@@ -15,7 +15,7 @@ public final class ImpulseLayoutsV2_4 {
     public static final int SPEC_MAGIC = 0x494D5053;
     public static final int HEADER_BASELINE_OFFSET = 4096;
 
-    /** Section 1 Fixed 4KB Baseline Snapshot Header (Size: 1096 Bytes) */
+    /** Section 1 Fixed 4KB Baseline Snapshot Header (v2.4) (Size: 1096 Bytes) */
     public static final StructLayout IMPULSE_SNAPSHOT_HEADER_V2_4_T_LAYOUT = MemoryLayout.structLayout(
         ValueLayout.JAVA_INT_UNALIGNED.withName("magic"),
         ValueLayout.JAVA_SHORT_UNALIGNED.withName("version"),
@@ -46,7 +46,7 @@ public final class ImpulseLayoutsV2_4 {
     public static final VarHandle VH_IMPULSE_SNAPSHOT_HEADER_V2_4_T_GLOBAL_REQUIRED_FEATURES =
         IMPULSE_SNAPSHOT_HEADER_V2_4_T_LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("global_required_features"));
 
-    /** Section 2 Relation Directory Metadata Entry (Size: 109 Bytes) */
+    /** Section 2 Relation Directory Metadata Entry (v2.4) (Size: 109 Bytes) */
     public static final StructLayout IMPULSE_RELATION_DIRECTORY_ENTRY_V2_4_T_LAYOUT = MemoryLayout.structLayout(
         ValueLayout.JAVA_SHORT_UNALIGNED.withName("src_domain_id"),
         ValueLayout.JAVA_SHORT_UNALIGNED.withName("tgt_domain_id"),
