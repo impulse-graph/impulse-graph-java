@@ -5,20 +5,20 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.lang.foreign.Arena;
 import org.junit.jupiter.api.Test;
 
-class CsrSwapManagerTest {
+class SnapshotSwapManagerTest {
 
     @Test
     void testSwapAndRelease() throws Exception {
         Arena arena1 = Arena.ofShared();
-        CsrSnapshot initialSnapshot = new CsrSnapshot(arena1, 1, 1, new int[]{0, 1}, new int[]{0});
+        RelationSnapshot initialSnapshot = new RelationSnapshot(arena1, 1, 1, new int[]{0, 1}, new int[]{0});
 
-        try (CsrSwapManager<CsrSnapshot> swapManager = new CsrSwapManager<>(initialSnapshot)) {
+        try (SnapshotSwapManager<RelationSnapshot> swapManager = new SnapshotSwapManager<>(initialSnapshot)) {
             var holder1 = swapManager.acquireCurrent();
             assertNotNull(holder1);
             assertEquals(initialSnapshot, holder1.getResource());
 
             Arena arena2 = Arena.ofShared();
-            CsrSnapshot newSnapshot = new CsrSnapshot(arena2, 2, 2, new int[]{0, 1, 2}, new int[]{0, 1});
+            RelationSnapshot newSnapshot = new RelationSnapshot(arena2, 2, 2, new int[]{0, 1, 2}, new int[]{0, 1});
 
             swapManager.swap(newSnapshot);
 

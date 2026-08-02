@@ -4,10 +4,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Generic thread-safe A/B pointer swap manager for off-heap graph containers ({@link CsrSnapshot} and {@link FullCsrGraph}).
+ * Generic thread-safe A/B pointer swap manager for off-heap graph containers ({@link RelationSnapshot} and {@link GraphSnapshot}).
  * Tracks active readers per epoch so old off-heap Arenas can be safely closed.
  */
-public class CsrSwapManager<T extends AutoCloseable> implements AutoCloseable {
+public class SnapshotSwapManager<T extends AutoCloseable> implements AutoCloseable {
 
     public static class Holder<T extends AutoCloseable> {
         private final T resource;
@@ -39,7 +39,7 @@ public class CsrSwapManager<T extends AutoCloseable> implements AutoCloseable {
 
     private final AtomicReference<Holder<T>> currentHolder = new AtomicReference<>();
 
-    public CsrSwapManager(T initialResource) {
+    public SnapshotSwapManager(T initialResource) {
         if (initialResource != null) {
             currentHolder.set(new Holder<>(initialResource));
         }

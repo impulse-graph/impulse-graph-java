@@ -1,71 +1,45 @@
-package org.impulsegraph.domain.id;
-
-import java.util.Objects;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
+package org.impulsegraph.api;
 
 /**
- * Pod-local bi-directional mapping between external 128-bit UUIDs and local dense INT32 identifiers.
+ * Bi-directional mapping interface between external domain identifiers (UUID, String, Long, byte[])
+ * and internal dense 64-bit/32-bit node IDs.
+ *
+ * @param <K> External identifier type (UUID, String, Long, byte[])
  */
-public class IdMapper {
-
-    private final String domainType;
-    private final ConcurrentHashMap<UUID, Integer> uuidToIntMap = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Integer, UUID> intToUuidMap = new ConcurrentHashMap<>();
-    private final AtomicInteger sequence = new AtomicInteger(1);
-
-    public IdMapper(String domainType) {
-        this.domainType = Objects.requireNonNull(domainType, "domainType must not be null");
-    }
-
-    public String getDomainType() {
-        return domainType;
-    }
+public interface IdMapper<K> {
 
     /**
-     * Obtains or assigns a local INT32 ID for a given UUID.
+     * Obtains the entity/domain name associated with this mapper.
      */
-    public int getOrAssignId(UUID uuid) {
-        Objects.requireNonNull(uuid, "uuid must not be null");
-        return uuidToIntMap.computeIfAbsent(uuid, k -> {
-            int newId = sequence.getAndIncrement();
-            intToUuidMap.put(newId, k);
-            return newId;
-        });
-    }
+    String getDomainType();
 
     /**
-     * Registers a known UUID <-> INT32 mapping (e.g., loaded from RocksDB).
+     * Resolves an external key to a dense 64-bit node ID, assigning a new ID if absent.
      */
-    public void registerMapping(UUID uuid, int id) {
-        Objects.requireNonNull(uuid, "uuid must not be null");
-        uuidToIntMap.put(uuid, id);
-        intToUuidMap.put(id, uuid);
-        sequence.updateAndGet(current -> Math.max(current, id + 1));
-    }
+    long getOrAssignId(K key);
 
     /**
-     * Resolves a local INT32 ID back to its UUID.
+     * Registers a known external key to dense ID mapping (e.g. loaded from binary Section 4 or database).
      */
-    public UUID getUuid(int id) {
-        return intToUuidMap.get(id);
-    }
+    void registerMapping(K key, long denseId);
 
     /**
-     * Look up INT32 ID for UUID without assigning.
+     * Resolves a local dense node ID back to its external key.
      */
-    public Integer getId(UUID uuid) {
-        return uuidToIntMap.get(uuid);
-    }
+    K getExternalKey(long denseId);
 
-    public int size() {
-        return uuidToIntMap.size();
-    }
+    /**
+     * Looks up the dense node ID for a given external key without assigning a new one. Returns null if absent.
+     */
+    Long getId(K key);
 
-    public void clear() {
-        uuidToIntMap.clear();
-        intToUuidMap.clear();
-        sequence.set(1);
-    }
+    /**
+     * Returns the total count of mapped IDs.
+     */
+    int size();
+
+    /**
+     * Clears all in-memory mappings.
+     */
+    void clear();
 }

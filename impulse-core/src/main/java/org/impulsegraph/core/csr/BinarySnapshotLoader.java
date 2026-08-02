@@ -11,9 +11,14 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
 
+/**
+ * High-performance binary snapshot loader conforming to Impulse-Graph C-ABI Binary Snapshot Spec v2.4 (and v2.3 / v1).
+ * Supports SIMDComp / PFOR-Delta (0x04), Delta-VByte (0x01), UINT16 (0x02), HYBRID (0x03), RAW_UINT64 (0x07), and RAW_UINT32 (0x00).
+ */
 public class BinarySnapshotLoader {
 
     public static final int SNAPSHOT_MAGIC = 0x494D5053; // "IMPS"
+    public static final long SUPPORTED_GLOBAL_FEATURES = 0x00000000000000FFL;
 
     public record LoadedDomain(int id, String name, byte keyType, Map<String, Integer> bkToDenseMap) {}
 
@@ -24,11 +29,60 @@ public class BinarySnapshotLoader {
             int relationCount,
             long kafkaOffset,
             long timestampMs,
+            long globalFeatures,
             String sha256Hex,
             Map<Integer, LoadedDomain> domainsById,
             Map<String, LoadedDomain> domainsByName,
-            FullCsrGraph graph
-    ) {}
+            GraphSnapshot graph
+    ) implements org.impulsegraph.api.ImpulseGraphSnapshot {
+
+        @Override
+        public int getRelationCount() {
+            return relationCount;
+        }
+
+        @Override
+        public Set<String> getRelationNames() {
+            return graph != null ? graph.getAllRelationSnapshots().keySet() : Set.of();
+        }
+
+        @Override
+        public long getNodeCount(String domainName) {
+            LoadedDomain dom = domainsByName != null ? domainsByName.get(domainName) : null;
+            return dom != null ? dom.bkToDenseMap().size() : 0;
+        }
+
+        @Override
+        public long getEdgeCount(String relationName) {
+            if (graph == null) return 0;
+            RelationSnapshot rel = graph.getRelationSnapshot(relationName);
+            return rel != null ? rel.getEdgeCount() : 0;
+        }
+
+        @Override
+        public java.lang.foreign.MemorySegment getRelationTargetsSegment(String relationName) {
+            if (graph == null) return null;
+            RelationSnapshot rel = graph.getRelationSnapshot(relationName);
+            return rel != null ? rel.getColumnTargetsSegment() : null;
+        }
+
+        @Override
+        public long getOffHeapMemorySizeBytes() {
+            return graph != null ? graph.getOffHeapMemorySizeBytes() : 0;
+        }
+
+        @Override
+        public String getSha256Checksum() {
+            return sha256Hex;
+        }
+
+        @Override
+        public void close() {
+            if (graph != null) {
+                graph.close();
+            }
+        }
+    }
 
     public static LoadedSnapshot loadSnapshot(Path filePath, Arena arena) throws IOException {
         byte[] bytes = Files.readAllBytes(filePath);
@@ -55,6 +109,11 @@ public class BinarySnapshotLoader {
         }
 
         short version = buf.getShort();
+        int ver = Short.toUnsignedInt(version);
+        if (ver != 1 && ver != 2 && ver != 0x0204) {
+            throw new IllegalArgumentException("Unsupported protocol version number: " + ver);
+        }
+
         int dataOffset = 58;
         int domainCount = 0;
         int relationCount = 0;
@@ -73,6 +132,15 @@ public class BinarySnapshotLoader {
 
         byte[] expectedSha256 = new byte[32];
         buf.get(expectedSha256);
+
+        long globalFeatures = 0;
+        if (version >= 2 && data.length >= 72) {
+            buf.position(64);
+            globalFeatures = buf.getLong();
+            if ((globalFeatures & ~SUPPORTED_GLOBAL_FEATURES) != 0) {
+                throw new UnsupportedOperationException(String.format("Unsupported global feature bitmask 0x%X", globalFeatures));
+            }
+        }
 
         // Verify SHA256 payload checksum if enabled
         if (verifyChecksum) {
@@ -96,74 +164,162 @@ public class BinarySnapshotLoader {
         Map<String, LoadedDomain> domainsByName = new HashMap<>();
 
         for (int i = 0; i < domainCount; i++) {
-            int domId = Short.toUnsignedInt(buf.getShort());
-            byte keyType = buf.get();
-            int nameLen = Short.toUnsignedInt(buf.getShort());
+            int domId = 0;
+            byte keyType = 0;
+            String domName = "";
 
-            byte[] nameBytes = new byte[nameLen];
-            buf.get(nameBytes);
-            String domName = new String(nameBytes, StandardCharsets.UTF_8);
+            if (ver == 0x0204) {
+                int entryPos = dataOffset + i * 64;
+                buf.position(entryPos);
+                domId = Short.toUnsignedInt(buf.getShort());
+                keyType = buf.get();
+                buf.get(); // reserved1
+                long domNodeCount = buf.getLong();
+                buf.getLong(); // requiredFeatures
+                buf.getLong(); // compatFeatures
+                buf.getLong(); // auxSectionsPos
+                buf.getLong(); // auxSectionsSize
+                int nameOff = buf.getInt();
+                int nameLen = Short.toUnsignedInt(buf.getShort());
+                
+                if (nameLen > 0 && nameOff > 0) {
+                    if (nameOff + nameLen > data.length) {
+                        throw new IllegalArgumentException("Domain NameLen " + nameLen + " exceeds remaining file buffer size");
+                    }
+                    byte[] nameBytes = new byte[nameLen];
+                    int oldPos = buf.position();
+                    buf.position(nameOff);
+                    buf.get(nameBytes);
+                    buf.position(oldPos);
+                    domName = new String(nameBytes, StandardCharsets.UTF_8);
+                } else {
+                    domName = "dom_" + domId;
+                }
+            } else {
+                domId = Short.toUnsignedInt(buf.getShort());
+                keyType = buf.get();
+                int nameLen = Short.toUnsignedInt(buf.getShort());
 
-            int mapCount = buf.getInt();
-            Map<String, Integer> bkToDense = new HashMap<>(mapCount);
-            for (int m = 0; m < mapCount; m++) {
-                int denseId = buf.getInt();
-                int bkLen = Short.toUnsignedInt(buf.getShort());
-                byte[] bkBytes = new byte[bkLen];
-                buf.get(bkBytes);
-                String bk = new String(bkBytes, StandardCharsets.UTF_8);
-                bkToDense.put(bk, denseId);
+                if (buf.position() + nameLen > data.length) {
+                    throw new IllegalArgumentException("Domain NameLen " + nameLen + " exceeds remaining file buffer size");
+                }
+
+                byte[] nameBytes = new byte[nameLen];
+                buf.get(nameBytes);
+                domName = new String(nameBytes, StandardCharsets.UTF_8);
+
+                int mapCount = buf.getInt();
+                for (int m = 0; m < mapCount; m++) {
+                    buf.getInt();
+                    int bkLen = Short.toUnsignedInt(buf.getShort());
+                    buf.get(new byte[bkLen]);
+                }
             }
 
-            LoadedDomain domain = new LoadedDomain(domId, domName, keyType, bkToDense);
+            LoadedDomain domain = new LoadedDomain(domId, domName, keyType, Map.of());
             domainsById.put(domId, domain);
             domainsByName.put(domName, domain);
         }
 
-        if (version >= 2) {
+        if (ver >= 2) {
             align64(buf);
         }
 
         // Parse Relation Section (CSR Adjacency Matrices)
-        Map<String, CsrSnapshot> relationSnapshots = new HashMap<>();
+        Map<String, RelationSnapshot> relationSnapshots = new HashMap<>();
+        int dirTableOffset = (ver == 0x0204) ? dataOffset + domainCount * 64 : buf.position();
 
         for (int j = 0; j < relationCount; j++) {
+            int entrySize = (ver == 0x0204) ? 128 : (ver >= 2 ? 109 : 28);
+            buf.position(dirTableOffset + j * entrySize);
             int srcDomId = Short.toUnsignedInt(buf.getShort());
             int tgtDomId = Short.toUnsignedInt(buf.getShort());
 
             byte encodingType = 0x00;
-            if (version >= 2) {
-                encodingType = buf.get();
-            }
+            long sectionFeatures = 0;
+            long csrRowOffOffset = 0;
+            long csrRowOffBytes = 0;
+            long csrColIdxOffset = 0;
+            long csrColIdxBytes = 0;
 
-            int nodeCount = buf.getInt();
-            long edgeCount = buf.getLong();
-            long rowOffBytes = buf.getLong();
-            long colIdxBytes = buf.getLong();
+            long nodeCount = 0;
+            long edgeCount = 0;
+
+            if (ver == 0x0204) {
+                encodingType = buf.get();
+                nodeCount = buf.getLong();
+                edgeCount = buf.getLong();
+                sectionFeatures = buf.getLong();
+                buf.getLong(); // compatFeatures
+                csrRowOffOffset = buf.getLong();
+                csrRowOffBytes = buf.getLong();
+                csrColIdxOffset = buf.getLong();
+                csrColIdxBytes = buf.getLong();
+
+                if (csrRowOffOffset > data.length || csrColIdxOffset > data.length) {
+                    throw new IllegalArgumentException("Catalog section offset points outside file boundaries");
+                }
+                if (csrRowOffOffset > 0 && csrRowOffOffset % 64 != 0) {
+                    throw new IllegalArgumentException("Catalog section offset not aligned to 64-byte boundary");
+                }
+            } else if (ver >= 2) {
+                encodingType = buf.get();
+                nodeCount = buf.getLong();
+                edgeCount = buf.getLong();
+                sectionFeatures = buf.getLong();
+                csrRowOffOffset = buf.getLong();
+                csrRowOffBytes = buf.getLong();
+                csrColIdxOffset = buf.getLong();
+                csrColIdxBytes = buf.getLong();
+                buf.getLong(); // idMapOffset
+                buf.getLong(); // idMapBytes
+                buf.getLong(); // dtoLookupOffset
+                buf.getLong(); // dtoLookupBytes
+                buf.getLong(); // deltaLogOffset
+                buf.getLong(); // deltaLogBytes
+
+                if (csrRowOffOffset > data.length || csrColIdxOffset > data.length) {
+                    throw new IllegalArgumentException("Catalog section offset points outside file boundaries");
+                }
+                if (csrRowOffOffset > 0 && csrRowOffOffset % 64 != 0) {
+                    throw new IllegalArgumentException("Catalog section offset not aligned to 64-byte boundary");
+                }
+            } else {
+                nodeCount = buf.getInt();
+                edgeCount = buf.getLong();
+                csrRowOffBytes = buf.getLong();
+                csrColIdxBytes = buf.getLong();
+            }
 
             LoadedDomain srcDom = domainsById.get(srcDomId);
             LoadedDomain tgtDom = domainsById.get(tgtDomId);
             String relName = (srcDom != null && tgtDom != null) ?
-                    srcDom.name().toLowerCase() + "To" + capitalize(tgtDom.name().toLowerCase()) :
+                    "rel_" + j + "_" + srcDom.name().toLowerCase() + "To" + capitalize(tgtDom.name().toLowerCase()) :
                     "relation_" + j;
 
-            int numRowOffsets = (int) (rowOffBytes / 4);
-            if (version >= 2) {
+            int numRowOffsets = (int) (csrRowOffBytes / 4);
+            if (csrRowOffOffset > 0) {
+                buf.position((int) csrRowOffOffset);
+            } else if (version >= 2) {
                 align64(buf);
             }
+
             int[] rowOffsetsData = new int[numRowOffsets];
             for (int r = 0; r < numRowOffsets; r++) {
                 rowOffsetsData[r] = buf.getInt();
             }
 
-            if (version >= 2) {
+            if (csrColIdxOffset > 0) {
+                buf.position((int) csrColIdxOffset);
+            } else if (version >= 2) {
                 align64(buf);
             }
 
             int[] columnIndicesData = new int[(int) edgeCount];
             if (encodingType == 0x01) {
+                // 0x01 = DELTA_VBYTE
                 int colPtr = 0;
-                for (int node = 0; node <= nodeCount; node++) {
+                for (int node = 0; node < (int) nodeCount; node++) {
                     int start = rowOffsetsData[node];
                     int end = rowOffsetsData[node + 1];
                     int prevTgt = 0;
@@ -175,13 +331,15 @@ public class BinarySnapshotLoader {
                     }
                 }
             } else if (encodingType == 0x02) {
-                int numColIndices = (int) (colIdxBytes / 2);
+                // 0x02 = RAW_UINT16
+                int numColIndices = (int) (csrColIdxBytes / 2);
                 for (int c = 0; c < numColIndices; c++) {
                     columnIndicesData[c] = Short.toUnsignedInt(buf.getShort());
                 }
             } else if (encodingType == 0x03) {
+                // 0x03 = HYBRID_UINT16_UINT32
                 int colPtr = 0;
-                for (int node = 0; node <= nodeCount; node++) {
+                for (int node = 0; node < (int) nodeCount; node++) {
                     int start = rowOffsetsData[node];
                     int end = rowOffsetsData[node + 1];
                     int rowLen = end - start;
@@ -193,8 +351,71 @@ public class BinarySnapshotLoader {
                         columnIndicesData[colPtr++] = buf.getInt();
                     }
                 }
+            } else if (encodingType == 0x04) {
+                // 0x04 = RELATION_FEAT_ENC_SIMDCOMP (SIMDComp / PFOR-Delta Bit-Packed Integer Stream)
+                int colPtr = 0;
+                for (int node = 0; node < (int) nodeCount; node++) {
+                    int start = rowOffsetsData[node];
+                    int end = rowOffsetsData[node + 1];
+                    int rowLen = end - start;
+                    if (rowLen == 0) continue;
+
+                    int prevTgt = 0;
+                    int idx = start;
+                    while (idx < end) {
+                        int chunkSize = Math.min(128, end - idx);
+                        byte bitWidth = buf.get();
+                        byte numExceptions = buf.get();
+                        int packedByteLen = (chunkSize * bitWidth + 7) / 8;
+                        byte[] packedBytes = new byte[packedByteLen];
+                        buf.get(packedBytes);
+
+                        // Bit-unpack deltas
+                        long bitPos = 0;
+                        int[] unpackedDeltas = new int[chunkSize];
+                        for (int i = 0; i < chunkSize; i++) {
+                            int val = 0;
+                            for (int b = 0; b < bitWidth; b++) {
+                                int byteIdx = (int) (bitPos >> 3);
+                                int bitIdx = (int) (bitPos & 7);
+                                if (byteIdx < packedBytes.length) {
+                                    int bit = (packedBytes[byteIdx] >> bitIdx) & 1;
+                                    val |= (bit << b);
+                                }
+                                bitPos++;
+                            }
+                            unpackedDeltas[i] = val;
+                        }
+
+                        // Apply frame exceptions
+                        for (int ex = 0; ex < numExceptions; ex++) {
+                            int exPos = Short.toUnsignedInt(buf.getShort());
+                            int exVal = buf.getInt();
+                            if (exPos < chunkSize) {
+                                unpackedDeltas[exPos] = exVal;
+                            }
+                        }
+
+                        // Reconstruct absolute target node IDs
+                        for (int i = 0; i < chunkSize; i++) {
+                            int delta = unpackedDeltas[i];
+                            int tgt = (idx == start && i == 0) ? delta : (prevTgt + delta);
+                            columnIndicesData[colPtr++] = tgt;
+                            prevTgt = tgt;
+                        }
+
+                        idx += chunkSize;
+                    }
+                }
+            } else if (encodingType == 0x07) {
+                // 0x07 = RAW_UINT64
+                int numColIndices = (int) (csrColIdxBytes / 8);
+                for (int c = 0; c < numColIndices; c++) {
+                    columnIndicesData[c] = (int) buf.getLong();
+                }
             } else {
-                int numColIndices = (int) (colIdxBytes / 4);
+                // 0x00 = RAW_UINT32
+                int numColIndices = (int) (csrColIdxBytes / 4);
                 for (int c = 0; c < numColIndices; c++) {
                     columnIndicesData[c] = buf.getInt();
                 }
@@ -204,15 +425,15 @@ public class BinarySnapshotLoader {
                 align64(buf);
             }
 
-            CsrSnapshot csrSnapshot = new CsrSnapshot(arena, nodeCount, (int) edgeCount, rowOffsetsData, columnIndicesData);
+            RelationSnapshot csrSnapshot = new RelationSnapshot(arena, (int) nodeCount, (int) edgeCount, rowOffsetsData, columnIndicesData);
             relationSnapshots.put(relName, csrSnapshot);
         }
 
-        FullCsrGraph fullGraph = new FullCsrGraph(arena, relationSnapshots);
+        GraphSnapshot fullGraph = new GraphSnapshot(arena, relationSnapshots);
 
         return new LoadedSnapshot(
                 magic, version, domainCount, relationCount,
-                kafkaOffset, timestampMs, sha256Hex,
+                kafkaOffset, timestampMs, globalFeatures, sha256Hex,
                 domainsById, domainsByName, fullGraph
         );
     }
