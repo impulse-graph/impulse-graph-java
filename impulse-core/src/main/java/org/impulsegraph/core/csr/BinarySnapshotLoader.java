@@ -303,8 +303,11 @@ public class BinarySnapshotLoader {
 
             LoadedDomain srcDom = domainsById.get(srcDomId);
             LoadedDomain tgtDom = domainsById.get(tgtDomId);
+            String rawRelName = (srcDom != null && tgtDom != null) ?
+                    srcDom.name().toLowerCase() + "To" + capitalize(tgtDom.name().toLowerCase()) :
+                    "relation_" + j;
             String relName = (srcDom != null && tgtDom != null) ?
-                    "rel_" + j + "_" + srcDom.name().toLowerCase() + "To" + capitalize(tgtDom.name().toLowerCase()) :
+                    "rel_" + j + "_" + rawRelName :
                     "relation_" + j;
 
             int numRowOffsets = (int) (csrRowOffBytes / 4);
