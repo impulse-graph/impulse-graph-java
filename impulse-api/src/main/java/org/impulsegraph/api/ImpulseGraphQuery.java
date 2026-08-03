@@ -28,6 +28,11 @@ public interface ImpulseGraphQuery<R> {
     R execute(ImpulseGraph liveGraph, Object input);
 
     /**
+     * Returns the list of pipeline AST step nodes.
+     */
+    java.util.List<ImpulseQueryBuilder.StepNode> getSteps();
+
+    /**
      * Returns the string name or structural operation description of this query root node.
      */
     String getOperationName();

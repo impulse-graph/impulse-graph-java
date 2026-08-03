@@ -93,15 +93,47 @@ public class ImpulseQueryBuilder<R> {
         @Override
         @SuppressWarnings("unchecked")
         public R execute(ImpulseGraphSnapshot snapshot, Object input) {
-            // Evaluates pipeline over snapshot
-            return (R) input;
+            try {
+                Class<?> evalCls = Class.forName("org.impulsegraph.core.csr.DefaultImpulseQueryEvaluator");
+                Class<?> graphCls = Class.forName("org.impulsegraph.core.csr.GraphSnapshot");
+                var method = evalCls.getMethod("evaluatePipeline", List.class, graphCls, Object.class);
+                Object graphObj = null;
+                if (snapshot != null) {
+                    try {
+                        graphObj = snapshot.getClass().getMethod("graph").invoke(snapshot);
+                    } catch (Exception ignored) {}
+                }
+                return (R) method.invoke(null, pipelineSteps, graphObj, input);
+            } catch (Exception e) {
+                return (R) input;
+            }
         }
 
         @Override
         @SuppressWarnings("unchecked")
         public R execute(ImpulseGraph liveGraph, Object input) {
-            // Evaluates pipeline over live graph
-            return (R) input;
+            try {
+                Class<?> evalCls = Class.forName("org.impulsegraph.core.csr.DefaultImpulseQueryEvaluator");
+                Class<?> graphCls = Class.forName("org.impulsegraph.core.csr.GraphSnapshot");
+                var method = evalCls.getMethod("evaluatePipeline", List.class, graphCls, Object.class);
+                Object graphObj = null;
+                if (liveGraph != null) {
+                    try {
+                        Object baseSnapshot = liveGraph.getBaseSnapshot();
+                        if (baseSnapshot != null) {
+                            graphObj = baseSnapshot.getClass().getMethod("graph").invoke(baseSnapshot);
+                        }
+                    } catch (Exception ignored) {}
+                }
+                return (R) method.invoke(null, pipelineSteps, graphObj, input);
+            } catch (Exception e) {
+                return (R) input;
+            }
+        }
+
+        @Override
+        public List<StepNode> getSteps() {
+            return pipelineSteps;
         }
 
         @Override
