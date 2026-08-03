@@ -22,7 +22,23 @@ public class GraphSnapshot implements AutoCloseable {
     }
 
     public RelationSnapshot getRelationSnapshot(String relationName) {
-        return relationMap.get(relationName);
+        if (relationName == null) return null;
+        RelationSnapshot snapshot = relationMap.get(relationName);
+        if (snapshot != null) return snapshot;
+
+        String targetNorm = relationName.replaceFirst("^rel_\\d+_", "").toLowerCase();
+
+        for (Map.Entry<String, RelationSnapshot> entry : relationMap.entrySet()) {
+            String key = entry.getKey();
+            if (key.equalsIgnoreCase(relationName)) {
+                return entry.getValue();
+            }
+            String keyNorm = key.replaceFirst("^rel_\\d+_", "").toLowerCase();
+            if (keyNorm.equals(targetNorm)) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
 
     public Map<String, RelationSnapshot> getAllRelationSnapshots() {
