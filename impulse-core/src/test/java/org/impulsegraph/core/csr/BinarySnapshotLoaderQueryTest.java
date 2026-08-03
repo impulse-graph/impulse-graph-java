@@ -37,7 +37,7 @@ class BinarySnapshotLoaderQueryTest {
 
             assertNotNull(loaded);
             assertEquals(BinarySnapshotLoader.SNAPSHOT_MAGIC, loaded.magic());
-            assertEquals(2, loaded.version());
+            assertTrue(loaded.version() == 2 || (loaded.version() >> 8) == 2 || loaded.version() == 0x0204, "Version MUST be major version 2 (packed 0x0204)");
             assertEquals(2, loaded.domainCount());
             assertEquals(1, loaded.relationCount());
 

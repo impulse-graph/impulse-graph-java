@@ -77,6 +77,16 @@ public class BinarySnapshotLoader {
         }
 
         @Override
+        public String getMetadata(String key) {
+            return null;
+        }
+
+        @Override
+        public Map<String, String> getMetadataMap() {
+            return Map.of();
+        }
+
+        @Override
         public void close() {
             if (graph != null) {
                 graph.close();

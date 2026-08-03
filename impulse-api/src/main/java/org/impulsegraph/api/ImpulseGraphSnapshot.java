@@ -60,6 +60,16 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
      */
     String getSha256Checksum();
 
+    /**
+     * Returns the value for a custom metadata key, or null if not present.
+     */
+    String getMetadata(String key);
+
+    /**
+     * Returns an unmodifiable map of all custom metadata key-value pairs stored in this snapshot.
+     */
+    Map<String, String> getMetadataMap();
+
     @Override
     void close();
 }
