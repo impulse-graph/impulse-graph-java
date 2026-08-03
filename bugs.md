@@ -2,6 +2,9 @@
 
 This document details identified bugs, build failures, functional defects, root cause analyses, proposed fixes, and mandatory test cases required to prevent regressions across `impulse-graph-java`.
 
+> [!NOTE]
+> **Status Update (2026-08-02)**: All 5 identified bugs (`BUG-JAVA-001` through `BUG-JAVA-005`) have been fully resolved, verified via automated test suites (42/42 tests passing), and committed to `main`.
+
 ---
 
 ## BUG-JAVA-001: `LoadedSnapshot` Interface Incompleteness (`getMetadata` & `getMetadataMap`)
