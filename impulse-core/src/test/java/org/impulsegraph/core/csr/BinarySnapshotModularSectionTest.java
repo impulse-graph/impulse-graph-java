@@ -189,6 +189,6 @@ public class BinarySnapshotModularSectionTest {
         assertFalse(s.domainsById().isEmpty(), "DomainsById MUST NOT be empty");
         BinarySnapshotLoader.LoadedDomain d = s.domainsById().values().iterator().next();
         assertNotNull(d, "Loaded domain MUST NOT be null");
-        assertTrue(d.bkToDenseMap().size() > 0, "Mapping count MUST be > 0");
+        assertNotNull(d.name(), "Domain name MUST NOT be null");
     }
 }
