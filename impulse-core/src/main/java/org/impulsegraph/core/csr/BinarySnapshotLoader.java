@@ -271,14 +271,26 @@ public final class BinarySnapshotLoader {
         if (isV09) {
             // Read Shared String Table Header & Pool
             int strPoolBytes = buf.getInt();
+            if (strPoolBytes < 1 || buf.position() + strPoolBytes > data.length) {
+                throw new IllegalArgumentException("Invalid or overflowing Section 2 string_table_bytes: " + strPoolBytes);
+            }
             byte[] poolBytes = new byte[strPoolBytes];
             buf.get(poolBytes);
 
+            if (poolBytes[0] != 0) {
+                throw new IllegalArgumentException("Invalid String Table: byte 0 of string pool MUST be '\\0'");
+            }
+
             BiFunction<Integer, String, String> getString = (off, defaultVal) -> {
-                if (off < 0 || off >= poolBytes.length) return defaultVal;
+                if (off < 0 || off >= poolBytes.length) {
+                    throw new IllegalArgumentException("String offset out of bounds: " + off);
+                }
                 int end = off;
                 while (end < poolBytes.length && poolBytes[end] != 0) {
                     end++;
+                }
+                if (end >= poolBytes.length) {
+                    throw new IllegalArgumentException("Unterminated string in string pool at offset " + off);
                 }
                 return new String(poolBytes, off, end - off, StandardCharsets.UTF_8);
             };
