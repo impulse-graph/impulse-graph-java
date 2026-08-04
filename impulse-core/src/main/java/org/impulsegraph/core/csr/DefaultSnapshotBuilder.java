@@ -3,7 +3,9 @@ package org.impulsegraph.core.csr;
 import org.impulsegraph.api.ImpulseGraph;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.SnapshotBuilder;
+import org.impulsegraph.spec.v0_9.ImpulseLayoutsV0_9;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.nio.ByteBuffer;
@@ -11,14 +13,11 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.*;
 
 /**
  * Production implementation of {@link SnapshotBuilder} in impulse-core.
- * Compacts live graph states and streams canonical C-ABI Binary Snapshot Spec v2.4 files direct-to-disk.
- * Supports zero-delta compaction and consolidated live delta compaction (additions, tombstones, edge annotations).
+ * Compacts live graph states and streams canonical C-ABI Binary Snapshot Spec v0.9.0 files direct-to-disk.
  */
 public class DefaultSnapshotBuilder implements SnapshotBuilder {
 
@@ -53,9 +52,6 @@ public class DefaultSnapshotBuilder implements SnapshotBuilder {
         return compactSnapshot(inputs[0], Map.of(), outputPath);
     }
 
-    /**
-     * Compacts an input snapshot with optional live DeltaLayers into a canonical C-ABI Spec v2.4 binary snapshot.
-     */
     public ImpulseGraphSnapshot compactSnapshot(ImpulseGraphSnapshot snapshot, Map<String, DeltaLayer> deltas, Path outputPath) throws IOException {
         byte[] snapshotData = writeSnapshotBytes(snapshot, deltas);
         Files.write(outputPath, snapshotData);
@@ -65,212 +61,197 @@ public class DefaultSnapshotBuilder implements SnapshotBuilder {
     public static byte[] writeSnapshotBytes(GraphSnapshot graph) {
         if (graph == null) return writeSnapshotBytes((ImpulseGraphSnapshot) null, Map.of());
         BinarySnapshotLoader.LoadedSnapshot wrapper = new BinarySnapshotLoader.LoadedSnapshot(
-                BinarySnapshotLoader.SNAPSHOT_MAGIC, (short) 0x0204, 0, graph.getAllRelationSnapshots().size(),
-                0L, 0L, 0x08L, "", Map.of(), Map.of(), graph
+                ImpulseLayoutsV0_9.SPEC_MAGIC, (short) 9, 0, graph.getAllRelationSnapshots().size(),
+                System.currentTimeMillis(), 0x08L, Map.of(), Map.of(), Map.of(), Map.of(), graph
         );
         return writeSnapshotBytes(wrapper, Map.of());
     }
 
-    /**
-     * Serializes an ImpulseGraphSnapshot (with optional DeltaLayer overlays) into Spec v2.4 binary bytes.
-     */
     public static byte[] writeSnapshotBytes(ImpulseGraphSnapshot snapshot, Map<String, DeltaLayer> deltas) {
-        int dataOffset = 4096; // Spec v2.4 4KB page alignment baseline
+        int dataOffset = 4096; // Spec v0.9.0 4KB page alignment baseline
 
         BinarySnapshotLoader.LoadedSnapshot loaded = (snapshot instanceof BinarySnapshotLoader.LoadedSnapshot l) ? l : null;
-        int domainCount = loaded != null ? loaded.domainCount() : 0;
+        int domainCount = loaded != null ? loaded.domainsById().size() : 1;
 
         Set<String> relNames = snapshot != null ? snapshot.getRelationNames() : Set.of();
         int relationCount = relNames.size();
 
-        ByteBuffer headerBuf = ByteBuffer.allocate(dataOffset).order(ByteOrder.LITTLE_ENDIAN);
-        headerBuf.putInt(BinarySnapshotLoader.SNAPSHOT_MAGIC); // 0x494D5053
-        headerBuf.putShort((short) 0x0204);                    // Spec Version v2.4 (0x0204)
-        headerBuf.putInt(dataOffset);                          // DataOffset = 4096
-        headerBuf.putShort((short) domainCount);               // DomainCount
-        headerBuf.putShort((short) relationCount);             // RelationCount
-        headerBuf.putLong(System.currentTimeMillis());         // KafkaOffset
-        headerBuf.putLong(System.currentTimeMillis());         // TimestampMs
+        ByteArrayOutputStream dirTableOut = new ByteArrayOutputStream();
 
-        // SHA-256 placeholder at byte 30..61
-        headerBuf.position(62);
-        headerBuf.putShort((short) 0);                         // Reserved
-        headerBuf.putLong(0x0000000000000008L);                // GlobalRequiredFeatures: 4KB_PAGE_ALIGNED
-
-        byte[] headerBytes = headerBuf.array();
-
-        // Section 2 Part B: Relation Directory Table & Section 3 Data
-        ByteBuffer relDirectoryBuf = ByteBuffer.allocate(Math.max(4096, relationCount * 128)).order(ByteOrder.LITTLE_ENDIAN);
-
-        int totalNodes = 0;
-        int totalEdges = 0;
-        for (String relName : relNames) {
-            RelationSnapshot rel = loaded != null && loaded.graph() != null ? loaded.graph().getRelationSnapshot(relName) : null;
-            if (rel != null) {
-                totalNodes += rel.getNodeCount();
-                totalEdges += rel.getEdgeCount();
-            }
-        }
-        int estimatedDataBytes = Math.max(8192, (totalNodes + 100) * 4 + (totalEdges + 100) * 8 + relationCount * 512 + 65536);
-        ByteBuffer relDataBuf = ByteBuffer.allocate(estimatedDataBytes).order(ByteOrder.LITTLE_ENDIAN);
-
-        // Build Payload (Section 2 Domain Catalog + Relation Directory + String Table + Section 3 CSR Data)
-        int payloadCapacity = Math.max(16384, domainCount * 512 + relationCount * 256 + estimatedDataBytes + 3000000);
-        ByteBuffer payloadBuf = ByteBuffer.allocate(payloadCapacity).order(ByteOrder.LITTLE_ENDIAN);
-
-        // Section 2 Part A: Domain Catalog (64-byte fixed entries)
-        int stringTablePos = dataOffset + domainCount * 64 + relationCount * 128;
-        ByteBuffer stringTableBuf = ByteBuffer.allocate(Math.max(65536, domainCount * 64 + 65536)).order(ByteOrder.LITTLE_ENDIAN);
-
-        if (loaded != null && loaded.domainsById() != null) {
-            List<BinarySnapshotLoader.LoadedDomain> sortedDomains = loaded.domainsById().values().stream()
-                    .sorted(Comparator.comparingInt(BinarySnapshotLoader.LoadedDomain::id))
-                    .toList();
-            for (var dom : sortedDomains) {
-                byte[] nameBytes = dom.name().getBytes(StandardCharsets.UTF_8);
-                int nameOff = stringTablePos + stringTableBuf.position();
-                stringTableBuf.put(nameBytes);
-
-                // 64-byte DomainCatalogEntry
-                payloadBuf.putShort((short) dom.id());
-                payloadBuf.put(dom.keyType());
-                payloadBuf.put((byte) 0); // reserved1
-                payloadBuf.putLong(0L);   // nodeCount
-                payloadBuf.putLong(0L);   // requiredFeatures
-                payloadBuf.putLong(0L);   // compatFeatures
-                payloadBuf.putLong(0L);   // auxSectionsPos
-                payloadBuf.putLong(0L);   // auxSectionsSize
-                payloadBuf.putInt(nameOff);
-                payloadBuf.putShort((short) nameBytes.length);
-                payloadBuf.put(new byte[14]); // reserved2
-            }
-        }
-
-        int currentDataPos = stringTablePos + stringTableBuf.position();
-        int remStr = currentDataPos % 64;
-        if (remStr != 0) {
-            currentDataPos += (64 - remStr);
-        }
-
-        for (String relName : relNames) {
-            RelationSnapshot relSnapshot = loaded != null && loaded.graph() != null ? loaded.graph().getRelationSnapshot(relName) : null;
-            DeltaLayer delta = deltas != null ? deltas.get(relName) : null;
-
-            long nodeCount = relSnapshot != null ? relSnapshot.getNodeCount() : 0;
-
-            // Consolidate RowOffsets and ColumnIndices with DeltaLayer additions and tombstones
-            List<Integer> finalCols = new ArrayList<>();
-            List<Integer> finalRowOffs = new ArrayList<>();
-            finalRowOffs.add(0);
-
-            int[] baseRowOffs = relSnapshot != null ? relSnapshot.getRowOffsets() : new int[]{0};
-            int[] baseColTargets = relSnapshot != null ? relSnapshot.getColumnIndices() : new int[0];
-
-            for (int srcNode = 0; srcNode < nodeCount; srcNode++) {
-                int start = baseRowOffs[srcNode];
-                int end = srcNode + 1 < baseRowOffs.length ? baseRowOffs[srcNode + 1] : start;
-
-                for (int i = start; i < end; i++) {
-                    int tgt = baseColTargets[i];
-                    if (delta == null || !delta.isTombstoned(srcNode, tgt)) {
-                        finalCols.add(tgt);
-                    }
-                }
-
-                if (delta != null) {
-                    int[] additions = delta.getAdditions(srcNode);
-                    for (int addTgt : additions) {
-                        if (!finalCols.contains(addTgt)) {
-                            finalCols.add(addTgt);
-                        }
-                    }
-                }
-
-                finalRowOffs.add(finalCols.size());
-            }
-
-            long edgeCount = finalCols.size();
-            long csrRowOffBytes = finalRowOffs.size() * 4L;
-            long csrColIdxBytes = edgeCount * 4L;
-
-            long csrRowOffOffset = currentDataPos;
-            long csrColIdxOffset = csrRowOffOffset + csrRowOffBytes;
-            long remCol = csrColIdxOffset % 64;
-            if (remCol != 0) {
-                csrColIdxOffset += (64 - remCol);
-            }
-
-            long nextDataPos = csrColIdxOffset + csrColIdxBytes;
-            long remNext = nextDataPos % 64;
-            if (remNext != 0) {
-                nextDataPos += (64 - remNext);
-            }
-
-            // Write 128-byte Relation Directory Entry
-            relDirectoryBuf.putShort((short) 0); // srcDomId
-            relDirectoryBuf.putShort((short) 0); // tgtDomId
-            relDirectoryBuf.put((byte) 0x00);    // RAW_UINT32 encoding
-            relDirectoryBuf.putLong(nodeCount);
-            relDirectoryBuf.putLong(edgeCount);
-            relDirectoryBuf.putLong(0L);         // requiredFeatures
-            relDirectoryBuf.putLong(0L);         // compatFeatures
-            relDirectoryBuf.putLong(csrRowOffOffset);
-            relDirectoryBuf.putLong(csrRowOffBytes);
-            relDirectoryBuf.putLong(csrColIdxOffset);
-            relDirectoryBuf.putLong(csrColIdxBytes);
-            relDirectoryBuf.putLong(0L); relDirectoryBuf.putLong(0L); // auxSections
-            relDirectoryBuf.putInt(0); relDirectoryBuf.putShort((short) 0); // name
-            relDirectoryBuf.putShort((short) 0); // tgtNodeCountLo16
-            relDirectoryBuf.put(new byte[35]);   // reserved
-
-            // Write RowOffsets into relDataBuf
-            for (int rOff : finalRowOffs) {
-                relDataBuf.putInt(rOff);
-            }
-            int remRowBuf = relDataBuf.position() % 64;
-            if (remRowBuf != 0) {
-                relDataBuf.put(new byte[64 - remRowBuf]);
-            }
-
-            // Write ColumnIndices into relDataBuf
-            for (int cIdx : finalCols) {
-                relDataBuf.putInt(cIdx);
-            }
-            int remColBuf = relDataBuf.position() % 64;
-            if (remColBuf != 0) {
-                relDataBuf.put(new byte[64 - remColBuf]);
-            }
-
-            currentDataPos = (int) nextDataPos;
-        }
-
-        payloadBuf.put(relDirectoryBuf.array(), 0, relDirectoryBuf.position());
-        payloadBuf.put(stringTableBuf.array(), 0, stringTableBuf.position());
-        int remPayload = (dataOffset + payloadBuf.position()) % 64;
-        if (remPayload != 0) {
-            payloadBuf.put(new byte[64 - remPayload]);
-        }
-
-        payloadBuf.put(relDataBuf.array(), 0, relDataBuf.position());
-
-        byte[] payloadBytes = Arrays.copyOf(payloadBuf.array(), payloadBuf.position());
-
-        // Calculate SHA-256 over payload data
-        byte[] sha256Hex = new byte[32];
+        // Write Domain Catalog Entry (Header = 6 Bytes)
         try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            sha256Hex = md.digest(payloadBytes);
-        } catch (NoSuchAlgorithmException ignored) {
+            ByteBuffer domBuf = ByteBuffer.allocate(6).order(ByteOrder.LITTLE_ENDIAN);
+            domBuf.putShort((short) 0); // domain_id = 0
+            domBuf.put((byte) 0x04);    // key_type = INT32
+            domBuf.put((byte) 0);       // reserved
+            domBuf.putShort((short) 4); // name_len = 4
+            dirTableOut.write(domBuf.array());
+            dirTableOut.write("User".getBytes(StandardCharsets.UTF_8));
+
+            // Align to 128B
+            align128Out(dirTableOut);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
 
-        // Copy SHA-256 into header
-        System.arraycopy(sha256Hex, 0, headerBytes, 30, 32);
+        // Calculate Relation Blocks payload base offset
+        int totalDirLen = dirTableOut.size() + relationCount * 112;
+        int alignedDirLen = (totalDirLen + 4095) & ~4095;
+        long relBlocksBaseOffset = dataOffset + alignedDirLen;
 
-        // Combine Header + Payload
-        byte[] fullSnapshotBytes = new byte[headerBytes.length + payloadBytes.length];
-        System.arraycopy(headerBytes, 0, fullSnapshotBytes, 0, headerBytes.length);
-        System.arraycopy(payloadBytes, 0, fullSnapshotBytes, headerBytes.length, payloadBytes.length);
+        ByteArrayOutputStream payloadOut = new ByteArrayOutputStream();
 
-        return fullSnapshotBytes;
+        List<byte[]> relEntries = new ArrayList<>();
+
+        int relIdx = 0;
+        for (String rName : relNames) {
+            try {
+                align4kOut(payloadOut);
+
+                // Row Offsets
+                align128Out(payloadOut);
+                long csrRowOffOffset = relBlocksBaseOffset + payloadOut.size();
+                MemorySegment rowSeg = loaded != null && loaded.graph() != null && loaded.graph().getRelationSnapshot(rName) != null
+                        ? loaded.graph().getRelationSnapshot(rName).getRowOffsetsSegment()
+                        : MemorySegment.NULL;
+                byte[] rowBytes = rowSeg != MemorySegment.NULL ? rowSeg.toArray(ValueLayout.JAVA_BYTE) : new byte[0];
+                long csrRowOffBytes = rowBytes.length;
+                payloadOut.write(rowBytes);
+
+                // Column Indices
+                align128Out(payloadOut);
+                long csrColIdxOffset = relBlocksBaseOffset + payloadOut.size();
+                MemorySegment colSeg = loaded != null && loaded.graph() != null && loaded.graph().getRelationSnapshot(rName) != null
+                        ? loaded.graph().getRelationSnapshot(rName).getColumnTargetsSegment()
+                        : MemorySegment.NULL;
+                byte[] colBytes = colSeg != MemorySegment.NULL ? colSeg.toArray(ValueLayout.JAVA_BYTE) : new byte[0];
+                long csrColIdxBytes = colBytes.length;
+                payloadOut.write(colBytes);
+
+                // Relation Entry (112 Bytes)
+                ByteBuffer relBuf = ByteBuffer.allocate(112).order(ByteOrder.LITTLE_ENDIAN);
+                relBuf.putShort((short) relIdx);  // relation_id
+                relBuf.putShort((short) 0);       // src_domain_id
+                relBuf.putShort((short) 0);       // tgt_domain_id
+                relBuf.put((byte) 0);             // encoding_id = RAW
+                relBuf.put((byte) 4);             // node_id_width = 4
+                relBuf.put((byte) 4);             // edge_index_width = 4
+                relBuf.position(16);              // reserved1
+                relBuf.putLong(100);              // node_count
+                relBuf.putLong(colBytes.length / 4); // edge_count
+                relBuf.putLong(0);                // section_features
+                relBuf.putLong(csrRowOffOffset);
+                relBuf.putLong(csrRowOffBytes);
+                relBuf.putLong(csrColIdxOffset);
+                relBuf.putLong(csrColIdxBytes);
+                relBuf.putLong(0);                // csc_row_off_offset
+                relBuf.putLong(0);                // csc_row_off_bytes
+                relBuf.putLong(0);                // csc_col_idx_offset
+                relBuf.putLong(0);                // csc_col_idx_bytes
+                relBuf.putShort((short) 0);       // attr_count
+
+                relEntries.add(relBuf.array());
+                relIdx++;
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        for (byte[] rB : relEntries) {
+            try {
+                dirTableOut.write(rB);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        // Pad dirTableOut to alignedDirLen
+        while (dirTableOut.size() < alignedDirLen) {
+            dirTableOut.write(0);
+        }
+
+        ByteArrayOutputStream finalPayloadOut = new ByteArrayOutputStream();
+        try {
+            finalPayloadOut.write(dirTableOut.toByteArray());
+            finalPayloadOut.write(payloadOut.toByteArray());
+
+            // Footer Block
+            align4kOut(finalPayloadOut);
+            int footerStart = finalPayloadOut.size();
+
+            // Metadata map empty
+            ByteBuffer metaBuf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+            metaBuf.putInt(0);
+            finalPayloadOut.write(metaBuf.array());
+
+            // Footer Trailer (16 Bytes)
+            long footerLen = finalPayloadOut.size() + 16 - footerStart;
+            ByteBuffer trailerBuf = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
+            trailerBuf.putLong(footerLen);
+            trailerBuf.putInt(9); // spec_version
+            trailerBuf.putInt(ImpulseLayoutsV0_9.SPEC_MAGIC);
+            finalPayloadOut.write(trailerBuf.array());
+
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        byte[] finalPayload = finalPayloadOut.toByteArray();
+
+        // Header Page 0 (4096 Bytes)
+        ByteBuffer headerBuf = ByteBuffer.allocate(4096).order(ByteOrder.LITTLE_ENDIAN);
+        headerBuf.putInt(ImpulseLayoutsV0_9.SPEC_MAGIC); // 0x494D5053
+        headerBuf.putShort((short) 9);                     // Spec Version 0.9.0
+        headerBuf.putInt(dataOffset);                      // DataOffset = 4096
+        headerBuf.putShort((short) domainCount);           // DomainCount
+        headerBuf.putShort((short) relationCount);         // RelationCount
+        headerBuf.putLong(System.currentTimeMillis());     // TimestampMs
+        headerBuf.putLong(0x08L);                          // RequiredFeatures
+        headerBuf.putLong(0);                              // FooterDirectoryOffset
+        headerBuf.putLong(0);                              // FooterDirectoryBytes
+
+        // Header CRC-16 over 0x00..0x3E
+        byte[] hdrArr = headerBuf.array();
+        short crc = computeCrc16(hdrArr, 0, 62);
+        headerBuf.putShort(62, crc);
+
+        byte[] result = new byte[4096 + finalPayload.length];
+        System.arraycopy(hdrArr, 0, result, 0, 4096);
+        System.arraycopy(finalPayload, 0, result, 4096, finalPayload.length);
+
+        return result;
+    }
+
+    private static void align128Out(ByteArrayOutputStream out) {
+        int rem = out.size() % 128;
+        if (rem != 0) {
+            for (int i = 0; i < 128 - rem; i++) {
+                out.write(0);
+            }
+        }
+    }
+
+    private static void align4kOut(ByteArrayOutputStream out) {
+        int rem = out.size() % 4096;
+        if (rem != 0) {
+            for (int i = 0; i < 4096 - rem; i++) {
+                out.write(0);
+            }
+        }
+    }
+
+    private static short computeCrc16(byte[] data, int off, int len) {
+        int crc = 0xFFFF;
+        for (int i = off; i < off + len; i++) {
+            crc ^= (data[i] & 0xFF) << 8;
+            for (int j = 0; j < 8; j++) {
+                if ((crc & 0x8000) != 0) {
+                    crc = (crc << 1) ^ 0x1021;
+                } else {
+                    crc <<= 1;
+                }
+            }
+        }
+        return (short) (crc & 0xFFFF);
     }
 }

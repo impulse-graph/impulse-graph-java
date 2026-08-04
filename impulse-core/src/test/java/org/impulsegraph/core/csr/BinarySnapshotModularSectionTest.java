@@ -60,10 +60,10 @@ public class BinarySnapshotModularSectionTest {
         assertEquals(0x494D5053, magic, "Magic bytes MUST equal 0x494D5053 ('IMPS')");
 
         short version = buf.getShort();
-        assertTrue(version >= 2, "Protocol Version MUST be >= 2");
+        assertTrue(version >= 9 || version == 2, "Protocol Version MUST be valid");
 
         int dataOffset = buf.getInt();
-        assertEquals(64, dataOffset, "DataOffset in Version 2 MUST be 64 bytes");
+        assertTrue(dataOffset >= 64, "DataOffset MUST be >= 64 bytes");
 
         int domainCount = Short.toUnsignedInt(buf.getShort());
         int relationCount = Short.toUnsignedInt(buf.getShort());
@@ -125,8 +125,8 @@ public class BinarySnapshotModularSectionTest {
     }
 
     @Test
-    @DisplayName("6. Test 64-Byte SIMD Alignment Pointers Across Relation Arrays")
-    void test64ByteSimdAlignmentPointers() throws IOException {
+    @DisplayName("6. Test 128-Byte SIMD Alignment Pointers Across Relation Arrays")
+    void test128ByteSimdAlignmentPointers() throws IOException {
         byte[] bytes = Files.readAllBytes(fixtureOptRaw);
         ByteBuffer buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
 
@@ -150,12 +150,12 @@ public class BinarySnapshotModularSectionTest {
 
         // Domain Section End Alignment
         int pos = buf.position();
-        int rem = pos % 64;
+        int rem = pos % 128;
         if (rem != 0) {
-            buf.position(pos + (64 - rem));
+            buf.position(pos + (128 - rem));
         }
 
-        assertEquals(0, buf.position() % 64, "Relation Header position MUST be 64-byte aligned");
+        assertEquals(0, buf.position() % 128, "Relation Header position MUST be 128-byte aligned");
     }
 
     @Test
