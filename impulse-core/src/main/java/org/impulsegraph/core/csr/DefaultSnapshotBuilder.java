@@ -8,6 +8,8 @@ import org.impulsegraph.spec.v0_9.ImpulseLayoutsV0_9;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -74,7 +76,7 @@ public class DefaultSnapshotBuilder implements SnapshotBuilder {
         int domainCount = loaded != null ? loaded.domainsById().size() : 1;
 
         Set<String> relNames = snapshot != null ? snapshot.getRelationNames() : Set.of();
-        int relationCount = relNames.size();
+        int relationCount = loaded != null ? loaded.relationCount() : relNames.size();
 
         ByteArrayOutputStream dirTableOut = new ByteArrayOutputStream();
 
