@@ -46,7 +46,7 @@ class RbacQueryExecutionTest {
             BitSet inputUsers = new BitSet();
             inputUsers.set(0);
 
-            Object result = userToRolesQuery.execute(loadedSnapshot, inputUsers);
+            Object result = userToRolesQuery.execute(loadedSnapshot.graph(), inputUsers);
             assertNotNull(result, "Execute result MUST NOT be null");
             assertTrue(result instanceof BitSet, "Execute result MUST be a BitSet");
 

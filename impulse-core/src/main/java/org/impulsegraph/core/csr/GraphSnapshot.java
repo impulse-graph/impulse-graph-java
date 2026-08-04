@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * High-performance off-heap multi-relation graph container holding relation snapshots across domain types.
  */
-public class GraphSnapshot implements AutoCloseable {
+public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot, AutoCloseable {
 
     private final Arena arena;
     private final Map<String, RelationSnapshot> relationMap = new ConcurrentHashMap<>();
@@ -58,6 +58,48 @@ public class GraphSnapshot implements AutoCloseable {
             }
         }
         return total;
+    }
+
+    @Override
+    public int getRelationCount() {
+        return relationMap.size();
+    }
+
+    @Override
+    public java.util.Set<String> getRelationNames() {
+        return relationMap.keySet();
+    }
+
+    @Override
+    public long getNodeCount(String domainName) {
+        return 0;
+    }
+
+    @Override
+    public long getEdgeCount(String relationName) {
+        RelationSnapshot rel = getRelationSnapshot(relationName);
+        return rel != null ? rel.getEdgeCount() : 0;
+    }
+
+    @Override
+    public java.lang.foreign.MemorySegment getRelationTargetsSegment(String relationName) {
+        RelationSnapshot rel = getRelationSnapshot(relationName);
+        return rel != null ? rel.getColumnTargetsSegment() : null;
+    }
+
+    @Override
+    public String getSha256Checksum() {
+        return "";
+    }
+
+    @Override
+    public String getMetadata(String key) {
+        return null;
+    }
+
+    @Override
+    public Map<String, String> getMetadataMap() {
+        return Map.of();
     }
 
     @Override

@@ -55,7 +55,7 @@ public class RbacSnapshotQueryExample {
             inputUsers.set(0);
 
             // 5. Execute AST query pipeline
-            Object result = userToRolesQuery.execute(loadedSnapshot, inputUsers);
+            Object result = userToRolesQuery.execute(loadedSnapshot.graph(), inputUsers);
             System.out.println("[+] AST Builder execute() result (stub return): " + result);
 
             // 6. Direct FFM Off-Heap CSR Graph Traversal (3-tier RBAC reachability)
