@@ -102,6 +102,45 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
         return Map.of();
     }
 
+    private final java.util.concurrent.atomic.LongAdder activeQueryCount = new java.util.concurrent.atomic.LongAdder();
+
+    public void enterQuery() {
+        activeQueryCount.increment();
+    }
+
+    public void exitQuery() {
+        activeQueryCount.decrement();
+    }
+
+    @Override
+    public long getActiveQueryCount() {
+        return activeQueryCount.sum();
+    }
+
+    @Override
+    public boolean isDrained() {
+        return activeQueryCount.sum() <= 0;
+    }
+
+    @Override
+    public boolean awaitDrained(long timeout, java.util.concurrent.TimeUnit unit) throws InterruptedException {
+        long deadlineNanos = System.nanoTime() + unit.toNanos(timeout);
+        while (activeQueryCount.sum() > 0) {
+            if (System.nanoTime() >= deadlineNanos) {
+                return activeQueryCount.sum() <= 0;
+            }
+            Thread.onSpinWait();
+            Thread.sleep(1);
+        }
+        return true;
+    }
+
+    @Override
+    public void drainAndClose(long timeout, java.util.concurrent.TimeUnit unit) throws InterruptedException {
+        awaitDrained(timeout, unit);
+        close();
+    }
+
     @Override
     public void close() {
         if (arena.scope().isAlive()) {

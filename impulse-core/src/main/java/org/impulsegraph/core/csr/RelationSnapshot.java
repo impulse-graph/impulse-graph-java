@@ -38,7 +38,13 @@ public class RelationSnapshot implements AutoCloseable {
         }
     }
 
+    private final java.util.List<MemorySegment> attributeSegments = new java.util.ArrayList<>();
+
     public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment) {
+        this(arena, nodeCount, edgeCount, rowOffsetsSegment, columnTargetsSegment, java.util.Collections.emptyList());
+    }
+
+    public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment, java.util.List<MemorySegment> attributeSegments) {
         this.arena = Objects.requireNonNull(arena, "arena must not be null");
         this.nodeCount = nodeCount;
         this.edgeCount = edgeCount;
@@ -46,6 +52,13 @@ public class RelationSnapshot implements AutoCloseable {
         this.columnTargetsSegment = Objects.requireNonNull(columnTargetsSegment, "columnTargetsSegment must not be null");
         this.rowOffsetsData = null;
         this.columnIndicesData = null;
+        if (attributeSegments != null) {
+            this.attributeSegments.addAll(attributeSegments);
+        }
+    }
+
+    public java.util.List<MemorySegment> getAttributeSegments() {
+        return attributeSegments;
     }
 
     public int getNodeCount() {

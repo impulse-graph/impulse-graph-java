@@ -36,4 +36,24 @@ public interface ImpulseGraphQuery<R> {
      * Returns the string name or structural operation description of this query root node.
      */
     String getOperationName();
+
+    /**
+     * Returns a human-readable text tree representation of the query AST.
+     */
+    default String exportAst() {
+        return ImpulseQueryBuilder.exportAst(getSteps());
+    }
+
+    /**
+     * Disassembles the query into Impulse VM bytecode assembly format.
+     */
+    default String disassemble(ImpulseGraphSnapshot snapshot) {
+        try {
+            Class<?> compilerCls = Class.forName("org.impulsegraph.vm.ImpulseQueryCompiler");
+            var method = compilerCls.getMethod("disassembleQuery", ImpulseGraphQuery.class, ImpulseGraphSnapshot.class);
+            return (String) method.invoke(null, this, snapshot);
+        } catch (Exception e) {
+            return exportAst();
+        }
+    }
 }

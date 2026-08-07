@@ -378,8 +378,17 @@ public final class BinarySnapshotLoader {
                         ? segment.asSlice(csrColIdxOffset, csrColIdxBytes)
                         : MemorySegment.NULL;
 
+                List<MemorySegment> attrSegments = new ArrayList<>();
+                for (LoadedAttribute attr : attributes) {
+                    if (attr.dataOffset() > 0 && attr.dataOffset() + attr.dataBytes() <= segSize) {
+                        attrSegments.add(segment.asSlice(attr.dataOffset(), attr.dataBytes()));
+                    } else {
+                        attrSegments.add(MemorySegment.NULL);
+                    }
+                }
+
                 RelationSnapshot relSnap = new RelationSnapshot(
-                        arena, (int) nodeCount, (int) edgeCount, offsetsSeg, targetsSeg
+                        arena, (int) nodeCount, (int) edgeCount, offsetsSeg, targetsSeg, attrSegments
                 );
                 relationSnapshots.put(relName, relSnap);
 

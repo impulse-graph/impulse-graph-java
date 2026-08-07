@@ -1,0 +1,14 @@
+graphName: MinimalGraph
+version: 1.0
+package: org.impulsegraph.example.minimal
+
+nodes:
+  Node:
+    key: int64
+    denseId: int32
+
+relations:
+  link:
+    source: Node
+    target: Node
+    direction: [out]

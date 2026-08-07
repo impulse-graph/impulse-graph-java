@@ -143,6 +143,31 @@ public final class ImpulseVmInterpreter {
                         pc++;
                     }
 
+                    case OP_NODE_FILTER -> {
+                        VmHandlers.handleNodeFilter(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_CSR_WALK_FILTERED -> {
+                        VmHandlers.handleCsrWalk(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_VECTOR_MUL_ATTR -> {
+                        VmHandlers.handleVectorMulAttr(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_VECTOR_REDUCE_SUM, OP_REDUCE -> {
+                        finalResult = VmHandlers.handleVectorReduceSum(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_ISLAND_DETECT -> {
+                        VmHandlers.handleIslandDetect(state, ctx, instr);
+                        pc++;
+                    }
+
                     case OP_COLLECT_BITSET -> {
                         finalResult = VmHandlers.handleCollectBitset(state, ctx, instr);
                         pc++;

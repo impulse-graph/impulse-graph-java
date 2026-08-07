@@ -86,6 +86,10 @@ public final class VmQueryContext implements AutoCloseable {
         return handle;
     }
 
+    public int acquireFloatVector(int capacity) {
+        return registerFloatVector(new float[capacity]);
+    }
+
     public float[] getFloatVector(int handle) {
         return (handle >= 0 && handle < floatVectors.size()) ? floatVectors.get(handle) : null;
     }

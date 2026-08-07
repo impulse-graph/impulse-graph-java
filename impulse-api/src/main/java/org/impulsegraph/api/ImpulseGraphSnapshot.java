@@ -70,6 +70,37 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
      */
     Map<String, String> getMetadataMap();
 
+    /**
+     * Returns the count of queries currently executing against this graph snapshot.
+     */
+    default long getActiveQueryCount() {
+        return 0;
+    }
+
+    /**
+     * Checks if all queries executing against this snapshot have drained (active count == 0).
+     */
+    default boolean isDrained() {
+        return getActiveQueryCount() == 0;
+    }
+
+    /**
+     * Awaits all in-flight queries executing against this snapshot to drain, up to the specified timeout.
+     *
+     * @return true if all queries drained; false if timeout expired
+     */
+    default boolean awaitDrained(long timeout, java.util.concurrent.TimeUnit unit) throws InterruptedException {
+        return true;
+    }
+
+    /**
+     * Awaits all in-flight queries to drain and closes the underlying off-heap graph resources.
+     */
+    default void drainAndClose(long timeout, java.util.concurrent.TimeUnit unit) throws InterruptedException {
+        awaitDrained(timeout, unit);
+        close();
+    }
+
     @Override
     void close();
 }

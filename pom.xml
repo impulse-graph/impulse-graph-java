@@ -16,6 +16,8 @@
         <module>impulse-spec</module>
         <module>impulse-api</module>
         <module>impulse-core</module>
+        <module>impulse-codegen</module>
+        <module>impulse-maven-plugin</module>
     </modules>
 
     <properties>
@@ -68,6 +70,16 @@
                 <version>3.2.5</version>
                 <configuration>
                     <argLine>--enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED</argLine>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>3.6.3</version>
+                <configuration>
+                    <additionalOptions>--enable-preview --add-modules jdk.incubator.vector</additionalOptions>
+                    <doclint>none</doclint>
+                    <quiet>true</quiet>
                 </configuration>
             </plugin>
         </plugins>

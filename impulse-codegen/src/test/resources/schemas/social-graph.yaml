@@ -1,0 +1,30 @@
+graphName: SocialGraph
+version: 1.0
+package: org.impulsegraph.example.social
+
+nodes:
+  User:
+    key: uuid
+    denseId: int32
+    attributes:
+      username: { type: string, length: 15, nullable: false, indexed: true }
+      email: { type: varstring, nullable: false }
+      embedding: { type: float32[768] }
+  Post:
+    key: int64
+    denseId: int64
+    attributes:
+      title: { type: varstring, nullable: false }
+
+relations:
+  userFollowsUser:
+    source: User
+    target: User
+    direction: [out, in]
+    inverseAlias: followedBy
+    cardinality: many_to_many
+  userPostsPost:
+    source: User
+    target: Post
+    direction: [out]
+    cardinality: one_to_many

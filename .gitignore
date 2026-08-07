@@ -10,3 +10,5 @@ target/
 .settings/
 .DS_Store
 Thumbs.db
+*.aot
+*.aotcache
