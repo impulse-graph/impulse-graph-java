@@ -13,21 +13,21 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class BinarySnapshotLoaderTest {
 
-    private static Path getSpecTestVectorsDir() {
+    private static Path getRbacSnapshotPath() {
         Path curr = Paths.get("").toAbsolutePath();
-        while (curr != null && !Files.exists(curr.resolve("impulse-graph-spec"))) {
+        while (curr != null && !Files.exists(curr.resolve("datasets/rbac_snapshot.imps"))) {
             curr = curr.getParent();
         }
         if (curr == null) {
-            throw new IllegalStateException("Workspace root containing 'impulse-graph-spec' directory not found");
+            throw new IllegalStateException("Workspace root containing 'datasets/rbac_snapshot.imps' not found");
         }
-        return curr.resolve("impulse-graph-spec/test-vectors");
+        return curr.resolve("datasets/rbac_snapshot.imps");
     }
 
     @Test
     @DisplayName("BUG-JAVA-001: LoadedSnapshot Metadata Interface Verification")
     void testLoadedSnapshotMetadataInterface() throws Exception {
-        Path snapshotPath = getSpecTestVectorsDir().resolve("tc07_encoding_raw_uint32/snapshot.imps");
+        Path snapshotPath = getRbacSnapshotPath();
         assertTrue(Files.exists(snapshotPath), "Snapshot file MUST exist: " + snapshotPath);
 
         byte[] snapshotBytes = Files.readAllBytes(snapshotPath);

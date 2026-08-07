@@ -12,21 +12,21 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class BinarySnapshotLoaderRelationNameTest {
 
-    private static Path getSpecTestVectorsDir() {
+    private static Path getRbacSnapshotPath() {
         Path curr = Paths.get("").toAbsolutePath();
-        while (curr != null && !Files.exists(curr.resolve("impulse-graph-spec"))) {
+        while (curr != null && !Files.exists(curr.resolve("datasets/rbac_snapshot.imps"))) {
             curr = curr.getParent();
         }
         if (curr == null) {
-            throw new IllegalStateException("Workspace root containing 'impulse-graph-spec' directory not found");
+            throw new IllegalStateException("Workspace root containing 'datasets/rbac_snapshot.imps' not found");
         }
-        return curr.resolve("impulse-graph-spec/test-vectors");
+        return curr.resolve("datasets/rbac_snapshot.imps");
     }
 
     @Test
-    @DisplayName("BUG-JAVA-004: Relation Key Lookup (raw name 'userToGroup' vs prefixed 'rel_0_userToGroup')")
+    @DisplayName("BUG-JAVA-004: Relation Key Lookup (raw name 'userToGroup' vs prefixed 'rel_0_1')")
     void testRelationNameNormalizationAndLookup() throws Exception {
-        Path snapshotPath = getSpecTestVectorsDir().resolve("tc07_encoding_raw_uint32/snapshot.imps");
+        Path snapshotPath = getRbacSnapshotPath();
         assertTrue(Files.exists(snapshotPath), "Snapshot MUST exist: " + snapshotPath);
 
         byte[] snapshotBytes = Files.readAllBytes(snapshotPath);
@@ -37,11 +37,11 @@ class BinarySnapshotLoaderRelationNameTest {
             GraphSnapshot graph = loaded.graph();
             assertNotNull(graph, "GraphSnapshot MUST NOT be null");
 
-            RelationSnapshot rawLookup = graph.getRelationSnapshot("uToV");
-            RelationSnapshot prefixedLookup = graph.getRelationSnapshot("rel_0_uToV");
+            RelationSnapshot rawLookup = graph.getRelationSnapshot("userToGroup");
+            RelationSnapshot prefixedLookup = graph.getRelationSnapshot("rel_0_1");
 
-            assertNotNull(rawLookup, "Lookup with raw relation name 'uToV' MUST NOT return null");
-            assertNotNull(prefixedLookup, "Lookup with prefixed relation name 'rel_0_uToV' MUST NOT return null");
+            assertNotNull(rawLookup, "Lookup with raw relation name 'userToGroup' MUST NOT return null");
+            assertNotNull(prefixedLookup, "Lookup with prefixed relation name 'rel_0_1' MUST NOT return null");
             assertSame(rawLookup, prefixedLookup, "Both lookups MUST return the exact same RelationSnapshot instance");
         }
     }

@@ -13,21 +13,21 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class BinarySnapshotLoaderQueryTest {
 
-    private static Path getSpecTestVectorsDir() {
+    private static Path getRbacSnapshotPath() {
         Path curr = Paths.get("").toAbsolutePath();
-        while (curr != null && !Files.exists(curr.resolve("impulse-graph-spec"))) {
+        while (curr != null && !Files.exists(curr.resolve("datasets/rbac_snapshot.imps"))) {
             curr = curr.getParent();
         }
         if (curr == null) {
-            throw new IllegalStateException("Workspace root containing 'impulse-graph-spec' directory not found");
+            throw new IllegalStateException("Workspace root containing 'datasets/rbac_snapshot.imps' not found");
         }
-        return curr.resolve("impulse-graph-spec/test-vectors");
+        return curr.resolve("datasets/rbac_snapshot.imps");
     }
 
     @Test
     @DisplayName("Load test vector snapshot into impulse-core RelationSnapshot and execute reachability queries")
     void testLoadSampleRbacSnapshotAndExecuteQueries() throws Exception {
-        Path snapshotPath = getSpecTestVectorsDir().resolve("tc07_encoding_raw_uint32/snapshot.imps");
+        Path snapshotPath = getRbacSnapshotPath();
         assertTrue(Files.exists(snapshotPath), "Snapshot MUST exist: " + snapshotPath);
 
         byte[] snapshotBytes = Files.readAllBytes(snapshotPath);
@@ -37,9 +37,9 @@ class BinarySnapshotLoaderQueryTest {
 
             assertNotNull(loaded);
             assertEquals(BinarySnapshotLoader.SNAPSHOT_MAGIC, loaded.magic());
-            assertTrue(loaded.version() == 2 || (loaded.version() >> 8) == 2 || loaded.version() == 0x0204, "Version MUST be major version 2 (packed 0x0204)");
-            assertEquals(2, loaded.domainCount());
-            assertEquals(1, loaded.relationCount());
+            assertEquals(9, loaded.version(), "Version MUST be 9 (v0.9.0)");
+            assertEquals(3, loaded.domainCount());
+            assertEquals(2, loaded.relationCount());
 
             GraphSnapshot graph = loaded.graph();
             assertNotNull(graph, "GraphSnapshot MUST NOT be null");
@@ -55,8 +55,8 @@ class BinarySnapshotLoaderQueryTest {
             for (int i = startOff; i < endOff; i++) {
                 activeTargets.set(columnIndices[i]);
             }
-            assertTrue(activeTargets.get(10), "Target 10 MUST be present");
-            assertTrue(activeTargets.get(20), "Target 20 MUST be present");
+            assertTrue(activeTargets.get(0), "Target 0 MUST be present");
+            assertTrue(activeTargets.get(1), "Target 1 MUST be present");
 
             System.out.println("[+] impulse-core RelationSnapshot & GraphSnapshot loaded successfully!");
         }

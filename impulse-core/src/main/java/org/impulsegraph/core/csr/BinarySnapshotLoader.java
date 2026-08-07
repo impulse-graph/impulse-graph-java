@@ -371,6 +371,10 @@ public final class BinarySnapshotLoader {
                 }
 
                 String relName = getString.apply(relNameOff, "rel_" + srcDomId + "_" + tgtDomId);
+                if (relName.isEmpty()) {
+                    relName = "rel_" + srcDomId + "_" + tgtDomId;
+                }
+
                 MemorySegment offsetsSeg = (csrRowOffOffset > 0 && csrRowOffOffset + csrRowOffBytes <= segSize)
                         ? segment.asSlice(csrRowOffOffset, csrRowOffBytes)
                         : MemorySegment.NULL;
@@ -391,6 +395,14 @@ public final class BinarySnapshotLoader {
                         arena, (int) nodeCount, (int) edgeCount, offsetsSeg, targetsSeg, attrSegments
                 );
                 relationSnapshots.put(relName, relSnap);
+                relationSnapshots.putIfAbsent("rel_" + srcDomId + "_" + tgtDomId, relSnap);
+
+                LoadedDomain srcDom = domainsById.get(srcDomId);
+                LoadedDomain tgtDom = domainsById.get(tgtDomId);
+                if (srcDom != null && tgtDom != null && !srcDom.name().isEmpty() && !tgtDom.name().isEmpty()) {
+                    String domainRelName = srcDom.name().toLowerCase() + "To" + tgtDom.name().substring(0, 1).toUpperCase() + tgtDom.name().substring(1).toLowerCase();
+                    relationSnapshots.putIfAbsent(domainRelName, relSnap);
+                }
 
                 LoadedRelation rel = new LoadedRelation(
                         relId, srcDomId, tgtDomId, encodingId, nodeIdWidth, edgeIndexWidth,
