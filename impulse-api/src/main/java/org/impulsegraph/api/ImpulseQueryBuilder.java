@@ -99,9 +99,15 @@ public class ImpulseQueryBuilder<R> {
                 var method = evalCls.getMethod("evaluatePipeline", List.class, graphCls, Object.class);
                 Object graphObj = null;
                 if (snapshot != null) {
-                    try {
-                        graphObj = snapshot.getClass().getMethod("graph").invoke(snapshot);
-                    } catch (Exception ignored) {}
+                    if (snapshot.getClass().getName().endsWith("GraphSnapshot")) {
+                        graphObj = snapshot;
+                    } else {
+                        try {
+                            graphObj = snapshot.getClass().getMethod("graph").invoke(snapshot);
+                        } catch (Exception ignored) {
+                            graphObj = snapshot;
+                        }
+                    }
                 }
                 return (R) method.invoke(null, pipelineSteps, graphObj, input);
             } catch (Exception e) {
@@ -121,7 +127,15 @@ public class ImpulseQueryBuilder<R> {
                     try {
                         Object baseSnapshot = liveGraph.getBaseSnapshot();
                         if (baseSnapshot != null) {
-                            graphObj = baseSnapshot.getClass().getMethod("graph").invoke(baseSnapshot);
+                            if (baseSnapshot.getClass().getName().endsWith("GraphSnapshot")) {
+                                graphObj = baseSnapshot;
+                            } else {
+                                try {
+                                    graphObj = baseSnapshot.getClass().getMethod("graph").invoke(baseSnapshot);
+                                } catch (Exception ignored) {
+                                    graphObj = baseSnapshot;
+                                }
+                            }
                         }
                     } catch (Exception ignored) {}
                 }

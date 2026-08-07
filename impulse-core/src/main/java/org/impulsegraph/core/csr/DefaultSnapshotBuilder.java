@@ -19,7 +19,7 @@ public final class DefaultSnapshotBuilder {
     public DefaultSnapshotBuilder() {}
 
     public static byte[] writeSnapshotBytes(GraphSnapshot graph) {
-        return new DefaultSnapshotBuilder().build(new BinarySnapshotLoader.DefaultLoadedSnapshot(graph, Map.of(), Map.of(), Map.of(), Map.of()));
+        return new DefaultSnapshotBuilder().build(new BinarySnapshotLoader.DefaultLoadedSnapshot(SPEC_MAGIC, SPEC_VERSION_PACKED, graph, Map.of(), Map.of(), Map.of(), Map.of()));
     }
 
     public DefaultSnapshotBuilder withMetadata(String key, String value) {

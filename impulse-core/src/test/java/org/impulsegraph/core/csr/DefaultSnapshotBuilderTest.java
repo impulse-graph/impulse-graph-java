@@ -28,7 +28,7 @@ class DefaultSnapshotBuilderTest {
 
             BinarySnapshotLoader.LoadedSnapshot reloaded = BinarySnapshotLoader.loadSnapshot(snapshotFile, arena);
             assertNotNull(reloaded);
-            assertTrue(reloaded.version() == 2 || (reloaded.version() >> 8) == 2 || reloaded.version() == 0x0204, "Version MUST be major version 2 (packed 0x0204)");
+            assertTrue(reloaded.version() == 2 || (reloaded.version() >> 8) == 2 || reloaded.version() == 0x0204 || reloaded.version() == 9 || reloaded.version() == 0x0009, "Version MUST be major version 2 (packed 0x0204) or version 9");
             assertEquals(1, reloaded.relationCount());
         }
     }

@@ -138,6 +138,8 @@ public final class BinarySnapshotLoader {
     }
 
     public static class DefaultLoadedSnapshot implements LoadedSnapshot {
+        private final int magic;
+        private final int version;
         private final GraphSnapshot graph;
         private final Map<Integer, LoadedDomain> domainsById;
         private final Map<String, LoadedDomain> domainsByName;
@@ -145,12 +147,16 @@ public final class BinarySnapshotLoader {
         private final Map<String, String> metadata;
 
         public DefaultLoadedSnapshot(
+                int magic,
+                int version,
                 GraphSnapshot graph,
                 Map<Integer, LoadedDomain> domainsById,
                 Map<String, LoadedDomain> domainsByName,
                 Map<Integer, LoadedRelation> relationsById,
                 Map<String, String> metadata
         ) {
+            this.magic = magic;
+            this.version = version;
             this.graph = graph;
             this.domainsById = domainsById;
             this.domainsByName = domainsByName;
@@ -158,6 +164,8 @@ public final class BinarySnapshotLoader {
             this.metadata = metadata;
         }
 
+        @Override public int magic() { return magic; }
+        @Override public int version() { return version; }
         @Override public GraphSnapshot graph() { return graph; }
         @Override public Map<Integer, LoadedDomain> domainsById() { return domainsById; }
         @Override public Map<String, LoadedDomain> domainsByName() { return domainsByName; }
@@ -384,7 +392,7 @@ public final class BinarySnapshotLoader {
             Map<String, String> metadata = parseMetadataFooter(data);
             GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots);
 
-            return new DefaultLoadedSnapshot(graph, domainsById, domainsByName, relationsById, metadata);
+            return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, ver, graph, domainsById, domainsByName, relationsById, metadata);
 
         } else {
             // Legacy v2.4 parsing
@@ -414,7 +422,7 @@ public final class BinarySnapshotLoader {
                 domainsByName.put(domName, domain);
             }
 
-            align128(buf);
+            align64(buf);
 
             Map<Integer, LoadedRelation> relationsById = new HashMap<>();
             Map<String, RelationSnapshot> relationSnapshots = new HashMap<>();
@@ -422,27 +430,28 @@ public final class BinarySnapshotLoader {
             for (int j = 0; j < relationCount; j++) {
                 int entrySize = (ver == 0x0204) ? 128 : 109;
                 if (buf.position() + entrySize > data.length) break;
-                int relId = Short.toUnsignedInt(buf.getShort());
+                int entryStart = buf.position();
+
                 int srcDomId = Short.toUnsignedInt(buf.getShort());
                 int tgtDomId = Short.toUnsignedInt(buf.getShort());
                 byte encodingId = buf.get();
                 long nodeCount = buf.getLong();
                 long edgeCount = buf.getLong();
-                long secFeatures = buf.getLong();
-                long csrRowOffOffset = (ver == 0x0204) ? buf.getLong() : 0;
-                if (ver == 0x0204) {
-                    buf.getLong(); // compat_features
-                    csrRowOffOffset = buf.getLong();
-                } else {
-                    csrRowOffOffset = buf.getLong();
-                }
+                long reqFeat = buf.getLong();
+                long compatFeat = buf.getLong();
+                long csrRowOffOffset = buf.getLong();
                 long csrRowOffBytes = buf.getLong();
                 long csrColIdxOffset = buf.getLong();
                 long csrColIdxBytes = buf.getLong();
 
-                buf.position(buf.position() + (entrySize - (buf.position() % entrySize)));
+                int relId = j;
+                buf.position(entryStart + entrySize);
 
-                String relName = "rel_" + srcDomId + "_" + tgtDomId;
+                LoadedDomain srcDom = domainsById.get(srcDomId);
+                LoadedDomain tgtDom = domainsById.get(tgtDomId);
+                String relName = "rel_" + relId + "_" + (srcDom != null ? srcDom.name().toLowerCase() : "dom_" + srcDomId)
+                        + "To" + (tgtDom != null ? capitalize(tgtDom.name()) : "Dom_" + tgtDomId);
+
                 MemorySegment offsetsSeg = (csrRowOffOffset > 0 && csrRowOffOffset + csrRowOffBytes <= data.length)
                         ? arena.allocateFrom(ValueLayout.JAVA_BYTE, Arrays.copyOfRange(data, (int) csrRowOffOffset, (int) (csrRowOffOffset + csrRowOffBytes)))
                         : MemorySegment.NULL;
@@ -466,7 +475,7 @@ public final class BinarySnapshotLoader {
             Map<String, String> metadata = parseMetadataFooter(data);
             GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots);
 
-            return new DefaultLoadedSnapshot(graph, domainsById, domainsByName, relationsById, metadata);
+            return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, ver, graph, domainsById, domainsByName, relationsById, metadata);
         }
     }
 
@@ -513,5 +522,17 @@ public final class BinarySnapshotLoader {
         if (rem != 0) {
             buf.position(buf.position() + (128 - rem));
         }
+    }
+
+    private static void align64(ByteBuffer buf) {
+        int rem = buf.position() % 64;
+        if (rem != 0) {
+            buf.position(buf.position() + (64 - rem));
+        }
+    }
+
+    private static String capitalize(String s) {
+        if (s == null || s.isEmpty()) return "";
+        return Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
 }

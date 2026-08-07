@@ -7,6 +7,7 @@ import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.ImpulseQueryBuilder;
 import org.impulsegraph.api.ReturnType;
 
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -41,6 +42,7 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 
     public static GraphSnapshot extractGraphSnapshot(ImpulseGraphSnapshot snapshot) {
         if (snapshot == null) return null;
+        if (snapshot instanceof GraphSnapshot gs) return gs;
         if (snapshot instanceof BinarySnapshotLoader.LoadedSnapshot ls) {
             return ls.graph();
         }
