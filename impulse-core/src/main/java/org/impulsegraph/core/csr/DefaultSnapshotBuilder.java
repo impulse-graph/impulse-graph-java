@@ -19,7 +19,7 @@ public final class DefaultSnapshotBuilder {
     public DefaultSnapshotBuilder() {}
 
     public static byte[] writeSnapshotBytes(GraphSnapshot graph) {
-        return new DefaultSnapshotBuilder().build(new BinarySnapshotLoader.DefaultLoadedSnapshot(SPEC_MAGIC, SPEC_VERSION_PACKED, graph, Map.of(), Map.of(), Map.of(), Map.of()));
+        return new DefaultSnapshotBuilder().build(new BinarySnapshotLoader.DefaultLoadedSnapshot(SPEC_MAGIC, (short) SPEC_VERSION_PACKED, graph, Map.of(), Map.of(), Map.of(), Map.of()));
     }
 
     public DefaultSnapshotBuilder withMetadata(String key, String value) {
@@ -28,7 +28,7 @@ public final class DefaultSnapshotBuilder {
     }
 
     public byte[] build(BinarySnapshotLoader.LoadedSnapshot loaded) {
-        Set<String> relNames = loaded != null ? loaded.getRelationNames() : Set.of();
+        Set<String> relNames = (loaded != null && loaded.graph() != null) ? loaded.graph().getAllRelationSnapshots().keySet() : Set.of();
         int relationCount = relNames.size();
 
         int dataOffset = 4096;

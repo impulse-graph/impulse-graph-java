@@ -6,9 +6,10 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
 import java.util.function.BiFunction;
 
@@ -31,39 +32,9 @@ public final class BinarySnapshotLoader {
             this.keyType = keyType;
         }
 
-        public int getDomainId() { return domainId; }
-        public String getName() { return name; }
+        public int domainId() { return domainId; }
         public String name() { return name; }
-        public byte getKeyType() { return keyType; }
-    }
-
-    public static class LoadedAttribute {
-        private final String name;
-        private final byte typeCode;
-        private final int dimension;
-        private final long dataOffset;
-        private final long dataBytes;
-        private final long offsetsOffset;
-        private final long offsetsBytes;
-
-        public LoadedAttribute(String name, byte typeCode, int dimension, long dataOffset, long dataBytes, long offsetsOffset, long offsetsBytes) {
-            this.name = name;
-            this.typeCode = typeCode;
-            this.dimension = dimension;
-            this.dataOffset = dataOffset;
-            this.dataBytes = dataBytes;
-            this.offsetsOffset = offsetsOffset;
-            this.offsetsBytes = offsetsBytes;
-        }
-
-        public String getName() { return name; }
-        public String name() { return name; }
-        public byte getTypeCode() { return typeCode; }
-        public int getDimension() { return dimension; }
-        public long getDataOffset() { return dataOffset; }
-        public long getDataBytes() { return dataBytes; }
-        public long getOffsetsOffset() { return offsetsOffset; }
-        public long getOffsetsBytes() { return offsetsBytes; }
+        public byte keyType() { return keyType; }
     }
 
     public static class LoadedRelation {
@@ -81,14 +52,10 @@ public final class BinarySnapshotLoader {
         private final long csrColIdxBytes;
         private final List<LoadedAttribute> attributes;
 
-        public LoadedRelation(
-                int relationId, int srcDomainId, int tgtDomainId,
-                byte encodingId, byte nodeIdWidth, byte edgeIndexWidth,
-                long nodeCount, long edgeCount,
-                long csrRowOffOffset, long csrRowOffBytes,
-                long csrColIdxOffset, long csrColIdxBytes,
-                List<LoadedAttribute> attributes
-        ) {
+        public LoadedRelation(int relationId, int srcDomainId, int tgtDomainId, byte encodingId,
+                              byte nodeIdWidth, byte edgeIndexWidth, long nodeCount, long edgeCount,
+                              long csrRowOffOffset, long csrRowOffBytes, long csrColIdxOffset, long csrColIdxBytes,
+                              List<LoadedAttribute> attributes) {
             this.relationId = relationId;
             this.srcDomainId = srcDomainId;
             this.tgtDomainId = tgtDomainId;
@@ -104,117 +71,134 @@ public final class BinarySnapshotLoader {
             this.attributes = attributes;
         }
 
-        public int getRelationId() { return relationId; }
-        public int getSrcDomainId() { return srcDomainId; }
-        public int getTgtDomainId() { return tgtDomainId; }
-        public byte getEncodingId() { return encodingId; }
-        public long getNodeCount() { return nodeCount; }
-        public long getEdgeCount() { return edgeCount; }
-        public List<LoadedAttribute> getAttributes() { return attributes; }
+        public int relationId() { return relationId; }
+        public int srcDomainId() { return srcDomainId; }
+        public int tgtDomainId() { return tgtDomainId; }
+        public byte encodingId() { return encodingId; }
+        public byte nodeIdWidth() { return nodeIdWidth; }
+        public byte edgeIndexWidth() { return edgeIndexWidth; }
+        public long nodeCount() { return nodeCount; }
+        public long edgeCount() { return edgeCount; }
+        public long csrRowOffOffset() { return csrRowOffOffset; }
+        public long csrRowOffBytes() { return csrRowOffBytes; }
+        public long csrColIdxOffset() { return csrColIdxOffset; }
+        public long csrColIdxBytes() { return csrColIdxBytes; }
+        public List<LoadedAttribute> attributes() { return attributes; }
+    }
+
+    public static class LoadedAttribute {
+        private final String name;
+        private final byte typeCode;
+        private final int dimension;
+        private final long dataOffset;
+        private final long dataBytes;
+        private final long offsetsOffset;
+        private final long offsetsBytes;
+
+        public LoadedAttribute(String name, byte typeCode, int dimension,
+                               long dataOffset, long dataBytes, long offsetsOffset, long offsetsBytes) {
+            this.name = name;
+            this.typeCode = typeCode;
+            this.dimension = dimension;
+            this.dataOffset = dataOffset;
+            this.dataBytes = dataBytes;
+            this.offsetsOffset = offsetsOffset;
+            this.offsetsBytes = offsetsBytes;
+        }
+
+        public String name() { return name; }
+        public byte typeCode() { return typeCode; }
+        public int dimension() { return dimension; }
+        public long dataOffset() { return dataOffset; }
+        public long dataBytes() { return dataBytes; }
+        public long offsetsOffset() { return offsetsOffset; }
+        public long offsetsBytes() { return offsetsBytes; }
     }
 
     public interface LoadedSnapshot extends AutoCloseable {
-        GraphSnapshot graph();
+        int magic();
+        short version();
+        int domainCount();
+        int relationCount();
+        long timestampMs();
+        long globalFeatures();
+
+        LoadedDomain getDomain(int domainId);
+        LoadedDomain getDomain(String name);
+        LoadedRelation getRelation(int relationId);
         Map<Integer, LoadedDomain> domainsById();
         Map<String, LoadedDomain> domainsByName();
         Map<Integer, LoadedRelation> relationsById();
-        Set<String> getRelationNames();
-        long getNodeCount(String domainName);
-        long getEdgeCount(String relationName);
-        MemorySegment getRelationTargetsSegment(String relationName);
-        long getOffHeapMemorySizeBytes();
-        String getSha256Checksum();
+        GraphSnapshot graph();
         String getMetadata(String key);
         Map<String, String> getMetadataMap();
-        void close();
-
-        default int magic() { return SPEC_MAGIC; }
-        default int version() { return 9; }
-        default int domainCount() { return domainsById() != null ? domainsById().size() : 0; }
-        default int relationCount() { return relationsById() != null ? relationsById().size() : 0; }
-        default Collection<LoadedDomain> domains() { return domainsById() != null ? domainsById().values() : List.of(); }
-        default Collection<LoadedRelation> relations() { return relationsById() != null ? relationsById().values() : List.of(); }
-        default LoadedRelation getRelationEntry(int relId) { return relationsById() != null ? relationsById().get(relId) : null; }
+        default String getSha256Checksum() { return ""; }
+        default Set<String> getRelationNames() {
+            return graph() != null ? graph().getAllRelationSnapshots().keySet() : Set.of();
+        }
     }
 
     public static class DefaultLoadedSnapshot implements LoadedSnapshot {
         private final int magic;
-        private final int version;
-        private final GraphSnapshot graph;
+        private final short version;
+        private final int domainCount;
+        private final int relationCount;
+        private final long timestampMs;
+        private final long globalFeatures;
         private final Map<Integer, LoadedDomain> domainsById;
         private final Map<String, LoadedDomain> domainsByName;
         private final Map<Integer, LoadedRelation> relationsById;
         private final Map<String, String> metadata;
+        private final GraphSnapshot graph;
 
-        public DefaultLoadedSnapshot(
-                int magic,
-                int version,
-                GraphSnapshot graph,
-                Map<Integer, LoadedDomain> domainsById,
-                Map<String, LoadedDomain> domainsByName,
-                Map<Integer, LoadedRelation> relationsById,
-                Map<String, String> metadata
-        ) {
+        public DefaultLoadedSnapshot(int magic, short version, GraphSnapshot graph,
+                                     Map<Integer, LoadedDomain> domainsById,
+                                     Map<String, LoadedDomain> domainsByName,
+                                     Map<Integer, LoadedRelation> relationsById,
+                                     Map<String, String> metadata) {
             this.magic = magic;
             this.version = version;
+            this.domainCount = domainsById != null ? domainsById.size() : 0;
+            this.relationCount = relationsById != null ? relationsById.size() : 0;
+            this.timestampMs = System.currentTimeMillis();
+            this.globalFeatures = 0L;
             this.graph = graph;
-            this.domainsById = domainsById;
-            this.domainsByName = domainsByName;
-            this.relationsById = relationsById;
-            this.metadata = metadata;
-        }
-
-        @Override public int magic() { return magic; }
-        @Override public int version() { return version; }
-        @Override public GraphSnapshot graph() { return graph; }
-        @Override public Map<Integer, LoadedDomain> domainsById() { return domainsById; }
-        @Override public Map<String, LoadedDomain> domainsByName() { return domainsByName; }
-        @Override public Map<Integer, LoadedRelation> relationsById() { return relationsById; }
-
-        @Override
-        public Set<String> getRelationNames() {
-            return graph != null ? graph.getAllRelationSnapshots().keySet() : Set.of();
+            this.domainsById = domainsById != null ? Map.copyOf(domainsById) : Map.of();
+            this.domainsByName = domainsByName != null ? Map.copyOf(domainsByName) : Map.of();
+            this.relationsById = relationsById != null ? Map.copyOf(relationsById) : Map.of();
+            this.metadata = metadata != null ? Map.copyOf(metadata) : Map.of();
         }
 
         @Override
-        public long getNodeCount(String domainName) {
-            LoadedDomain dom = domainsByName != null ? domainsByName.get(domainName) : null;
-            return dom != null ? 1 : 0;
-        }
-
+        public int magic() { return magic; }
         @Override
-        public long getEdgeCount(String relationName) {
-            if (graph == null) return 0;
-            RelationSnapshot rel = graph.getRelationSnapshot(relationName);
-            return rel != null ? rel.getEdgeCount() : 0;
-        }
-
+        public short version() { return version; }
         @Override
-        public MemorySegment getRelationTargetsSegment(String relationName) {
-            if (graph == null) return null;
-            RelationSnapshot rel = graph.getRelationSnapshot(relationName);
-            return rel != null ? rel.getColumnTargetsSegment() : null;
-        }
-
+        public int domainCount() { return domainCount; }
         @Override
-        public long getOffHeapMemorySizeBytes() {
-            return graph != null ? graph.getOffHeapMemorySizeBytes() : 0;
-        }
-
+        public int relationCount() { return relationCount; }
         @Override
-        public String getSha256Checksum() {
-            return "";
-        }
-
+        public long timestampMs() { return timestampMs; }
         @Override
-        public String getMetadata(String key) {
-            return metadata != null ? metadata.get(key) : null;
-        }
-
+        public long globalFeatures() { return globalFeatures; }
         @Override
-        public Map<String, String> getMetadataMap() {
-            return metadata != null ? metadata : Map.of();
-        }
+        public LoadedDomain getDomain(int domainId) { return domainsById.get(domainId); }
+        @Override
+        public LoadedDomain getDomain(String name) { return domainsByName.get(name); }
+        @Override
+        public LoadedRelation getRelation(int relationId) { return relationsById.get(relationId); }
+        @Override
+        public Map<Integer, LoadedDomain> domainsById() { return domainsById; }
+        @Override
+        public Map<String, LoadedDomain> domainsByName() { return domainsByName; }
+        @Override
+        public Map<Integer, LoadedRelation> relationsById() { return relationsById; }
+        @Override
+        public GraphSnapshot graph() { return graph; }
+        @Override
+        public String getMetadata(String key) { return metadata.get(key); }
+        @Override
+        public Map<String, String> getMetadataMap() { return metadata; }
 
         @Override
         public void close() {
@@ -225,8 +209,17 @@ public final class BinarySnapshotLoader {
     }
 
     public static LoadedSnapshot loadSnapshot(Path filePath, Arena arena) throws IOException {
-        byte[] bytes = Files.readAllBytes(filePath);
-        return loadSnapshot(bytes, arena, false);
+        return loadSnapshot(filePath, arena, false);
+    }
+
+    public static LoadedSnapshot loadSnapshot(Path filePath, Arena arena, boolean verifyChecksum) throws IOException {
+        Objects.requireNonNull(filePath, "filePath must not be null");
+        Objects.requireNonNull(arena, "arena must not be null");
+        try (FileChannel channel = FileChannel.open(filePath, StandardOpenOption.READ)) {
+            long size = channel.size();
+            MemorySegment segment = channel.map(FileChannel.MapMode.READ_ONLY, 0, size, arena);
+            return loadSnapshot(segment, arena, verifyChecksum);
+        }
     }
 
     public static LoadedSnapshot loadSnapshot(byte[] data, Arena arena) {
@@ -236,12 +229,21 @@ public final class BinarySnapshotLoader {
     public static LoadedSnapshot loadSnapshot(byte[] data, Arena arena, boolean verifyChecksum) {
         Objects.requireNonNull(data, "snapshot data must not be null");
         Objects.requireNonNull(arena, "arena must not be null");
+        MemorySegment segment = MemorySegment.ofArray(data);
+        return loadSnapshot(segment, arena, verifyChecksum);
+    }
 
-        if (data.length < 58) {
-            throw new IllegalArgumentException("snapshot file size (" + data.length + " bytes) is smaller than header");
+    public static LoadedSnapshot loadSnapshot(MemorySegment segment, Arena arena, boolean verifyChecksum) {
+        Objects.requireNonNull(segment, "snapshot segment must not be null");
+        Objects.requireNonNull(arena, "arena must not be null");
+
+        long segSize = segment.byteSize();
+        if (segSize < 58) {
+            throw new IllegalArgumentException("snapshot file size (" + segSize + " bytes) is smaller than header");
         }
 
-        ByteBuffer buf = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
+        long headerWindowLen = Math.min(segSize, 64 * 1024 * 1024L);
+        ByteBuffer buf = segment.asSlice(0, headerWindowLen).asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
 
         int magic = buf.getInt(0);
         if (magic != SNAPSHOT_MAGIC) {
@@ -266,7 +268,7 @@ public final class BinarySnapshotLoader {
         int dirOffset = dataOffset;
         if (isV09) {
             long footerDirectoryOffset = buf.getLong(30);
-            if (footerDirectoryOffset > 0 && footerDirectoryOffset < data.length) {
+            if (footerDirectoryOffset > 0 && footerDirectoryOffset < segSize) {
                 dirOffset = (int) footerDirectoryOffset;
             }
         }
@@ -279,7 +281,7 @@ public final class BinarySnapshotLoader {
         if (isV09) {
             // Read Shared String Table Header & Pool
             int strPoolBytes = buf.getInt();
-            if (strPoolBytes < 1 || buf.position() + strPoolBytes > data.length) {
+            if (strPoolBytes < 1 || buf.position() + strPoolBytes > segSize) {
                 throw new IllegalArgumentException("Invalid or overflowing Section 2 string_table_bytes: " + strPoolBytes);
             }
             byte[] poolBytes = new byte[strPoolBytes];
@@ -307,7 +309,7 @@ public final class BinarySnapshotLoader {
 
             // Read Domain Catalog Entries (Fixed 16 Bytes)
             for (int i = 0; i < domainCount; i++) {
-                if (buf.position() + 16 > data.length) break;
+                if (buf.position() + 16 > segSize) break;
                 int domId = Short.toUnsignedInt(buf.getShort());
                 byte keyType = buf.get();
                 buf.get(); // reserved
@@ -327,7 +329,7 @@ public final class BinarySnapshotLoader {
             Map<String, RelationSnapshot> relationSnapshots = new HashMap<>();
 
             for (int j = 0; j < relationCount; j++) {
-                if (buf.position() + 128 > data.length) break;
+                if (buf.position() + 128 > segSize) break;
                 int relId = Short.toUnsignedInt(buf.getShort());
                 int srcDomId = Short.toUnsignedInt(buf.getShort());
                 int tgtDomId = Short.toUnsignedInt(buf.getShort());
@@ -353,7 +355,7 @@ public final class BinarySnapshotLoader {
 
                 List<LoadedAttribute> attributes = new ArrayList<>();
                 for (int a = 0; a < attrCount; a++) {
-                    if (buf.position() + 44 > data.length) break;
+                    if (buf.position() + 44 > segSize) break;
                     int attrNameOff = buf.getInt();
                     byte typeCode = buf.get();
                     buf.get(); // reserved1
@@ -369,11 +371,11 @@ public final class BinarySnapshotLoader {
                 }
 
                 String relName = getString.apply(relNameOff, "rel_" + srcDomId + "_" + tgtDomId);
-                MemorySegment offsetsSeg = (csrRowOffOffset > 0 && csrRowOffOffset + csrRowOffBytes <= data.length)
-                        ? arena.allocateFrom(ValueLayout.JAVA_BYTE, Arrays.copyOfRange(data, (int) csrRowOffOffset, (int) (csrRowOffOffset + csrRowOffBytes)))
+                MemorySegment offsetsSeg = (csrRowOffOffset > 0 && csrRowOffOffset + csrRowOffBytes <= segSize)
+                        ? segment.asSlice(csrRowOffOffset, csrRowOffBytes)
                         : MemorySegment.NULL;
-                MemorySegment targetsSeg = (csrColIdxOffset > 0 && csrColIdxOffset + csrColIdxBytes <= data.length)
-                        ? arena.allocateFrom(ValueLayout.JAVA_BYTE, Arrays.copyOfRange(data, (int) csrColIdxOffset, (int) (csrColIdxOffset + csrColIdxBytes)))
+                MemorySegment targetsSeg = (csrColIdxOffset > 0 && csrColIdxOffset + csrColIdxBytes <= segSize)
+                        ? segment.asSlice(csrColIdxOffset, csrColIdxBytes)
                         : MemorySegment.NULL;
 
                 RelationSnapshot relSnap = new RelationSnapshot(
@@ -389,15 +391,15 @@ public final class BinarySnapshotLoader {
                 relationsById.put(relId, rel);
             }
 
-            Map<String, String> metadata = parseMetadataFooter(data);
+            Map<String, String> metadata = parseMetadataFooter(segment, segSize);
             GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots);
 
-            return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, ver, graph, domainsById, domainsByName, relationsById, metadata);
+            return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, (short) ver, graph, domainsById, domainsByName, relationsById, metadata);
 
         } else {
             // Legacy v2.4 parsing
             for (int i = 0; i < domainCount; i++) {
-                if (buf.position() + 64 > data.length) break;
+                if (buf.position() + 64 > segSize) break;
                 int domId = Short.toUnsignedInt(buf.getShort());
                 byte keyType = buf.get();
                 buf.get();
@@ -408,7 +410,7 @@ public final class BinarySnapshotLoader {
                 buf.position(buf.position() + 14);
 
                 String domName = "dom_" + domId;
-                if (nameLen > 0 && nameOff > 0 && nameOff + nameLen <= data.length) {
+                if (nameLen > 0 && nameOff > 0 && nameOff + nameLen <= segSize) {
                     int oldPos = buf.position();
                     buf.position(nameOff);
                     byte[] nameBytes = new byte[nameLen];
@@ -429,7 +431,7 @@ public final class BinarySnapshotLoader {
 
             for (int j = 0; j < relationCount; j++) {
                 int entrySize = (ver == 0x0204) ? 128 : 109;
-                if (buf.position() + entrySize > data.length) break;
+                if (buf.position() + entrySize > segSize) break;
                 int entryStart = buf.position();
 
                 int srcDomId = Short.toUnsignedInt(buf.getShort());
@@ -452,11 +454,11 @@ public final class BinarySnapshotLoader {
                 String relName = "rel_" + relId + "_" + (srcDom != null ? srcDom.name().toLowerCase() : "dom_" + srcDomId)
                         + "To" + (tgtDom != null ? capitalize(tgtDom.name()) : "Dom_" + tgtDomId);
 
-                MemorySegment offsetsSeg = (csrRowOffOffset > 0 && csrRowOffOffset + csrRowOffBytes <= data.length)
-                        ? arena.allocateFrom(ValueLayout.JAVA_BYTE, Arrays.copyOfRange(data, (int) csrRowOffOffset, (int) (csrRowOffOffset + csrRowOffBytes)))
+                MemorySegment offsetsSeg = (csrRowOffOffset > 0 && csrRowOffOffset + csrRowOffBytes <= segSize)
+                        ? segment.asSlice(csrRowOffOffset, csrRowOffBytes)
                         : MemorySegment.NULL;
-                MemorySegment targetsSeg = (csrColIdxOffset > 0 && csrColIdxOffset + csrColIdxBytes <= data.length)
-                        ? arena.allocateFrom(ValueLayout.JAVA_BYTE, Arrays.copyOfRange(data, (int) csrColIdxOffset, (int) (csrColIdxOffset + csrColIdxBytes)))
+                MemorySegment targetsSeg = (csrColIdxOffset > 0 && csrColIdxOffset + csrColIdxBytes <= segSize)
+                        ? segment.asSlice(csrColIdxOffset, csrColIdxBytes)
                         : MemorySegment.NULL;
 
                 RelationSnapshot relSnap = new RelationSnapshot(
@@ -472,40 +474,39 @@ public final class BinarySnapshotLoader {
                 relationsById.put(relId, rel);
             }
 
-            Map<String, String> metadata = parseMetadataFooter(data);
+            Map<String, String> metadata = parseMetadataFooter(segment, segSize);
             GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots);
 
-            return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, ver, graph, domainsById, domainsByName, relationsById, metadata);
+            return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, (short) ver, graph, domainsById, domainsByName, relationsById, metadata);
         }
     }
 
-    private static Map<String, String> parseMetadataFooter(byte[] data) {
+    private static Map<String, String> parseMetadataFooter(MemorySegment segment, long segSize) {
         Map<String, String> meta = new HashMap<>();
-        if (data.length < 16) return meta;
+        if (segSize < 16) return meta;
 
-        ByteBuffer buf = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
-        int trailerPos = data.length - 16;
-        long footerLen = buf.getLong(trailerPos);
-        int magic = buf.getInt(trailerPos + 12);
+        long trailerPos = segSize - 16;
+        long footerLen = segment.get(ValueLayout.JAVA_LONG_UNALIGNED, trailerPos);
+        int magic = segment.get(ValueLayout.JAVA_INT_UNALIGNED, trailerPos + 12);
 
-        if (magic == SNAPSHOT_MAGIC && footerLen <= data.length) {
-            int metaStart = data.length - (int) footerLen;
-            int metaBytes = (int) footerLen - 16;
+        if (magic == SNAPSHOT_MAGIC && footerLen > 16 && footerLen <= segSize && footerLen <= 64 * 1024 * 1024L) {
+            long metaStart = segSize - footerLen;
+            long metaBytes = footerLen - 16;
 
-            if (metaStart + metaBytes <= data.length && metaBytes >= 4) {
-                buf.position(metaStart);
+            ByteBuffer buf = segment.asSlice(metaStart, metaBytes).asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
+            if (buf.remaining() >= 4) {
                 int count = buf.getInt();
                 for (int k = 0; k < count; k++) {
-                    if (buf.position() + 2 > metaStart + metaBytes) break;
+                    if (buf.remaining() < 2) break;
                     int klen = Short.toUnsignedInt(buf.getShort());
-                    if (buf.position() + klen > metaStart + metaBytes) break;
+                    if (buf.remaining() < klen) break;
                     byte[] kb = new byte[klen];
                     buf.get(kb);
                     String key = new String(kb, StandardCharsets.UTF_8);
 
-                    if (buf.position() + 4 > metaStart + metaBytes) break;
+                    if (buf.remaining() < 4) break;
                     int vlen = buf.getInt();
-                    if (buf.position() + vlen > metaStart + metaBytes) break;
+                    if (buf.remaining() < vlen) break;
                     byte[] vb = new byte[vlen];
                     buf.get(vb);
                     String val = new String(vb, StandardCharsets.UTF_8);

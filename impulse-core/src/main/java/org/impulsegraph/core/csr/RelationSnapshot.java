@@ -44,18 +44,8 @@ public class RelationSnapshot implements AutoCloseable {
         this.edgeCount = edgeCount;
         this.rowOffsetsSegment = Objects.requireNonNull(rowOffsetsSegment, "rowOffsetsSegment must not be null");
         this.columnTargetsSegment = Objects.requireNonNull(columnTargetsSegment, "columnTargetsSegment must not be null");
-
-        int numRowOffsets = (int) (rowOffsetsSegment.byteSize() / ValueLayout.JAVA_INT.byteSize());
-        this.rowOffsetsData = new int[numRowOffsets];
-        for (int i = 0; i < numRowOffsets; i++) {
-            this.rowOffsetsData[i] = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, i);
-        }
-
-        int numCols = (int) (columnTargetsSegment.byteSize() / ValueLayout.JAVA_INT.byteSize());
-        this.columnIndicesData = new int[numCols];
-        for (int j = 0; j < numCols; j++) {
-            this.columnIndicesData[j] = columnTargetsSegment.getAtIndex(ValueLayout.JAVA_INT, j);
-        }
+        this.rowOffsetsData = null;
+        this.columnIndicesData = null;
     }
 
     public int getNodeCount() {
@@ -67,11 +57,21 @@ public class RelationSnapshot implements AutoCloseable {
     }
 
     public int[] getRowOffsets() {
-        return rowOffsetsData;
+        if (rowOffsetsData != null) return rowOffsetsData;
+        if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)) return new int[0];
+        int numRowOffsets = (int) (rowOffsetsSegment.byteSize() / ValueLayout.JAVA_INT.byteSize());
+        int[] arr = new int[numRowOffsets];
+        MemorySegment.copy(rowOffsetsSegment, ValueLayout.JAVA_INT, 0, arr, 0, numRowOffsets);
+        return arr;
     }
 
     public int[] getColumnIndices() {
-        return columnIndicesData;
+        if (columnIndicesData != null) return columnIndicesData;
+        if (columnTargetsSegment == null || columnTargetsSegment.equals(MemorySegment.NULL)) return new int[0];
+        int numCols = (int) (columnTargetsSegment.byteSize() / ValueLayout.JAVA_INT.byteSize());
+        int[] arr = new int[numCols];
+        MemorySegment.copy(columnTargetsSegment, ValueLayout.JAVA_INT, 0, arr, 0, numCols);
+        return arr;
     }
 
     public MemorySegment getRowOffsetsSegment() {
@@ -83,23 +83,28 @@ public class RelationSnapshot implements AutoCloseable {
     }
 
     /**
-     * Gets the out-degree for a specific node ID.
+     * Gets the out-degree for a specific node ID zero-copy directly from off-heap memory.
      */
     public int getDegree(int nodeId) {
         if (nodeId < 0 || nodeId >= nodeCount) return 0;
-        return rowOffsetsData[nodeId + 1] - rowOffsetsData[nodeId];
+        if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)) return 0;
+        int start = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, nodeId);
+        int end = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, nodeId + 1);
+        return end - start;
     }
 
     /**
-     * Returns the array slice of target node IDs for a specific source node ID.
+     * Returns the array slice of target node IDs for a specific source node ID zero-copy from off-heap memory.
      */
     public int[] getTargets(int nodeId) {
         if (nodeId < 0 || nodeId >= nodeCount) return new int[0];
-        int start = rowOffsetsData[nodeId];
-        int end = rowOffsetsData[nodeId + 1];
+        if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)) return new int[0];
+        int start = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, nodeId);
+        int end = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, nodeId + 1);
         int len = end - start;
+        if (len <= 0) return new int[0];
         int[] targets = new int[len];
-        System.arraycopy(columnIndicesData, start, targets, 0, len);
+        MemorySegment.copy(columnTargetsSegment, ValueLayout.JAVA_INT, (long) start * 4, targets, 0, len);
         return targets;
     }
 
