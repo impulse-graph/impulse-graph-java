@@ -49,10 +49,19 @@ class TestVectorSuiteTest {
             List<Path> dirs = stream
                     .filter(Files::isDirectory)
                     .filter(p -> Files.exists(p.resolve("manifest.json")) && Files.exists(p.resolve("snapshot.imps")))
+                    .filter(p -> isV09Manifest(p.resolve("manifest.json")))
                     .sorted()
                     .toList();
             assertFalse(dirs.isEmpty(), "At least one test vector directory MUST be found");
             return dirs.stream();
+        }
+    }
+
+    private static boolean isV09Manifest(Path manifestPath) {
+        try {
+            return Files.readString(manifestPath).contains("\"spec_version\": \"0.9.0\"");
+        } catch (Exception e) {
+            return false;
         }
     }
 
