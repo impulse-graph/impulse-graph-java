@@ -104,10 +104,13 @@ public class Twitter2010BfsVmBenchmarkTest {
             // 2. Benchmark MethodHandle Compiled Execution
             MethodHandle mh = ImpulseMethodHandleCompiler.compile(prog, 5);
 
-            // Warmup
-            for (int i = 0; i < 5; i++) {
+            // Warmup (10,000 iterations to trigger HotSpot C2 Tier-4 JIT compilation)
+            long t0Warmup = System.nanoTime();
+            for (int i = 0; i < 10000; i++) {
                 Object dummy = (Object) mh.invokeExact(graph, (Object) 0, arena);
             }
+            double warmupTimeMs = (System.nanoTime() - t0Warmup) / 1_000_000.0;
+            System.out.printf("%n10,000 Iteration HotSpot C2 Warmup Time: %.3f ms%n", warmupTimeMs);
 
             long t0Mh = System.nanoTime();
             Object mhResult = (Object) mh.invokeExact(graph, (Object) 0, arena);
