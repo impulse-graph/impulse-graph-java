@@ -61,7 +61,7 @@ public class RelationSnapshot implements AutoCloseable {
         if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)) return new int[0];
         int numRowOffsets = (int) (rowOffsetsSegment.byteSize() / ValueLayout.JAVA_INT.byteSize());
         int[] arr = new int[numRowOffsets];
-        MemorySegment.copy(rowOffsetsSegment, ValueLayout.JAVA_INT, 0, arr, 0, numRowOffsets);
+        MemorySegment.copy(rowOffsetsSegment, ValueLayout.JAVA_INT_UNALIGNED, 0, arr, 0, numRowOffsets);
         return arr;
     }
 
@@ -70,7 +70,7 @@ public class RelationSnapshot implements AutoCloseable {
         if (columnTargetsSegment == null || columnTargetsSegment.equals(MemorySegment.NULL)) return new int[0];
         int numCols = (int) (columnTargetsSegment.byteSize() / ValueLayout.JAVA_INT.byteSize());
         int[] arr = new int[numCols];
-        MemorySegment.copy(columnTargetsSegment, ValueLayout.JAVA_INT, 0, arr, 0, numCols);
+        MemorySegment.copy(columnTargetsSegment, ValueLayout.JAVA_INT_UNALIGNED, 0, arr, 0, numCols);
         return arr;
     }
 
@@ -88,8 +88,8 @@ public class RelationSnapshot implements AutoCloseable {
     public int getDegree(int nodeId) {
         if (nodeId < 0 || nodeId >= nodeCount) return 0;
         if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)) return 0;
-        int start = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, nodeId);
-        int end = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, nodeId + 1);
+        int start = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeId);
+        int end = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeId + 1);
         return end - start;
     }
 
@@ -99,13 +99,53 @@ public class RelationSnapshot implements AutoCloseable {
     public int[] getTargets(int nodeId) {
         if (nodeId < 0 || nodeId >= nodeCount) return new int[0];
         if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)) return new int[0];
-        int start = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, nodeId);
-        int end = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, nodeId + 1);
+        int start = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeId);
+        int end = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeId + 1);
         int len = end - start;
         if (len <= 0) return new int[0];
         int[] targets = new int[len];
-        MemorySegment.copy(columnTargetsSegment, ValueLayout.JAVA_INT, (long) start * 4, targets, 0, len);
+        MemorySegment.copy(columnTargetsSegment, ValueLayout.JAVA_INT_UNALIGNED, (long) start * 4, targets, 0, len);
         return targets;
+    }
+
+    private static final jdk.incubator.vector.VectorSpecies<Integer> INT_SPECIES = jdk.incubator.vector.IntVector.SPECIES_PREFERRED;
+
+    /**
+     * SIMD vectorized target node traversal into a destination BitSet.
+     * Uses Java 25 Vector API (AVX-512 / AVX2 / ARM Neon) to load vector tiles of target IDs directly off-heap.
+     */
+    public void copyTargetsSimd(int nodeId, java.util.BitSet outBs) {
+        if (nodeId < 0 || nodeId >= nodeCount || outBs == null) return;
+        if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)) return;
+
+        int start = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, nodeId);
+        int end = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, nodeId + 1);
+        int count = end - start;
+        if (count <= 0) return;
+
+        long baseByteOffset = (long) start * 4;
+        long segAddr = columnTargetsSegment.address() + baseByteOffset;
+        int vectorBytes = INT_SPECIES.vectorByteSize();
+
+        if ((segAddr % vectorBytes) == 0 && count >= INT_SPECIES.length()) {
+            int i = 0;
+            int loopBound = INT_SPECIES.loopBound(count);
+            for (; i < loopBound; i += INT_SPECIES.length()) {
+                jdk.incubator.vector.IntVector vec = jdk.incubator.vector.IntVector.fromMemorySegment(
+                        INT_SPECIES, columnTargetsSegment, baseByteOffset + i * 4L, java.nio.ByteOrder.LITTLE_ENDIAN
+                );
+                for (int lane = 0; lane < INT_SPECIES.length(); lane++) {
+                    outBs.set(vec.lane(lane));
+                }
+            }
+            for (; i < count; i++) {
+                outBs.set(columnTargetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + i));
+            }
+        } else {
+            for (int i = 0; i < count; i++) {
+                outBs.set(columnTargetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + i));
+            }
+        }
     }
 
     public long getMemoryFootprintBytes() {

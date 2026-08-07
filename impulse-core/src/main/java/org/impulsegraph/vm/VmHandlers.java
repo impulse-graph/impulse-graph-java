@@ -131,18 +131,12 @@ public final class VmHandlers {
 
         if (rel != null) {
             if (srcType == TYPE_NODE_ID) {
-                int[] targets = rel.getTargets((int) srcVal);
-                if (targets != null) {
-                    for (int t : targets) outBs.set(t);
-                }
+                rel.copyTargetsSimd((int) srcVal, outBs);
             } else if (srcType == TYPE_BITSET_HANDLE) {
                 BitSet inBs = ctx.getBitset((int) srcVal);
                 if (inBs != null) {
                     for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
-                        int[] targets = rel.getTargets(u);
-                        if (targets != null) {
-                            for (int t : targets) outBs.set(t);
-                        }
+                        rel.copyTargetsSimd(u, outBs);
                     }
                 }
             }
