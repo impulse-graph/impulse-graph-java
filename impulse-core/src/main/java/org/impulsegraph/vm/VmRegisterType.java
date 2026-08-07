@@ -68,12 +68,34 @@ public final class VmRegisterType {
     public static final byte OP_VECTOR_REDUCE_SUM      = (byte) 0x35;
     public static final byte OP_VECTOR_DIV             = (byte) 0x36;
     public static final byte OP_VECTOR_STR_CONCAT      = (byte) 0x37;
+    public static final byte OP_FLOAT_VECTOR_SCALE     = (byte) 0x38;
+    public static final byte OP_L1_NORM_DIFF           = (byte) 0x39;
+
     public static final byte OP_CC_AFFOREST            = (byte) 0x40;
     public static final byte OP_MXV                    = (byte) 0x41;
     public static final byte OP_VXM                    = (byte) 0x42;
     public static final byte OP_EWISE_ADD              = (byte) 0x43;
     public static final byte OP_EWISE_MULT             = (byte) 0x44;
     public static final byte OP_REDUCE                 = (byte) 0x45;
+    public static final byte OP_CC_HOOK_COMPRESS       = (byte) 0x46;
+    public static final byte OP_TC_SWEEP_BATCH         = (byte) 0x47;
+    public static final byte OP_BRANDES_FORWARD        = (byte) 0x48;
+    public static final byte OP_BRANDES_BACKWARD       = (byte) 0x49;
+    public static final byte OP_DELTA_STEP_RELAX       = (byte) 0x4A;
+    public static final byte OP_READ_EDGE_WEIGHT       = (byte) 0x4B;
+
+    // Extended Domain Opcodes (0x60 - 0x6A)
+    public static final byte OP_SAMPLE_NEIGHBORS       = (byte) 0x60;
+    public static final byte OP_RANDOM_WALK            = (byte) 0x61;
+    public static final byte OP_SCATTER_GATHER         = (byte) 0x62;
+    public static final byte OP_REBAC_CHECK            = (byte) 0x63;
+    public static final byte OP_ROARING_BITMAP_AND     = (byte) 0x64;
+    public static final byte OP_ISLAND_DETECT          = (byte) 0x65;
+    public static final byte OP_SPARSE_MATVEC          = (byte) 0x66;
+    public static final byte OP_LOUVAIN_MODULARITY     = (byte) 0x67;
+    public static final byte OP_KCORE_DECOMPOSITION    = (byte) 0x68;
+    public static final byte OP_MOTIF_MATCH_3          = (byte) 0x69;
+    public static final byte OP_GRAPH_ISOMORPHISM      = (byte) 0x6A;
 
     public static final byte OP_JMP                    = (byte) 0x50;
     public static final byte OP_JZ                     = (byte) 0x51;

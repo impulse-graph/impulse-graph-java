@@ -244,4 +244,75 @@ public final class VmHandlers {
         }
         return new BitSet();
     }
+
+    public static void handleFloatVectorScale(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int reg = instr.dstReg();
+        float alpha = Float.intBitsToFloat(instr.payload());
+        int handle = (int) getRegisterValue(state, reg);
+        float[] vec = ctx.getFloatVector(handle);
+        if (vec != null) {
+            for (int i = 0; i < vec.length; i++) {
+                vec[i] *= alpha;
+            }
+        }
+    }
+
+    public static void handleL1NormDiff(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int reg1 = instr.payload() & 0xFFFF;
+        int reg2 = (instr.payload() >> 16) & 0xFFFF;
+        float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, reg1));
+        float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, reg2));
+        double diffSum = 0.0;
+        if (v1 != null && v2 != null && v1.length == v2.length) {
+            for (int i = 0; i < v1.length; i++) {
+                diffSum += Math.abs(v1[i] - v2[i]);
+            }
+        }
+        setRegister(state, instr.dstReg(), Double.doubleToRawLongBits(diffSum), TYPE_FLOAT);
+        setFlag(state, FLAG_ZF, diffSum < 1e-4);
+    }
+
+    public static void handleTcSweepBatch(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int relId = instr.payload() & 0xFFFF;
+        int srcReg = (instr.payload() >> 16) & 0xFFFF;
+        GraphSnapshot graph = ctx.snapshot();
+        RelationSnapshot rel = (graph != null) ? graph.getRelationSnapshot("rel_" + relId) : null;
+        if (rel == null && graph != null && !graph.getAllRelationSnapshots().isEmpty()) {
+            rel = graph.getAllRelationSnapshots().values().iterator().next();
+        }
+        long triangleCount = 0;
+        if (rel != null) {
+            BitSet inBs = ctx.getBitset((int) getRegisterValue(state, srcReg));
+            if (inBs != null) {
+                for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
+                    int[] targetsU = rel.getTargets(u);
+                    for (int v : targetsU) {
+                        if (v > u) {
+                            int[] targetsV = rel.getTargets(v);
+                            triangleCount += countIntersection(targetsU, targetsV);
+                        }
+                    }
+                }
+            }
+        }
+        setRegister(state, instr.dstReg(), triangleCount, TYPE_INT64);
+        setFlag(state, FLAG_ZF, triangleCount == 0);
+    }
+
+    private static long countIntersection(int[] a, int[] b) {
+        if (a == null || b == null || a.length == 0 || b.length == 0) return 0;
+        long count = 0;
+        int i = 0, j = 0;
+        while (i < a.length && j < b.length) {
+            if (a[i] == b[j]) { count++; i++; j++; }
+            else if (a[i] < b[j]) { i++; }
+            else { j++; }
+        }
+        return count;
+    }
+
+    public static void handleReadEdgeWeight(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        setRegister(state, instr.dstReg(), Float.floatToRawIntBits(1.0f), TYPE_FLOAT);
+        setFlag(state, FLAG_ZF, false);
+    }
 }

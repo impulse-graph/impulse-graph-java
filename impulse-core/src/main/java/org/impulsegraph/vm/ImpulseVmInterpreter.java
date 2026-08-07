@@ -78,6 +78,26 @@ public final class ImpulseVmInterpreter {
                         pc++;
                     }
 
+                    case OP_FLOAT_VECTOR_SCALE -> {
+                        VmHandlers.handleFloatVectorScale(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_L1_NORM_DIFF -> {
+                        VmHandlers.handleL1NormDiff(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_TC_SWEEP_BATCH -> {
+                        VmHandlers.handleTcSweepBatch(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_READ_EDGE_WEIGHT -> {
+                        VmHandlers.handleReadEdgeWeight(state, ctx, instr);
+                        pc++;
+                    }
+
                     case OP_JMP -> {
                         pc = instr.payload() & 0xFFFFFFFFL;
                     }
