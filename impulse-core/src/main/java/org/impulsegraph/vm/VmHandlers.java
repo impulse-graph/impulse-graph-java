@@ -15,6 +15,8 @@ import static org.impulsegraph.vm.VmStateLayout.*;
  */
 public final class VmHandlers {
 
+    public static final int PARALLEL_FRONTIER_THRESHOLD = 524_288; // 512k Frontier Threshold
+
     private VmHandlers() {}
 
     /**
@@ -135,8 +137,16 @@ public final class VmHandlers {
             } else if (srcType == TYPE_BITSET_HANDLE) {
                 BitSet inBs = ctx.getBitset((int) srcVal);
                 if (inBs != null) {
-                    for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
-                        rel.copyTargetsSimd(u, outBs);
+                    int cardinality = inBs.cardinality();
+                    final RelationSnapshot relSnap = rel;
+                    if (cardinality >= PARALLEL_FRONTIER_THRESHOLD) {
+                        // Multi-Threaded Parallel Execution (>= 512k active nodes)
+                        inBs.stream().parallel().forEach(u -> relSnap.copyTargetsSimd(u, outBs));
+                    } else {
+                        // Single-Threaded Vector SIMD Execution (< 512k active nodes)
+                        for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
+                            relSnap.copyTargetsSimd(u, outBs);
+                        }
                     }
                 }
             }
