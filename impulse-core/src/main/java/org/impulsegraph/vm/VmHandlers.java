@@ -112,6 +112,16 @@ public final class VmHandlers {
         GraphSnapshot graph = ctx.snapshot();
         if (graph == null) return null;
         RelationSnapshot rel = graph.getRelationSnapshot("rel_" + relId);
+        if (rel == null && !graph.getAllRelationSnapshots().isEmpty()) {
+            int idx = 0;
+            for (RelationSnapshot snap : graph.getAllRelationSnapshots().values()) {
+                if (idx == relId) {
+                    rel = snap;
+                    break;
+                }
+                idx++;
+            }
+        }
         if (rel != null && !rel.hasCsc()) {
             rel.setCscSegments(rel.getRowOffsetsSegment(), rel.getColumnTargetsSegment());
         }
