@@ -57,6 +57,24 @@ public class RelationSnapshot implements AutoCloseable {
         }
     }
 
+    private boolean cscPresent = false;
+    private MemorySegment cscRowOffsetsSegment = MemorySegment.NULL;
+    private MemorySegment cscColumnTargetsSegment = MemorySegment.NULL;
+
+    public void setCscSegments(MemorySegment rowOffsets, MemorySegment columnTargets) {
+        this.cscRowOffsetsSegment = rowOffsets;
+        this.cscColumnTargetsSegment = columnTargets;
+        this.cscPresent = true;
+    }
+
+    public boolean hasCsc() {
+        return cscPresent || (cscRowOffsetsSegment != null && !cscRowOffsetsSegment.equals(MemorySegment.NULL));
+    }
+
+    public boolean hasCsr() {
+        return rowOffsetsSegment != null && !rowOffsetsSegment.equals(MemorySegment.NULL);
+    }
+
     public java.util.List<MemorySegment> getAttributeSegments() {
         return attributeSegments;
     }

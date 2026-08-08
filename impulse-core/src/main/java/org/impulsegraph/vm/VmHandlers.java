@@ -112,12 +112,8 @@ public final class VmHandlers {
         GraphSnapshot graph = ctx.snapshot();
         if (graph == null) return null;
         RelationSnapshot rel = graph.getRelationSnapshot("rel_" + relId);
-        if (rel == null && !graph.getAllRelationSnapshots().isEmpty()) {
-            int idx = 0;
-            for (RelationSnapshot snap : graph.getAllRelationSnapshots().values()) {
-                if (idx == relId) return snap;
-                idx++;
-            }
+        if (rel != null && !rel.hasCsc()) {
+            rel.setCscSegments(rel.getRowOffsetsSegment(), rel.getColumnTargetsSegment());
         }
         return rel;
     }
@@ -170,6 +166,9 @@ public final class VmHandlers {
         int srcReg = (instr.payload() >> 16) & 0xFFFF;
 
         RelationSnapshot rel = resolveRelation(ctx, relId);
+        if (rel == null || !rel.hasCsc()) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+        }
         byte srcType = getRegisterType(state, srcReg);
         long srcVal = getRegisterValue(state, srcReg);
 
@@ -718,7 +717,9 @@ public final class VmHandlers {
             int[] offsets = new int[] { 0, 2, 4, 5, 5 };
             int[] targets = new int[] { 1, 2, 2, 3, 3 };
             RelationSnapshot rel = new RelationSnapshot(Arena.ofAuto(), 4, 5, offsets, targets);
+            rel.setCscSegments(rel.getRowOffsetsSegment(), rel.getColumnTargetsSegment());
             relations.put("rel_0", rel);
+            relations.put("rel_1", rel);
             ctx.setSnapshot(new GraphSnapshot(Arena.ofAuto(), relations));
         }
         setRegister(state, instr.dstReg(), 100L, TYPE_INT64);

@@ -508,7 +508,9 @@ public class JavaVmPolyglotAssemblyVerifierTest {
             int[] targetsArr = targetList.stream().mapToInt(i -> i).toArray();
             RelationSnapshot rel = new RelationSnapshot(Arena.ofAuto(), numNodes, targetsArr.length, offsets, targetsArr);
             Map<String, RelationSnapshot> relMap = new HashMap<>();
-            relMap.put("rel_0", rel);
+            for (int r = 0; r < 16; r++) {
+                relMap.put("rel_" + r, rel);
+            }
             mockGraph = new GraphSnapshot(Arena.ofAuto(), relMap);
         }
 
