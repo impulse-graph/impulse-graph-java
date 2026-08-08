@@ -213,6 +213,35 @@ public final class VmHandlers {
         setFlag(state, FLAG_ZF, outBs.isEmpty());
     }
 
+    public static void handleHasCsr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int relId = instr.payload() & 0xFFFF;
+        RelationSnapshot rel = resolveRelation(ctx, relId);
+        boolean present = (rel != null && rel.hasCsr());
+        setRegister(state, instr.dstReg(), present ? 1L : 0L, TYPE_INT64);
+        setFlag(state, FLAG_ZF, !present);
+    }
+
+    public static void handleHasCsc(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int relId = instr.payload() & 0xFFFF;
+        RelationSnapshot rel = resolveRelation(ctx, relId);
+        boolean present = (rel != null && rel.hasCsc());
+        setRegister(state, instr.dstReg(), present ? 1L : 0L, TYPE_INT64);
+        setFlag(state, FLAG_ZF, !present);
+    }
+
+    public static void handleHasCoo(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int relId = instr.payload() & 0xFFFF;
+        RelationSnapshot rel = resolveRelation(ctx, relId);
+        boolean present = (rel != null);
+        setRegister(state, instr.dstReg(), present ? 1L : 0L, TYPE_INT64);
+        setFlag(state, FLAG_ZF, !present);
+    }
+
+    public static void handleHasKeyCatalog(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        setRegister(state, instr.dstReg(), 0L, TYPE_INT64);
+        setFlag(state, FLAG_ZF, true);
+    }
+
     public static void handleCsrDegree(MemorySegment state, VmQueryContext ctx, Instruction instr) {
         int relId = instr.payload() & 0xFFFF;
         int srcReg = (instr.payload() >> 16) & 0xFFFF;
@@ -712,16 +741,15 @@ public final class VmHandlers {
     }
 
     public static void handleInitMockGraph(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        if (ctx.snapshot() == null) {
-            Map<String, RelationSnapshot> relations = new HashMap<>();
-            int[] offsets = new int[] { 0, 2, 4, 5, 5 };
-            int[] targets = new int[] { 1, 2, 2, 3, 3 };
-            RelationSnapshot rel = new RelationSnapshot(Arena.ofAuto(), 4, 5, offsets, targets);
-            rel.setCscSegments(rel.getRowOffsetsSegment(), rel.getColumnTargetsSegment());
-            relations.put("rel_0", rel);
-            relations.put("rel_1", rel);
-            ctx.setSnapshot(new GraphSnapshot(Arena.ofAuto(), relations));
+        Map<String, RelationSnapshot> relations = new HashMap<>();
+        int[] offsets = new int[] { 0, 2, 4, 5, 5 };
+        int[] targets = new int[] { 1, 2, 2, 3, 3 };
+        RelationSnapshot rel = new RelationSnapshot(Arena.ofAuto(), 4, 5, offsets, targets);
+        rel.setCscSegments(rel.getRowOffsetsSegment(), rel.getColumnTargetsSegment());
+        for (int r = 0; r < 16; r++) {
+            relations.put("rel_" + r, rel);
         }
+        ctx.setSnapshot(new GraphSnapshot(Arena.ofAuto(), relations));
         setRegister(state, instr.dstReg(), 100L, TYPE_INT64);
     }
 

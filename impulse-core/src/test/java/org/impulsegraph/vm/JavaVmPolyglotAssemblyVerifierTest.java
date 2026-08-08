@@ -49,6 +49,10 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         OPCODE_MAP.put("OP_CSR_WALK_REDUCE_SUM", (byte) 0x16);
         OPCODE_MAP.put("OP_CSR_WALK_REDUCE", (byte) 0x17);
         OPCODE_MAP.put("OP_CSC_WALK", (byte) 0x18);
+        OPCODE_MAP.put("OP_HAS_CSR", (byte) 0x19);
+        OPCODE_MAP.put("OP_HAS_CSC", (byte) 0x1A);
+        OPCODE_MAP.put("OP_HAS_COO", (byte) 0x1B);
+        OPCODE_MAP.put("OP_HAS_KEY_CATALOG", (byte) 0x1C);
 
         OPCODE_MAP.put("OP_SET_UNION", (byte) 0x30);
         OPCODE_MAP.put("OP_SET_INTERSECT", (byte) 0x31);
@@ -257,6 +261,10 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x16 -> { VmHandlers.handleVectorReduceSum(state, ctx, instr); pc++; }
                             case 0x17 -> { VmHandlers.handleVectorReduceSum(state, ctx, instr); pc++; } // OP_CSR_WALK_REDUCE
                             case 0x18 -> { VmHandlers.handleCscWalk(state, ctx, instr); pc++; }
+                            case 0x19 -> { VmHandlers.handleHasCsr(state, ctx, instr); pc++; }
+                            case 0x1A -> { VmHandlers.handleHasCsc(state, ctx, instr); pc++; }
+                            case 0x1B -> { VmHandlers.handleHasCoo(state, ctx, instr); pc++; }
+                            case 0x1C -> { VmHandlers.handleHasKeyCatalog(state, ctx, instr); pc++; }
                             case 0x30 -> { VmHandlers.handleSetUnion(state, ctx, instr); pc++; }
                             case 0x31 -> { VmHandlers.handleSetIntersect(state, ctx, instr); pc++; }
                             case 0x32 -> { VmHandlers.handleSetDifference(state, ctx, instr); pc++; }

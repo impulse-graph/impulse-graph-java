@@ -72,7 +72,7 @@ public class RelationSnapshot implements AutoCloseable {
     }
 
     public boolean hasCsr() {
-        return rowOffsetsSegment != null && !rowOffsetsSegment.equals(MemorySegment.NULL);
+        return (rowOffsetsData != null && rowOffsetsData.length > 0) || (rowOffsetsSegment != null && !rowOffsetsSegment.equals(MemorySegment.NULL));
     }
 
     public java.util.List<MemorySegment> getAttributeSegments() {
