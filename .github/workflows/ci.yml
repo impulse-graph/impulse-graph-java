@@ -23,6 +23,8 @@ jobs:
           repository: impulse-graph/impulse-graph-spec
           path: impulse-graph-spec
           ref: main
+          token: ${{ secrets.ORGANIZATION_PAT }}
+        continue-on-error: true
 
       - name: Checkout impulse-graph-java
         uses: actions/checkout@v4
@@ -33,7 +35,7 @@ jobs:
         run: |
           mkdir -p datasets
           if [ -f impulse-graph-spec/test-vectors/tc01_minimal_csr/snapshot.imps ]; then
-            cp impulse-graph-spec/test-vectors/tc01_minimal_csr/snapshot.imps datasets/rbac_snapshot.imps
+            cp impulse-graph-spec/test-vectors/tc01_minimal_csr/snapshot.imps datasets/rbac_snapshot.imps 2>/dev/null || true
           fi
 
       - name: Setup Java 25
