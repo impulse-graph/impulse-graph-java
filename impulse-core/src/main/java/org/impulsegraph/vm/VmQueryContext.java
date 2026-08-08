@@ -12,8 +12,10 @@ import java.util.*;
  */
 public final class VmQueryContext implements AutoCloseable {
 
-    private final GraphSnapshot snapshot;
+    private GraphSnapshot snapshot;
     private final Arena arena;
+    private MemorySegment inlineDataSeg = null;
+    private long inlineDataBytes = 0;
 
     // Bitset Pool
     private final List<BitSet> bitsets = new ArrayList<>();
@@ -28,13 +30,80 @@ public final class VmQueryContext implements AutoCloseable {
     // Value Map Pool
     private final List<Map<Integer, Object>> valueMaps = new ArrayList<>();
 
+    // Scratch Memory Accounting
+    private long maxScratchCapacityBytes = 512 * 1024 * 1024L; // 512 MB default
+    private long allocatedScratchBytes = 0;
+
+    // Multi-Threading (MT) & Degree of Parallelism (DoP) Control
+    private int maxThreads = resolveDefaultMaxThreads();
+
+    private static int resolveDefaultMaxThreads() {
+        String envDop = System.getenv("IMPULSE_MAX_DOP");
+        if (envDop == null) envDop = System.getenv("IMPULSE_MAX_THREADS");
+        if (envDop != null) {
+            try { return Math.max(1, Integer.parseInt(envDop.trim())); } catch (NumberFormatException ignored) {}
+        }
+        return Runtime.getRuntime().availableProcessors();
+    }
+
+    public int getMaxThreads() {
+        return maxThreads;
+    }
+
+    public int getMaxDop() {
+        return maxThreads;
+    }
+
+    public void setMaxThreads(int maxThreads) {
+        this.maxThreads = Math.max(1, maxThreads);
+    }
+
+    public void setMaxDop(int maxDop) {
+        setMaxThreads(maxDop);
+    }
+
+    public long allocateScratch(long bytes) {
+        long aligned = (bytes + 63) & ~63L;
+        allocatedScratchBytes += aligned;
+        return allocatedScratchBytes;
+    }
+
+    public long getAllocatedScratchBytes() {
+        return allocatedScratchBytes;
+    }
+
+    public long getMaxScratchCapacityBytes() {
+        return maxScratchCapacityBytes;
+    }
+
+    public void setMaxScratchCapacityBytes(long bytes) {
+        this.maxScratchCapacityBytes = bytes;
+    }
+
     public VmQueryContext(GraphSnapshot snapshot, Arena arena) {
         this.snapshot = snapshot;
         this.arena = (arena != null) ? arena : Arena.ofShared();
     }
 
+    public MemorySegment inlineDataSegment() {
+        return inlineDataSeg;
+    }
+
+    public long inlineDataBytes() {
+        return inlineDataBytes;
+    }
+
+    public void setInlineData(MemorySegment segment, long bytes) {
+        this.inlineDataSeg = segment;
+        this.inlineDataBytes = bytes;
+    }
+
     public GraphSnapshot snapshot() {
         return snapshot;
+    }
+
+    public void setSnapshot(GraphSnapshot snapshot) {
+        this.snapshot = snapshot;
     }
 
     public Arena arena() {

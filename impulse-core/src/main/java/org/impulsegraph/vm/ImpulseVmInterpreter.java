@@ -53,8 +53,28 @@ public final class ImpulseVmInterpreter {
                         pc++;
                     }
 
+                    case OP_LOAD_CONST_STR_PREFIX -> {
+                        VmHandlers.handleLoadConstStrPrefix(state, instr);
+                        pc++;
+                    }
+
                     case OP_CSR_WALK -> {
                         VmHandlers.handleCsrWalk(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_CSC_WALK -> {
+                        VmHandlers.handleCscWalk(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_CSR_DEGREE -> {
+                        VmHandlers.handleCsrDegree(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_CSR_WALK_PREDICATE -> {
+                        VmHandlers.handleCsrWalkPredicate(state, ctx, instr);
                         pc++;
                     }
 
@@ -88,6 +108,21 @@ public final class ImpulseVmInterpreter {
                         pc++;
                     }
 
+                    case OP_VECTOR_DIV -> {
+                        VmHandlers.handleVectorDiv(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_VECTOR_STR_CONCAT -> {
+                        VmHandlers.handleVectorStrConcat(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_ROARING_BITMAP_AND -> {
+                        VmHandlers.handleRoaringBitmapAnd(state, ctx, instr);
+                        pc++;
+                    }
+
                     case OP_TC_SWEEP_BATCH -> {
                         VmHandlers.handleTcSweepBatch(state, ctx, instr);
                         pc++;
@@ -99,30 +134,34 @@ public final class ImpulseVmInterpreter {
                     }
 
                     case OP_JMP -> {
-                        pc = instr.payload() & 0xFFFFFFFFL;
+                        int offset = instr.payload();
+                        pc += offset;
                     }
 
                     case OP_JZ -> {
+                        int offset = instr.payload();
                         if (VmHandlers.checkFlag(state, FLAG_ZF)) {
-                            pc = instr.payload() & 0xFFFFFFFFL;
+                            pc += offset;
                         } else {
                             pc++;
                         }
                     }
 
                     case OP_JNZ -> {
+                        int offset = instr.payload();
                         if (!VmHandlers.checkFlag(state, FLAG_ZF)) {
-                            pc = instr.payload() & 0xFFFFFFFFL;
+                            pc += offset;
                         } else {
                             pc++;
                         }
                     }
 
                     case OP_LOOP_DECR -> {
+                        int offset = instr.payload();
                         long count = VmHandlers.getRegisterValue(state, instr.dstReg());
                         if (count > 0) {
                             VmHandlers.setRegister(state, instr.dstReg(), count - 1, TYPE_INT64);
-                            pc = instr.payload() & 0xFFFFFFFFL;
+                            pc += offset;
                         } else {
                             pc++;
                         }
@@ -171,6 +210,50 @@ public final class ImpulseVmInterpreter {
                     case OP_COLLECT_BITSET -> {
                         finalResult = VmHandlers.handleCollectBitset(state, ctx, instr);
                         pc++;
+                    }
+
+                    case OP_LOAD_INDIRECT -> {
+                        VmHandlers.handleLoadIndirect(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_ALLOC_SCRATCH -> {
+                        VmHandlers.handleAllocScratch(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_ASSERT_SCRATCH_BYTES -> {
+                        VmHandlers.handleAssertScratchBytes(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_SET_MAX_DOP -> {
+                        VmHandlers.handleSetMaxDop(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_LOAD_INLINE_ARRAY -> {
+                        VmHandlers.handleLoadInlineArray(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_INIT_MOCK_GRAPH -> {
+                        VmHandlers.handleInitMockGraph(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_THROW -> {
+                        VmHandlers.handleThrow(state, instr);
+                        pc = instructionCount; // Stop loop on throw
+                    }
+
+                    case OP_ASSERT -> {
+                        VmHandlers.handleAssert(state, instr);
+                        pc++;
+                    }
+
+                    case OP_TRAP -> {
+                        pc = instructionCount; // Stop loop on trap
                     }
 
                     case OP_HALT -> {

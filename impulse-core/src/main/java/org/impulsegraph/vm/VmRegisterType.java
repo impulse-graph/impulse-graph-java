@@ -49,6 +49,8 @@ public final class VmRegisterType {
     public static final byte OP_MAP_KEYS_TO_DENSE      = (byte) 0x04;
     public static final byte OP_LOAD_CONST_FLOAT       = (byte) 0x05;
     public static final byte OP_LOAD_CONST_STR_PREFIX  = (byte) 0x06;
+    public static final byte OP_LOAD_INLINE_ARRAY        = (byte) 0x07;
+    public static final byte OP_INIT_MOCK_GRAPH          = (byte) 0x08;
 
     public static final byte OP_CSR_WALK               = (byte) 0x10;
     public static final byte OP_CSR_WALK_FILTERED      = (byte) 0x11;
@@ -104,9 +106,16 @@ public final class VmRegisterType {
     public static final byte OP_STABLE_CHECK           = (byte) 0x54;
     public static final byte OP_CALL                   = (byte) 0x55;
     public static final byte OP_RET                    = (byte) 0x56;
+    public static final byte OP_THROW                  = (byte) 0x5A;
+    public static final byte OP_ASSERT                 = (byte) 0x5B;
+    public static final byte OP_TRAP                   = (byte) 0x5C;
 
     public static final byte OP_MOV                    = (byte) 0x70;
     public static final byte OP_CLEAR_REG              = (byte) 0x71;
+    public static final byte OP_LOAD_INDIRECT          = (byte) 0x72;
+    public static final byte OP_ALLOC_SCRATCH          = (byte) 0x73;
+    public static final byte OP_ASSERT_SCRATCH_BYTES   = (byte) 0x74;
+    public static final byte OP_SET_MAX_DOP            = (byte) 0x75;
 
     public static final byte OP_COLLECT_BITSET         = (byte) 0x90;
     public static final byte OP_COLLECT_ARRAY          = (byte) 0x91;
@@ -136,4 +145,7 @@ public final class VmRegisterType {
     public static final int VM_ERR_STACK_OVERFLOW      = 4;
     public static final int VM_ERR_STACK_UNDERFLOW     = 5;
     public static final int VM_ERR_INVALID_REGISTER    = 6;
+    public static final int VM_ERR_USER_THROW          = 7;
+    public static final int VM_ERR_ASSERTION_FAILED    = 8;
+    public static final int VM_ERR_TRAP                = 9;
 }

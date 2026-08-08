@@ -78,4 +78,28 @@ public class VmStateLayoutTest {
             assertFalse(ctx.getBitset(h0Reused).get(10), "Bitset MUST be cleared upon re-acquisition");
         }
     }
+
+    @Test
+    public void testStateSegmentInitializationBaseline() {
+        try (Arena arena = Arena.ofShared();
+             VmQueryContext ctx = new VmQueryContext(null, arena)) {
+
+            MemorySegment state = ctx.allocateStateSegment();
+            assertEquals(640, state.byteSize(), "Allocated state segment size MUST be exactly 640 bytes");
+
+            // Assert baseline initialization across all fields
+            assertEquals(0L, VmStateLayout.FLAGS_HANDLE.get(state, 0L), "Initial flags MUST be 0");
+            assertEquals(0, (int) VmStateLayout.PC_HANDLE.get(state, 0L), "Initial PC MUST be 0");
+            assertEquals(0, (int) VmStateLayout.CALL_STACK_DEPTH_HANDLE.get(state, 0L), "Initial call stack depth MUST be 0");
+
+            for (int r = 0; r < 64; r++) {
+                assertEquals(0L, (long) VmStateLayout.REGISTER_ELEMENT_HANDLE.get(state, 0L, (long) r), "Register R" + r + " value MUST be 0");
+                assertEquals(VmRegisterType.TYPE_NULL, (byte) VmStateLayout.REGISTER_TYPE_ELEMENT_HANDLE.get(state, 0L, (long) r), "Register R" + r + " type MUST be TYPE_NULL");
+            }
+
+            for (int s = 0; s < 8; s++) {
+                assertEquals(0, (int) VmStateLayout.CALL_STACK_ELEMENT_HANDLE.get(state, 0L, (long) s), "Call stack slot " + s + " MUST be 0");
+            }
+        }
+    }
 }

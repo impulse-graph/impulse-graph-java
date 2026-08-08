@@ -116,4 +116,38 @@ public class VmExecutionEngineTest {
             assertTrue(resBs.get(20));
         }
     }
+
+    @Test
+    public void testVmInitializationAndSingleOpHalt() throws Throwable {
+        try (Arena arena = Arena.ofConfined()) {
+            GraphSnapshot graph = new GraphSnapshot(arena, Map.of());
+            try (VmQueryContext ctx = new VmQueryContext(graph, arena)) {
+                MemorySegment state = ctx.allocateStateSegment();
+
+                // Verify initial VM state layout baseline (all 64 registers, types, flags, PC, call stack)
+                assertEquals(0L, FLAGS_HANDLE.get(state, 0L));
+                assertEquals(0, (int) PC_HANDLE.get(state, 0L));
+                assertEquals(0, (int) CALL_STACK_DEPTH_HANDLE.get(state, 0L));
+
+                for (int i = 0; i < 64; i++) {
+                    assertEquals(0L, VmHandlers.getRegisterValue(state, i), "Register R" + i + " must be initialized to 0");
+                    assertEquals(TYPE_NULL, VmHandlers.getRegisterType(state, i), "Register R" + i + " type must be TYPE_NULL");
+                }
+
+                for (int i = 0; i < 8; i++) {
+                    assertEquals(0, (int) CALL_STACK_ELEMENT_HANDLE.get(state, 0L, (long) i), "Call stack slot " + i + " must be 0");
+                }
+
+                // Execute single OP_HALT instruction
+                InstructionData[] code = {
+                        new InstructionData(OP_HALT, (byte) 0, (short) 0, 0)
+                };
+                MemorySegment prog = buildProgram(arena, code);
+
+                Object result = ImpulseVmInterpreter.execute(prog, code.length, graph, null, arena);
+                assertTrue(result instanceof BitSet, "Single OP_HALT program returns default empty BitSet");
+                assertTrue(((BitSet) result).isEmpty(), "Single OP_HALT program should return empty BitSet");
+            }
+        }
+    }
 }
