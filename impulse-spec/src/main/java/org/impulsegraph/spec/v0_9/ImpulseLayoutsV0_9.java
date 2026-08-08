@@ -11,6 +11,8 @@ public final class ImpulseLayoutsV0_9 {
     public static final short VERSION_MAJOR = 0;
     public static final short VERSION_MINOR = 9;
     public static final int MAGIC = 0x494D5053;
+    public static final int SPEC_MAGIC = 0x494D5053;
+    public static final short SPEC_VERSION_PACKED = 9;
     public static final int HEADER_BASELINE_OFFSET = 4096;
 
     // Section 1 Fixed 4KB Baseline Snapshot Header (Spec v0.9.0)
