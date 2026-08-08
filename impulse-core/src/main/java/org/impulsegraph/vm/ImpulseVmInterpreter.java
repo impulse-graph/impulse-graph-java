@@ -172,6 +172,34 @@ public final class ImpulseVmInterpreter {
                         pc++;
                     }
 
+                    case OP_CALL -> {
+                        int target = instr.payload();
+                        long returnPc = pc + 1;
+                        if (!VmHandlers.pushCallStack(state, (int) returnPc)) {
+                            throw new IllegalStateException("IMPULSE_VM_ERR_STACK_OVERFLOW");
+                        }
+                        long arg0 = VmHandlers.getRegisterValue(state, 12);
+                        long arg1 = VmHandlers.getRegisterValue(state, 13);
+                        long arg2 = VmHandlers.getRegisterValue(state, 14);
+                        long arg3 = VmHandlers.getRegisterValue(state, 15);
+
+                        VmHandlers.setRegister(state, 0, arg0, TYPE_INT64);
+                        VmHandlers.setRegister(state, 1, arg1, TYPE_INT64);
+                        VmHandlers.setRegister(state, 2, arg2, TYPE_INT64);
+                        VmHandlers.setRegister(state, 3, arg3, TYPE_INT64);
+
+                        if (target >= 0 && target < instructionCount) pc = target;
+                        else pc += target;
+                    }
+
+                    case OP_RET -> {
+                        int returnPc = VmHandlers.popCallStack(state);
+                        if (returnPc < 0) {
+                            throw new IllegalStateException("IMPULSE_VM_ERR_STACK_UNDERFLOW");
+                        }
+                        pc = returnPc;
+                    }
+
                     case OP_MOV -> {
                         VmHandlers.handleMov(state, instr);
                         pc++;

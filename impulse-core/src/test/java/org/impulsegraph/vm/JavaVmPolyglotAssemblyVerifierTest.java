@@ -292,6 +292,17 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                                     actualStatus = "IMPULSE_VM_ERR_STACK_OVERFLOW";
                                     break;
                                 }
+                                // Register Windowing: Pass Out registers (R12..R15) to Callee In registers (R0..R3)
+                                long arg0 = VmHandlers.getRegisterValue(state, 12);
+                                long arg1 = VmHandlers.getRegisterValue(state, 13);
+                                long arg2 = VmHandlers.getRegisterValue(state, 14);
+                                long arg3 = VmHandlers.getRegisterValue(state, 15);
+
+                                VmHandlers.setRegister(state, 0, arg0, VmRegisterType.TYPE_INT64);
+                                VmHandlers.setRegister(state, 1, arg1, VmRegisterType.TYPE_INT64);
+                                VmHandlers.setRegister(state, 2, arg2, VmRegisterType.TYPE_INT64);
+                                VmHandlers.setRegister(state, 3, arg3, VmRegisterType.TYPE_INT64);
+
                                 if (target >= 0 && target < instructionCount) pc = target;
                                 else pc += target;
                             }
@@ -322,7 +333,8 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             }
                         }
                     } catch (IllegalStateException ex) {
-                        actualStatus = "IMPULSE_VM_ERR_ASSERTION_FAILED";
+                        String msg = ex.getMessage();
+                        actualStatus = (msg != null && msg.startsWith("IMPULSE_VM_ERR_")) ? msg : "IMPULSE_VM_ERR_ASSERTION_FAILED";
                         break;
                     } catch (Exception ex) {
                         actualStatus = "IMPULSE_VM_ERR_OUT_OF_BOUNDS";
@@ -419,7 +431,13 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                 expectedZf = mFlag.group(1).equals("ZF");
             }
 
-            String[] parts = trimmed.split("\\s+");
+            String lineCode = trimmed;
+            int commentIdx = lineCode.indexOf(';');
+            if (commentIdx >= 0) {
+                lineCode = lineCode.substring(0, commentIdx).trim();
+            }
+
+            String[] parts = lineCode.split("\\s+");
             if (parts.length >= 2 && parts[1].startsWith("OP_")) {
                 String opName = parts[1].replaceAll(",", "").trim();
                 if (OPCODE_MAP.containsKey(opName)) {

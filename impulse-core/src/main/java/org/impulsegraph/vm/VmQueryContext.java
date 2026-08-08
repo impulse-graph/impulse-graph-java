@@ -30,9 +30,10 @@ public final class VmQueryContext implements AutoCloseable {
     // Value Map Pool
     private final List<Map<Integer, Object>> valueMaps = new ArrayList<>();
 
-    // Scratch Memory Accounting
-    private long maxScratchCapacityBytes = 512 * 1024 * 1024L; // 512 MB default
-    private long allocatedScratchBytes = 0;
+    // Scratch Memory Accounting (64 KB default baseline allocation)
+    public static final long DEFAULT_SCRATCH_BYTES = 64 * 1024L; // 64 KB default baseline
+    private long maxScratchCapacityBytes = 512 * 1024 * 1024L; // 512 MB default cap
+    private long allocatedScratchBytes = DEFAULT_SCRATCH_BYTES;
 
     // Multi-Threading (MT) & Degree of Parallelism (DoP) Control
     private int maxThreads = resolveDefaultMaxThreads();
