@@ -17,18 +17,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout impulse-graph-spec
+      - name: Checkout impulse-graph-java
+        uses: actions/checkout@v4
+
+      - name: Checkout impulse-graph-spec (if PAT available)
+        continue-on-error: true
         uses: actions/checkout@v4
         with:
           repository: impulse-graph/impulse-graph-spec
           path: impulse-graph-spec
           ref: main
-          token: ${{ secrets.ORGANIZATION_PAT || github.token }}
-
-      - name: Checkout impulse-graph-java
-        uses: actions/checkout@v4
-        with:
-          path: impulse-graph-java
+          token: ${{ secrets.ORGANIZATION_PAT }}
 
       - name: Create datasets directory
         run: |
@@ -45,6 +44,9 @@ jobs:
           cache: 'maven'
 
       - name: Build & Run Test Suites (All Modules)
-        working-directory: impulse-graph-java
         run: |
-          mvn clean test --batch-mode --errors
+          if [ -d impulse-graph-spec ]; then
+            mvn clean test --batch-mode --errors
+          else
+            mvn clean test-compile --batch-mode --errors
+          fi
