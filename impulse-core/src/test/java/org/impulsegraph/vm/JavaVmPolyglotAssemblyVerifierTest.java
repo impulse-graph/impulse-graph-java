@@ -133,9 +133,16 @@ public class JavaVmPolyglotAssemblyVerifierTest {
             testVectorDir = Paths.get("../../impulse-graph-spec/test-vectors/vm-impas");
         }
         if (!Files.exists(testVectorDir)) {
-            System.out.println("[WARN] Test vector directory not found: " + testVectorDir.toAbsolutePath() + ". Skipping verifier suite.");
-            return;
+            Path curr = Paths.get("").toAbsolutePath();
+            while (curr != null && !Files.exists(curr.resolve("impulse-graph-spec/test-vectors/vm-impas"))) {
+                curr = curr.getParent();
+            }
+            if (curr != null) {
+                testVectorDir = curr.resolve("impulse-graph-spec/test-vectors/vm-impas");
+            }
         }
+
+        assertTrue(Files.exists(testVectorDir), "Spec assembly test vector directory (.impas) MUST exist: " + testVectorDir);
 
         List<Path> impasFiles;
         try (Stream<Path> s = Files.walk(testVectorDir)) {

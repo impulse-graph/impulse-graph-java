@@ -36,17 +36,14 @@ class TestVectorSuiteTest {
             curr = curr.getParent();
         }
         if (curr == null) {
-            return null;
+            throw new IllegalStateException("Workspace root containing 'impulse-graph-spec' directory not found. Spec testing (.imps) is MANDATORY.");
         }
         return curr.resolve("impulse-graph-spec/test-vectors");
     }
 
     static Stream<Path> testVectorDirectoriesProvider() throws IOException {
         Path specDir = getSpecTestVectorsDir();
-        if (specDir == null || !Files.exists(specDir)) {
-            System.out.println("[WARN] Spec test-vectors directory not found. Skipping spec vector tests.");
-            return Stream.empty();
-        }
+        assertTrue(Files.exists(specDir), "Spec test-vectors directory MUST exist: " + specDir);
 
         try (Stream<Path> stream = Files.list(specDir)) {
             List<Path> dirs = stream
@@ -55,10 +52,7 @@ class TestVectorSuiteTest {
                     .filter(p -> isV09Manifest(p.resolve("manifest.json")))
                     .sorted()
                     .toList();
-            if (dirs.isEmpty()) {
-                System.out.println("[WARN] No valid v0.9 test vector directories found. Skipping.");
-                return Stream.empty();
-            }
+            assertFalse(dirs.isEmpty(), "At least one spec test vector directory (.imps) MUST be found");
             return dirs.stream();
         }
     }
