@@ -211,10 +211,16 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 
                 long pc = 0;
                 long instructionCount = asm.instructions().size();
-                String actualStatus = "IMPULSE_VM_OK";
+                
+                VmHandlers.Instruction[] progArr = new VmHandlers.Instruction[(int) instructionCount];
+                for (int i = 0; i < instructionCount; i++) {
+                    progArr[i] = VmHandlers.decodeInstruction(progSeg, i);
+                }
+                
+                String actualStatus = ImpulseVmValidator.validate(progArr);
                 long stepCount = 0;
 
-                while (pc >= 0 && pc < instructionCount && stepCount++ < 100000) {
+                while (actualStatus.equals("IMPULSE_VM_OK") && pc >= 0 && pc < instructionCount && stepCount++ < 100000) {
                     VmHandlers.Instruction instr = VmHandlers.decodeInstruction(progSeg, pc);
                     byte opcode = instr.opcode();
 

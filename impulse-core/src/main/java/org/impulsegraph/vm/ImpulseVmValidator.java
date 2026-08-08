@@ -21,23 +21,22 @@ public final class ImpulseVmValidator {
         for (VmHandlers.Instruction inst : program) {
             int opcode = Byte.toUnsignedInt(inst.opcode());
             int dst = inst.dstReg();
-            int src = inst.payload() & 0xFFFF;
+            int src = (inst.payload() >> 16) != 0 ? ((inst.payload() >> 16) & 0xFFFF) : (inst.payload() & 0xFFFF);
 
             if (dst >= 64) {
                 return "IMPULSE_VM_ERR_INVALID_REGISTER";
             }
 
             switch (opcode) {
-                case 0x00, 0xFF, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x5A, 0x5B, 0x5C, 0x73, 0x74, 0x75 -> {}
-
+                case 0x70 -> { // OP_MOV
+                    if (src >= 64) return "IMPULSE_VM_ERR_INVALID_REGISTER";
+                    abstractTypes[dst] = abstractTypes[src];
+                }
                 case 0x01 -> abstractTypes[dst] = TYPE_NODE_ID;
                 case 0x02, 0x04, 0x10, 0x11, 0x18, 0x30, 0x31, 0x32 -> abstractTypes[dst] = TYPE_BITSET_HANDLE;
                 case 0x03, 0x12, 0x33 -> abstractTypes[dst] = TYPE_INT64;
                 case 0x05, 0x16, 0x35 -> abstractTypes[dst] = TYPE_FLOAT;
                 case 0x07 -> abstractTypes[dst] = TYPE_FLOAT_VECTOR;
-                case 0x70 -> {
-                    if (src < 64) abstractTypes[dst] = abstractTypes[src];
-                }
                 case 0x71 -> abstractTypes[dst] = TYPE_NULL;
                 default -> {}
             }
