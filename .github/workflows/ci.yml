@@ -17,8 +17,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout impulse-graph-spec
         uses: actions/checkout@v4
+        with:
+          repository: impulse-graph/impulse-graph-spec
+          path: impulse-graph-spec
+          ref: main
+
+      - name: Checkout impulse-graph-java
+        uses: actions/checkout@v4
+        with:
+          path: impulse-graph-java
+
+      - name: Create datasets directory
+        run: |
+          mkdir -p datasets
+          if [ -f impulse-graph-spec/test-vectors/tc01_minimal_csr/snapshot.imps ]; then
+            cp impulse-graph-spec/test-vectors/tc01_minimal_csr/snapshot.imps datasets/rbac_snapshot.imps
+          fi
 
       - name: Setup Java 25
         uses: actions/setup-java@v4
@@ -28,5 +44,6 @@ jobs:
           cache: 'maven'
 
       - name: Build & Run Test Suites (All Modules)
+        working-directory: impulse-graph-java
         run: |
           mvn clean test --batch-mode --errors
