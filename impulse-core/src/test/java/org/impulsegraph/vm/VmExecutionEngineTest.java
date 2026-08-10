@@ -59,7 +59,7 @@ public class VmExecutionEngineTest {
             InstructionData[] code = {
                     new InstructionData(OP_INIT_INPUT_NODE, (byte) 0, (short) 0, 0),
                     new InstructionData(OP_CSR_WALK, (byte) 0, (short) 1, (0 << 16) | 0),
-                    new InstructionData(OP_CSR_WALK, (byte) 0, (short) 2, (1 << 16) | 0),
+                    new InstructionData(OP_CSR_WALK, (byte) 0, (short) 2, (0 << 16) | 1),
                     new InstructionData(OP_COLLECT_BITSET, (byte) 0, (short) 2, 0),
                     new InstructionData(OP_HALT, (byte) 0, (short) 0, 0)
             };

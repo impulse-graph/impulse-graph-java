@@ -129,8 +129,8 @@ public final class VmHandlers {
     }
 
     public static void handleCsrWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        int relId = instr.payload() & 0xFFFF;
-        int srcReg = (instr.payload() >> 16) & 0xFFFF;
+        int srcReg = instr.payload() & 0xFFFF;
+        int relId = (instr.payload() >> 16) & 0xFFFF;
 
         RelationSnapshot rel = resolveRelation(ctx, relId);
 
@@ -172,8 +172,8 @@ public final class VmHandlers {
     }
 
     public static void handleCscWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        int relId = instr.payload() & 0xFFFF;
-        int srcReg = (instr.payload() >> 16) & 0xFFFF;
+        int srcReg = instr.payload() & 0xFFFF;
+        int relId = (instr.payload() >> 24) & 0xFF;
 
         RelationSnapshot rel = resolveRelation(ctx, relId);
         if (rel == null || !rel.hasCsc()) {
@@ -253,8 +253,8 @@ public final class VmHandlers {
     }
 
     public static void handleCsrDegree(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        int relId = instr.payload() & 0xFFFF;
-        int srcReg = (instr.payload() >> 16) & 0xFFFF;
+        int srcReg = instr.payload() & 0xFFFF;
+        int relId = (instr.payload() >> 16) & 0xFFFF;
         long u = getRegisterValue(state, srcReg);
 
         RelationSnapshot rel = resolveRelation(ctx, relId);
@@ -656,7 +656,7 @@ public final class VmHandlers {
     }
 
     public static void handleNodeFilter(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        int srcReg = (instr.payload() >> 16) & 0xFFFF;
+        int srcReg = instr.payload() & 0xFFFF;
         int dstReg = instr.dstReg();
         byte type = getRegisterType(state, srcReg);
         if (type == TYPE_BITSET_HANDLE) {
@@ -675,7 +675,7 @@ public final class VmHandlers {
     }
 
     public static void handleVectorMulAttr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        int srcReg = (instr.payload() >> 16) & 0xFFFF;
+        int srcReg = instr.payload() & 0xFFFF;
         int dstReg = instr.dstReg();
         byte type = getRegisterType(state, srcReg);
 
@@ -721,8 +721,8 @@ public final class VmHandlers {
 
     public static void handleLoadIndirect(MemorySegment state, VmQueryContext ctx, Instruction instr) {
         int dst = instr.dstReg();
-        int srcParam = (instr.payload() >> 16) & 0xFFFF;
-        int idxReg = instr.payload() & 0xFFFF;
+        int srcParam = instr.payload() & 0xFFFF;
+        int idxReg = (instr.payload() >> 16) & 0xFFFF;
 
         if (instr.flags() == 0) {
             long targetRegIdx = getRegisterValue(state, srcParam);
@@ -745,17 +745,53 @@ public final class VmHandlers {
     }
 
     public static void handleLoadInlineArray(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        MemorySegment inlineSeg = ctx.inlineDataSegment();
+        if (inlineSeg == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+        }
+
         int dst = instr.dstReg();
-        int handle = ctx.acquireFloatVector(1024);
+        int payload = instr.payload();
+        int offset = payload & 0xFFFF;
+        int count = (payload >> 16) & 0xFFFF;
+
+        float[] vec = new float[count];
+        java.lang.foreign.ValueLayout.OfFloat layoutFloat = java.lang.foreign.ValueLayout.JAVA_FLOAT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < count; i++) {
+            vec[i] = inlineSeg.get(layoutFloat, offset + i * 4L);
+        }
+
+        int handle = ctx.registerFloatVector(vec);
         setRegister(state, dst, handle, TYPE_FLOAT_VECTOR);
     }
 
     public static void handleInitMockGraph(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        Map<String, RelationSnapshot> relations = new HashMap<>();
-        int[] offsets = new int[] { 0, 2, 4, 5, 5 };
-        int[] targets = new int[] { 1, 2, 2, 3, 3 };
-        RelationSnapshot rel = new RelationSnapshot(Arena.ofAuto(), 4, 5, offsets, targets);
+        MemorySegment inlineSeg = ctx.inlineDataSegment();
+        if (inlineSeg == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+        }
+
+        int payload = instr.payload();
+        int offset = payload & 0xFFFF;
+        int nodeCount = (payload >> 16) & 0xFFFF;
+
+        int[] offsets = new int[nodeCount + 1];
+        java.lang.foreign.ValueLayout.OfInt layoutInt = java.lang.foreign.ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i <= nodeCount; i++) {
+            offsets[i] = inlineSeg.get(layoutInt, offset + i * 4L);
+        }
+
+        int numTargets = offsets[nodeCount];
+        int[] targets = new int[numTargets];
+        long targetsOffset = offset + (nodeCount + 1) * 4L;
+        for (int i = 0; i < numTargets; i++) {
+            targets[i] = inlineSeg.get(layoutInt, targetsOffset + i * 4L);
+        }
+
+        RelationSnapshot rel = new RelationSnapshot(Arena.ofAuto(), nodeCount, numTargets, offsets, targets);
         rel.setCscSegments(rel.getRowOffsetsSegment(), rel.getColumnTargetsSegment());
+
+        Map<String, RelationSnapshot> relations = new HashMap<>();
         for (int r = 0; r < 16; r++) {
             relations.put("rel_" + r, rel);
         }

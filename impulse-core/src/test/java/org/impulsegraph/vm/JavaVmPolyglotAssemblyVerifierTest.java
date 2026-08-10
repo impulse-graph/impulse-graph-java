@@ -406,6 +406,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 
     private ParsedAssembly parseImpasFile(Path file) throws IOException {
         List<String> lines = Files.readAllLines(file);
+        String fullText = String.join("\n", lines);
         List<Long> instructions = new ArrayList<>();
         List<String> opcodesUsed = new ArrayList<>();
         Map<String, byte[]> mockData = new HashMap<>();
@@ -420,6 +421,75 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         Pattern expectFlagPat = Pattern.compile("\\{EXPECT:\\s*FLAG\\s*=\\s*(ZF|!ZF)\\}");
 
         ByteArrayOutputStream inlineBytes = new ByteArrayOutputStream();
+
+        // Parse all .csr_inline blocks
+        Pattern csrPat = Pattern.compile("\\.csr_inline\\s+(\\w+)\\s*=\\s*\\{([^}]+)\\}");
+        Matcher csrMat = csrPat.matcher(fullText);
+        while (csrMat.find()) {
+            String symName = csrMat.group(1);
+            String csrBody = csrMat.group(2);
+
+            int offsetStart = inlineBytes.size();
+            List<Integer> offsets = new ArrayList<>();
+            offsets.add(0);
+            List<Integer> targets = new ArrayList<>();
+            int nodeCount = 0;
+
+            for (String line : csrBody.split("\\r?\\n")) {
+                String trimmedLine = line.trim();
+                if (trimmedLine.isEmpty() || !trimmedLine.contains(":")) continue;
+                String[] parts = trimmedLine.split(":", 2);
+                String tgtStr = parts[1].trim().replace("[", "").replace("]", "").trim();
+                List<Integer> tgts = new ArrayList<>();
+                if (!tgtStr.isEmpty()) {
+                    for (String x : tgtStr.split(",")) {
+                        if (!x.trim().isEmpty()) {
+                            tgts.add(Integer.parseInt(x.trim()));
+                        }
+                    }
+                }
+                targets.addAll(tgts);
+                offsets.add(targets.size());
+                nodeCount++;
+            }
+
+            try {
+                for (int off : offsets) {
+                    inlineBytes.write(java.nio.ByteBuffer.allocate(4).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(off).array());
+                }
+                for (int tgt : targets) {
+                    inlineBytes.write(java.nio.ByteBuffer.allocate(4).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(tgt).array());
+                }
+            } catch (IOException ignored) {}
+
+            symbolMap.put(symName, offsetStart | (nodeCount << 16));
+        }
+
+        // Parse all .array_float blocks
+        Pattern arrPat = Pattern.compile("\\.array_float\\s+(\\w+)\\s*=\\s*\\[([^\\]]+)\\]");
+        Matcher arrMat = arrPat.matcher(fullText);
+        while (arrMat.find()) {
+            String symName = arrMat.group(1);
+            String arrBody = arrMat.group(2);
+            int offsetStart = inlineBytes.size();
+            List<Float> floats = new ArrayList<>();
+            for (String x : arrBody.split(",")) {
+                if (!x.trim().isEmpty()) {
+                    floats.add(Float.parseFloat(x.trim()));
+                }
+            }
+            try {
+                for (float flt : floats) {
+                    inlineBytes.write(java.nio.ByteBuffer.allocate(4).order(java.nio.ByteOrder.LITTLE_ENDIAN).putFloat(flt).array());
+                }
+            } catch (IOException ignored) {}
+
+            symbolMap.put(symName, offsetStart | (floats.size() << 16));
+        }
+
+        if (inlineBytes.size() > 0) {
+            mockData.put("__DEFAULT_INLINE__", inlineBytes.toByteArray());
+        }
 
         Map<Integer, List<Integer>> graphRows = new HashMap<>();
         Pattern rowPat = Pattern.compile("(\\d+):\\s*\\[([\\d,\\s]+)\\]");
@@ -471,54 +541,80 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                 lineCode = lineCode.substring(0, commentIdx).trim();
             }
 
-            String[] parts = lineCode.split("\\s+");
-            if (parts.length >= 2 && parts[1].startsWith("OP_")) {
-                String opName = parts[1].replaceAll(",", "").trim();
-                if (OPCODE_MAP.containsKey(opName)) {
+            if (lineCode.contains(":")) {
+                String[] parts = lineCode.split(":", 2);
+                String codePart = parts[1].trim();
+                String[] tokens = codePart.split("[\\s,]+");
+                if (tokens.length > 0 && tokens[0].startsWith("OP_")) {
+                    String opName = tokens[0].toUpperCase();
+                    if (OPCODE_MAP.containsKey(opName)) {
                         byte opcode = OPCODE_MAP.get(opName);
                         opcodesUsed.add(opName);
 
                         byte flags = 0;
                         int dstReg = 0;
-                        int srcReg = 0;
-                        int payloadVal = 0;
+                        int payload = 0;
 
-                        if (parts.length >= 3) {
-                            String p2 = parts[2].replaceAll(",", "").trim();
-                            if (p2.matches("R\\d+")) {
-                                try { dstReg = Integer.parseInt(p2.substring(1)); } catch (NumberFormatException ignored) {}
-                            } else {
-                                payloadVal = parsePayloadValue(p2, symbolMap);
+                         if (opName.equals("OP_JMP") || opName.equals("OP_JZ") || opName.equals("OP_JNZ") || 
+                            opName.equals("OP_CALL") || opName.equals("OP_TRAP") || opName.equals("OP_NOP") || 
+                            opName.equals("OP_HALT") || opName.equals("OP_RET") || opName.equals("OP_STABLE_CHECK")) {
+                            if (tokens.length > 1) {
+                                payload = parseVal(tokens[1], symbolMap);
                             }
-                        }
-
-                        if (parts.length >= 4) {
-                            String p3 = parts[3].replaceAll(",", "").trim();
-                            if (p3.matches("R\\d+")) {
-                                try { srcReg = Integer.parseInt(p3.substring(1)); } catch (NumberFormatException ignored) {}
-                                if (parts.length >= 5) {
-                                    String p4 = parts[4].replaceAll(",", "").trim();
-                                    if (p4.matches("R\\d+")) {
-                                        int idxReg = Integer.parseInt(p4.substring(1));
-                                        payloadVal = (idxReg << 16) | srcReg;
-                                        srcReg = 0; // Handled in payloadVal
-                                        if (parts.length >= 6) {
-                                            flags = (byte) parsePayloadValue(parts[5].replaceAll(",", "").trim(), symbolMap);
-                                        }
-                                    } else {
-                                        payloadVal = parsePayloadValue(p4, symbolMap);
-                                    }
+                        } else if (opName.equals("OP_INIT_MOCK_GRAPH") || opName.equals("OP_LOAD_INLINE_ARRAY")) {
+                            if (tokens.length > 1) {
+                                dstReg = parseVal(tokens[1], symbolMap);
+                            }
+                            if (tokens.length > 2) {
+                                payload = parseVal(tokens[2], symbolMap);
+                            }
+                        } else if (opName.equals("OP_CSC_WALK")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFFFF);
+                            if (tokens.length == 4) {
+                                payload |= (63 << 16);
+                                payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 24);
+                            } else if (tokens.length > 4) {
+                                payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 16);
+                                payload |= ((parseVal(tokens[4], symbolMap) & 0xFF) << 24);
+                            }
+                        } else if (opName.equals("OP_MXV") || opName.equals("OP_VXM")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFF);
+                            if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 8);
+                            if (tokens.length > 4) payload |= ((parseVal(tokens[4], symbolMap) & 0xFFFF) << 16);
+                        } else if (opName.equals("OP_LOAD_INDIRECT") || opName.equals("OP_ASSERT")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFFFF);
+                            if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFFFF) << 16);
+                            if (tokens.length > 4) flags = (byte) parseVal(tokens[4], symbolMap);
+                        } else if (opName.equals("OP_ALLOC_SCRATCH") || opName.equals("OP_ASSERT_SCRATCH_BYTES") || opName.equals("OP_SET_MAX_DOP")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload = parseVal(tokens[2], symbolMap);
+                        } else {
+                            if (tokens.length > 1) {
+                                if (tokens[1].startsWith("R")) {
+                                    dstReg = parseVal(tokens[1], symbolMap);
+                                } else {
+                                    payload = parseVal(tokens[1], symbolMap);
                                 }
-                            } else {
-                                payloadVal = parsePayloadValue(p3, symbolMap);
+                            }
+                            if (tokens.length > 2) {
+                                payload |= (parseVal(tokens[2], symbolMap) & 0xFFFF);
+                            }
+                            if (tokens.length > 3) {
+                                payload |= ((parseVal(tokens[3], symbolMap) & 0xFFFF) << 16);
+                            }
+                            if (tokens.length > 4) {
+                                flags = (byte) parseVal(tokens[4], symbolMap);
                             }
                         }
 
-                        int finalPayload = (srcReg != 0) ? ((srcReg << 16) | (payloadVal & 0xFFFF)) : payloadVal;
-                        long enc = (opcode & 0xFFL) | ((flags & 0xFFL) << 8) | ((dstReg & 0xFFFFL) << 16) | ((finalPayload & 0xFFFFFFFFL) << 32);
+                        long enc = (opcode & 0xFFL) | ((flags & 0xFFL) << 8) | ((dstReg & 0xFFFFL) << 16) | ((payload & 0xFFFFFFFFL) << 32);
                         instructions.add(enc);
                     }
                 }
+            }
         }
 
         GraphSnapshot mockGraph = null;
@@ -560,5 +656,14 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         } catch (NumberFormatException ex) {
             return 0;
         }
+    }
+
+    private int parseVal(String str, Map<String, Integer> symbolMap) {
+        if (str.startsWith("R")) {
+            try {
+                return Integer.parseInt(str.substring(1));
+            } catch (NumberFormatException ignored) {}
+        }
+        return parsePayloadValue(str, symbolMap);
     }
 }
