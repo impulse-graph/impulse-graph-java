@@ -284,6 +284,10 @@ public final class ImpulseVmInterpreter {
                         pc = instructionCount; // Stop loop on trap
                     }
 
+                    case OP_ENTER_FRAME, OP_LEAVE_FRAME -> {
+                        // NO-OP frame setup/teardown in JVM interpreter
+                    }
+
                     case OP_HALT -> {
                         pc = instructionCount; // Stop loop
                     }
@@ -292,7 +296,7 @@ public final class ImpulseVmInterpreter {
                          OP_RESERVED_1D, OP_RESERVED_1E, OP_RESERVED_1F, OP_RESERVED_20, OP_RESERVED_21, OP_RESERVED_22, OP_RESERVED_23, OP_RESERVED_24, OP_RESERVED_25, OP_RESERVED_26, OP_RESERVED_27, OP_RESERVED_28, OP_RESERVED_29, OP_RESERVED_2A, OP_RESERVED_2B, OP_RESERVED_2C, OP_RESERVED_2D, OP_RESERVED_2E, OP_RESERVED_2F,
                          OP_RESERVED_3A, OP_RESERVED_3B, OP_RESERVED_3C, OP_RESERVED_3D, OP_RESERVED_3E, OP_RESERVED_3F,
                          OP_RESERVED_4C, OP_RESERVED_4D, OP_RESERVED_4E, OP_RESERVED_4F,
-                         OP_RESERVED_57, OP_RESERVED_58, OP_RESERVED_59,
+                         OP_RESERVED_59,
                          OP_RESERVED_5D, OP_RESERVED_5E, OP_RESERVED_5F,
                          OP_RESERVED_6D, OP_RESERVED_6E, OP_RESERVED_6F,
                          OP_RESERVED_76, OP_RESERVED_77, OP_RESERVED_78, OP_RESERVED_79, OP_RESERVED_7A, OP_RESERVED_7B, OP_RESERVED_7C, OP_RESERVED_7D, OP_RESERVED_7E, OP_RESERVED_7F, OP_RESERVED_80, OP_RESERVED_81, OP_RESERVED_82, OP_RESERVED_83, OP_RESERVED_84, OP_RESERVED_85, OP_RESERVED_86, OP_RESERVED_87, OP_RESERVED_88, OP_RESERVED_89, OP_RESERVED_8A, OP_RESERVED_8B, OP_RESERVED_8C, OP_RESERVED_8D, OP_RESERVED_8E, OP_RESERVED_8F -> {

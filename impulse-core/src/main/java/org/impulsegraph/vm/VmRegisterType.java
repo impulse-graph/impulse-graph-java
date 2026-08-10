@@ -134,8 +134,8 @@ public final class VmRegisterType {
     public static final byte OP_CALL                   = (byte) 0x55;
     public static final byte OP_RET                    = (byte) 0x56;
 
-    public static final byte OP_RESERVED_57            = (byte) 0x57;
-    public static final byte OP_RESERVED_58            = (byte) 0x58;
+    public static final byte OP_ENTER_FRAME            = (byte) 0x57;
+    public static final byte OP_LEAVE_FRAME            = (byte) 0x58;
     public static final byte OP_RESERVED_59            = (byte) 0x59;
 
     public static final byte OP_THROW                  = (byte) 0x5A;
