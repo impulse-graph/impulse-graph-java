@@ -240,33 +240,37 @@ public final class VmHandlers {
         }
 
         int nodeCount = rel.getNodeCount();
-        int[] comp = new int[nodeCount];
+        java.util.concurrent.atomic.AtomicIntegerArray comp = new java.util.concurrent.atomic.AtomicIntegerArray(nodeCount);
 
         MemorySegment rowOff = rel.getRowOffsetsSegment();
         MemorySegment colIdx = rel.getColumnTargetsSegment();
 
-        // Zero-allocation Afforest Connected Components algorithm over off-heap memory
-        for (int u = 0; u < nodeCount; u++) comp[u] = u;
+        int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
+        int chunkSize = (nodeCount + numThreads - 1) / numThreads;
+
+        // Parallel Initialization
+        java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+            int startU = t * chunkSize;
+            int endU = Math.min(startU + chunkSize, nodeCount);
+            for (int u = startU; u < endU; u++) comp.set(u, u);
+        });
 
         // 1. 2-Neighbor sampling pass
         for (int r = 0; r < 2; r++) {
-            for (int u = 0; u < nodeCount; u++) {
-                int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
-                int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
-                int deg = end - start;
-                if (r < deg) {
-                    int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + r);
-                    if (v < nodeCount) {
-                        int rootU = findCcRoot(comp, u);
-                        int rootV = findCcRoot(comp, v);
-                        if (rootU != rootV) {
-                            int high = Math.min(rootU, rootV);
-                            int low = Math.max(rootU, rootV);
-                            comp[low] = high;
-                        }
+            final int neighborIdx = r;
+            java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+                int startU = t * chunkSize;
+                int endU = Math.min(startU + chunkSize, nodeCount);
+                for (int u = startU; u < endU; u++) {
+                    int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+                    int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+                    int deg = end - start;
+                    if (neighborIdx < deg) {
+                        int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + neighborIdx);
+                        if (v < nodeCount) unionCcNodesAtomic(comp, u, v);
                     }
                 }
-            }
+            });
         }
 
         // 2. Identify Giant Component Root
@@ -276,7 +280,7 @@ public final class VmHandlers {
         int maxCount = 0;
         for (int i = 0; i < counts.length; i++) {
             int u = (int) ((i * 9973L) % nodeCount);
-            counts[i] = findCcRoot(comp, u);
+            counts[i] = findCcRootAtomic(comp, u);
         }
         for (int i = 0; i < counts.length; i++) {
             int root = counts[i];
@@ -290,44 +294,114 @@ public final class VmHandlers {
             }
         }
 
-        // 3. Full CSR Edge Processing (skipping giant component)
+        // 3. Parallel Full CSR Edge Processing (skipping giant component)
         final int gRoot = giantRoot;
-        for (int u = 0; u < nodeCount; u++) {
-            if (findCcRoot(comp, u) != gRoot) {
-                int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
-                int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
-                for (int idx = start; idx < end; idx++) {
-                    int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
-                    if (v < nodeCount) {
-                        int rootU = findCcRoot(comp, u);
-                        int rootV = findCcRoot(comp, v);
-                        if (rootU != rootV) {
-                            int high = Math.min(rootU, rootV);
-                            int low = Math.max(rootU, rootV);
-                            comp[low] = high;
-                        }
+        java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+            int startU = t * chunkSize;
+            int endU = Math.min(startU + chunkSize, nodeCount);
+            for (int u = startU; u < endU; u++) {
+                if (findCcRootAtomic(comp, u) != gRoot) {
+                    int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+                    int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+                    for (int idx = start; idx < end; idx++) {
+                        int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                        if (v < nodeCount) unionCcNodesAtomic(comp, u, v);
                     }
                 }
             }
-        }
+        });
 
-        // 4. Final Path Compression
-        for (int u = 0; u < nodeCount; u++) {
-            comp[u] = findCcRoot(comp, u);
-        }
+        // 4. Parallel Path Compression
+        int[] resultComp = new int[nodeCount];
+        java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+            int startU = t * chunkSize;
+            int endU = Math.min(startU + chunkSize, nodeCount);
+            for (int u = startU; u < endU; u++) {
+                resultComp[u] = findCcRootAtomic(comp, u);
+            }
+        });
 
-        int outHandle = ctx.acquireNodeVector(comp);
+        int outHandle = ctx.acquireNodeVector(resultComp);
         setRegister(state, instr.dstReg(), outHandle, TYPE_NODE_VECTOR);
         setFlag(state, FLAG_ZF, false);
     }
 
-    private static int findCcRoot(int[] comp, int i) {
-        int curr = i;
-        while (curr != comp[curr]) {
-            comp[curr] = comp[comp[curr]];
-            curr = comp[curr];
+    private static int findCcRootAtomic(java.util.concurrent.atomic.AtomicIntegerArray comp, int curr) {
+        while (curr != comp.get(curr)) {
+            int parent = comp.get(curr);
+            int grandParent = comp.get(parent);
+            comp.compareAndSet(curr, parent, grandParent);
+            curr = grandParent;
         }
         return curr;
+    }
+
+    private static void unionCcNodesAtomic(java.util.concurrent.atomic.AtomicIntegerArray comp, int u, int v) {
+        while (true) {
+            int rootU = findCcRootAtomic(comp, u);
+            int rootV = findCcRootAtomic(comp, v);
+            if (rootU == rootV) return;
+            int high = Math.min(rootU, rootV);
+            int low = Math.max(rootU, rootV);
+            if (comp.compareAndSet(low, low, high)) break;
+        }
+    }
+
+    public static void handleMxv(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int xReg = instr.payload() & 0xFFFF;
+        int relId = (instr.payload() >> 16) & 0xFFFF;
+
+        RelationSnapshot rel = resolveRelation(ctx, relId);
+        if (rel == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+        }
+
+        int nodeCount = rel.getNodeCount();
+        float[] x = ctx.getFloatVector((int) getRegisterValue(state, xReg));
+        if (x == null || x.length < nodeCount) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_VECTOR");
+        }
+
+        int outHandle = ctx.acquireFloatVector(nodeCount);
+        float[] y = ctx.getFloatVector(outHandle);
+
+        MemorySegment rowOff = rel.getRowOffsetsSegment();
+        MemorySegment colIdx = rel.getColumnTargetsSegment();
+
+        int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
+        int chunkSize = (nodeCount + numThreads - 1) / numThreads;
+
+        // Parallel Zero-Allocation 4-Wide Unrolled SpMV: y[u] = sum(x[v] for v in neighbors(u))
+        java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+            int startU = t * chunkSize;
+            int endU = Math.min(startU + chunkSize, nodeCount);
+
+            for (int u = startU; u < endU; u++) {
+                int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+                int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+                int count = end - start;
+
+                float sum = 0.0f;
+                int idx = start;
+                int end4 = start + ((count >> 2) << 2);
+
+                for (; idx < end4; idx += 4) {
+                    int v0 = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                    int v1 = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx + 1);
+                    int v2 = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx + 2);
+                    int v3 = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx + 3);
+                    sum += x[v0] + x[v1] + x[v2] + x[v3];
+                }
+                for (; idx < end; idx++) {
+                    int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                    sum += x[v];
+                }
+                y[u] = sum;
+            }
+        });
+
+        setRegister(state, instr.dstReg(), outHandle, TYPE_FLOAT_VECTOR);
+        setFlag(state, FLAG_ZF, false);
     }
 
     public static void handleHasCsr(MemorySegment state, VmQueryContext ctx, Instruction instr) {

@@ -235,6 +235,11 @@ public final class ImpulseVmInterpreter {
                         pc++;
                     }
 
+                    case OP_MXV -> {
+                        VmHandlers.handleMxv(state, ctx, instr);
+                        pc++;
+                    }
+
                     case OP_CC_AFFOREST -> {
                         VmHandlers.handleCcAfforest(state, ctx, instr);
                         int handle = (int) VmHandlers.getRegisterValue(state, instr.dstReg());
