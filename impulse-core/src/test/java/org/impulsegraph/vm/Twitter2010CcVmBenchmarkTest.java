@@ -6,6 +6,7 @@ import org.impulsegraph.core.csr.RelationSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.ForkJoinPool;
@@ -44,40 +45,38 @@ public class Twitter2010CcVmBenchmarkTest {
             System.out.printf("Relation Node Count:               %,d nodes%n", nodeCount);
             System.out.printf("Relation Edge Count:               %,d edges%n", edgeCount);
 
-            // Parent Array for Union-Find
-            int[] parent = new int[nodeCount];
-            for (int i = 0; i < nodeCount; i++) parent[i] = i;
+            // 1. Parallel Full-Graph Afforest Connected Components via Impulse VM OP_CC_AFFOREST
+            MemorySegment prog = arena.allocate(VmStateLayout.INSTRUCTION_LAYOUT, 2);
+            VmStateLayout.INSTR_OPCODE_HANDLE.set(prog, 0L, VmRegisterType.OP_CC_AFFOREST);
+            VmStateLayout.INSTR_FLAGS_HANDLE.set(prog, 0L, (byte) 0);
+            VmStateLayout.INSTR_DST_REG_HANDLE.set(prog, 0L, (short) 1);
+            VmStateLayout.INSTR_PAYLOAD_HANDLE.set(prog, 0L, 0);
 
-            // 1. Single-Threaded Afforest Sampling & Union-Find Pass
+            VmStateLayout.INSTR_OPCODE_HANDLE.set(prog, 1 * VmStateLayout.INSTRUCTION_SIZE_BYTES, VmRegisterType.OP_HALT);
+            VmStateLayout.INSTR_FLAGS_HANDLE.set(prog, 1 * VmStateLayout.INSTRUCTION_SIZE_BYTES, (byte) 0);
+            VmStateLayout.INSTR_DST_REG_HANDLE.set(prog, 1 * VmStateLayout.INSTRUCTION_SIZE_BYTES, (short) 0);
+            VmStateLayout.INSTR_PAYLOAD_HANDLE.set(prog, 1 * VmStateLayout.INSTRUCTION_SIZE_BYTES, 0);
+
             long t0Cc = System.nanoTime();
-            int sampleEdges = Math.min(nodeCount, 2_000_000);
-            for (int u = 0; u < sampleEdges; u++) {
-                int[] targets = rel.getTargets(u);
-                if (targets != null && targets.length > 0) {
-                    int rootU = find(parent, u);
-                    int rootV = find(parent, targets[0]);
-                    if (rootU != rootV) {
-                        union(parent, rootU, rootV);
-                    }
-                }
-            }
+            int[] comp = (int[]) ImpulseVmInterpreter.execute(prog, 2, graph, 0, arena);
             double ccTimeMs = (System.nanoTime() - t0Cc) / 1_000_000.0;
 
             // Count unique component roots
-            AtomicInteger componentCount = new AtomicInteger(0);
-            for (int i = 0; i < nodeCount; i++) {
-                if (parent[i] == i) componentCount.incrementAndGet();
+            java.util.Set<Integer> uniqueRoots = new java.util.HashSet<>();
+            for (int root : comp) {
+                uniqueRoots.add(root);
             }
+            int componentCount = uniqueRoots.size();
 
             double mteps = (edgeCount / 1_000_000.0) / (ccTimeMs / 1000.0);
 
-            System.out.println("\n--- Connected Components (CC) Execution Results ---");
+            System.out.println("\n--- Connected Components (CC via OP_CC_AFFOREST) Execution Results ---");
             System.out.printf("Execution Time:                    %.3f ms%n", ccTimeMs);
-            System.out.printf("Unique Discovered Components:      %,d components%n", componentCount.get());
+            System.out.printf("Unique Discovered Components:      %,d components%n", componentCount);
             System.out.printf("Throughput:                        %,.1f MTEPS%n", mteps);
-            System.out.printf("Micro-Latency per Component Label: %.3f us%n", (ccTimeMs * 1000.0) / Math.max(1, componentCount.get()));
+            System.out.printf("Micro-Latency per Component Label: %.3f us%n", (ccTimeMs * 1000.0) / Math.max(1, componentCount));
 
-            assertTrue(componentCount.get() > 0, "Discovered components MUST be > 0");
+            assertTrue(componentCount > 0, "Discovered components MUST be > 0");
 
             System.out.println("\n=========================================================================");
             System.out.println("               CC BENCHMARK COMPLETED SUCCESSFULLY                       ");

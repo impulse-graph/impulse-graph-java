@@ -5,6 +5,7 @@ import org.impulsegraph.core.csr.RelationSnapshot;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.Map;
@@ -202,6 +203,99 @@ public final class VmHandlers {
 
         setRegister(state, instr.dstReg(), outHandle, TYPE_BITSET_HANDLE);
         setFlag(state, FLAG_ZF, outBs.isEmpty());
+    }
+
+    public static void handleCcAfforest(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int relId = instr.payload() & 0xFFFF;
+        RelationSnapshot rel = resolveRelation(ctx, relId);
+        if (rel == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+        }
+
+        int nodeCount = rel.getNodeCount();
+        int[] comp = new int[nodeCount];
+
+        MemorySegment rowOff = rel.getRowOffsetsSegment();
+        MemorySegment colIdx = rel.getColumnTargetsSegment();
+
+        // 1. Parallel Init
+        java.util.stream.IntStream.range(0, nodeCount).parallel().forEach(u -> comp[u] = u);
+
+        // 2. Parallel 2-neighbor sampling pass (zero allocations)
+        for (int r = 0; r < 2; r++) {
+            final int round = r;
+            java.util.stream.IntStream.range(0, nodeCount).parallel().forEach(u -> {
+                int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+                int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+                int deg = end - start;
+                if (round < deg) {
+                    int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + round);
+                    if (v < nodeCount) {
+                        int rootU = findCcRoot(comp, u);
+                        int rootV = findCcRoot(comp, v);
+                        if (rootU != rootV) {
+                            int high = Math.min(rootU, rootV);
+                            int low = Math.max(rootU, rootV);
+                            comp[low] = high;
+                        }
+                    }
+                }
+            });
+        }
+
+        // 3. Identify Giant Component Root
+        int sampleN = Math.min(nodeCount, 100_000);
+        Map<Integer, Integer> counts = new java.util.HashMap<>();
+        int maxCount = 0;
+        int giantRoot = 0;
+        for (int i = 0; i < sampleN; i++) {
+            int u = (int) ((i * 9973L) % nodeCount);
+            int root = findCcRoot(comp, u);
+            int cnt = counts.merge(root, 1, Integer::sum);
+            if (cnt > maxCount) {
+                maxCount = cnt;
+                giantRoot = root;
+            }
+        }
+
+        // 4. Parallel Full CSR Edge Processing (zero allocations)
+        final int gRoot = giantRoot;
+        java.util.stream.IntStream.range(0, nodeCount).parallel().forEach(u -> {
+            if (findCcRoot(comp, u) != gRoot) {
+                int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+                int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+                for (int idx = start; idx < end; idx++) {
+                    int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                    if (v < nodeCount) {
+                        int rootU = findCcRoot(comp, u);
+                        int rootV = findCcRoot(comp, v);
+                        if (rootU != rootV) {
+                            int high = Math.min(rootU, rootV);
+                            int low = Math.max(rootU, rootV);
+                            comp[low] = high;
+                        }
+                    }
+                }
+            }
+        });
+
+        // 5. Final Path Compression
+        java.util.stream.IntStream.range(0, nodeCount).parallel().forEach(u -> {
+            comp[u] = findCcRoot(comp, u);
+        });
+
+        int outHandle = ctx.acquireNodeVector(comp);
+        setRegister(state, instr.dstReg(), outHandle, TYPE_NODE_VECTOR);
+        setFlag(state, FLAG_ZF, false);
+    }
+
+    private static int findCcRoot(int[] comp, int i) {
+        int curr = i;
+        while (curr != comp[curr]) {
+            comp[curr] = comp[comp[curr]];
+            curr = comp[curr];
+        }
+        return curr;
     }
 
     public static void handleHasCsr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
