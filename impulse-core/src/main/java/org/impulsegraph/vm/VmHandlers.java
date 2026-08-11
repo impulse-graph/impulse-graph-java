@@ -192,14 +192,29 @@ public final class VmHandlers {
                 MemorySegment cscColIdx = rel.getCscColumnTargetsSegment();
                 int nodeCount = rel.getNodeCount();
 
-                int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
-                int wordChunks = ((nodeCount + 63) / 64 + numThreads - 1) / numThreads;
-                int chunkSize = wordChunks * 64;
+                int unvisitedCount = unvisitedBs.cardinality();
+                if (unvisitedCount >= 10_000 && nodeCount >= 10_000) {
+                    int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
+                    int wordChunks = ((nodeCount + 63) / 64 + numThreads - 1) / numThreads;
+                    int chunkSize = wordChunks * 64;
 
-                java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
-                    int startV = t * chunkSize;
-                    int endV = Math.min(startV + chunkSize, nodeCount);
-                    for (int v = unvisitedBs.nextSetBit(startV); v >= 0 && v < endV; v = unvisitedBs.nextSetBit(v + 1)) {
+                    java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+                        int startV = t * chunkSize;
+                        int endV = Math.min(startV + chunkSize, nodeCount);
+                        for (int v = unvisitedBs.nextSetBit(startV); v >= 0 && v < endV; v = unvisitedBs.nextSetBit(v + 1)) {
+                            int start = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v);
+                            int end = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v + 1);
+                            for (int idx = start; idx < end; idx++) {
+                                int u = cscColIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                                if (frontierBs.get(u)) {
+                                    outBs.set(v);
+                                    break;
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    for (int v = unvisitedBs.nextSetBit(0); v >= 0; v = unvisitedBs.nextSetBit(v + 1)) {
                         int start = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v);
                         int end = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v + 1);
                         for (int idx = start; idx < end; idx++) {
@@ -210,7 +225,7 @@ public final class VmHandlers {
                             }
                         }
                     }
-                });
+                }
             }
         } else {
             // Standard CSC Walk Mode
