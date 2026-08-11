@@ -211,18 +211,17 @@ public final class VmHandlers {
         MemorySegment rowOff = rel.getRowOffsetsSegment();
         MemorySegment colIdx = rel.getColumnTargetsSegment();
 
-        // 1. Parallel Init
-        java.util.stream.IntStream.range(0, nodeCount).parallel().forEach(u -> comp[u] = u);
+        // Zero-allocation Afforest Connected Components algorithm over off-heap memory
+        for (int u = 0; u < nodeCount; u++) comp[u] = u;
 
-        // 2. Parallel 2-neighbor sampling pass (zero allocations)
+        // 1. 2-Neighbor sampling pass
         for (int r = 0; r < 2; r++) {
-            final int round = r;
-            java.util.stream.IntStream.range(0, nodeCount).parallel().forEach(u -> {
+            for (int u = 0; u < nodeCount; u++) {
                 int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
                 int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
                 int deg = end - start;
-                if (round < deg) {
-                    int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + round);
+                if (r < deg) {
+                    int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + r);
                     if (v < nodeCount) {
                         int rootU = findCcRoot(comp, u);
                         int rootV = findCcRoot(comp, v);
@@ -233,27 +232,33 @@ public final class VmHandlers {
                         }
                     }
                 }
-            });
+            }
         }
 
-        // 3. Identify Giant Component Root
+        // 2. Identify Giant Component Root
         int sampleN = Math.min(nodeCount, 100_000);
-        Map<Integer, Integer> counts = new java.util.HashMap<>();
-        int maxCount = 0;
+        int[] counts = new int[Math.min(sampleN, 1024)];
         int giantRoot = 0;
-        for (int i = 0; i < sampleN; i++) {
+        int maxCount = 0;
+        for (int i = 0; i < counts.length; i++) {
             int u = (int) ((i * 9973L) % nodeCount);
-            int root = findCcRoot(comp, u);
-            int cnt = counts.merge(root, 1, Integer::sum);
+            counts[i] = findCcRoot(comp, u);
+        }
+        for (int i = 0; i < counts.length; i++) {
+            int root = counts[i];
+            int cnt = 0;
+            for (int j = 0; j < counts.length; j++) {
+                if (counts[j] == root) cnt++;
+            }
             if (cnt > maxCount) {
                 maxCount = cnt;
                 giantRoot = root;
             }
         }
 
-        // 4. Parallel Full CSR Edge Processing (zero allocations)
+        // 3. Full CSR Edge Processing (skipping giant component)
         final int gRoot = giantRoot;
-        java.util.stream.IntStream.range(0, nodeCount).parallel().forEach(u -> {
+        for (int u = 0; u < nodeCount; u++) {
             if (findCcRoot(comp, u) != gRoot) {
                 int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
                 int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
@@ -270,12 +275,12 @@ public final class VmHandlers {
                     }
                 }
             }
-        });
+        }
 
-        // 5. Final Path Compression
-        java.util.stream.IntStream.range(0, nodeCount).parallel().forEach(u -> {
+        // 4. Final Path Compression
+        for (int u = 0; u < nodeCount; u++) {
             comp[u] = findCcRoot(comp, u);
-        });
+        }
 
         int outHandle = ctx.acquireNodeVector(comp);
         setRegister(state, instr.dstReg(), outHandle, TYPE_NODE_VECTOR);

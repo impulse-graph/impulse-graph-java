@@ -57,21 +57,37 @@ public class Twitter2010CcVmBenchmarkTest {
             VmStateLayout.INSTR_DST_REG_HANDLE.set(prog, 1 * VmStateLayout.INSTRUCTION_SIZE_BYTES, (short) 0);
             VmStateLayout.INSTR_PAYLOAD_HANDLE.set(prog, 1 * VmStateLayout.INSTRUCTION_SIZE_BYTES, 0);
 
-            long t0Cc = System.nanoTime();
-            int[] comp = (int[]) ImpulseVmInterpreter.execute(prog, 2, graph, 0, arena);
-            double ccTimeMs = (System.nanoTime() - t0Cc) / 1_000_000.0;
+            // Warm-up run
+            ImpulseVmInterpreter.execute(prog, 2, graph, 0, arena);
 
-            // Count unique component roots
-            java.util.Set<Integer> uniqueRoots = new java.util.HashSet<>();
-            for (int root : comp) {
-                uniqueRoots.add(root);
+            // 3 Measured Runs
+            double minCcTimeMs = Double.MAX_VALUE;
+            double sumCcTimeMs = 0.0;
+            int[] comp = null;
+            int runs = 3;
+
+            for (int r = 0; r < runs; r++) {
+                long t0Cc = System.nanoTime();
+                comp = (int[]) ImpulseVmInterpreter.execute(prog, 2, graph, 0, arena);
+                double tMs = (System.nanoTime() - t0Cc) / 1_000_000.0;
+                sumCcTimeMs += tMs;
+                if (tMs < minCcTimeMs) minCcTimeMs = tMs;
             }
-            int componentCount = uniqueRoots.size();
+            double ccTimeMs = minCcTimeMs;
+
+            // Count unique component roots (primitive scan)
+            int componentCount = 0;
+            if (comp != null) {
+                for (int i = 0; i < nodeCount; i++) {
+                    if (comp[i] == i) componentCount++;
+                }
+            }
 
             double mteps = (edgeCount / 1_000_000.0) / (ccTimeMs / 1000.0);
 
             System.out.println("\n--- Connected Components (CC via OP_CC_AFFOREST) Execution Results ---");
-            System.out.printf("Execution Time:                    %.3f ms%n", ccTimeMs);
+            System.out.printf("Min Execution Time:                %.3f ms%n", minCcTimeMs);
+            System.out.printf("Avg Execution Time:                %.3f ms%n", sumCcTimeMs / runs);
             System.out.printf("Unique Discovered Components:      %,d components%n", componentCount);
             System.out.printf("Throughput:                        %,.1f MTEPS%n", mteps);
             System.out.printf("Micro-Latency per Component Label: %.3f us%n", (ccTimeMs * 1000.0) / Math.max(1, componentCount));
