@@ -109,10 +109,18 @@ public final class VmHandlers {
         setRegister(state, instr.dstReg(), Float.floatToRawIntBits(fVal), TYPE_FLOAT);
     }
 
+    private static final String[] PRECACHED_REL_NAMES = new String[256];
+    static {
+        for (int i = 0; i < 256; i++) {
+            PRECACHED_REL_NAMES[i] = "rel_" + i;
+        }
+    }
+
     private static RelationSnapshot resolveRelation(VmQueryContext ctx, int relId) {
         GraphSnapshot graph = ctx.snapshot();
         if (graph == null) return null;
-        RelationSnapshot rel = graph.getRelationSnapshot("rel_" + relId);
+        String name = (relId >= 0 && relId < 256) ? PRECACHED_REL_NAMES[relId] : ("rel_" + relId);
+        RelationSnapshot rel = graph.getRelationSnapshot(name);
         if (rel == null && !graph.getAllRelationSnapshots().isEmpty()) {
             int idx = 0;
             for (RelationSnapshot snap : graph.getAllRelationSnapshots().values()) {
@@ -144,16 +152,8 @@ public final class VmHandlers {
             } else if (srcType == TYPE_BITSET_HANDLE) {
                 BitSet inBs = ctx.getBitset((int) srcVal);
                 if (inBs != null) {
-                    int cardinality = inBs.cardinality();
-                    final RelationSnapshot relSnap = rel;
-                    if (cardinality >= PARALLEL_FRONTIER_THRESHOLD) {
-                        // Multi-Threaded Parallel Execution (>= 512k active nodes)
-                        inBs.stream().parallel().forEach(u -> relSnap.copyTargetsSimd(u, outBs));
-                    } else {
-                        // Single-Threaded Vector SIMD Execution (< 512k active nodes)
-                        for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
-                            relSnap.copyTargetsSimd(u, outBs);
-                        }
+                    for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
+                        rel.copyTargetsSimd(u, outBs);
                     }
                 }
             }
@@ -184,19 +184,12 @@ public final class VmHandlers {
         BitSet outBs = ctx.getBitset(outHandle);
 
         if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
-            int targetV = (int) srcVal;
-            int[] inTargets = rel.getInTargets(targetV);
-            for (int u : inTargets) {
-                outBs.set(u);
-            }
+            rel.copyInTargetsSimd((int) srcVal, outBs);
         } else if (srcType == TYPE_BITSET_HANDLE) {
             BitSet inBs = ctx.getBitset((int) srcVal);
             if (inBs != null) {
                 for (int v = inBs.nextSetBit(0); v >= 0; v = inBs.nextSetBit(v + 1)) {
-                    int[] inTargets = rel.getInTargets(v);
-                    for (int u : inTargets) {
-                        outBs.set(u);
-                    }
+                    rel.copyInTargetsSimd(v, outBs);
                 }
             }
         }
@@ -335,8 +328,7 @@ public final class VmHandlers {
         RelationSnapshot rel = resolveRelation(ctx, relId);
         long degree = 0;
         if (rel != null && u >= 0 && u < rel.getNodeCount()) {
-            int[] targets = rel.getTargets((int) u);
-            degree = (targets != null) ? targets.length : 0;
+            degree = rel.getDegree((int) u);
         }
 
         setRegister(state, instr.dstReg(), degree, TYPE_INT64);
@@ -489,9 +481,13 @@ public final class VmHandlers {
             BitSet bsSrc = ctx.getBitset((int) srcVal);
             BitSet bsDst = ctx.getBitset((int) dstVal);
             if (bsSrc != null && bsDst != null) {
-                BitSet diff = (BitSet) bsSrc.clone();
-                diff.andNot(bsDst);
-                isSubset = diff.isEmpty();
+                isSubset = true;
+                for (int i = bsSrc.nextSetBit(0); i >= 0; i = bsSrc.nextSetBit(i + 1)) {
+                    if (!bsDst.get(i)) {
+                        isSubset = false;
+                        break;
+                    }
+                }
             }
         } else if (srcType != TYPE_BITSET_HANDLE && dstType == TYPE_BITSET_HANDLE) {
             BitSet bsDst = ctx.getBitset((int) dstVal);
@@ -510,15 +506,14 @@ public final class VmHandlers {
             srcReg = instr.dstReg();
         }
         byte typeTag = getRegisterType(state, srcReg);
-        BitSet outBs = new BitSet();
+        int outHandle = ctx.acquireBitset();
+        BitSet outBs = ctx.getBitset(outHandle);
         if (typeTag == TYPE_BITSET_HANDLE) {
             BitSet bs = ctx.getBitset((int) getRegisterValue(state, srcReg));
-            if (bs != null) outBs.or(bs);
+            if (bs != null && bs != outBs) outBs.or(bs);
         } else if (typeTag == TYPE_NODE_ID || typeTag == TYPE_INT64) {
             outBs.set((int) getRegisterValue(state, srcReg));
         }
-        int outHandle = ctx.acquireBitset();
-        ctx.getBitset(outHandle).or(outBs);
         setRegister(state, instr.dstReg(), outHandle, TYPE_BITSET_HANDLE);
         return outBs;
     }
@@ -562,12 +557,21 @@ public final class VmHandlers {
         if (rel != null) {
             BitSet inBs = ctx.getBitset((int) getRegisterValue(state, srcReg));
             if (inBs != null) {
+                MemorySegment rowOff = rel.getRowOffsetsSegment();
+                MemorySegment colIdx = rel.getColumnTargetsSegment();
+                int nodeCount = rel.getNodeCount();
+
                 for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
-                    int[] targetsU = rel.getTargets(u);
-                    for (int v : targetsU) {
-                        if (v > u) {
-                            int[] targetsV = rel.getTargets(v);
-                            triangleCount += countIntersection(targetsU, targetsV);
+                    if (u >= nodeCount) continue;
+                    int startU = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+                    int endU = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+
+                    for (int i = startU; i < endU; i++) {
+                        int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+                        if (v > u && v < nodeCount) {
+                            int startV = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v);
+                            int endV = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v + 1);
+                            triangleCount += countOffHeapIntersection(colIdx, startU, endU, startV, endV);
                         }
                     }
                 }
@@ -577,14 +581,21 @@ public final class VmHandlers {
         setFlag(state, FLAG_ZF, triangleCount == 0);
     }
 
-    private static long countIntersection(int[] a, int[] b) {
-        if (a == null || b == null || a.length == 0 || b.length == 0) return 0;
+    private static long countOffHeapIntersection(MemorySegment colIdx, int startA, int endA, int startB, int endB) {
         long count = 0;
-        int i = 0, j = 0;
-        while (i < a.length && j < b.length) {
-            if (a[i] == b[j]) { count++; i++; j++; }
-            else if (a[i] < b[j]) { i++; }
-            else { j++; }
+        int i = startA, j = startB;
+        while (i < endA && j < endB) {
+            int valA = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+            int valB = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, j);
+            if (valA == valB) {
+                count++;
+                i++;
+                j++;
+            } else if (valA < valB) {
+                i++;
+            } else {
+                j++;
+            }
         }
         return count;
     }

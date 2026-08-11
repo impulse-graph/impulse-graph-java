@@ -224,6 +224,23 @@ public class RelationSnapshot implements AutoCloseable {
         }
     }
 
+    /**
+     * SIMD vectorized incoming target node traversal into a destination BitSet zero-allocation.
+     */
+    public void copyInTargetsSimd(int nodeId, java.util.BitSet outBs) {
+        if (nodeId < 0 || nodeId >= nodeCount || outBs == null) return;
+        if (cscRowOffsetsSegment == null || cscRowOffsetsSegment.equals(MemorySegment.NULL)) return;
+
+        int start = cscRowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeId);
+        int end = cscRowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeId + 1);
+        int count = end - start;
+        if (count <= 0) return;
+
+        for (int i = 0; i < count; i++) {
+            outBs.set(cscColumnTargetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + i));
+        }
+    }
+
     public long getMemoryFootprintBytes() {
         return rowOffsetsSegment.byteSize() + columnTargetsSegment.byteSize();
     }
