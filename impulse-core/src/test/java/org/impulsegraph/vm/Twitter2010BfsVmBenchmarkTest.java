@@ -1,12 +1,14 @@
 package org.impulsegraph.vm;
 
 import org.impulsegraph.core.csr.BinarySnapshotLoader;
+import org.impulsegraph.core.csr.DefaultSnapshotBuilder;
 import org.impulsegraph.core.csr.GraphSnapshot;
 import org.impulsegraph.core.csr.RelationSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,51 +51,108 @@ public class Twitter2010BfsVmBenchmarkTest {
             System.out.printf("Relation Node Count:               %,d nodes%n", nodeCount);
             System.out.printf("Relation Edge Count:               %,d edges%n", edgeCount);
 
-            // 1. Parallel Full-Graph BFS Traversal (Root 613, degree 2,997,469 - 10 Threads)
-            int rootNode = 613;
-            BitSet visited = new BitSet(nodeCount);
-            BitSet frontier = new BitSet(nodeCount);
-            frontier.set(rootNode);
-            visited.set(rootNode);
+            if (!rel.hasCsc()) {
+                System.out.println("Generating off-heap CSC transpose index for Twitter-2010 snapshot...");
+                long t0Csc = System.nanoTime();
+                MemorySegment[] cscSegs = DefaultSnapshotBuilder.computeCscSegments(arena, nodeCount, (int) edgeCount, rel.getRowOffsetsSegment(), rel.getColumnTargetsSegment());
+                rel.setCscSegments(cscSegs[0], cscSegs[1]);
+                System.out.printf("CSC transpose index generated off-heap in %.2f ms%n", (System.nanoTime() - t0Csc) / 1_000_000.0);
+            }
 
+            // 1. Parallel Direction-Optimizing Lock-Free BFS Traversal (Root 613, degree 2,997,469 - 10 Threads)
+            int rootNode = 613;
+            int wordCount = (nodeCount + 63) / 64;
+            long[] visitedWords = new long[wordCount];
+            long[] currentFrontierWords = new long[wordCount];
+
+            int rootWord = rootNode >> 6;
+            long rootMask = 1L << (rootNode & 63);
+            visitedWords[rootWord] |= rootMask;
+            currentFrontierWords[rootWord] |= rootMask;
+
+            java.lang.invoke.VarHandle varHandle = java.lang.invoke.MethodHandles.arrayElementVarHandle(long[].class);
             ForkJoinPool customPool = new ForkJoinPool(10);
             AtomicLong totalTraversedEdges = new AtomicLong(0);
 
             long t0FullBfs = System.nanoTime();
-            while (!frontier.isEmpty()) {
-                BitSet currentFrontier = frontier;
-                BitSet nextFrontier = new BitSet(nodeCount);
+            while (true) {
+                // Count active frontier size
+                long frontierSize = 0;
+                for (long w : currentFrontierWords) {
+                    frontierSize += Long.bitCount(w);
+                }
+                if (frontierSize == 0) break;
 
-                int[] frontierNodes = currentFrontier.stream().toArray();
-                customPool.submit(() -> {
-                    java.util.Arrays.stream(frontierNodes).parallel().forEach(u -> {
-                        int[] targets = rel.getTargets(u);
-                        if (targets != null) {
-                            totalTraversedEdges.addAndGet(targets.length);
-                            for (int t : targets) {
-                                if (!visited.get(t)) {
-                                    synchronized (visited) {
-                                        if (!visited.get(t)) {
-                                            visited.set(t);
-                                            synchronized (nextFrontier) {
-                                                nextFrontier.set(t);
-                                            }
-                                        }
+                long[] nextFrontierWords = new long[wordCount];
+
+                if (frontierSize > 500_000) {
+                    // Bottom-Up Pull Step (CSC) - Fast early break per vertex
+                    long[] curFrontier = currentFrontierWords;
+                    java.util.stream.IntStream.range(0, nodeCount).parallel().forEach(v -> {
+                        int vWord = v >> 6;
+                        long vMask = 1L << (v & 63);
+                        if (((long) varHandle.get(visitedWords, vWord) & vMask) == 0) {
+                            int[] inTargets = rel.getInTargets(v);
+                            if (inTargets != null && inTargets.length > 0) {
+                                for (int u : inTargets) {
+                                    int uWord = u >> 6;
+                                    long uMask = 1L << (u & 63);
+                                    if ((curFrontier[uWord] & uMask) != 0) {
+                                        varHandle.getAndBitwiseOr(visitedWords, vWord, vMask);
+                                        varHandle.getAndBitwiseOr(nextFrontierWords, vWord, vMask);
+                                        break; // Early exit on first matching in-neighbor
                                     }
                                 }
                             }
                         }
                     });
-                }).get();
+                } else {
+                    // Top-Down Push Step (CSR) - Lock-free VarHandle bitwise OR
+                    java.util.ArrayList<Integer> frontierList = new java.util.ArrayList<>();
+                    for (int wIdx = 0; wIdx < wordCount; wIdx++) {
+                        long w = currentFrontierWords[wIdx];
+                        if (w != 0) {
+                            int base = wIdx * 64;
+                            for (int b = 0; b < 64; b++) {
+                                if ((w & (1L << b)) != 0) {
+                                    frontierList.add(base + b);
+                                }
+                            }
+                        }
+                    }
 
-                frontier = nextFrontier;
+                    int[] frontierNodes = frontierList.stream().mapToInt(Integer::intValue).toArray();
+                    customPool.submit(() -> {
+                        java.util.Arrays.stream(frontierNodes).parallel().forEach(u -> {
+                            int[] targets = rel.getTargets(u);
+                            if (targets != null) {
+                                totalTraversedEdges.addAndGet(targets.length);
+                                for (int t : targets) {
+                                    int wIdx = t >> 6;
+                                    long mask = 1L << (t & 63);
+                                    if (((long) varHandle.get(visitedWords, wIdx) & mask) == 0) {
+                                        varHandle.getAndBitwiseOr(visitedWords, wIdx, mask);
+                                        varHandle.getAndBitwiseOr(nextFrontierWords, wIdx, mask);
+                                    }
+                                }
+                            }
+                        });
+                    }).get();
+                }
+
+                currentFrontierWords = nextFrontierWords;
             }
             double fullBfsTimeMs = (System.nanoTime() - t0FullBfs) / 1_000_000.0;
             double mteps = (totalTraversedEdges.get() / 1_000_000.0) / (fullBfsTimeMs / 1000.0);
 
-            System.out.println("\n--- Full-Graph Parallel BFS Traversal (Root 613, 10 Threads) ---");
+            long totalVisited = 0;
+            for (long w : visitedWords) {
+                totalVisited += Long.bitCount(w);
+            }
+
+            System.out.println("\n--- Full-Graph Direction-Optimizing Hybrid BFS Traversal (Root 613, 10 Threads) ---");
             System.out.printf("Execution Time:                    %.3f ms%n", fullBfsTimeMs);
-            System.out.printf("Reachable Nodes Visited:           %,d / %,d nodes%n", visited.cardinality(), nodeCount);
+            System.out.printf("Reachable Nodes Visited:           %,d / %,d nodes%n", totalVisited, nodeCount);
             System.out.printf("Total Traversed Edges:             %,d edges%n", totalTraversedEdges.get());
             System.out.printf("Throughput (MTEPS):                %,.1f MTEPS%n", mteps);
 

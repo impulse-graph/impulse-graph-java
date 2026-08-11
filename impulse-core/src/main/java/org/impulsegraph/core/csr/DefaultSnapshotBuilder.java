@@ -2,6 +2,7 @@ package org.impulsegraph.core.csr;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.ByteBuffer;
@@ -39,12 +40,15 @@ public final class DefaultSnapshotBuilder {
         return this;
     }
 
-    private static byte[][] computeCscBytes(int nodeCount, int edgeCount, MemorySegment csrRowOffsets, MemorySegment csrColumnTargets) {
+    public static MemorySegment[] computeCscSegments(Arena arena, int nodeCount, int edgeCount, MemorySegment csrRowOffsets, MemorySegment csrColumnTargets) {
         if (nodeCount <= 0 || csrRowOffsets == null || csrRowOffsets.equals(MemorySegment.NULL) || csrColumnTargets == null || csrColumnTargets.equals(MemorySegment.NULL)) {
-            return new byte[][] { new byte[0], new byte[0] };
+            return new MemorySegment[] { MemorySegment.NULL, MemorySegment.NULL };
         }
 
         int numEdges = (int) (csrColumnTargets.byteSize() / 4);
+        MemorySegment cscRowOffSeg = arena.allocate(ValueLayout.JAVA_INT, nodeCount + 1);
+        MemorySegment cscColIdxSeg = arena.allocate(ValueLayout.JAVA_INT, numEdges);
+
         int[] inDegrees = new int[nodeCount];
         for (int i = 0; i < numEdges; i++) {
             int target = csrColumnTargets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
@@ -53,14 +57,17 @@ public final class DefaultSnapshotBuilder {
             }
         }
 
-        int[] cscRowOffsets = new int[nodeCount + 1];
-        cscRowOffsets[0] = 0;
+        int accum = 0;
         for (int i = 0; i < nodeCount; i++) {
-            cscRowOffsets[i + 1] = cscRowOffsets[i] + inDegrees[i];
+            cscRowOffSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i, accum);
+            accum += inDegrees[i];
         }
+        cscRowOffSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeCount, accum);
 
-        int[] cscColumnTargets = new int[numEdges];
-        int[] nextOffset = Arrays.copyOf(cscRowOffsets, nodeCount);
+        int[] nextOffset = new int[nodeCount];
+        for (int i = 0; i < nodeCount; i++) {
+            nextOffset[i] = cscRowOffSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+        }
 
         for (int u = 0; u < nodeCount; u++) {
             int start = csrRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
@@ -69,18 +76,22 @@ public final class DefaultSnapshotBuilder {
                 int v = csrColumnTargets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
                 if (v >= 0 && v < nodeCount) {
                     int cscIdx = nextOffset[v]++;
-                    cscColumnTargets[cscIdx] = u;
+                    cscColIdxSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, cscIdx, u);
                 }
             }
         }
 
-        ByteBuffer rowBuf = ByteBuffer.allocate((nodeCount + 1) * 4).order(ByteOrder.LITTLE_ENDIAN);
-        for (int val : cscRowOffsets) rowBuf.putInt(val);
+        return new MemorySegment[] { cscRowOffSeg, cscColIdxSeg };
+    }
 
-        ByteBuffer colBuf = ByteBuffer.allocate(numEdges * 4).order(ByteOrder.LITTLE_ENDIAN);
-        for (int val : cscColumnTargets) colBuf.putInt(val);
-
-        return new byte[][] { rowBuf.array(), colBuf.array() };
+    public static byte[][] computeCscBytes(int nodeCount, int edgeCount, MemorySegment csrRowOffsets, MemorySegment csrColumnTargets) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment[] segs = computeCscSegments(arena, nodeCount, edgeCount, csrRowOffsets, csrColumnTargets);
+            if (segs[0] == MemorySegment.NULL) {
+                return new byte[][] { new byte[0], new byte[0] };
+            }
+            return new byte[][] { segs[0].toArray(ValueLayout.JAVA_BYTE), segs[1].toArray(ValueLayout.JAVA_BYTE) };
+        }
     }
 
     public byte[] build(BinarySnapshotLoader.LoadedSnapshot loaded) {
