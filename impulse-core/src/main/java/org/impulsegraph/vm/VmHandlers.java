@@ -170,26 +170,60 @@ public final class VmHandlers {
     }
 
     public static void handleCscWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        int srcReg = instr.payload() & 0xFFFF;
+        int frontierReg = instr.payload() & 0xFFFF;
+        int unvisitedReg = (instr.payload() >> 16) & 0xFFFF;
         int relId = (instr.payload() >> 24) & 0xFF;
 
         RelationSnapshot rel = resolveRelation(ctx, relId);
         if (rel == null || !rel.hasCsc()) {
             throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
         }
-        byte srcType = getRegisterType(state, srcReg);
-        long srcVal = getRegisterValue(state, srcReg);
 
         int outHandle = ctx.acquireBitset();
         BitSet outBs = ctx.getBitset(outHandle);
 
-        if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
-            rel.copyInTargetsSimd((int) srcVal, outBs);
-        } else if (srcType == TYPE_BITSET_HANDLE) {
-            BitSet inBs = ctx.getBitset((int) srcVal);
-            if (inBs != null) {
-                for (int v = inBs.nextSetBit(0); v >= 0; v = inBs.nextSetBit(v + 1)) {
-                    rel.copyInTargetsSimd(v, outBs);
+        if (unvisitedReg != 0) {
+            // Bottom-Up Pull Mode (Frontier = frontierReg, Unvisited = unvisitedReg)
+            BitSet frontierBs = ctx.getBitset((int) getRegisterValue(state, frontierReg));
+            BitSet unvisitedBs = ctx.getBitset((int) getRegisterValue(state, unvisitedReg));
+
+            if (frontierBs != null && unvisitedBs != null) {
+                MemorySegment cscRowOff = rel.getCscRowOffsetsSegment();
+                MemorySegment cscColIdx = rel.getCscColumnTargetsSegment();
+                int nodeCount = rel.getNodeCount();
+
+                int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
+                int wordChunks = ((nodeCount + 63) / 64 + numThreads - 1) / numThreads;
+                int chunkSize = wordChunks * 64;
+
+                java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+                    int startV = t * chunkSize;
+                    int endV = Math.min(startV + chunkSize, nodeCount);
+                    for (int v = unvisitedBs.nextSetBit(startV); v >= 0 && v < endV; v = unvisitedBs.nextSetBit(v + 1)) {
+                        int start = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v);
+                        int end = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v + 1);
+                        for (int idx = start; idx < end; idx++) {
+                            int u = cscColIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                            if (frontierBs.get(u)) {
+                                outBs.set(v);
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+        } else {
+            // Standard CSC Walk Mode
+            byte srcType = getRegisterType(state, frontierReg);
+            long srcVal = getRegisterValue(state, frontierReg);
+            if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
+                rel.copyInTargetsSimd((int) srcVal, outBs);
+            } else if (srcType == TYPE_BITSET_HANDLE) {
+                BitSet inBs = ctx.getBitset((int) srcVal);
+                if (inBs != null) {
+                    for (int v = inBs.nextSetBit(0); v >= 0; v = inBs.nextSetBit(v + 1)) {
+                        rel.copyInTargetsSimd(v, outBs);
+                    }
                 }
             }
         }
