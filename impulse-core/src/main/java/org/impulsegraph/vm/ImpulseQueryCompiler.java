@@ -128,7 +128,7 @@ public final class ImpulseQueryCompiler {
             // 3. Patch Bytecode Instructions in new program segment
             for (RelationInstructionPatch patch : patches) {
                 int newRelId = newRelationIdMap.get(patch.logicalRelationName());
-                int newPayload = ((patch.srcReg() & 0xFFFF) << 16) | (newRelId & 0xFFFF);
+                int newPayload = ((newRelId & 0xFFFF) << 16) | (patch.srcReg() & 0xFFFF);
                 long off = patch.pc() * INSTRUCTION_SIZE_BYTES;
                 INSTR_PAYLOAD_HANDLE.set(newProgSeg, off, newPayload);
             }
@@ -198,8 +198,8 @@ public final class ImpulseQueryCompiler {
                         pc, opName, instr.flags(), instr.dstReg(), instr.payload(), instr.payload()));
 
                 if (instr.opcode() == OP_CSR_WALK) {
-                    int srcReg = (instr.payload() >> 16) & 0xFFFF;
-                    int relId = instr.payload() & 0xFFFF;
+                    int srcReg = instr.payload() & 0xFFFF;
+                    int relId = (instr.payload() >> 16) & 0xFFFF;
                     String relName = patchMap.getOrDefault(pc, "rel_" + relId);
                     sb.append(String.format(" -> WALK src=R%d -> dst=R%d via rel[%d] (\"%s\")",
                             srcReg, instr.dstReg(), relId, relName));
@@ -279,7 +279,7 @@ public final class ImpulseQueryCompiler {
                 patches.add(new RelationInstructionPatch(pc, logicalRelName, srcReg, dstReg));
 
                 byte opcode = op.contains("FILTERED") ? OP_CSR_WALK_FILTERED : OP_CSR_WALK;
-                int payload = ((srcReg & 0xFFFF) << 16) | (relId & 0xFFFF);
+                int payload = ((relId & 0xFFFF) << 16) | (srcReg & 0xFFFF);
                 instrList.add(new InstructionBuilderData(opcode, (byte) 0, dstReg, payload));
             } else if ("REPEAT".equalsIgnoreCase(op)) {
                 int repeatCount = step.repeatCount();
@@ -350,7 +350,7 @@ public final class ImpulseQueryCompiler {
                 long pc = instrList.size();
                 patches.add(new RelationInstructionPatch(pc, logicalRelName, srcReg, dstReg));
 
-                int payload = ((srcReg & 0xFFFF) << 16) | (relId & 0xFFFF);
+                int payload = ((relId & 0xFFFF) << 16) | (srcReg & 0xFFFF);
                 instrList.add(new InstructionBuilderData(OP_CSR_WALK, (byte) 0, dstReg, payload));
             }
         }

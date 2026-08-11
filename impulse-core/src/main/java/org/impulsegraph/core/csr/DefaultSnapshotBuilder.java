@@ -2,6 +2,7 @@ package org.impulsegraph.core.csr;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.ByteBuffer;
@@ -15,6 +16,8 @@ import static org.impulsegraph.spec.v0_9.ImpulseLayoutsV0_9.SPEC_VERSION_PACKED;
 public final class DefaultSnapshotBuilder {
 
     private final Map<String, String> metadata = new HashMap<>();
+    private Boolean includeCscOverride = null;
+    private Boolean includeCooOverride = null;
 
     public DefaultSnapshotBuilder() {}
 
@@ -25,6 +28,70 @@ public final class DefaultSnapshotBuilder {
     public DefaultSnapshotBuilder withMetadata(String key, String value) {
         metadata.put(key, value);
         return this;
+    }
+
+    public DefaultSnapshotBuilder withCsc(boolean include) {
+        this.includeCscOverride = include;
+        return this;
+    }
+
+    public DefaultSnapshotBuilder withCoo(boolean include) {
+        this.includeCooOverride = include;
+        return this;
+    }
+
+    public static MemorySegment[] computeCscSegments(Arena arena, int nodeCount, int edgeCount, MemorySegment csrRowOffsets, MemorySegment csrColumnTargets) {
+        if (nodeCount <= 0 || csrRowOffsets == null || csrRowOffsets.equals(MemorySegment.NULL) || csrColumnTargets == null || csrColumnTargets.equals(MemorySegment.NULL)) {
+            return new MemorySegment[] { MemorySegment.NULL, MemorySegment.NULL };
+        }
+
+        int numEdges = (int) (csrColumnTargets.byteSize() / 4);
+        MemorySegment cscRowOffSeg = arena.allocate(ValueLayout.JAVA_INT, nodeCount + 1);
+        MemorySegment cscColIdxSeg = arena.allocate(ValueLayout.JAVA_INT, numEdges);
+
+        int[] inDegrees = new int[nodeCount];
+        for (int i = 0; i < numEdges; i++) {
+            int target = csrColumnTargets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+            if (target >= 0 && target < nodeCount) {
+                inDegrees[target]++;
+            }
+        }
+
+        int accum = 0;
+        for (int i = 0; i < nodeCount; i++) {
+            cscRowOffSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i, accum);
+            accum += inDegrees[i];
+        }
+        cscRowOffSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeCount, accum);
+
+        int[] nextOffset = new int[nodeCount];
+        for (int i = 0; i < nodeCount; i++) {
+            nextOffset[i] = cscRowOffSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+        }
+
+        for (int u = 0; u < nodeCount; u++) {
+            int start = csrRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+            int end = csrRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+            for (int idx = start; idx < end; idx++) {
+                int v = csrColumnTargets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                if (v >= 0 && v < nodeCount) {
+                    int cscIdx = nextOffset[v]++;
+                    cscColIdxSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, cscIdx, u);
+                }
+            }
+        }
+
+        return new MemorySegment[] { cscRowOffSeg, cscColIdxSeg };
+    }
+
+    public static byte[][] computeCscBytes(int nodeCount, int edgeCount, MemorySegment csrRowOffsets, MemorySegment csrColumnTargets) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment[] segs = computeCscSegments(arena, nodeCount, edgeCount, csrRowOffsets, csrColumnTargets);
+            if (segs[0] == MemorySegment.NULL) {
+                return new byte[][] { new byte[0], new byte[0] };
+            }
+            return new byte[][] { segs[0].toArray(ValueLayout.JAVA_BYTE), segs[1].toArray(ValueLayout.JAVA_BYTE) };
+        }
     }
 
     public byte[] build(BinarySnapshotLoader.LoadedSnapshot loaded) {
@@ -96,12 +163,12 @@ public final class DefaultSnapshotBuilder {
             try {
                 align4kOut(payloadOut);
 
+                RelationSnapshot relSnap = loaded != null && loaded.graph() != null ? loaded.graph().getRelationSnapshot(rName) : null;
+
                 // Row Offsets
                 align128Out(payloadOut);
                 long csrRowOffOffset = relBlocksBaseOffset + payloadOut.size();
-                MemorySegment rowSeg = loaded != null && loaded.graph() != null && loaded.graph().getRelationSnapshot(rName) != null
-                        ? loaded.graph().getRelationSnapshot(rName).getRowOffsetsSegment()
-                        : MemorySegment.NULL;
+                MemorySegment rowSeg = relSnap != null ? relSnap.getRowOffsetsSegment() : MemorySegment.NULL;
                 byte[] rowBytes = rowSeg != MemorySegment.NULL ? rowSeg.toArray(ValueLayout.JAVA_BYTE) : new byte[0];
                 long csrRowOffBytes = rowBytes.length;
                 payloadOut.write(rowBytes);
@@ -109,12 +176,49 @@ public final class DefaultSnapshotBuilder {
                 // Column Indices
                 align128Out(payloadOut);
                 long csrColIdxOffset = relBlocksBaseOffset + payloadOut.size();
-                MemorySegment colSeg = loaded != null && loaded.graph() != null && loaded.graph().getRelationSnapshot(rName) != null
-                        ? loaded.graph().getRelationSnapshot(rName).getColumnTargetsSegment()
-                        : MemorySegment.NULL;
+                MemorySegment colSeg = relSnap != null ? relSnap.getColumnTargetsSegment() : MemorySegment.NULL;
                 byte[] colBytes = colSeg != MemorySegment.NULL ? colSeg.toArray(ValueLayout.JAVA_BYTE) : new byte[0];
                 long csrColIdxBytes = colBytes.length;
                 payloadOut.write(colBytes);
+
+                // CSC Segments evaluation
+                boolean sourceHasCsc = relSnap != null && relSnap.hasCsc();
+                boolean shouldWriteCsc = includeCscOverride != null ? includeCscOverride : sourceHasCsc;
+
+                long cscRowOffOffset = 0L;
+                long cscRowOffBytes = 0L;
+                long cscColIdxOffset = 0L;
+                long cscColIdxBytes = 0L;
+
+                if (shouldWriteCsc && relSnap != null) {
+                    byte[] cscRowBytes;
+                    byte[] cscColBytes;
+
+                    if (relSnap.hasCsc()) {
+                        cscRowBytes = relSnap.getCscRowOffsetsSegment().toArray(ValueLayout.JAVA_BYTE);
+                        cscColBytes = relSnap.getCscColumnTargetsSegment().toArray(ValueLayout.JAVA_BYTE);
+                    } else {
+                        byte[][] computed = computeCscBytes(relSnap.getNodeCount(), relSnap.getEdgeCount(), rowSeg, colSeg);
+                        cscRowBytes = computed[0];
+                        cscColBytes = computed[1];
+                    }
+
+                    if (cscRowBytes.length > 0) {
+                        align128Out(payloadOut);
+                        cscRowOffOffset = relBlocksBaseOffset + payloadOut.size();
+                        cscRowOffBytes = cscRowBytes.length;
+                        payloadOut.write(cscRowBytes);
+
+                        align128Out(payloadOut);
+                        cscColIdxOffset = relBlocksBaseOffset + payloadOut.size();
+                        cscColIdxBytes = cscColBytes.length;
+                        payloadOut.write(cscColBytes);
+                    }
+                }
+
+                // COO evaluation
+                boolean shouldWriteCoo = includeCooOverride != null ? includeCooOverride : false;
+                byte encodingId = shouldWriteCoo ? (byte) 6 : (byte) 0;
 
                 // Relation Entry (Fixed 128 Bytes)
                 int rNameOff = relNameOffsets.get(relIdx);
@@ -122,30 +226,28 @@ public final class DefaultSnapshotBuilder {
                 relBuf.putShort((short) relIdx);  // relation_id
                 relBuf.putShort((short) 0);       // src_domain_id
                 relBuf.putShort((short) 0);       // tgt_domain_id
-                relBuf.put((byte) 0);             // encoding_id = RAW
+                relBuf.put(encodingId);           // encoding_id = RAW (0) or TPU_BCOO (6)
                 relBuf.put((byte) 4);             // node_id_width = 4
                 relBuf.put((byte) 4);             // edge_index_width = 4
                 relBuf.put(new byte[3]);          // reserved1
                 relBuf.putInt(rNameOff);          // name_offset
 
-                long nodeCount = loaded != null && loaded.graph() != null && loaded.graph().getRelationSnapshot(rName) != null
-                        ? loaded.graph().getRelationSnapshot(rName).getNodeCount()
-                        : 0;
-                long edgeCount = loaded != null && loaded.graph() != null && loaded.graph().getRelationSnapshot(rName) != null
-                        ? loaded.graph().getRelationSnapshot(rName).getEdgeCount()
-                        : 0;
+                long nodeCount = relSnap != null ? relSnap.getNodeCount() : 0;
+                long edgeCount = relSnap != null ? relSnap.getEdgeCount() : 0;
+
+                long sectionFeatures = (cscRowOffBytes > 0) ? 1L : 0L;
 
                 relBuf.putLong(nodeCount);
                 relBuf.putLong(edgeCount);
-                relBuf.putLong(0L);               // section_features
+                relBuf.putLong(sectionFeatures);  // section_features (bit 0 = CSC)
                 relBuf.putLong(csrRowOffOffset);
                 relBuf.putLong(csrRowOffBytes);
                 relBuf.putLong(csrColIdxOffset);
                 relBuf.putLong(csrColIdxBytes);
-                relBuf.putLong(0L);               // csc_row_off_offset
-                relBuf.putLong(0L);               // csc_row_off_bytes
-                relBuf.putLong(0L);               // csc_col_idx_offset
-                relBuf.putLong(0L);               // csc_col_idx_bytes
+                relBuf.putLong(cscRowOffOffset);
+                relBuf.putLong(cscRowOffBytes);
+                relBuf.putLong(cscColIdxOffset);
+                relBuf.putLong(cscColIdxBytes);
                 relBuf.putShort((short) 0);       // attr_count
                 relBuf.put(new byte[22]);         // reserved2
 

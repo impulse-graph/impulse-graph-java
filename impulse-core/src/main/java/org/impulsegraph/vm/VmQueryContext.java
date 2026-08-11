@@ -22,6 +22,7 @@ public final class VmQueryContext implements AutoCloseable {
     private final BitSet freeBitsetHandles = new BitSet();
 
     // Vector Pools
+    private final List<int[]> intVectors = new ArrayList<>();
     private final List<float[]> floatVectors = new ArrayList<>();
     private final List<double[]> doubleVectors = new ArrayList<>();
     private final List<long[]> longVectors = new ArrayList<>();
@@ -149,6 +150,24 @@ public final class VmQueryContext implements AutoCloseable {
     }
 
     // --- Vector Management ---
+
+    public int registerIntVector(int[] vec) {
+        int handle = intVectors.size();
+        intVectors.add(vec);
+        return handle;
+    }
+
+    public int acquireNodeVector(int[] vec) {
+        return registerIntVector(vec);
+    }
+
+    public int[] getIntVector(int handle) {
+        return (handle >= 0 && handle < intVectors.size()) ? intVectors.get(handle) : null;
+    }
+
+    public int[] getNodeVector(int handle) {
+        return getIntVector(handle);
+    }
 
     public int registerFloatVector(float[] vec) {
         int handle = floatVectors.size();

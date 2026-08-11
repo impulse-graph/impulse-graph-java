@@ -5,6 +5,7 @@ import org.impulsegraph.core.csr.RelationSnapshot;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.Map;
@@ -108,10 +109,18 @@ public final class VmHandlers {
         setRegister(state, instr.dstReg(), Float.floatToRawIntBits(fVal), TYPE_FLOAT);
     }
 
+    private static final String[] PRECACHED_REL_NAMES = new String[256];
+    static {
+        for (int i = 0; i < 256; i++) {
+            PRECACHED_REL_NAMES[i] = "rel_" + i;
+        }
+    }
+
     private static RelationSnapshot resolveRelation(VmQueryContext ctx, int relId) {
         GraphSnapshot graph = ctx.snapshot();
         if (graph == null) return null;
-        RelationSnapshot rel = graph.getRelationSnapshot("rel_" + relId);
+        String name = (relId >= 0 && relId < 256) ? PRECACHED_REL_NAMES[relId] : ("rel_" + relId);
+        RelationSnapshot rel = graph.getRelationSnapshot(name);
         if (rel == null && !graph.getAllRelationSnapshots().isEmpty()) {
             int idx = 0;
             for (RelationSnapshot snap : graph.getAllRelationSnapshots().values()) {
@@ -122,15 +131,12 @@ public final class VmHandlers {
                 idx++;
             }
         }
-        if (rel != null && !rel.hasCsc()) {
-            rel.setCscSegments(rel.getRowOffsetsSegment(), rel.getColumnTargetsSegment());
-        }
         return rel;
     }
 
     public static void handleCsrWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        int relId = instr.payload() & 0xFFFF;
-        int srcReg = (instr.payload() >> 16) & 0xFFFF;
+        int srcReg = instr.payload() & 0xFFFF;
+        int relId = (instr.payload() >> 16) & 0xFFFF;
 
         RelationSnapshot rel = resolveRelation(ctx, relId);
 
@@ -146,16 +152,8 @@ public final class VmHandlers {
             } else if (srcType == TYPE_BITSET_HANDLE) {
                 BitSet inBs = ctx.getBitset((int) srcVal);
                 if (inBs != null) {
-                    int cardinality = inBs.cardinality();
-                    final RelationSnapshot relSnap = rel;
-                    if (cardinality >= PARALLEL_FRONTIER_THRESHOLD) {
-                        // Multi-Threaded Parallel Execution (>= 512k active nodes)
-                        inBs.stream().parallel().forEach(u -> relSnap.copyTargetsSimd(u, outBs));
-                    } else {
-                        // Single-Threaded Vector SIMD Execution (< 512k active nodes)
-                        for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
-                            relSnap.copyTargetsSimd(u, outBs);
-                        }
+                    for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
+                        rel.copyTargetsSimd(u, outBs);
                     }
                 }
             }
@@ -172,48 +170,74 @@ public final class VmHandlers {
     }
 
     public static void handleCscWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        int relId = instr.payload() & 0xFFFF;
-        int srcReg = (instr.payload() >> 16) & 0xFFFF;
+        int frontierReg = instr.payload() & 0xFFFF;
+        int unvisitedReg = (instr.payload() >> 16) & 0xFFFF;
+        int relId = (instr.payload() >> 24) & 0xFF;
 
         RelationSnapshot rel = resolveRelation(ctx, relId);
         if (rel == null || !rel.hasCsc()) {
             throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
         }
-        byte srcType = getRegisterType(state, srcReg);
-        long srcVal = getRegisterValue(state, srcReg);
 
         int outHandle = ctx.acquireBitset();
         BitSet outBs = ctx.getBitset(outHandle);
 
-        if (rel != null) {
-            if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
-                int targetV = (int) srcVal;
-                for (int u = 0; u < rel.getNodeCount(); u++) {
-                    int[] targets = rel.getTargets(u);
-                    if (targets != null) {
-                        for (int t : targets) {
-                            if (t == targetV) {
-                                outBs.set(u);
+        if (unvisitedReg != 0) {
+            // Bottom-Up Pull Mode (Frontier = frontierReg, Unvisited = unvisitedReg)
+            BitSet frontierBs = ctx.getBitset((int) getRegisterValue(state, frontierReg));
+            BitSet unvisitedBs = ctx.getBitset((int) getRegisterValue(state, unvisitedReg));
+
+            if (frontierBs != null && unvisitedBs != null) {
+                MemorySegment cscRowOff = rel.getCscRowOffsetsSegment();
+                MemorySegment cscColIdx = rel.getCscColumnTargetsSegment();
+                int nodeCount = rel.getNodeCount();
+
+                int unvisitedCount = unvisitedBs.cardinality();
+                if (unvisitedCount >= 10_000 && nodeCount >= 10_000) {
+                    int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
+                    int wordChunks = ((nodeCount + 63) / 64 + numThreads - 1) / numThreads;
+                    int chunkSize = wordChunks * 64;
+
+                    java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+                        int startV = t * chunkSize;
+                        int endV = Math.min(startV + chunkSize, nodeCount);
+                        for (int v = unvisitedBs.nextSetBit(startV); v >= 0 && v < endV; v = unvisitedBs.nextSetBit(v + 1)) {
+                            int start = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v);
+                            int end = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v + 1);
+                            for (int idx = start; idx < end; idx++) {
+                                int u = cscColIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                                if (frontierBs.get(u)) {
+                                    outBs.set(v);
+                                    break;
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    for (int v = unvisitedBs.nextSetBit(0); v >= 0; v = unvisitedBs.nextSetBit(v + 1)) {
+                        int start = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v);
+                        int end = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v + 1);
+                        for (int idx = start; idx < end; idx++) {
+                            int u = cscColIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                            if (frontierBs.get(u)) {
+                                outBs.set(v);
                                 break;
                             }
                         }
                     }
                 }
+            }
+        } else {
+            // Standard CSC Walk Mode
+            byte srcType = getRegisterType(state, frontierReg);
+            long srcVal = getRegisterValue(state, frontierReg);
+            if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
+                rel.copyInTargetsSimd((int) srcVal, outBs);
             } else if (srcType == TYPE_BITSET_HANDLE) {
                 BitSet inBs = ctx.getBitset((int) srcVal);
                 if (inBs != null) {
                     for (int v = inBs.nextSetBit(0); v >= 0; v = inBs.nextSetBit(v + 1)) {
-                        for (int u = 0; u < rel.getNodeCount(); u++) {
-                            int[] targets = rel.getTargets(u);
-                            if (targets != null) {
-                                for (int t : targets) {
-                                    if (t == v) {
-                                        outBs.set(u);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
+                        rel.copyInTargetsSimd(v, outBs);
                     }
                 }
             }
@@ -221,6 +245,178 @@ public final class VmHandlers {
 
         setRegister(state, instr.dstReg(), outHandle, TYPE_BITSET_HANDLE);
         setFlag(state, FLAG_ZF, outBs.isEmpty());
+    }
+
+    public static void handleCcAfforest(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int relId = instr.payload() & 0xFFFF;
+        RelationSnapshot rel = resolveRelation(ctx, relId);
+        if (rel == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+        }
+
+        int nodeCount = rel.getNodeCount();
+        java.util.concurrent.atomic.AtomicIntegerArray comp = new java.util.concurrent.atomic.AtomicIntegerArray(nodeCount);
+
+        MemorySegment rowOff = rel.getRowOffsetsSegment();
+        MemorySegment colIdx = rel.getColumnTargetsSegment();
+
+        int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
+        int chunkSize = (nodeCount + numThreads - 1) / numThreads;
+
+        // Parallel Initialization
+        java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+            int startU = t * chunkSize;
+            int endU = Math.min(startU + chunkSize, nodeCount);
+            for (int u = startU; u < endU; u++) comp.set(u, u);
+        });
+
+        // 1. 2-Neighbor sampling pass
+        for (int r = 0; r < 2; r++) {
+            final int neighborIdx = r;
+            java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+                int startU = t * chunkSize;
+                int endU = Math.min(startU + chunkSize, nodeCount);
+                for (int u = startU; u < endU; u++) {
+                    int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+                    int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+                    int deg = end - start;
+                    if (neighborIdx < deg) {
+                        int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + neighborIdx);
+                        if (v < nodeCount) unionCcNodesAtomic(comp, u, v);
+                    }
+                }
+            });
+        }
+
+        // 2. Identify Giant Component Root
+        int sampleN = Math.min(nodeCount, 100_000);
+        int[] counts = new int[Math.min(sampleN, 1024)];
+        int giantRoot = 0;
+        int maxCount = 0;
+        for (int i = 0; i < counts.length; i++) {
+            int u = (int) ((i * 9973L) % nodeCount);
+            counts[i] = findCcRootAtomic(comp, u);
+        }
+        for (int i = 0; i < counts.length; i++) {
+            int root = counts[i];
+            int cnt = 0;
+            for (int j = 0; j < counts.length; j++) {
+                if (counts[j] == root) cnt++;
+            }
+            if (cnt > maxCount) {
+                maxCount = cnt;
+                giantRoot = root;
+            }
+        }
+
+        // 3. Parallel Full CSR Edge Processing (skipping giant component)
+        final int gRoot = giantRoot;
+        java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+            int startU = t * chunkSize;
+            int endU = Math.min(startU + chunkSize, nodeCount);
+            for (int u = startU; u < endU; u++) {
+                if (findCcRootAtomic(comp, u) != gRoot) {
+                    int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+                    int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+                    for (int idx = start; idx < end; idx++) {
+                        int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                        if (v < nodeCount) unionCcNodesAtomic(comp, u, v);
+                    }
+                }
+            }
+        });
+
+        // 4. Parallel Path Compression
+        int[] resultComp = new int[nodeCount];
+        java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+            int startU = t * chunkSize;
+            int endU = Math.min(startU + chunkSize, nodeCount);
+            for (int u = startU; u < endU; u++) {
+                resultComp[u] = findCcRootAtomic(comp, u);
+            }
+        });
+
+        int outHandle = ctx.acquireNodeVector(resultComp);
+        setRegister(state, instr.dstReg(), outHandle, TYPE_NODE_VECTOR);
+        setFlag(state, FLAG_ZF, false);
+    }
+
+    private static int findCcRootAtomic(java.util.concurrent.atomic.AtomicIntegerArray comp, int curr) {
+        while (curr != comp.get(curr)) {
+            int parent = comp.get(curr);
+            int grandParent = comp.get(parent);
+            comp.compareAndSet(curr, parent, grandParent);
+            curr = grandParent;
+        }
+        return curr;
+    }
+
+    private static void unionCcNodesAtomic(java.util.concurrent.atomic.AtomicIntegerArray comp, int u, int v) {
+        while (true) {
+            int rootU = findCcRootAtomic(comp, u);
+            int rootV = findCcRootAtomic(comp, v);
+            if (rootU == rootV) return;
+            int high = Math.min(rootU, rootV);
+            int low = Math.max(rootU, rootV);
+            if (comp.compareAndSet(low, low, high)) break;
+        }
+    }
+
+    public static void handleMxv(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int xReg = instr.payload() & 0xFFFF;
+        int relId = (instr.payload() >> 16) & 0xFFFF;
+
+        RelationSnapshot rel = resolveRelation(ctx, relId);
+        if (rel == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+        }
+
+        int nodeCount = rel.getNodeCount();
+        float[] x = ctx.getFloatVector((int) getRegisterValue(state, xReg));
+        if (x == null || x.length < nodeCount) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_VECTOR");
+        }
+
+        int outHandle = ctx.acquireFloatVector(nodeCount);
+        float[] y = ctx.getFloatVector(outHandle);
+
+        MemorySegment rowOff = rel.getRowOffsetsSegment();
+        MemorySegment colIdx = rel.getColumnTargetsSegment();
+
+        int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
+        int chunkSize = (nodeCount + numThreads - 1) / numThreads;
+
+        // Parallel Zero-Allocation 4-Wide Unrolled SpMV: y[u] = sum(x[v] for v in neighbors(u))
+        java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+            int startU = t * chunkSize;
+            int endU = Math.min(startU + chunkSize, nodeCount);
+
+            for (int u = startU; u < endU; u++) {
+                int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+                int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+                int count = end - start;
+
+                float sum = 0.0f;
+                int idx = start;
+                int end4 = start + ((count >> 2) << 2);
+
+                for (; idx < end4; idx += 4) {
+                    int v0 = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                    int v1 = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx + 1);
+                    int v2 = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx + 2);
+                    int v3 = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx + 3);
+                    sum += x[v0] + x[v1] + x[v2] + x[v3];
+                }
+                for (; idx < end; idx++) {
+                    int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                    sum += x[v];
+                }
+                y[u] = sum;
+            }
+        });
+
+        setRegister(state, instr.dstReg(), outHandle, TYPE_FLOAT_VECTOR);
+        setFlag(state, FLAG_ZF, false);
     }
 
     public static void handleHasCsr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -253,15 +449,14 @@ public final class VmHandlers {
     }
 
     public static void handleCsrDegree(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        int relId = instr.payload() & 0xFFFF;
-        int srcReg = (instr.payload() >> 16) & 0xFFFF;
+        int srcReg = instr.payload() & 0xFFFF;
+        int relId = (instr.payload() >> 16) & 0xFFFF;
         long u = getRegisterValue(state, srcReg);
 
         RelationSnapshot rel = resolveRelation(ctx, relId);
         long degree = 0;
         if (rel != null && u >= 0 && u < rel.getNodeCount()) {
-            int[] targets = rel.getTargets((int) u);
-            degree = (targets != null) ? targets.length : 0;
+            degree = rel.getDegree((int) u);
         }
 
         setRegister(state, instr.dstReg(), degree, TYPE_INT64);
@@ -414,9 +609,13 @@ public final class VmHandlers {
             BitSet bsSrc = ctx.getBitset((int) srcVal);
             BitSet bsDst = ctx.getBitset((int) dstVal);
             if (bsSrc != null && bsDst != null) {
-                BitSet diff = (BitSet) bsSrc.clone();
-                diff.andNot(bsDst);
-                isSubset = diff.isEmpty();
+                isSubset = true;
+                for (int i = bsSrc.nextSetBit(0); i >= 0; i = bsSrc.nextSetBit(i + 1)) {
+                    if (!bsDst.get(i)) {
+                        isSubset = false;
+                        break;
+                    }
+                }
             }
         } else if (srcType != TYPE_BITSET_HANDLE && dstType == TYPE_BITSET_HANDLE) {
             BitSet bsDst = ctx.getBitset((int) dstVal);
@@ -435,15 +634,14 @@ public final class VmHandlers {
             srcReg = instr.dstReg();
         }
         byte typeTag = getRegisterType(state, srcReg);
-        BitSet outBs = new BitSet();
+        int outHandle = ctx.acquireBitset();
+        BitSet outBs = ctx.getBitset(outHandle);
         if (typeTag == TYPE_BITSET_HANDLE) {
             BitSet bs = ctx.getBitset((int) getRegisterValue(state, srcReg));
-            if (bs != null) outBs.or(bs);
+            if (bs != null && bs != outBs) outBs.or(bs);
         } else if (typeTag == TYPE_NODE_ID || typeTag == TYPE_INT64) {
             outBs.set((int) getRegisterValue(state, srcReg));
         }
-        int outHandle = ctx.acquireBitset();
-        ctx.getBitset(outHandle).or(outBs);
         setRegister(state, instr.dstReg(), outHandle, TYPE_BITSET_HANDLE);
         return outBs;
     }
@@ -487,12 +685,21 @@ public final class VmHandlers {
         if (rel != null) {
             BitSet inBs = ctx.getBitset((int) getRegisterValue(state, srcReg));
             if (inBs != null) {
+                MemorySegment rowOff = rel.getRowOffsetsSegment();
+                MemorySegment colIdx = rel.getColumnTargetsSegment();
+                int nodeCount = rel.getNodeCount();
+
                 for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
-                    int[] targetsU = rel.getTargets(u);
-                    for (int v : targetsU) {
-                        if (v > u) {
-                            int[] targetsV = rel.getTargets(v);
-                            triangleCount += countIntersection(targetsU, targetsV);
+                    if (u >= nodeCount) continue;
+                    int startU = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+                    int endU = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+
+                    for (int i = startU; i < endU; i++) {
+                        int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+                        if (v > u && v < nodeCount) {
+                            int startV = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v);
+                            int endV = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v + 1);
+                            triangleCount += countOffHeapIntersection(colIdx, startU, endU, startV, endV);
                         }
                     }
                 }
@@ -502,14 +709,21 @@ public final class VmHandlers {
         setFlag(state, FLAG_ZF, triangleCount == 0);
     }
 
-    private static long countIntersection(int[] a, int[] b) {
-        if (a == null || b == null || a.length == 0 || b.length == 0) return 0;
+    private static long countOffHeapIntersection(MemorySegment colIdx, int startA, int endA, int startB, int endB) {
         long count = 0;
-        int i = 0, j = 0;
-        while (i < a.length && j < b.length) {
-            if (a[i] == b[j]) { count++; i++; j++; }
-            else if (a[i] < b[j]) { i++; }
-            else { j++; }
+        int i = startA, j = startB;
+        while (i < endA && j < endB) {
+            int valA = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+            int valB = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, j);
+            if (valA == valB) {
+                count++;
+                i++;
+                j++;
+            } else if (valA < valB) {
+                i++;
+            } else {
+                j++;
+            }
         }
         return count;
     }
@@ -656,7 +870,7 @@ public final class VmHandlers {
     }
 
     public static void handleNodeFilter(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        int srcReg = (instr.payload() >> 16) & 0xFFFF;
+        int srcReg = instr.payload() & 0xFFFF;
         int dstReg = instr.dstReg();
         byte type = getRegisterType(state, srcReg);
         if (type == TYPE_BITSET_HANDLE) {
@@ -675,7 +889,7 @@ public final class VmHandlers {
     }
 
     public static void handleVectorMulAttr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        int srcReg = (instr.payload() >> 16) & 0xFFFF;
+        int srcReg = instr.payload() & 0xFFFF;
         int dstReg = instr.dstReg();
         byte type = getRegisterType(state, srcReg);
 
@@ -721,8 +935,8 @@ public final class VmHandlers {
 
     public static void handleLoadIndirect(MemorySegment state, VmQueryContext ctx, Instruction instr) {
         int dst = instr.dstReg();
-        int srcParam = (instr.payload() >> 16) & 0xFFFF;
-        int idxReg = instr.payload() & 0xFFFF;
+        int srcParam = instr.payload() & 0xFFFF;
+        int idxReg = (instr.payload() >> 16) & 0xFFFF;
 
         if (instr.flags() == 0) {
             long targetRegIdx = getRegisterValue(state, srcParam);
@@ -745,17 +959,53 @@ public final class VmHandlers {
     }
 
     public static void handleLoadInlineArray(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        MemorySegment inlineSeg = ctx.inlineDataSegment();
+        if (inlineSeg == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+        }
+
         int dst = instr.dstReg();
-        int handle = ctx.acquireFloatVector(1024);
+        int payload = instr.payload();
+        int offset = payload & 0xFFFF;
+        int count = (payload >> 16) & 0xFFFF;
+
+        float[] vec = new float[count];
+        java.lang.foreign.ValueLayout.OfFloat layoutFloat = java.lang.foreign.ValueLayout.JAVA_FLOAT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < count; i++) {
+            vec[i] = inlineSeg.get(layoutFloat, offset + i * 4L);
+        }
+
+        int handle = ctx.registerFloatVector(vec);
         setRegister(state, dst, handle, TYPE_FLOAT_VECTOR);
     }
 
     public static void handleInitMockGraph(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        Map<String, RelationSnapshot> relations = new HashMap<>();
-        int[] offsets = new int[] { 0, 2, 4, 5, 5 };
-        int[] targets = new int[] { 1, 2, 2, 3, 3 };
-        RelationSnapshot rel = new RelationSnapshot(Arena.ofAuto(), 4, 5, offsets, targets);
+        MemorySegment inlineSeg = ctx.inlineDataSegment();
+        if (inlineSeg == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+        }
+
+        int payload = instr.payload();
+        int offset = payload & 0xFFFF;
+        int nodeCount = (payload >> 16) & 0xFFFF;
+
+        int[] offsets = new int[nodeCount + 1];
+        java.lang.foreign.ValueLayout.OfInt layoutInt = java.lang.foreign.ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i <= nodeCount; i++) {
+            offsets[i] = inlineSeg.get(layoutInt, offset + i * 4L);
+        }
+
+        int numTargets = offsets[nodeCount];
+        int[] targets = new int[numTargets];
+        long targetsOffset = offset + (nodeCount + 1) * 4L;
+        for (int i = 0; i < numTargets; i++) {
+            targets[i] = inlineSeg.get(layoutInt, targetsOffset + i * 4L);
+        }
+
+        RelationSnapshot rel = new RelationSnapshot(Arena.ofAuto(), nodeCount, numTargets, offsets, targets);
         rel.setCscSegments(rel.getRowOffsetsSegment(), rel.getColumnTargetsSegment());
+
+        Map<String, RelationSnapshot> relations = new HashMap<>();
         for (int r = 0; r < 16; r++) {
             relations.put("rel_" + r, rel);
         }
