@@ -40,21 +40,32 @@ public class RelationSnapshot implements AutoCloseable {
 
     private final java.util.List<MemorySegment> attributeSegments = new java.util.ArrayList<>();
 
+    public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment, java.util.List<MemorySegment> attributeSegments) {
+        this(arena, nodeCount, edgeCount, rowOffsetsSegment, columnTargetsSegment, MemorySegment.NULL, MemorySegment.NULL, attributeSegments);
+    }
+
     public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment) {
         this(arena, nodeCount, edgeCount, rowOffsetsSegment, columnTargetsSegment, java.util.Collections.emptyList());
     }
 
-    public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment, java.util.List<MemorySegment> attributeSegments) {
+    public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment, MemorySegment cscRowOffsetsSegment, MemorySegment cscColumnTargetsSegment, java.util.List<MemorySegment> attributeSegments) {
         this.arena = Objects.requireNonNull(arena, "arena must not be null");
         this.nodeCount = nodeCount;
         this.edgeCount = edgeCount;
         this.rowOffsetsSegment = Objects.requireNonNull(rowOffsetsSegment, "rowOffsetsSegment must not be null");
         this.columnTargetsSegment = Objects.requireNonNull(columnTargetsSegment, "columnTargetsSegment must not be null");
+        this.cscRowOffsetsSegment = cscRowOffsetsSegment != null ? cscRowOffsetsSegment : MemorySegment.NULL;
+        this.cscColumnTargetsSegment = cscColumnTargetsSegment != null ? cscColumnTargetsSegment : MemorySegment.NULL;
+        this.cscPresent = !this.cscRowOffsetsSegment.equals(MemorySegment.NULL) && !this.cscColumnTargetsSegment.equals(MemorySegment.NULL);
         this.rowOffsetsData = null;
         this.columnIndicesData = null;
         if (attributeSegments != null) {
             this.attributeSegments.addAll(attributeSegments);
         }
+    }
+
+    public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment, MemorySegment cscRowOffsetsSegment, MemorySegment cscColumnTargetsSegment) {
+        this(arena, nodeCount, edgeCount, rowOffsetsSegment, columnTargetsSegment, cscRowOffsetsSegment, cscColumnTargetsSegment, java.util.Collections.emptyList());
     }
 
     private boolean cscPresent = false;
@@ -64,11 +75,19 @@ public class RelationSnapshot implements AutoCloseable {
     public void setCscSegments(MemorySegment rowOffsets, MemorySegment columnTargets) {
         this.cscRowOffsetsSegment = rowOffsets;
         this.cscColumnTargetsSegment = columnTargets;
-        this.cscPresent = true;
+        this.cscPresent = (rowOffsets != null && !rowOffsets.equals(MemorySegment.NULL) && columnTargets != null && !columnTargets.equals(MemorySegment.NULL));
     }
 
     public boolean hasCsc() {
-        return cscPresent || (cscRowOffsetsSegment != null && !cscRowOffsetsSegment.equals(MemorySegment.NULL));
+        return cscPresent && (cscRowOffsetsSegment != null && !cscRowOffsetsSegment.equals(MemorySegment.NULL)) && (cscColumnTargetsSegment != null && !cscColumnTargetsSegment.equals(MemorySegment.NULL));
+    }
+
+    public MemorySegment getCscRowOffsetsSegment() {
+        return cscRowOffsetsSegment;
+    }
+
+    public MemorySegment getCscColumnTargetsSegment() {
+        return cscColumnTargetsSegment;
     }
 
     public boolean hasCsr() {
@@ -136,6 +155,32 @@ public class RelationSnapshot implements AutoCloseable {
         if (len <= 0) return new int[0];
         int[] targets = new int[len];
         MemorySegment.copy(columnTargetsSegment, ValueLayout.JAVA_INT_UNALIGNED, (long) start * 4, targets, 0, len);
+        return targets;
+    }
+
+    /**
+     * Gets the in-degree for a specific destination node ID zero-copy directly from off-heap memory.
+     */
+    public int getInDegree(int nodeId) {
+        if (nodeId < 0 || nodeId >= nodeCount) return 0;
+        if (cscRowOffsetsSegment == null || cscRowOffsetsSegment.equals(MemorySegment.NULL)) return 0;
+        int start = cscRowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeId);
+        int end = cscRowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeId + 1);
+        return end - start;
+    }
+
+    /**
+     * Returns the array slice of incoming source node IDs for a specific destination node ID zero-copy from off-heap memory.
+     */
+    public int[] getInTargets(int nodeId) {
+        if (nodeId < 0 || nodeId >= nodeCount) return new int[0];
+        if (cscRowOffsetsSegment == null || cscRowOffsetsSegment.equals(MemorySegment.NULL)) return new int[0];
+        int start = cscRowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeId);
+        int end = cscRowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeId + 1);
+        int len = end - start;
+        if (len <= 0) return new int[0];
+        int[] targets = new int[len];
+        MemorySegment.copy(cscColumnTargetsSegment, ValueLayout.JAVA_INT_UNALIGNED, (long) start * 4, targets, 0, len);
         return targets;
     }
 

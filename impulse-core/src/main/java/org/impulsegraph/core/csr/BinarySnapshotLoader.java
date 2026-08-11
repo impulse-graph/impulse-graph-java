@@ -382,6 +382,13 @@ public final class BinarySnapshotLoader {
                         ? segment.asSlice(csrColIdxOffset, csrColIdxBytes)
                         : MemorySegment.NULL;
 
+                MemorySegment cscOffsetsSeg = (cscRowOffOffset > 0 && cscRowOffOffset + cscRowOffBytes <= segSize)
+                        ? segment.asSlice(cscRowOffOffset, cscRowOffBytes)
+                        : MemorySegment.NULL;
+                MemorySegment cscTargetsSeg = (cscColIdxOffset > 0 && cscColIdxOffset + cscColIdxBytes <= segSize)
+                        ? segment.asSlice(cscColIdxOffset, cscColIdxBytes)
+                        : MemorySegment.NULL;
+
                 List<MemorySegment> attrSegments = new ArrayList<>();
                 for (LoadedAttribute attr : attributes) {
                     if (attr.dataOffset() > 0 && attr.dataOffset() + attr.dataBytes() <= segSize) {
@@ -392,7 +399,7 @@ public final class BinarySnapshotLoader {
                 }
 
                 RelationSnapshot relSnap = new RelationSnapshot(
-                        arena, (int) nodeCount, (int) edgeCount, offsetsSeg, targetsSeg, attrSegments
+                        arena, (int) nodeCount, (int) edgeCount, offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg, attrSegments
                 );
                 relationSnapshots.put(relName, relSnap);
                 relationSnapshots.putIfAbsent("rel_" + srcDomId + "_" + tgtDomId, relSnap);

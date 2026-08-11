@@ -122,9 +122,6 @@ public final class VmHandlers {
                 idx++;
             }
         }
-        if (rel != null && !rel.hasCsc()) {
-            rel.setCscSegments(rel.getRowOffsetsSegment(), rel.getColumnTargetsSegment());
-        }
         return rel;
     }
 
@@ -185,35 +182,19 @@ public final class VmHandlers {
         int outHandle = ctx.acquireBitset();
         BitSet outBs = ctx.getBitset(outHandle);
 
-        if (rel != null) {
-            if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
-                int targetV = (int) srcVal;
-                for (int u = 0; u < rel.getNodeCount(); u++) {
-                    int[] targets = rel.getTargets(u);
-                    if (targets != null) {
-                        for (int t : targets) {
-                            if (t == targetV) {
-                                outBs.set(u);
-                                break;
-                            }
-                        }
-                    }
-                }
-            } else if (srcType == TYPE_BITSET_HANDLE) {
-                BitSet inBs = ctx.getBitset((int) srcVal);
-                if (inBs != null) {
-                    for (int v = inBs.nextSetBit(0); v >= 0; v = inBs.nextSetBit(v + 1)) {
-                        for (int u = 0; u < rel.getNodeCount(); u++) {
-                            int[] targets = rel.getTargets(u);
-                            if (targets != null) {
-                                for (int t : targets) {
-                                    if (t == v) {
-                                        outBs.set(u);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
+        if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
+            int targetV = (int) srcVal;
+            int[] inTargets = rel.getInTargets(targetV);
+            for (int u : inTargets) {
+                outBs.set(u);
+            }
+        } else if (srcType == TYPE_BITSET_HANDLE) {
+            BitSet inBs = ctx.getBitset((int) srcVal);
+            if (inBs != null) {
+                for (int v = inBs.nextSetBit(0); v >= 0; v = inBs.nextSetBit(v + 1)) {
+                    int[] inTargets = rel.getInTargets(v);
+                    for (int u : inTargets) {
+                        outBs.set(u);
                     }
                 }
             }
