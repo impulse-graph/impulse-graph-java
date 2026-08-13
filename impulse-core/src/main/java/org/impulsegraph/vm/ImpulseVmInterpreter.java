@@ -69,6 +69,11 @@ public final class ImpulseVmInterpreter {
                         pc++;
                     }
 
+                    case OP_ADAPTIVE_WALK -> {
+                        VmHandlers.handleAdaptiveWalk(state, ctx, instr);
+                        pc++;
+                    }
+
                     case OP_CSR_DEGREE -> {
                         VmHandlers.handleCsrDegree(state, ctx, instr);
                         pc++;

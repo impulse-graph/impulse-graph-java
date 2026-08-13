@@ -82,11 +82,8 @@ public class BfsVmJmhBenchmark {
 
             long t0Total = System.nanoTime();
 
-            // Setup VM Program Instructions
-            // TD PUSH INSTR: OP_CSR_WALK dst=4, payload=(2 | (0 << 16)) [Frontier R2, Rel 0, Dst R4]
-            VmHandlers.Instruction tdInstr = new VmHandlers.Instruction(VmRegisterType.OP_CSR_WALK, (byte) 0, 4, 2 | (0 << 16));
-            // BU PULL INSTR: OP_CSC_WALK dst=4, payload=(2 | (3 << 16) | (0 << 24)) [Frontier R2, Unvisited R3, Rel 0, Dst R4]
-            VmHandlers.Instruction buInstr = new VmHandlers.Instruction(VmRegisterType.OP_CSC_WALK, (byte) 0, 4, 2 | (3 << 16) | (0 << 24));
+            // ADAPTIVE WALK INSTR: OP_ADAPTIVE_WALK dst=4, payload=(2 | (3 << 16) | (0 << 24)) [Frontier R2, Unvisited R3, Rel 0, Dst R4]
+            VmHandlers.Instruction adaptiveInstr = new VmHandlers.Instruction(VmRegisterType.OP_ADAPTIVE_WALK, (byte) 0, 4, 2 | (3 << 16) | (0 << 24));
 
             while (frontierSize > 0) {
                 nextFrontier.clear();
@@ -105,33 +102,19 @@ public class BfsVmJmhBenchmark {
                     VmHandlers.setRegister(state, 2, hFrontier, VmRegisterType.TYPE_BITSET_HANDLE);
                     VmHandlers.setRegister(state, 3, hUnvisited, VmRegisterType.TYPE_BITSET_HANDLE);
 
-                    if (frontierSize > 500_000) {
-                        // Bottom-Up (Pull) Step via handleCscWalk
-                        long t0Pull = System.nanoTime();
-                        VmHandlers.handleCscWalk(state, ctx, buInstr);
-                        totalPullNs += (System.nanoTime() - t0Pull);
+                    long t0Walk = System.nanoTime();
+                    VmHandlers.handleAdaptiveWalk(state, ctx, adaptiveInstr);
+                    totalPushNs += (System.nanoTime() - t0Walk);
 
-                        int hNext = (int) VmHandlers.getRegisterValue(state, 4);
-                        ImpulseBitSet stepResult = ctx.getBitset(hNext);
-                        if (stepResult != null) nextFrontier.or(stepResult);
-                        pullSteps++;
-                    } else {
-                        // Top-Down (Push) Step via handleCsrWalk
-                        long t0Push = System.nanoTime();
-                        VmHandlers.handleCsrWalk(state, ctx, tdInstr);
-                        totalPushNs += (System.nanoTime() - t0Push);
+                    int hNext = (int) VmHandlers.getRegisterValue(state, 4);
+                    ImpulseBitSet stepResult = ctx.getBitset(hNext);
 
-                        int hNext = (int) VmHandlers.getRegisterValue(state, 4);
-                        ImpulseBitSet stepResult = ctx.getBitset(hNext);
-
-                        long t0Set = System.nanoTime();
-                        if (stepResult != null) {
-                            stepResult.andNot(visited);
-                            nextFrontier.or(stepResult);
-                        }
-                        totalSetOpsNs += (System.nanoTime() - t0Set);
-                        pushSteps++;
+                    long t0Set = System.nanoTime();
+                    if (stepResult != null) {
+                        stepResult.andNot(visited);
+                        nextFrontier.or(stepResult);
                     }
+                    totalSetOpsNs += (System.nanoTime() - t0Set);
                 }
 
                 long t0Set = System.nanoTime();

@@ -255,6 +255,47 @@ public final class VmHandlers {
         setFlag(state, FLAG_ZF, outBs.isEmpty());
     }
 
+    public static void handleAdaptiveWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int frontierReg = instr.payload() & 0xFFFF;
+        int unvisitedReg = (instr.payload() >> 16) & 0xFFFF;
+        int relId = (instr.payload() >> 24) & 0xFF;
+
+        RelationSnapshot rel = resolveRelation(ctx, relId);
+        if (rel == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+        }
+
+        if (unvisitedReg != 0 && rel.hasCsc()) {
+            ImpulseBitSet frontierBs = ctx.getBitset((int) getRegisterValue(state, frontierReg));
+            if (frontierBs != null) {
+                long frontierSize = frontierBs.cardinality();
+                org.impulsegraph.api.stats.RelationStatistics stats = rel.getStatistics();
+
+                long estimatedFrontierEdges = frontierSize * (long) Math.max(1.0, stats.getAvgDegree());
+                long pullThreshold = stats.getEdgeCount() / 80;
+                boolean shouldUsePull = estimatedFrontierEdges > pullThreshold || frontierSize > (stats.getNodeCount() / 80);
+
+                if (!shouldUsePull && frontierSize > 50_000 && stats.getSupernodeBitSet() != null && !stats.getSupernodeBitSet().isEmpty()) {
+                    ImpulseBitSet supernodes = stats.getSupernodeBitSet();
+                    for (int s = supernodes.nextSetBit(0); s >= 0; s = supernodes.nextSetBit(s + 1)) {
+                        if (frontierBs.get(s)) {
+                            shouldUsePull = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (shouldUsePull) {
+                    handleCscWalk(state, ctx, instr);
+                    return;
+                }
+            }
+        }
+
+        Instruction csrInstr = new Instruction(instr.opcode(), instr.flags(), instr.dstReg(), frontierReg | (relId << 16));
+        handleCsrWalk(state, ctx, csrInstr);
+    }
+
     public static void handleCcAfforest(MemorySegment state, VmQueryContext ctx, Instruction instr) {
         int relId = instr.payload() & 0xFFFF;
         RelationSnapshot rel = resolveRelation(ctx, relId);

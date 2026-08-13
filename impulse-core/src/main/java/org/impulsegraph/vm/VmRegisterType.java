@@ -69,6 +69,7 @@ public final class VmRegisterType {
     public static final byte OP_CSR_WALK_REDUCE_SUM    = (byte) 0x16;
     public static final byte OP_CSR_WALK_REDUCE        = (byte) 0x17;
     public static final byte OP_CSC_WALK               = (byte) 0x18;
+    public static final byte OP_ADAPTIVE_WALK          = (byte) 0x19;
 
     public static final byte OP_RESERVED_1D            = (byte) 0x1D;
     public static final byte OP_RESERVED_1E            = (byte) 0x1E;
