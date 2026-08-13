@@ -158,8 +158,8 @@ public final class VmHandlers {
                 ImpulseBitSet inBs = ctx.getBitset((int) srcVal);
                 if (inBs != null) {
                     long card = inBs.cardinality();
-                    if (card >= 5_000) {
-                        int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
+                    int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
+                    if (card >= 5_000 && numThreads > 1) {
                         java.util.concurrent.atomic.AtomicInteger nextChunk = new java.util.concurrent.atomic.AtomicInteger(0);
                         int nodeCount = rel.getNodeCount();
                         final int chunkSize = 1024;
@@ -226,9 +226,9 @@ public final class VmHandlers {
                 MemorySegment cscColIdx = rel.getCscColumnTargetsSegment();
                 int nodeCount = rel.getNodeCount();
 
+                int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
                 int unvisitedCount = (int) unvisitedBs.cardinality();
-                if (unvisitedCount >= 10_000 && nodeCount >= 10_000) {
-                    int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
+                if (unvisitedCount >= 10_000 && nodeCount >= 10_000 && numThreads > 1) {
                     java.util.concurrent.atomic.AtomicInteger nextChunk = new java.util.concurrent.atomic.AtomicInteger(0);
                     final int chunkSize = 1024; // Dynamic chunk size to prevent thread stalls on supernodes
 
