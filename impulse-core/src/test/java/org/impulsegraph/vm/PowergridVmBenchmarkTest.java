@@ -9,7 +9,8 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -161,8 +162,8 @@ public class PowergridVmBenchmarkTest {
 
                 int h1 = ctx.acquireBitset();
                 int h2 = ctx.acquireBitset();
-                BitSet bs1 = ctx.getBitset(h1);
-                BitSet bs2 = ctx.getBitset(h2);
+                ImpulseBitSet bs1 = ctx.getBitset(h1);
+                ImpulseBitSet bs2 = ctx.getBitset(h2);
 
                 for (int i = 0; i < 200; i++) {
                     bs1.set(i);

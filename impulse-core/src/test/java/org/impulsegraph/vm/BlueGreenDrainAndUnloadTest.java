@@ -10,7 +10,8 @@ import org.junit.jupiter.api.Test;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -68,7 +69,7 @@ public class BlueGreenDrainAndUnloadTest {
         RelationSnapshot relB = new RelationSnapshot(arenaB, 2, 1, offsetsB, targetsB);
         GraphSnapshot snapshotB = new GraphSnapshot(arenaB, Map.of("userToGroup", relB));
 
-        ImpulseGraphQuery<BitSet> query = ImpulseGraphQuery.<BitSet>builder()
+        ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()
                 .input("USER", ArgType.SINGLE_NODE)
                 .walkEdge("userToGroup")
                 .collect(ReturnType.ROARING_BITSET);
@@ -88,7 +89,7 @@ public class BlueGreenDrainAndUnloadTest {
                     while (running.get()) {
                         Object res = compiled.execute(null, 0, queryCompilerArena);
                         assertNotNull(res);
-                        assertTrue(res instanceof BitSet);
+                        assertTrue(res instanceof ImpulseBitSet);
                     }
                 } catch (Exception e) {
                     fail("Query execution failed during blue/green swap: " + e.getMessage());
@@ -118,7 +119,7 @@ public class BlueGreenDrainAndUnloadTest {
         assertFalse(arenaA.scope().isAlive(), "Snapshot A arena MUST be closed");
 
         // Verify Snapshot B continues to operate cleanly
-        BitSet finalRes = (BitSet) compiled.execute(snapshotB, 0, queryCompilerArena);
+        ImpulseBitSet finalRes = (ImpulseBitSet) compiled.execute(snapshotB, 0, queryCompilerArena);
         assertTrue(finalRes.get(20), "Final query on Snapshot B must reach target 20");
 
         snapshotB.drainAndClose(2, TimeUnit.SECONDS);

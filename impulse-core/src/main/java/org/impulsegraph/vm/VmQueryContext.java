@@ -5,6 +5,8 @@ import org.impulsegraph.core.csr.GraphSnapshot;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.util.*;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 /**
  * Runtime Execution Context for Impulse VM.
@@ -18,8 +20,8 @@ public final class VmQueryContext implements AutoCloseable {
     private long inlineDataBytes = 0;
 
     // Bitset Pool
-    private final List<BitSet> bitsets = new ArrayList<>();
-    private final BitSet freeBitsetHandles = new BitSet();
+    private final List<ImpulseBitSet> bitsets = new ArrayList<>();
+    private final java.util.BitSet freeBitsetHandles = new java.util.BitSet();
 
     // Vector Pools
     private final List<int[]> intVectors = new ArrayList<>();
@@ -123,26 +125,37 @@ public final class VmQueryContext implements AutoCloseable {
 
     // --- Bitset Management ---
 
+    private int getMaxNodeCount(GraphSnapshot snap) {
+        if (snap == null || snap.getAllRelationSnapshots().isEmpty()) return 1024 * 1024;
+        int max = 0;
+        for (org.impulsegraph.core.csr.RelationSnapshot rel : snap.getAllRelationSnapshots().values()) {
+            max = Math.max(max, rel.getNodeCount());
+        }
+        return max;
+    }
+
     public int acquireBitset() {
         int handle = freeBitsetHandles.nextSetBit(0);
         if (handle >= 0) {
             freeBitsetHandles.clear(handle);
-            bitsets.get(handle).clear();
+            ImpulseBitSet bs = bitsets.get(handle);
+            if (bs != null) bs.clear();
             return handle;
         }
         int newHandle = bitsets.size();
-        bitsets.add(new BitSet());
+        bitsets.add(new OffHeapBitSet(arena, getMaxNodeCount(snapshot)));
         return newHandle;
     }
 
     public void releaseBitset(int handle) {
         if (handle >= 0 && handle < bitsets.size()) {
-            bitsets.get(handle).clear();
+            ImpulseBitSet bs = bitsets.get(handle);
+            if (bs != null) bs.clear();
             freeBitsetHandles.set(handle);
         }
     }
 
-    public BitSet getBitset(int handle) {
+    public ImpulseBitSet getBitset(int handle) {
         if (handle >= 0 && handle < bitsets.size()) {
             return bitsets.get(handle);
         }

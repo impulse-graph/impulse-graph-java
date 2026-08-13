@@ -9,7 +9,8 @@ import java.lang.foreign.MemorySegment;
 import java.lang.invoke.MethodHandle;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 import static org.impulsegraph.vm.VmRegisterType.*;
 import static org.impulsegraph.vm.VmStateLayout.*;
@@ -19,7 +20,7 @@ import static org.impulsegraph.vm.VmStateLayout.*;
  */
 public class TwitterBfsRunner {
 
-    private static final Path TWITTER_SNAPSHOT_PATH = Path.of("/Users/jesse/impulse/datasets/twitter-2010/twitter-2010.imps");
+    private static final Path TWITTER_SNAPSHOT_PATH = Path.of("/Users/jesse/impulse/datasets/twitter-2010/twitter-2010.csc.imps");
 
     public static void main(String[] args) throws Throwable {
         long t0Startup = System.nanoTime();
@@ -80,7 +81,7 @@ public class TwitterBfsRunner {
             Object interpResult = ImpulseVmInterpreter.execute(prog, 5, graph, 0, arena);
             double interpTimeMs = (System.nanoTime() - t0Interp) / 1_000_000.0;
 
-            BitSet bsInterp = (BitSet) interpResult;
+            ImpulseBitSet bsInterp = (ImpulseBitSet) interpResult;
             System.out.println("\n--- GraalVM Native Image Interpreter Execution ---");
             System.out.printf("Execution Time:                    %.3f ms (%.1f us)%n", interpTimeMs, interpTimeMs * 1000.0);
             System.out.printf("2-Hop Visited Target Nodes:        %,d nodes%n", bsInterp.cardinality());
@@ -91,7 +92,7 @@ public class TwitterBfsRunner {
             Object mhResult = (Object) mh.invokeExact(graph, (Object) 0, arena);
             double mhTimeMs = (System.nanoTime() - t0Mh) / 1_000_000.0;
 
-            BitSet bsMh = (BitSet) mhResult;
+            ImpulseBitSet bsMh = (ImpulseBitSet) mhResult;
             System.out.println("\n--- GraalVM Native Image Pre-compiled MethodHandle Execution ---");
             System.out.printf("Execution Time:                    %.3f ms (%.1f us)%n", mhTimeMs, mhTimeMs * 1000.0);
             System.out.printf("2-Hop Visited Target Nodes:        %,d nodes%n", bsMh.cardinality());

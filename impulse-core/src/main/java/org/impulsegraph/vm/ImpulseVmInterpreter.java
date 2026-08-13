@@ -4,7 +4,8 @@ import org.impulsegraph.core.csr.GraphSnapshot;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 import static org.impulsegraph.vm.VmRegisterType.*;
 import static org.impulsegraph.vm.VmStateLayout.*;
@@ -19,7 +20,7 @@ public final class ImpulseVmInterpreter {
 
     public static Object execute(MemorySegment programSeg, long instructionCount, GraphSnapshot snapshot, Object input, Arena arena) {
         if (programSeg == null || instructionCount <= 0) {
-            return new BitSet();
+            return new OffHeapBitSet(arena, 1000);
         }
 
         try (VmQueryContext ctx = new VmQueryContext(snapshot, arena)) {
@@ -319,7 +320,7 @@ public final class ImpulseVmInterpreter {
                 }
             }
 
-            return (finalResult != null) ? finalResult : new BitSet();
+            return (finalResult != null) ? finalResult : new OffHeapBitSet(arena, 1000);
         }
     }
 }

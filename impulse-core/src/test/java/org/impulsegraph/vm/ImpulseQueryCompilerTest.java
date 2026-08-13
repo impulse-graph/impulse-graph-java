@@ -10,7 +10,8 @@ import org.junit.jupiter.api.Test;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -20,7 +21,7 @@ public class ImpulseQueryCompilerTest {
 
     @Test
     public void testAstTreeExportAndDisassemblyFormat() {
-        ImpulseGraphQuery<BitSet> query = ImpulseGraphQuery.<BitSet>builder()
+        ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()
                 .input("USER", ArgType.SINGLE_NODE)
                 .walkEdge("userToGroup")
                 .walkEdge("groupToRole")
@@ -65,7 +66,7 @@ public class ImpulseQueryCompilerTest {
             mapA.put("groupToRole", relG2r);
             GraphSnapshot snapshotA = new GraphSnapshot(arena, mapA);
 
-            ImpulseGraphQuery<BitSet> query = ImpulseGraphQuery.<BitSet>builder()
+            ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()
                     .input("USER", ArgType.SINGLE_NODE)
                     .walkEdge("userToGroup")
                     .walkEdge("groupToRole")
@@ -73,8 +74,8 @@ public class ImpulseQueryCompilerTest {
 
             // Execute compiled query via DefaultImpulseQueryEvaluator
             Object resultObj = query.execute(snapshotA, 0);
-            assertTrue(resultObj instanceof BitSet, "Result MUST be a BitSet");
-            BitSet result = (BitSet) resultObj;
+            assertTrue(resultObj instanceof ImpulseBitSet, "Result MUST be a ImpulseBitSet");
+            ImpulseBitSet result = (ImpulseBitSet) resultObj;
 
             assertEquals(2, result.cardinality(), "Must reach 2 target roles");
             assertTrue(result.get(100), "Must reach Role 100");
@@ -113,7 +114,7 @@ public class ImpulseQueryCompilerTest {
             mapB.put("userToGroup", relU2gB);
             GraphSnapshot snapshotB = new GraphSnapshot(arena, mapB);
 
-            ImpulseGraphQuery<BitSet> query = ImpulseGraphQuery.<BitSet>builder()
+            ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()
                     .input("USER", ArgType.SINGLE_NODE)
                     .walkEdge("userToGroup")
                     .walkEdge("groupToRole")
@@ -122,7 +123,7 @@ public class ImpulseQueryCompilerTest {
             ImpulseQueryCompiler.CompiledQuery compiled = ImpulseQueryCompiler.compile(query.getSteps(), snapshotA, arena);
 
             // Verify initial execution on Snapshot A
-            BitSet resA = (BitSet) compiled.execute(snapshotA, 0, arena);
+            ImpulseBitSet resA = (ImpulseBitSet) compiled.execute(snapshotA, 0, arena);
             assertTrue(resA.get(50), "Snapshot A must reach Role 50");
 
             // Perform Blue/Green Swap Re-bind to Snapshot B
@@ -130,7 +131,7 @@ public class ImpulseQueryCompilerTest {
             assertEquals(snapshotB, compiled.currentSnapshot());
 
             // Execute on Snapshot B after re-binding
-            BitSet resB = (BitSet) compiled.execute(snapshotB, 0, arena);
+            ImpulseBitSet resB = (ImpulseBitSet) compiled.execute(snapshotB, 0, arena);
             assertTrue(resB.get(50), "Snapshot B must reach Role 50 after re-binding");
         }
     }
@@ -147,7 +148,7 @@ public class ImpulseQueryCompilerTest {
             // Snapshot B is MISSING userToGroup
             GraphSnapshot snapshotB = new GraphSnapshot(arena, Map.of());
 
-            ImpulseGraphQuery<BitSet> query = ImpulseGraphQuery.<BitSet>builder()
+            ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()
                     .input("USER", ArgType.SINGLE_NODE)
                     .walkEdge("userToGroup")
                     .collect(ReturnType.ROARING_BITSET);
@@ -162,7 +163,7 @@ public class ImpulseQueryCompilerTest {
 
     @Test
     public void testRepeatLoopCompilation() {
-        ImpulseGraphQuery<BitSet> query = ImpulseGraphQuery.<BitSet>builder()
+        ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()
                 .input("USER", ArgType.SINGLE_NODE)
                 .repeat(b -> b.walkEdge("friend"), 3)
                 .collect(ReturnType.ROARING_BITSET);
@@ -179,7 +180,7 @@ public class ImpulseQueryCompilerTest {
 
     @Test
     public void testRepeatUntilStableCompilation() {
-        ImpulseGraphQuery<BitSet> query = ImpulseGraphQuery.<BitSet>builder()
+        ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()
                 .input("USER", ArgType.SINGLE_NODE)
                 .repeatUntilStable(b -> b.walkEdge("parent"))
                 .collect(ReturnType.ROARING_BITSET);

@@ -1,5 +1,8 @@
 package org.impulsegraph.vm;
 
+import org.impulsegraph.api.ImpulseGraphQuery;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 import org.impulsegraph.core.csr.GraphSnapshot;
 import org.impulsegraph.core.csr.RelationSnapshot;
 import org.junit.jupiter.api.DisplayName;
@@ -254,7 +257,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x00 -> { pc = instructionCount; } // OP_HALT
                             case 0x01 -> pc++; // OP_NOP
                             case 0x02 -> { VmHandlers.handleInitInputNode(state, ctx, instr, instr.payload() & 0xFFFFFFFFL); pc++; }
-                            case 0x03 -> { VmHandlers.handleInitInputSet(state, ctx, instr, new BitSet()); pc++; }
+                            case 0x03 -> { VmHandlers.handleInitInputSet(state, ctx, instr, new OffHeapBitSet(arena, 1000)); pc++; }
                             case 0x04 -> { VmHandlers.handleLoadConstInt(state, instr); pc++; }
                             case 0x05 -> { pc++; } // OP_MAP_KEYS_TO_DENSE
                             case 0x06 -> { VmHandlers.handleLoadConstFloat(state, instr); pc++; }

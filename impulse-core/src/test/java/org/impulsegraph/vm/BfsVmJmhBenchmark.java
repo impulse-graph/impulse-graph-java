@@ -11,7 +11,8 @@ import java.lang.foreign.ValueLayout;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,9 +25,9 @@ public class BfsVmJmhBenchmark {
 
     @Test
     public void profileBfsBottlenecks() throws Exception {
-        Path snapshotPath = Paths.get("../../datasets/twitter-2010/twitter-2010.imps");
+        Path snapshotPath = Paths.get("../../datasets/twitter-2010/twitter-2010.csc.imps");
         if (!Files.exists(snapshotPath)) {
-            snapshotPath = Paths.get("datasets/twitter-2010/twitter-2010.imps");
+            snapshotPath = Paths.get("datasets/twitter-2010/twitter-2010.csc.imps");
         }
         if (!Files.exists(snapshotPath)) {
             System.out.println("[SKIP] twitter-2010.imps not found for profiling");
@@ -58,15 +59,15 @@ public class BfsVmJmhBenchmark {
             MemorySegment cscRowOff = rel.getCscRowOffsetsSegment();
             MemorySegment cscColIdx = rel.getCscColumnTargetsSegment();
 
-            BitSet visited = new BitSet(nodeCount);
-            BitSet frontier = new BitSet(nodeCount);
-            BitSet nextFrontier = new BitSet(nodeCount);
-            BitSet unvisited = new BitSet(nodeCount);
+            ImpulseBitSet visited = new OffHeapBitSet(arena, nodeCount);
+            ImpulseBitSet frontier = new OffHeapBitSet(arena, nodeCount);
+            ImpulseBitSet nextFrontier = new OffHeapBitSet(arena, nodeCount);
+            ImpulseBitSet unvisited = new OffHeapBitSet(arena, nodeCount);
 
             int startNode = 613;
             visited.set(startNode);
             frontier.set(startNode);
-            unvisited.set(0, nodeCount);
+            for (int i = 0; i < nodeCount; i++) unvisited.set(i);
             unvisited.clear(startNode);
 
             long totalPushNs = 0;
@@ -111,7 +112,7 @@ public class BfsVmJmhBenchmark {
                         totalPullNs += (System.nanoTime() - t0Pull);
 
                         int hNext = (int) VmHandlers.getRegisterValue(state, 4);
-                        BitSet stepResult = ctx.getBitset(hNext);
+                        ImpulseBitSet stepResult = ctx.getBitset(hNext);
                         if (stepResult != null) nextFrontier.or(stepResult);
                         pullSteps++;
                     } else {
@@ -121,7 +122,7 @@ public class BfsVmJmhBenchmark {
                         totalPushNs += (System.nanoTime() - t0Push);
 
                         int hNext = (int) VmHandlers.getRegisterValue(state, 4);
-                        BitSet stepResult = ctx.getBitset(hNext);
+                        ImpulseBitSet stepResult = ctx.getBitset(hNext);
 
                         long t0Set = System.nanoTime();
                         if (stepResult != null) {
@@ -138,7 +139,7 @@ public class BfsVmJmhBenchmark {
                 unvisited.andNot(nextFrontier);
                 frontier.clear();
                 frontier.or(nextFrontier);
-                frontierSize = frontier.cardinality();
+                frontierSize = (int) frontier.cardinality();
                 totalSetOpsNs += (System.nanoTime() - t0Set);
 
                 visitedCount += frontierSize;
@@ -153,7 +154,7 @@ public class BfsVmJmhBenchmark {
             System.out.printf("Total BFS Execution Time:          %.3f ms%n", totalTimeMs);
             System.out.printf("  1. Top-Down Push Phase (CSR):    %.3f ms (%.1f%%) [%d steps]%n", pushTimeMs, (pushTimeMs / totalTimeMs) * 100, pushSteps);
             System.out.printf("  2. Bottom-Up Pull Phase (CSC):   %.3f ms (%.1f%%) [%d steps]%n", pullTimeMs, (pullTimeMs / totalTimeMs) * 100, pullSteps);
-            System.out.printf("  3. BitSet Math (OR / ANDNOT):   %.3f ms (%.1f%%)%n", setOpsTimeMs, (setOpsTimeMs / totalTimeMs) * 100);
+            System.out.printf("  3. ImpulseBitSet Math (OR / ANDNOT):   %.3f ms (%.1f%%)%n", setOpsTimeMs, (setOpsTimeMs / totalTimeMs) * 100);
             System.out.printf("Reachable Visited Nodes:           %,d / %,d nodes%n", visitedCount, nodeCount);
             System.out.printf("Total Checked Edges:               %,d edges%n", totalEdgesChecked);
 

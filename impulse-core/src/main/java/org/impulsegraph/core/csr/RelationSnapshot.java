@@ -1,5 +1,7 @@
 package org.impulsegraph.core.csr;
 
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
@@ -187,10 +189,10 @@ public class RelationSnapshot implements AutoCloseable {
     private static final jdk.incubator.vector.VectorSpecies<Integer> INT_SPECIES = jdk.incubator.vector.IntVector.SPECIES_PREFERRED;
 
     /**
-     * SIMD vectorized target node traversal into a destination BitSet.
+     * SIMD vectorized target node traversal into a destination ImpulseBitSet.
      * Uses Java 25 Vector API (AVX-512 / AVX2 / ARM Neon) to load vector tiles of target IDs directly off-heap.
      */
-    public void copyTargetsSimd(int nodeId, java.util.BitSet outBs) {
+    public void copyTargetsSimd(int nodeId, ImpulseBitSet outBs) {
         if (nodeId < 0 || nodeId >= nodeCount || outBs == null) return;
         if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)) return;
 
@@ -225,9 +227,9 @@ public class RelationSnapshot implements AutoCloseable {
     }
 
     /**
-     * SIMD vectorized incoming target node traversal into a destination BitSet zero-allocation.
+     * SIMD vectorized incoming target node traversal into a destination ImpulseBitSet zero-allocation.
      */
-    public void copyInTargetsSimd(int nodeId, java.util.BitSet outBs) {
+    public void copyInTargetsSimd(int nodeId, ImpulseBitSet outBs) {
         if (nodeId < 0 || nodeId >= nodeCount || outBs == null) return;
         if (cscRowOffsetsSegment == null || cscRowOffsetsSegment.equals(MemorySegment.NULL)) return;
 

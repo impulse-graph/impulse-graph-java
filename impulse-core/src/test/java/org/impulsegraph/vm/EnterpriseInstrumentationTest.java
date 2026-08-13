@@ -15,7 +15,8 @@ import org.junit.jupiter.api.Test;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -31,12 +32,12 @@ public class EnterpriseInstrumentationTest {
     public void testZeroOverheadNoopRegistryDefault() {
         try (Arena arena = Arena.ofShared()) {
             GraphSnapshot graph = new GraphSnapshot(arena, Map.of());
-            ImpulseGraphQuery<BitSet> query = ImpulseGraphQuery.<BitSet>builder()
+            ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()
                     .input("USER", ArgType.SINGLE_NODE)
                     .collect(ReturnType.ROARING_BITSET);
 
             // Execute query with default NOOP registry (zero overhead, pure JIT inlined)
-            BitSet result = query.execute(graph, 0);
+            ImpulseBitSet result = query.execute(graph, 0);
             assertNotNull(result);
             assertSame(ImpulseMetricsRegistry.NoopMetricsRegistry.INSTANCE, ImpulseMetricsRegistry.getInstance());
         }
@@ -52,7 +53,7 @@ public class EnterpriseInstrumentationTest {
             RelationSnapshot rel = new RelationSnapshot(arena, 2, 1, offsets, targets);
             GraphSnapshot graph = new GraphSnapshot(arena, Map.of("userToGroup", rel));
 
-            ImpulseGraphQuery<BitSet> query = ImpulseGraphQuery.<BitSet>builder()
+            ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()
                     .input("USER", ArgType.SINGLE_NODE)
                     .walkEdge("userToGroup")
                     .collect(ReturnType.ROARING_BITSET);
