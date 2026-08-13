@@ -142,7 +142,10 @@ public final class VmHandlers {
     public static void handleCsrWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
         int srcReg = instr.payload() & 0xFFFF;
         int relId = (instr.payload() >> 16) & 0xFFFF;
+        executeCsrWalk(state, ctx, instr.dstReg(), srcReg, relId);
+    }
 
+    public static void executeCsrWalk(MemorySegment state, VmQueryContext ctx, int dstReg, int srcReg, int relId) {
         RelationSnapshot rel = resolveRelation(ctx, relId);
 
         byte srcType = getRegisterType(state, srcReg);
@@ -193,7 +196,7 @@ public final class VmHandlers {
             }
         }
 
-        setRegister(state, instr.dstReg(), outHandle, TYPE_BITSET_HANDLE);
+        setRegister(state, dstReg, outHandle, TYPE_BITSET_HANDLE);
         setFlag(state, FLAG_ZF, outBs.isEmpty());
     }
 
@@ -321,8 +324,7 @@ public final class VmHandlers {
             }
         }
 
-        Instruction csrInstr = new Instruction(instr.opcode(), instr.flags(), instr.dstReg(), frontierReg | (relId << 16));
-        handleCsrWalk(state, ctx, csrInstr);
+        executeCsrWalk(state, ctx, instr.dstReg(), frontierReg, relId);
     }
 
     public static void handleCcAfforest(MemorySegment state, VmQueryContext ctx, Instruction instr) {
