@@ -96,6 +96,19 @@ public class RelationSnapshot implements AutoCloseable {
         return (rowOffsetsData != null && rowOffsetsData.length > 0) || (rowOffsetsSegment != null && !rowOffsetsSegment.equals(MemorySegment.NULL));
     }
 
+    private volatile org.impulsegraph.api.stats.RelationStatistics cachedStats;
+
+    public org.impulsegraph.api.stats.RelationStatistics getStatistics() {
+        if (cachedStats == null) {
+            synchronized (this) {
+                if (cachedStats == null) {
+                    cachedStats = org.impulsegraph.core.stats.RelationStatisticsCalculator.calculate(this);
+                }
+            }
+        }
+        return cachedStats;
+    }
+
     public java.util.List<MemorySegment> getAttributeSegments() {
         return attributeSegments;
     }

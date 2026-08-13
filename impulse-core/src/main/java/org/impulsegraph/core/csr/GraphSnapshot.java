@@ -60,6 +60,16 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
         return total;
     }
 
+    public org.impulsegraph.api.stats.GraphStatistics getGraphStatistics() {
+        org.impulsegraph.api.stats.GraphStatistics graphStats = new org.impulsegraph.api.stats.GraphStatistics();
+        for (Map.Entry<String, RelationSnapshot> entry : relationMap.entrySet()) {
+            if (entry.getValue() != null) {
+                graphStats.putRelationStatistics(entry.getKey(), entry.getValue().getStatistics());
+            }
+        }
+        return graphStats;
+    }
+
     @Override
     public int getRelationCount() {
         return relationMap.size();
