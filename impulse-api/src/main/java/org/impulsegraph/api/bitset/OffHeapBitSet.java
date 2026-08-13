@@ -114,7 +114,6 @@ public class OffHeapBitSet implements ImpulseBitSet {
         } else {
             for (int i = this.nextSetBit(0); i >= 0; i = this.nextSetBit(i + 1)) {
                 if (!set.get(i)) {
-                    // Turn off bit
                     int wordIndex = i >> 6;
                     long word = segment.getAtIndex(ValueLayout.JAVA_LONG, wordIndex);
                     segment.setAtIndex(ValueLayout.JAVA_LONG, wordIndex, word & ~(1L << i));
@@ -134,7 +133,6 @@ public class OffHeapBitSet implements ImpulseBitSet {
             }
         } else {
             for (int i = set.nextSetBit(0); i >= 0; i = set.nextSetBit(i + 1)) {
-                // Turn off bit
                 int wordIndex = i >> 6;
                 if (wordIndex < this.wordCount) {
                     long word = segment.getAtIndex(ValueLayout.JAVA_LONG, wordIndex);

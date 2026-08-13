@@ -157,8 +157,37 @@ public final class VmHandlers {
             } else if (srcType == TYPE_BITSET_HANDLE) {
                 ImpulseBitSet inBs = ctx.getBitset((int) srcVal);
                 if (inBs != null) {
-                    for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
-                        rel.copyTargetsSimd(u, outBs);
+                    long card = inBs.cardinality();
+                    if (card >= 5_000) {
+                        int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
+                        java.util.concurrent.atomic.AtomicInteger nextChunk = new java.util.concurrent.atomic.AtomicInteger(0);
+                        int nodeCount = rel.getNodeCount();
+                        final int chunkSize = 1024;
+
+                        ImpulseBitSet[] threadBs = new ImpulseBitSet[numThreads];
+                        for (int t = 0; t < numThreads; t++) {
+                            threadBs[t] = ctx.getBitset(ctx.acquireBitset());
+                        }
+
+                        java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+                            ImpulseBitSet localBs = threadBs[t];
+                            while (true) {
+                                int startV = nextChunk.getAndAdd(chunkSize);
+                                if (startV >= nodeCount) break;
+                                int endV = Math.min(startV + chunkSize, nodeCount);
+                                for (int u = inBs.nextSetBit(startV); u >= 0 && u < endV; u = inBs.nextSetBit(u + 1)) {
+                                    rel.copyTargetsSimd(u, localBs);
+                                }
+                            }
+                        });
+
+                        for (int t = 0; t < numThreads; t++) {
+                            outBs.or(threadBs[t]);
+                        }
+                    } else {
+                        for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
+                            rel.copyTargetsSimd(u, outBs);
+                        }
                     }
                 }
             }
