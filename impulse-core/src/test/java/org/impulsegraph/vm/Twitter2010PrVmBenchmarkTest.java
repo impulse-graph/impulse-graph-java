@@ -3,6 +3,7 @@ package org.impulsegraph.vm;
 import org.impulsegraph.core.csr.BinarySnapshotLoader;
 import org.impulsegraph.core.csr.GraphSnapshot;
 import org.impulsegraph.core.csr.RelationSnapshot;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Impulse Graph Engine - Java PageRank SIMD SpMV (OP_MXV) Benchmark Suite.
  * Evaluates Java 25 Vector API (AVX-512 FMA) PageRank SpMV matrix-vector multiplication over twitter-2010.
  */
+@Disabled("Manual 1.4B edge macro-benchmark")
 public class Twitter2010PrVmBenchmarkTest {
 
     @Test

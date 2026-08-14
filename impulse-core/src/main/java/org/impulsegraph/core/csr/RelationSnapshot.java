@@ -200,6 +200,14 @@ public class RelationSnapshot implements AutoCloseable {
     }
 
     private static final jdk.incubator.vector.VectorSpecies<Integer> INT_SPECIES = jdk.incubator.vector.IntVector.SPECIES_PREFERRED;
+    private static final jdk.incubator.vector.VectorSpecies<Float> FLOAT_SPECIES = jdk.incubator.vector.FloatVector.SPECIES_PREFERRED;
+
+    public static final byte CMP_GT = 0x01;
+    public static final byte CMP_GTE = 0x02;
+    public static final byte CMP_LT = 0x03;
+    public static final byte CMP_LTE = 0x04;
+    public static final byte CMP_EQ = 0x05;
+    public static final byte CMP_NEQ = 0x06;
 
     /**
      * SIMD vectorized target node traversal into a destination ImpulseBitSet.
@@ -214,26 +222,68 @@ public class RelationSnapshot implements AutoCloseable {
         int count = end - start;
         if (count <= 0) return;
 
-        long baseByteOffset = (long) start * 4;
-        long segAddr = columnTargetsSegment.address() + baseByteOffset;
-        int vectorBytes = INT_SPECIES.vectorByteSize();
+        for (int i = 0; i < count; i++) {
+            outBs.set(columnTargetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + i));
+        }
+    }
 
-        if ((segAddr % vectorBytes) == 0 && count >= INT_SPECIES.length()) {
-            int i = 0;
-            int loopBound = INT_SPECIES.loopBound(count);
-            for (; i < loopBound; i += INT_SPECIES.length()) {
-                jdk.incubator.vector.IntVector vec = jdk.incubator.vector.IntVector.fromMemorySegment(
-                        INT_SPECIES, columnTargetsSegment, baseByteOffset + i * 4L, java.nio.ByteOrder.LITTLE_ENDIAN
-                );
-                for (int lane = 0; lane < INT_SPECIES.length(); lane++) {
-                    outBs.set(vec.lane(lane));
+    /**
+     * SIMD Vector API fused edge attribute predicate filter during CSR traversal.
+     * When count >= OptimizerConfig.SIMD_PREDICATE_EVAL_MIN_DEGREE_THRESHOLD (64),
+     * loads 512-bit vector tiles of edge attribute values, compares using SIMD masks,
+     * and streams matching column targets directly into outBs.
+     */
+    public void copyTargetsSimdFilteredFloat(int nodeId, MemorySegment attrSegment, float threshold, byte cmpOp, ImpulseBitSet outBs) {
+        if (nodeId < 0 || nodeId >= nodeCount || outBs == null) return;
+        if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)) return;
+        if (attrSegment == null || attrSegment.equals(MemorySegment.NULL)) {
+            copyTargetsSimd(nodeId, outBs);
+            return;
+        }
+
+        int start = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, nodeId);
+        int end = rowOffsetsSegment.getAtIndex(ValueLayout.JAVA_INT, nodeId + 1);
+        int count = end - start;
+        if (count <= 0) return;
+
+        int i = 0;
+        if (count >= org.impulsegraph.api.config.OptimizerConfig.SIMD_PREDICATE_EVAL_MIN_DEGREE_THRESHOLD) {
+            int upperBound = FLOAT_SPECIES.loopBound(count);
+            jdk.incubator.vector.VectorOperators.Comparison op = switch (cmpOp) {
+                case CMP_GT -> jdk.incubator.vector.VectorOperators.GT;
+                case CMP_GTE -> jdk.incubator.vector.VectorOperators.GE;
+                case CMP_LT -> jdk.incubator.vector.VectorOperators.LT;
+                case CMP_LTE -> jdk.incubator.vector.VectorOperators.LE;
+                case CMP_EQ -> jdk.incubator.vector.VectorOperators.EQ;
+                case CMP_NEQ -> jdk.incubator.vector.VectorOperators.NE;
+                default -> jdk.incubator.vector.VectorOperators.GE;
+            };
+
+            for (; i < upperBound; i += FLOAT_SPECIES.length()) {
+                var vecAttr = jdk.incubator.vector.FloatVector.fromMemorySegment(
+                        FLOAT_SPECIES, attrSegment, (long) (start + i) * ValueLayout.JAVA_FLOAT.byteSize(), java.nio.ByteOrder.LITTLE_ENDIAN);
+                var mask = vecAttr.compare(op, threshold);
+                for (int lane = 0; lane < FLOAT_SPECIES.length(); lane++) {
+                    if (mask.laneIsSet(lane)) {
+                        outBs.set(columnTargetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + i + lane));
+                    }
                 }
             }
-            for (; i < count; i++) {
-                outBs.set(columnTargetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + i));
-            }
-        } else {
-            for (int i = 0; i < count; i++) {
+        }
+
+        // Tail / scalar loop for remaining lanes or low-degree nodes (< 64)
+        for (; i < count; i++) {
+            float val = attrSegment.getAtIndex(ValueLayout.JAVA_FLOAT_UNALIGNED, start + i);
+            boolean match = switch (cmpOp) {
+                case CMP_GT -> val > threshold;
+                case CMP_GTE -> val >= threshold;
+                case CMP_LT -> val < threshold;
+                case CMP_LTE -> val <= threshold;
+                case CMP_EQ -> val == threshold;
+                case CMP_NEQ -> val != threshold;
+                default -> val >= threshold;
+            };
+            if (match) {
                 outBs.set(columnTargetsSegment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + i));
             }
         }

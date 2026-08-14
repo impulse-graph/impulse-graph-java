@@ -57,6 +57,23 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         OPCODE_MAP.put("OP_HAS_CSC", (byte) 0x1A);
         OPCODE_MAP.put("OP_HAS_COO", (byte) 0x1B);
         OPCODE_MAP.put("OP_HAS_KEY_CATALOG", (byte) 0x1C);
+        OPCODE_MAP.put("OP_DENSE_WALK_LEGACY", (byte) 0x1D);
+        OPCODE_MAP.put("OP_ADAPTIVE_WALK", (byte) 0x1D);
+        OPCODE_MAP.put("OP_CREATE_SCRATCH_INDEX", (byte) 0x1E);
+        OPCODE_MAP.put("OP_DROP_SCRATCH_INDEX", (byte) 0x1F);
+
+        OPCODE_MAP.put("OP_VEC_CMP_EQ", (byte) 0x20);
+        OPCODE_MAP.put("OP_VEC_CMP_GT", (byte) 0x21);
+        OPCODE_MAP.put("OP_VEC_CMP_LT", (byte) 0x22);
+        OPCODE_MAP.put("OP_VEC_CMP_BETWEEN", (byte) 0x23);
+        OPCODE_MAP.put("OP_MASK_AND", (byte) 0x24);
+        OPCODE_MAP.put("OP_MASK_OR", (byte) 0x25);
+        OPCODE_MAP.put("OP_MASK_NOT", (byte) 0x26);
+        OPCODE_MAP.put("OP_VEC_BLEND", (byte) 0x27);
+        OPCODE_MAP.put("OP_ASSERT_FINITE", (byte) 0x2A);
+        OPCODE_MAP.put("OP_VEC_MATH_UNARY", (byte) 0x2D);
+        OPCODE_MAP.put("OP_VEC_MATH_BINARY", (byte) 0x2E);
+        OPCODE_MAP.put("OP_VEC_MATH_TERNARY", (byte) 0x2F);
 
         OPCODE_MAP.put("OP_SET_UNION", (byte) 0x30);
         OPCODE_MAP.put("OP_SET_INTERSECT", (byte) 0x31);
@@ -89,6 +106,8 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         OPCODE_MAP.put("OP_STABLE_CHECK", (byte) 0x54);
         OPCODE_MAP.put("OP_CALL", (byte) 0x55);
         OPCODE_MAP.put("OP_RET", (byte) 0x56);
+        OPCODE_MAP.put("OP_ENTER_FRAME", (byte) 0x57);
+        OPCODE_MAP.put("OP_LEAVE_FRAME", (byte) 0x58);
         OPCODE_MAP.put("OP_THROW", (byte) 0x5A);
         OPCODE_MAP.put("OP_ASSERT", (byte) 0x5B);
         OPCODE_MAP.put("OP_TRAP", (byte) 0x5C);
@@ -127,7 +146,8 @@ public class JavaVmPolyglotAssemblyVerifierTest {
             List<String> opcodesUsed,
             Expectation expectation,
             Map<String, byte[]> mockData,
-            GraphSnapshot mockGraph
+            GraphSnapshot mockGraph,
+            Integer fuel
     ) {}
 
     @Test
@@ -234,8 +254,16 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                 
                 String actualStatus = ImpulseVmValidator.validate(progArr);
                 long stepCount = 0;
+                int fuel = asm.fuel() != null ? asm.fuel() : -1;
 
                 while (actualStatus.equals("IMPULSE_VM_OK") && pc >= 0 && pc < instructionCount && stepCount++ < 100000) {
+                    if (fuel > 0) {
+                        fuel--;
+                        if (fuel == 0) {
+                            actualStatus = "IMPULSE_VM_ERR_GAS_EXHAUSTED";
+                            break;
+                        }
+                    }
                     VmHandlers.Instruction instr = VmHandlers.decodeInstruction(progSeg, pc);
                     byte opcode = instr.opcode();
 
@@ -305,10 +333,14 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x53 -> {
                                 int offset = instr.payload();
                                 long count = VmHandlers.getRegisterValue(state, instr.dstReg());
+                                count--;
+                                VmHandlers.setRegister(state, instr.dstReg(), count, VmRegisterType.TYPE_INT64);
+                                VmHandlers.setFlag(state, VmRegisterType.FLAG_ZF, count == 0);
                                 if (count > 0) {
-                                    VmHandlers.setRegister(state, instr.dstReg(), count - 1, VmRegisterType.TYPE_INT64);
                                     pc += offset;
-                                } else pc++;
+                                } else {
+                                    pc++;
+                                }
                             }
                             case 0x54 -> { VmHandlers.handleStableCheck(state, ctx, instr); pc++; }
                             case 0x55 -> { // OP_CALL
@@ -340,8 +372,11 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                                 }
                                 pc = returnPc;
                             }
+                            case 0x57, 0x58 -> { pc++; } // OP_ENTER_FRAME, OP_LEAVE_FRAME
                             case 0x5A -> { actualStatus = "IMPULSE_VM_ERR_USER_THROW"; pc = instructionCount; }
                             case 0x5B -> { VmHandlers.handleAssert(state, instr); pc++; }
+                            case 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x2D, 0x2E, 0x2F -> { pc++; } // Vector & Extended
+                            case 0x2A -> { VmHandlers.handleAssertFinite(state, ctx, instr); pc++; }
                             case 0x60, 0x61, 0x62, 0x63, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C -> { pc++; } // Extended pass-through
                             case 0x64 -> { VmHandlers.handleRoaringBitmapAnd(state, ctx, instr); pc++; }
                             case 0x65 -> { VmHandlers.handleIslandDetect(state, ctx, instr); pc++; }
@@ -354,10 +389,10 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x90 -> { VmHandlers.handleCollectBitset(state, ctx, instr); pc++; }
                             case 0x91, 0x92, 0x93 -> { pc++; }
                             case 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-                                 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
+                                 0x28, 0x29, 0x2B, 0x2C,
                                  0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
                                  0x4C, 0x4D, 0x4E, 0x4F,
-                                 0x57, 0x58, 0x59,
+                                 0x59,
                                  0x5D, 0x5E, 0x5F,
                                  0x6D, 0x6E, 0x6F,
                                  0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F -> {
@@ -374,6 +409,8 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                         actualStatus = (msg != null && msg.startsWith("IMPULSE_VM_ERR_")) ? msg : "IMPULSE_VM_ERR_ASSERTION_FAILED";
                         break;
                     } catch (Exception ex) {
+                        System.err.println("Exception in " + file.getFileName() + " at pc=" + pc + ": " + ex);
+                        ex.printStackTrace();
                         actualStatus = "IMPULSE_VM_ERR_OUT_OF_BOUNDS";
                         break;
                     }
@@ -418,6 +455,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         String expectedStatus = null;
         Map<Integer, Long> expectedRegs = new HashMap<>();
         Boolean expectedZf = null;
+        Integer fuel = null;
 
         Pattern expectStatusPat = Pattern.compile("\\{EXPECT:\\s*STATUS\\s*=\\s*(\\w+)\\}");
         Pattern expectRegPat = Pattern.compile("\\{EXPECT:\\s*R(\\d+)\\s*=\\s*(\\d+)\\}");
@@ -456,6 +494,13 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                 nodeCount++;
             }
 
+            int maxTgt = targets.stream().mapToInt(Integer::intValue).max().orElse(-1);
+            int totalNodes = Math.max(nodeCount, maxTgt + 1);
+            while (offsets.size() <= totalNodes) {
+                offsets.add(targets.size());
+            }
+            nodeCount = totalNodes;
+
             try {
                 for (int off : offsets) {
                     inlineBytes.write(java.nio.ByteBuffer.allocate(4).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(off).array());
@@ -477,8 +522,17 @@ public class JavaVmPolyglotAssemblyVerifierTest {
             int offsetStart = inlineBytes.size();
             List<Float> floats = new ArrayList<>();
             for (String x : arrBody.split(",")) {
-                if (!x.trim().isEmpty()) {
-                    floats.add(Float.parseFloat(x.trim()));
+                String trimmed = x.trim();
+                if (!trimmed.isEmpty()) {
+                    if (trimmed.equalsIgnoreCase("nan")) {
+                        floats.add(Float.NaN);
+                    } else if (trimmed.equalsIgnoreCase("inf") || trimmed.equalsIgnoreCase("+inf") || trimmed.equalsIgnoreCase("infinity") || trimmed.equalsIgnoreCase("+infinity")) {
+                        floats.add(Float.POSITIVE_INFINITY);
+                    } else if (trimmed.equalsIgnoreCase("-inf") || trimmed.equalsIgnoreCase("-infinity")) {
+                        floats.add(Float.NEGATIVE_INFINITY);
+                    } else {
+                        floats.add(Float.parseFloat(trimmed));
+                    }
                 }
             }
             try {
@@ -511,6 +565,16 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                     }
                 }
                 graphRows.put(u, tList);
+            }
+
+            if (trimmed.startsWith(".fuel")) {
+                String[] parts = trimmed.split("\\s+");
+                if (parts.length > 1) {
+                    try {
+                        fuel = Integer.parseInt(parts[1].trim());
+                    } catch (NumberFormatException ignored) {}
+                }
+                continue;
             }
 
             if (trimmed.startsWith(".rel ") || trimmed.startsWith(".const ")) {
@@ -575,7 +639,6 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
                             if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFFFF);
                             if (tokens.length == 4) {
-                                payload |= (63 << 16);
                                 payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 24);
                             } else if (tokens.length > 4) {
                                 payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 16);
@@ -623,7 +686,8 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         GraphSnapshot mockGraph = null;
         if (!graphRows.isEmpty()) {
             int maxU = graphRows.keySet().stream().max(Integer::compareTo).orElse(0);
-            int numNodes = maxU + 1;
+            int maxTgt = graphRows.values().stream().flatMap(List::stream).max(Integer::compareTo).orElse(-1);
+            int numNodes = Math.max(maxU, maxTgt) + 1;
             List<Integer> targetList = new ArrayList<>();
             int[] offsets = new int[numNodes + 1];
             offsets[0] = 0;
@@ -634,6 +698,33 @@ public class JavaVmPolyglotAssemblyVerifierTest {
             }
             int[] targetsArr = targetList.stream().mapToInt(i -> i).toArray();
             RelationSnapshot rel = new RelationSnapshot(Arena.ofAuto(), numNodes, targetsArr.length, offsets, targetsArr);
+
+            // Compute transposed CSC representation
+            int[] inDegrees = new int[numNodes];
+            for (int t : targetsArr) {
+                if (t >= 0 && t < numNodes) inDegrees[t]++;
+            }
+            int[] cscOffsets = new int[numNodes + 1];
+            cscOffsets[0] = 0;
+            for (int i = 0; i < numNodes; i++) cscOffsets[i + 1] = cscOffsets[i] + inDegrees[i];
+            int[] cscCur = cscOffsets.clone();
+            int[] cscTargets = new int[targetsArr.length];
+            for (int u = 0; u < numNodes; u++) {
+                int start = offsets[u];
+                int end = offsets[u + 1];
+                for (int idx = start; idx < end; idx++) {
+                    int v = targetsArr[idx];
+                    if (v >= 0 && v < numNodes) {
+                        cscTargets[cscCur[v]++] = u;
+                    }
+                }
+            }
+            MemorySegment cscOffsetsSeg = Arena.ofAuto().allocate(cscOffsets.length * 4L, 4);
+            for (int i = 0; i < cscOffsets.length; i++) cscOffsetsSeg.setAtIndex(ValueLayout.JAVA_INT, i, cscOffsets[i]);
+            MemorySegment cscTargetsSeg = Arena.ofAuto().allocate(cscTargets.length * 4L, 4);
+            for (int i = 0; i < cscTargets.length; i++) cscTargetsSeg.setAtIndex(ValueLayout.JAVA_INT, i, cscTargets[i]);
+            rel.setCscSegments(cscOffsetsSeg, cscTargetsSeg);
+
             Map<String, RelationSnapshot> relMap = new HashMap<>();
             for (int r = 0; r < 16; r++) {
                 relMap.put("rel_" + r, rel);
@@ -646,7 +737,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         Integer expectedCallStackDepth = null;
 
         Expectation exp = new Expectation(expectedStatus, expectedRegs, expectedZf, expectedSt, expectedPc, expectedCallStackDepth);
-        return new ParsedAssembly(instructions, opcodesUsed, exp, mockData, mockGraph);
+        return new ParsedAssembly(instructions, opcodesUsed, exp, mockData, mockGraph, fuel);
     }
 
     private int parsePayloadValue(String str, Map<String, Integer> symbolMap) {

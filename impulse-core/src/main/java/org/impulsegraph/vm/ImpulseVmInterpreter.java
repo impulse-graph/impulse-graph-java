@@ -60,13 +60,30 @@ public final class ImpulseVmInterpreter {
                     }
 
                     case OP_CSR_WALK -> {
-                        VmHandlers.handleCsrWalk(state, ctx, instr);
-                        pc++;
+                        VmHandlers.handleCsrWalk(state, ctx, instr, input);
+                        if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0 && VmHandlers.checkFlag(state, FLAG_ZF)) {
+                            pc = instructionCount; // Short-circuit early exit
+                        } else {
+                            pc++;
+                        }
+                    }
+
+                    case OP_CSR_WALK_2HOP -> {
+                        VmHandlers.handleCsrWalk2Hop(state, ctx, instr, input);
+                        if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0 && VmHandlers.checkFlag(state, FLAG_ZF)) {
+                            pc = instructionCount; // Short-circuit early exit
+                        } else {
+                            pc++;
+                        }
                     }
 
                     case OP_CSC_WALK -> {
-                        VmHandlers.handleCscWalk(state, ctx, instr);
-                        pc++;
+                        VmHandlers.handleCscWalk(state, ctx, instr, input);
+                        if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0 && VmHandlers.checkFlag(state, FLAG_ZF)) {
+                            pc = instructionCount; // Short-circuit early exit
+                        } else {
+                            pc++;
+                        }
                     }
 
                     case OP_ADAPTIVE_WALK -> {
@@ -298,6 +315,11 @@ public final class ImpulseVmInterpreter {
                         pc++;
                     }
 
+                    case OP_ASSERT_FINITE -> {
+                        VmHandlers.handleAssertFinite(state, ctx, instr);
+                        pc++;
+                    }
+
                     case OP_TRAP -> {
                         pc = instructionCount; // Stop loop on trap
                     }
@@ -311,8 +333,8 @@ public final class ImpulseVmInterpreter {
                         pc = instructionCount; // Stop loop
                     }
 
-                    case OP_RESERVED_0A, OP_RESERVED_0B, OP_RESERVED_0C, OP_RESERVED_0D, OP_RESERVED_0E, OP_RESERVED_0F,
-                         OP_RESERVED_1D, OP_RESERVED_1E, OP_RESERVED_1F, OP_RESERVED_20, OP_RESERVED_21, OP_RESERVED_22, OP_RESERVED_23, OP_RESERVED_24, OP_RESERVED_25, OP_RESERVED_26, OP_RESERVED_27, OP_RESERVED_28, OP_RESERVED_29, OP_RESERVED_2A, OP_RESERVED_2B, OP_RESERVED_2C, OP_RESERVED_2D, OP_RESERVED_2E, OP_RESERVED_2F,
+                    case OP_RESERVED_0A, OP_RESERVED_0B, OP_RESERVED_0C, OP_RESERVED_0D, OP_RESERVED_0F,
+                         OP_RESERVED_28, OP_RESERVED_29, OP_RESERVED_2B, OP_RESERVED_2C,
                          OP_RESERVED_3A, OP_RESERVED_3B, OP_RESERVED_3C, OP_RESERVED_3D, OP_RESERVED_3E, OP_RESERVED_3F,
                          OP_RESERVED_4C, OP_RESERVED_4D, OP_RESERVED_4E, OP_RESERVED_4F,
                          OP_RESERVED_59,

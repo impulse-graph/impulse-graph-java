@@ -3,6 +3,7 @@ package org.impulsegraph.vm;
 import org.impulsegraph.core.csr.BinarySnapshotLoader;
 import org.impulsegraph.core.csr.GraphSnapshot;
 import org.impulsegraph.core.csr.RelationSnapshot;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
@@ -14,6 +15,7 @@ import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@Disabled("Manual showcase benchmark")
 public class PowergridVmBenchmarkTest {
 
     private static final Path SNAPSHOT_PATH = Path.of("/Users/jesse/impulse/impulse-powergrid/datasets/case1354pegase.v09.imps");

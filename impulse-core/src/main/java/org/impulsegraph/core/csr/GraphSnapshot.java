@@ -13,6 +13,7 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
     private final Arena arena;
     private final Map<String, RelationSnapshot> relationMap = new ConcurrentHashMap<>();
     private final Map<RelationSnapshot, DeltaLayer> deltaLayers = new ConcurrentHashMap<>();
+    private final org.impulsegraph.api.stats.GraphStatistics graphStats = new org.impulsegraph.api.stats.GraphStatistics();
 
     public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots) {
         this.arena = Objects.requireNonNull(arena, "Arena must not be null");
@@ -61,9 +62,8 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
     }
 
     public org.impulsegraph.api.stats.GraphStatistics getGraphStatistics() {
-        org.impulsegraph.api.stats.GraphStatistics graphStats = new org.impulsegraph.api.stats.GraphStatistics();
         for (Map.Entry<String, RelationSnapshot> entry : relationMap.entrySet()) {
-            if (entry.getValue() != null) {
+            if (entry.getValue() != null && graphStats.getRelationStatistics(entry.getKey()) == null) {
                 graphStats.putRelationStatistics(entry.getKey(), entry.getValue().getStatistics());
             }
         }

@@ -21,6 +21,8 @@ import static org.impulsegraph.vm.VmStateLayout.*;
 public final class VmHandlers {
 
     public static final int PARALLEL_FRONTIER_THRESHOLD = 524_288; // 512k Frontier Threshold
+    public static final byte FLAG_HALT_ON_EMPTY = 0x01;
+    public static final byte FLAG_INPUT_SEED = 0x02;
 
     private VmHandlers() {}
 
@@ -140,16 +142,29 @@ public final class VmHandlers {
     }
 
     public static void handleCsrWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        handleCsrWalk(state, ctx, instr, null);
+    }
+
+    public static void handleCsrWalk(MemorySegment state, VmQueryContext ctx, Instruction instr, Object input) {
         int srcReg = instr.payload() & 0xFFFF;
         int relId = (instr.payload() >> 16) & 0xFFFF;
-        executeCsrWalk(state, ctx, instr.dstReg(), srcReg, relId);
+        executeCsrWalk(state, ctx, instr.dstReg(), srcReg, relId, instr.flags(), input);
     }
 
     public static void executeCsrWalk(MemorySegment state, VmQueryContext ctx, int dstReg, int srcReg, int relId) {
+        executeCsrWalk(state, ctx, dstReg, srcReg, relId, (byte) 0, null);
+    }
+
+    public static void executeCsrWalk(MemorySegment state, VmQueryContext ctx, int dstReg, int srcReg, int relId, byte flags, Object input) {
         RelationSnapshot rel = resolveRelation(ctx, relId);
 
         byte srcType = getRegisterType(state, srcReg);
         long srcVal = getRegisterValue(state, srcReg);
+
+        if ((flags & FLAG_INPUT_SEED) != 0 && input instanceof Number n) {
+            srcType = TYPE_NODE_ID;
+            srcVal = n.longValue();
+        }
 
         int outHandle = ctx.acquireBitset();
         ImpulseBitSet outBs = ctx.getBitset(outHandle);
@@ -200,6 +215,69 @@ public final class VmHandlers {
         setFlag(state, FLAG_ZF, outBs.isEmpty());
     }
 
+    public static void handleCsrWalk2Hop(MemorySegment state, VmQueryContext ctx, Instruction instr, Object input) {
+        int relId1 = instr.payload() & 0xFFFF;
+        int relId2 = (instr.payload() >> 16) & 0xFFFF;
+        executeCsrWalk2Hop(state, ctx, instr.dstReg(), 0, relId1, relId2, instr.flags(), input);
+    }
+
+    public static void executeCsrWalk2Hop(MemorySegment state, VmQueryContext ctx, int dstReg, int srcReg,
+                                          int relId1, int relId2, byte flags, Object input) {
+        RelationSnapshot rel1 = resolveRelation(ctx, relId1);
+        RelationSnapshot rel2 = resolveRelation(ctx, relId2);
+
+        int outHandle = ctx.acquireBitset();
+        ImpulseBitSet outBs = ctx.getBitset(outHandle);
+
+        if (rel1 != null && rel2 != null) {
+            MemorySegment r1Offsets = rel1.getRowOffsetsSegment();
+            MemorySegment r1Targets = rel1.getColumnTargetsSegment();
+
+            if ((flags & FLAG_INPUT_SEED) != 0 && input instanceof Number n) {
+                int seed = n.intValue();
+                if (seed >= 0 && seed < rel1.getNodeCount()) {
+                    int start1 = r1Offsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, seed);
+                    int end1 = r1Offsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, seed + 1);
+                    for (int i = start1; i < end1; i++) {
+                        int hop1Target = r1Targets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+                        rel2.copyTargetsSimd(hop1Target, outBs);
+                    }
+                }
+            } else {
+                byte srcType = getRegisterType(state, srcReg);
+                long srcVal = getRegisterValue(state, srcReg);
+                if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
+                    int seed = (int) srcVal;
+                    if (seed >= 0 && seed < rel1.getNodeCount()) {
+                        int start1 = r1Offsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, seed);
+                        int end1 = r1Offsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, seed + 1);
+                        for (int i = start1; i < end1; i++) {
+                            int hop1Target = r1Targets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+                            rel2.copyTargetsSimd(hop1Target, outBs);
+                        }
+                    }
+                } else if (srcType == TYPE_BITSET_HANDLE) {
+                    ImpulseBitSet inBs = ctx.getBitset((int) srcVal);
+                    if (inBs != null) {
+                        for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
+                            if (u < rel1.getNodeCount()) {
+                                int start1 = r1Offsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+                                int end1 = r1Offsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+                                for (int i = start1; i < end1; i++) {
+                                    int hop1Target = r1Targets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+                                    rel2.copyTargetsSimd(hop1Target, outBs);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        setRegister(state, dstReg, outHandle, TYPE_BITSET_HANDLE);
+        setFlag(state, FLAG_ZF, outBs.isEmpty());
+    }
+
     public static void handleLoadConstStrPrefix(MemorySegment state, Instruction instr) {
         long val = Integer.toUnsignedLong(instr.payload());
         setRegister(state, instr.dstReg(), val, TYPE_INT64);
@@ -207,8 +285,12 @@ public final class VmHandlers {
     }
 
     public static void handleCscWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        handleCscWalk(state, ctx, instr, null);
+    }
+
+    public static void handleCscWalk(MemorySegment state, VmQueryContext ctx, Instruction instr, Object input) {
         int frontierReg = instr.payload() & 0xFFFF;
-        int unvisitedReg = (instr.payload() >> 16) & 0xFFFF;
+        int unvisitedReg = (instr.payload() >> 16) & 0xFF;
         int relId = (instr.payload() >> 24) & 0xFF;
 
         RelationSnapshot rel = resolveRelation(ctx, relId);
@@ -231,28 +313,47 @@ public final class VmHandlers {
 
                 int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
                 int unvisitedCount = (int) unvisitedBs.cardinality();
-                if (unvisitedCount >= 10_000 && nodeCount >= 10_000 && numThreads > 1) {
-                    java.util.concurrent.atomic.AtomicInteger nextChunk = new java.util.concurrent.atomic.AtomicInteger(0);
-                    final int chunkSize = 1024; // Dynamic chunk size to prevent thread stalls on supernodes
+                if (unvisitedCount >= 10_000 && nodeCount >= 10_000) {
+                    if (numThreads > 1) {
+                        java.util.concurrent.atomic.AtomicInteger nextChunk = new java.util.concurrent.atomic.AtomicInteger(0);
+                        final int chunkSize = 1024;
 
-                    java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
-                        while (true) {
-                            int startV = nextChunk.getAndAdd(chunkSize);
-                            if (startV >= nodeCount) break;
+                        java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
+                            while (true) {
+                                int startV = nextChunk.getAndAdd(chunkSize);
+                                if (startV >= nodeCount) break;
+                                int endV = Math.min(startV + chunkSize, nodeCount);
+                                for (int v = unvisitedBs.nextSetBit(startV); v >= 0 && v < endV; v = unvisitedBs.nextSetBit(v + 1)) {
+                                    int start = cscRowOff.getAtIndex(ValueLayout.JAVA_INT, v);
+                                    int end = cscRowOff.getAtIndex(ValueLayout.JAVA_INT, v + 1);
+                                    for (int i = start; i < end; i++) {
+                                        int target = cscColIdx.getAtIndex(ValueLayout.JAVA_INT, i);
+                                        if (frontierBs.get(target)) {
+                                            outBs.set(v);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    } else {
+                        // Cache-tiled single-threaded loop (1024 nodes per L1 cache tile)
+                        final int chunkSize = 1024;
+                        for (int startV = 0; startV < nodeCount; startV += chunkSize) {
                             int endV = Math.min(startV + chunkSize, nodeCount);
                             for (int v = unvisitedBs.nextSetBit(startV); v >= 0 && v < endV; v = unvisitedBs.nextSetBit(v + 1)) {
-                                int start = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v);
-                                int end = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v + 1);
-                                for (int idx = start; idx < end; idx++) {
-                                    int u = cscColIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
-                                    if (frontierBs.get(u)) {
+                                int start = cscRowOff.getAtIndex(ValueLayout.JAVA_INT, v);
+                                int end = cscRowOff.getAtIndex(ValueLayout.JAVA_INT, v + 1);
+                                for (int i = start; i < end; i++) {
+                                    int target = cscColIdx.getAtIndex(ValueLayout.JAVA_INT, i);
+                                    if (frontierBs.get(target)) {
                                         outBs.set(v);
                                         break;
                                     }
                                 }
                             }
                         }
-                    });
+                    }
                 } else {
                     for (int v = unvisitedBs.nextSetBit(0); v >= 0; v = unvisitedBs.nextSetBit(v + 1)) {
                         int start = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v);
@@ -271,6 +372,12 @@ public final class VmHandlers {
             // Standard CSC Walk Mode
             byte srcType = getRegisterType(state, frontierReg);
             long srcVal = getRegisterValue(state, frontierReg);
+
+            if ((instr.flags() & FLAG_INPUT_SEED) != 0 && input instanceof Number n) {
+                srcType = TYPE_NODE_ID;
+                srcVal = n.longValue();
+            }
+
             if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
                 rel.copyInTargetsSimd((int) srcVal, outBs);
             } else if (srcType == TYPE_BITSET_HANDLE) {
@@ -289,7 +396,7 @@ public final class VmHandlers {
 
     public static void handleAdaptiveWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
         int frontierReg = instr.payload() & 0xFFFF;
-        int unvisitedReg = (instr.payload() >> 16) & 0xFFFF;
+        int unvisitedReg = (instr.payload() >> 16) & 0xFF;
         int relId = (instr.payload() >> 24) & 0xFF;
 
         RelationSnapshot rel = resolveRelation(ctx, relId);
@@ -1083,7 +1190,37 @@ public final class VmHandlers {
         }
 
         RelationSnapshot rel = new RelationSnapshot(Arena.ofAuto(), nodeCount, numTargets, offsets, targets);
-        rel.setCscSegments(rel.getRowOffsetsSegment(), rel.getColumnTargetsSegment());
+
+        // Compute true transposed CSC representation
+        int[] inDegrees = new int[nodeCount];
+        for (int t : targets) {
+            if (t >= 0 && t < nodeCount) {
+                inDegrees[t]++;
+            }
+        }
+        int[] cscOffsets = new int[nodeCount + 1];
+        cscOffsets[0] = 0;
+        for (int i = 0; i < nodeCount; i++) {
+            cscOffsets[i + 1] = cscOffsets[i] + inDegrees[i];
+        }
+        int[] cscCur = cscOffsets.clone();
+        int[] cscTargets = new int[numTargets];
+        for (int u = 0; u < nodeCount; u++) {
+            int start = offsets[u];
+            int end = offsets[u + 1];
+            for (int idx = start; idx < end; idx++) {
+                int v = targets[idx];
+                if (v >= 0 && v < nodeCount) {
+                    cscTargets[cscCur[v]++] = u;
+                }
+            }
+        }
+        MemorySegment cscOffsetsSeg = Arena.ofAuto().allocate(cscOffsets.length * 4L, 4);
+        for (int i = 0; i < cscOffsets.length; i++) cscOffsetsSeg.setAtIndex(ValueLayout.JAVA_INT, i, cscOffsets[i]);
+        MemorySegment cscTargetsSeg = Arena.ofAuto().allocate(cscTargets.length * 4L, 4);
+        for (int i = 0; i < cscTargets.length; i++) cscTargetsSeg.setAtIndex(ValueLayout.JAVA_INT, i, cscTargets[i]);
+
+        rel.setCscSegments(cscOffsetsSeg, cscTargetsSeg);
 
         Map<String, RelationSnapshot> relations = new HashMap<>();
         for (int r = 0; r < 16; r++) {
@@ -1109,6 +1246,38 @@ public final class VmHandlers {
             boolean flagMatch = checkFlag(state, expected);
             if (!flagMatch) {
                 throw new IllegalStateException("OP_ASSERT flag failed for mask 0x" + Long.toHexString(expected));
+            }
+        }
+    }
+
+    public static void handleAssertFinite(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int targetReg = instr.dstReg();
+        byte type = getRegisterType(state, targetReg);
+        long rawVal = getRegisterValue(state, targetReg);
+
+        if (type == TYPE_FLOAT) {
+            float v = Float.intBitsToFloat((int) rawVal);
+            if (Float.isNaN(v) || Float.isInfinite(v)) {
+                setRegister(state, 0, 0L, TYPE_INT64);
+                throw new IllegalStateException("IMPULSE_VM_ERR_FLOATING_POINT");
+            }
+        } else if (type == TYPE_DOUBLE) {
+            double v = Double.longBitsToDouble(rawVal);
+            if (Double.isNaN(v) || Double.isInfinite(v)) {
+                setRegister(state, 0, 0L, TYPE_INT64);
+                throw new IllegalStateException("IMPULSE_VM_ERR_FLOATING_POINT");
+            }
+        } else if (type == TYPE_FLOAT_VECTOR) {
+            int handle = (int) rawVal;
+            float[] vec = ctx.getFloatVector(handle);
+            if (vec != null) {
+                for (int i = 0; i < vec.length; i++) {
+                    float v = vec[i];
+                    if (Float.isNaN(v) || Float.isInfinite(v)) {
+                        setRegister(state, 0, (long) i, TYPE_INT64);
+                        throw new IllegalStateException("IMPULSE_VM_ERR_FLOATING_POINT");
+                    }
+                }
             }
         }
     }

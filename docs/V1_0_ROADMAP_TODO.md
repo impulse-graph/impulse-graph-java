@@ -18,32 +18,40 @@ This document outlines the detailed engineering task checklist required to bring
 ### 1. `impulse-api` (Public API & Annotations)
 - [x] Establish Java 21 LTS baseline target in `pom.xml`.
 - [x] Create `@ImpKQuery`, `@ImpLogRule`, and `@ImpulseRepository` annotations in `io.impulse.graph.annotations.*`.
-- [ ] Finalize fluent query builder API (`GraphView`, `ImpulseQueryBuilder`) with 100% type safety.
+- [ ] **Dual Fluent Query Builder API (`GraphView`, `ImpulseQueryBuilder`)**:
+  - **Typed Path**: `impulse.from(User.class).walk(MemberOf.class, Group.class).filter("edge.role == 'admin'").collect()`.
+  - **Untyped / Dynamic Path**: `impulse.fromNode("User").walkWhere("MEMBER_OF", "src.age > 25").collectKeys()`.
+  - Add terminal extractors: `collect()` (typed), `collectKeys()` (String keys), `collectNodeIds()` (primitive long[]/bitset), `collectRows()` (Arrow/Map).
 - [ ] Add zero-dependency exception hierarchy (`ImpulseException`, `ImpulseVMException`, `SnapshotCorruptedException`).
 - [ ] Ensure 0 third-party transitive dependencies on build classpath.
 
-### 2. `impulse-core` (Off-Heap Engine & Vector API VM)
+### 2. `impulse-core` (Off-Heap Engine, Vector API & CEL Compiler)
 - [ ] Complete off-heap zero-copy snapshot loader (`MemorySegment` mmap) matching Spec v0.9.0 Page 0 alignment and 128-byte hardware bounds.
-- [ ] Implement pure Java 25 / Java 21 JDK Vector API (`jdk.incubator.vector`) SIMD acceleration loops for GraphBLAS matrix math (`OP_MXV`, `OP_CSR_WALK`).
-- [ ] Implement `MethodHandle` JIT combinators for `ImpulseVM` bytecode execution (`0x00`..`0x72` opcodes).
+- [ ] Implement self-contained zero-dependency **Google CEL (Common Expression Language)** Pratt parser (~300 LOC in pure Java) with built-in Datetime/Duration and 42 analytical vector math extensions.
+- [ ] Implement Level 2 **`MethodHandle` JIT Combinators** (`MethodHandles.foldArguments()`, `filterArguments()`, `VectorOperators` bindings) for unrolling `impOps` into straight-line AVX-512 native HotSpot execution.
+- [ ] **Ultra-Low-Latency Intra-Opcode Parallel Engine (`ImpulseCarrierThreadPool`)**:
+  - Replace heavy `ForkJoinPool` with pre-allocated, pre-warmed static carrier platform threads.
+  - Implement deterministic range slicing over `MemorySegment` off-heap buffers with 0 heap object allocations per query.
+  - Implement dynamic single-cycle switching between sequential SIMD (`max_dop == 1`) and multi-carrier execution (`max_dop > 1`).
+- [ ] Multi-Layout Execution Kernels: CSR (Push), CSC (Pull direction optimization), COO (Edge stream), and DENSE (512-bit AVX bitmatrix).
 - [ ] Validate 100% pass rate against all spec test vectors (`tc01`..`tc36` and `vm-impas`).
 - [ ] Benchmark execution latency to verify **1x–2x parity vs C++20 kernel** under JMH harnesses.
 
 ### 3. `impulse-spec` (Format Specification Encoders/Decoders)
 - [ ] Validate fixed 4KB Page 0 header parsing, `IMPS` magic byte verification (`0x494D5053`), and SHA-256 integrity checksums.
-- [ ] Implement global string table pool (Section 2) decoder.
+- [ ] Implement global string table pool (Section 2) decoder and primary key catalog mapping.
 - [ ] Implement Structure-of-Arrays (SoA) attribute descriptors for `FixedString(N)`, `VarString`, `TimestampMicro`, and primitive types.
 
 ### 4. `impulse-codegen` & `.imps.schema.yaml`
 - [ ] Implement `.imps.schema.yaml` schema parser and validation engine.
-- [ ] Build Java 21 Record and POJO DTO code generators based on snapshot schemas.
+- [ ] Build Java 21 Record and POJO DTO code generators based on snapshot schemas (`User_`, `ShipmentEdge_`, `Customer_`).
 - [ ] Implement optional Java 25+ Project Valhalla `value class` (naked struct) generator.
-- [ ] Add compile-time query validator checking `@ImpKQuery` syntax against `.imps.schema.yaml`.
+- [ ] Implement `impulse-apt` JSR-269 Java Annotation Processor for in-IDE red squigglies and real-time CEL validation.
 
 ### 5. `impulse-maven-plugin` & `impulse-gradle-plugin`
-- [ ] Implement Maven plugin mojo (`ImpulseCompileMojo`) for compiling `@ImpKQuery` annotations during `mvn compile`.
-- [ ] Implement Gradle task (`ImpulseCompileTask`) for compiling `@ImpKQuery` annotations during `./gradlew build`.
-- [ ] Integrate native Rust `libimpulse_compiler` binaries (`.so`/`.dylib`/`.dll`) for build-time AOT compilation.
+- [ ] Implement `validate-cel` Mojo / Gradle task for compile-time CEL query verification during `mvn compile` and `./gradlew build`.
+- [ ] Implement `aot-compile` Mojo pre-compiling static queries to **`ImpScheme` S-Expression ASTs (`.impscm`)** for 0ns runtime parse overhead.
+- [ ] Implement `generate-schema` Mojo generating typed model records from `.imps` snapshots.
 
 ### 6. `impulse-kotlin` & `impulse-scala`
 - [ ] **`impulse-kotlin`**: Add Kotlin coroutine extensions (`suspend` query functions, `Flow<NodeId>` streams).

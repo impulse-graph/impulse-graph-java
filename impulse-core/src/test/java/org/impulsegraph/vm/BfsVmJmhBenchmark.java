@@ -59,56 +59,50 @@ public class BfsVmJmhBenchmark {
             MemorySegment cscRowOff = rel.getCscRowOffsetsSegment();
             MemorySegment cscColIdx = rel.getCscColumnTargetsSegment();
 
-            ImpulseBitSet visited = new OffHeapBitSet(arena, nodeCount);
-            ImpulseBitSet frontier = new OffHeapBitSet(arena, nodeCount);
-            ImpulseBitSet nextFrontier = new OffHeapBitSet(arena, nodeCount);
-            ImpulseBitSet unvisited = new OffHeapBitSet(arena, nodeCount);
-
             int startNode = 613;
-            visited.set(startNode);
-            frontier.set(startNode);
-            for (int i = 0; i < nodeCount; i++) unvisited.set(i);
-            unvisited.clear(startNode);
 
             System.out.println("Warming up JVM HotSpot C2 JIT compiler (5 warmup runs)...");
             for (int warmup = 0; warmup < 5; warmup++) {
-                visited.clear();
-                frontier.clear();
-                nextFrontier.clear();
-                unvisited.clear();
-                visited.set(startNode);
-                frontier.set(startNode);
-                for (int i = 0; i < nodeCount; i++) unvisited.set(i);
-                unvisited.clear(startNode);
-                int fSize = 1;
+                try (VmQueryContext ctx = new VmQueryContext(graph, arena)) {
+                    MemorySegment state = ctx.allocateStateSegment();
+                    int hVisited = ctx.acquireBitset();
+                    int hFrontier = ctx.acquireBitset();
+                    int hUnvisited = ctx.acquireBitset();
 
-                VmHandlers.Instruction adaptiveInstr = new VmHandlers.Instruction(VmRegisterType.OP_ADAPTIVE_WALK, (byte) 0, 4, 2 | (3 << 16) | (0 << 24));
-                while (fSize > 0) {
-                    nextFrontier.clear();
-                    try (VmQueryContext ctx = new VmQueryContext(graph, arena)) {
-                        MemorySegment state = ctx.allocateStateSegment();
-                        int hVisited = ctx.acquireBitset();
-                        int hFrontier = ctx.acquireBitset();
-                        int hUnvisited = ctx.acquireBitset();
-                        ctx.getBitset(hVisited).or(visited);
-                        ctx.getBitset(hFrontier).or(frontier);
-                        ctx.getBitset(hUnvisited).or(unvisited);
-                        VmHandlers.setRegister(state, 1, hVisited, VmRegisterType.TYPE_BITSET_HANDLE);
-                        VmHandlers.setRegister(state, 2, hFrontier, VmRegisterType.TYPE_BITSET_HANDLE);
-                        VmHandlers.setRegister(state, 3, hUnvisited, VmRegisterType.TYPE_BITSET_HANDLE);
+                    ImpulseBitSet visited = ctx.getBitset(hVisited);
+                    ImpulseBitSet frontier = ctx.getBitset(hFrontier);
+                    ImpulseBitSet unvisited = ctx.getBitset(hUnvisited);
+
+                    visited.clear();
+                    frontier.clear();
+                    unvisited.clear();
+                    visited.set(startNode);
+                    frontier.set(startNode);
+                    for (int i = 0; i < nodeCount; i++) unvisited.set(i);
+                    unvisited.clear(startNode);
+
+                    VmHandlers.setRegister(state, 1, hVisited, VmRegisterType.TYPE_BITSET_HANDLE);
+                    VmHandlers.setRegister(state, 2, hFrontier, VmRegisterType.TYPE_BITSET_HANDLE);
+                    VmHandlers.setRegister(state, 3, hUnvisited, VmRegisterType.TYPE_BITSET_HANDLE);
+
+                    int fSize = 1;
+                    VmHandlers.Instruction adaptiveInstr = new VmHandlers.Instruction(VmRegisterType.OP_ADAPTIVE_WALK, (byte) 0, 4, 2 | (3 << 16) | (0 << 24));
+                    while (fSize > 0) {
                         VmHandlers.handleAdaptiveWalk(state, ctx, adaptiveInstr);
                         int hNext = (int) VmHandlers.getRegisterValue(state, 4);
                         ImpulseBitSet stepResult = ctx.getBitset(hNext);
-                        if (stepResult != null) {
+                        if (stepResult != null && !stepResult.isEmpty()) {
                             stepResult.andNot(visited);
-                            nextFrontier.or(stepResult);
+                            visited.or(stepResult);
+                            unvisited.andNot(stepResult);
+                            frontier.clear();
+                            frontier.or(stepResult);
+                            fSize = (int) frontier.cardinality();
+                            ctx.releaseBitset(hNext);
+                        } else {
+                            break;
                         }
                     }
-                    visited.or(nextFrontier);
-                    unvisited.andNot(nextFrontier);
-                    frontier.clear();
-                    frontier.or(nextFrontier);
-                    fSize = (int) frontier.cardinality();
                 }
             }
             System.out.println("HotSpot C2 JIT Warmup Complete! Executing measured runs...");
@@ -119,73 +113,61 @@ public class BfsVmJmhBenchmark {
 
             int lastVisitedCount = 0;
             for (int run = 0; run < numRuns; run++) {
-                visited.clear();
-                frontier.clear();
-                nextFrontier.clear();
-                unvisited.clear();
-                visited.set(startNode);
-                frontier.set(startNode);
-                for (int i = 0; i < nodeCount; i++) unvisited.set(i);
-                unvisited.clear(startNode);
+                try (VmQueryContext ctx = new VmQueryContext(graph, arena)) {
+                    MemorySegment state = ctx.allocateStateSegment();
+                    int hVisited = ctx.acquireBitset();
+                    int hFrontier = ctx.acquireBitset();
+                    int hUnvisited = ctx.acquireBitset();
 
-                long totalPushNs = 0;
-                long totalPullNs = 0;
-                long totalSetOpsNs = 0;
-                int frontierSize = 1;
-                int visitedCount = 1;
+                    ImpulseBitSet visited = ctx.getBitset(hVisited);
+                    ImpulseBitSet frontier = ctx.getBitset(hFrontier);
+                    ImpulseBitSet unvisited = ctx.getBitset(hUnvisited);
 
-                long t0Total = System.nanoTime();
-                VmHandlers.Instruction adaptiveInstr = new VmHandlers.Instruction(VmRegisterType.OP_ADAPTIVE_WALK, (byte) 0, 4, 2 | (3 << 16) | (0 << 24));
+                    visited.clear();
+                    frontier.clear();
+                    unvisited.clear();
+                    visited.set(startNode);
+                    frontier.set(startNode);
+                    for (int i = 0; i < nodeCount; i++) unvisited.set(i);
+                    unvisited.clear(startNode);
 
-                while (frontierSize > 0) {
-                    nextFrontier.clear();
+                    VmHandlers.setRegister(state, 1, hVisited, VmRegisterType.TYPE_BITSET_HANDLE);
+                    VmHandlers.setRegister(state, 2, hFrontier, VmRegisterType.TYPE_BITSET_HANDLE);
+                    VmHandlers.setRegister(state, 3, hUnvisited, VmRegisterType.TYPE_BITSET_HANDLE);
 
-                    try (VmQueryContext ctx = new VmQueryContext(graph, arena)) {
-                        MemorySegment state = ctx.allocateStateSegment();
-                        int hVisited = ctx.acquireBitset();
-                        int hFrontier = ctx.acquireBitset();
-                        int hUnvisited = ctx.acquireBitset();
+                    int frontierSize = 1;
+                    int visitedCount = 1;
 
-                        ctx.getBitset(hVisited).or(visited);
-                        ctx.getBitset(hFrontier).or(frontier);
-                        ctx.getBitset(hUnvisited).or(unvisited);
+                    long t0Total = System.nanoTime();
+                    VmHandlers.Instruction adaptiveInstr = new VmHandlers.Instruction(VmRegisterType.OP_ADAPTIVE_WALK, (byte) 0, 4, 2 | (3 << 16) | (0 << 24));
 
-                        VmHandlers.setRegister(state, 1, hVisited, VmRegisterType.TYPE_BITSET_HANDLE);
-                        VmHandlers.setRegister(state, 2, hFrontier, VmRegisterType.TYPE_BITSET_HANDLE);
-                        VmHandlers.setRegister(state, 3, hUnvisited, VmRegisterType.TYPE_BITSET_HANDLE);
-
-                        long t0Walk = System.nanoTime();
+                    while (frontierSize > 0) {
                         VmHandlers.handleAdaptiveWalk(state, ctx, adaptiveInstr);
-                        totalPushNs += (System.nanoTime() - t0Walk);
 
                         int hNext = (int) VmHandlers.getRegisterValue(state, 4);
                         ImpulseBitSet stepResult = ctx.getBitset(hNext);
 
-                        long t0Set = System.nanoTime();
-                        if (stepResult != null) {
+                        if (stepResult != null && !stepResult.isEmpty()) {
                             stepResult.andNot(visited);
-                            nextFrontier.or(stepResult);
+                            visited.or(stepResult);
+                            unvisited.andNot(stepResult);
+                            frontier.clear();
+                            frontier.or(stepResult);
+                            frontierSize = (int) frontier.cardinality();
+                            visitedCount += frontierSize;
+                            ctx.releaseBitset(hNext);
+                        } else {
+                            break;
                         }
-                        totalSetOpsNs += (System.nanoTime() - t0Set);
                     }
 
-                    long t0Set = System.nanoTime();
-                    visited.or(nextFrontier);
-                    unvisited.andNot(nextFrontier);
-                    frontier.clear();
-                    frontier.or(nextFrontier);
-                    frontierSize = (int) frontier.cardinality();
-                    totalSetOpsNs += (System.nanoTime() - t0Set);
-
-                    visitedCount += frontierSize;
+                    double runTimeMs = (System.nanoTime() - t0Total) / 1_000_000.0;
+                    totalMeasuredMs += runTimeMs;
+                    if (runTimeMs < minTimeMs) {
+                        minTimeMs = runTimeMs;
+                    }
+                    lastVisitedCount = visitedCount;
                 }
-
-                double runTimeMs = (System.nanoTime() - t0Total) / 1_000_000.0;
-                totalMeasuredMs += runTimeMs;
-                if (runTimeMs < minTimeMs) {
-                    minTimeMs = runTimeMs;
-                }
-                lastVisitedCount = visitedCount;
             }
 
             double avgTimeMs = totalMeasuredMs / numRuns;

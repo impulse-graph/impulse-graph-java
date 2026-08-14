@@ -4,6 +4,7 @@ import org.impulsegraph.core.csr.BinarySnapshotLoader;
 import org.impulsegraph.core.csr.DefaultSnapshotBuilder;
 import org.impulsegraph.core.csr.GraphSnapshot;
 import org.impulsegraph.core.csr.RelationSnapshot;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
@@ -21,6 +22,7 @@ import static org.impulsegraph.vm.VmRegisterType.*;
 import static org.impulsegraph.vm.VmStateLayout.*;
 import static org.junit.jupiter.api.Assertions.*;
 
+@Disabled("Manual 1.4B edge macro-benchmark")
 public class Twitter2010BfsVmBenchmarkTest {
 
     private static final Path TWITTER_SNAPSHOT_PATH = Path.of("/Users/jesse/impulse/datasets/twitter-2010/twitter-2010.csc.imps");
