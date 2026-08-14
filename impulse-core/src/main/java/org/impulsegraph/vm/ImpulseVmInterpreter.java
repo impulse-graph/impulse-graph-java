@@ -304,6 +304,7 @@ public final class ImpulseVmInterpreter {
 
                     case OP_ENTER_FRAME, OP_LEAVE_FRAME -> {
                         // NO-OP frame setup/teardown in JVM interpreter
+                        pc++;
                     }
 
                     case OP_HALT -> {
