@@ -197,10 +197,10 @@ public class DifferentialCorrectnessHarnessTest {
             assertInstanceOf(ScmWalk.class, prog.steps().get(0));
             ScmWalk vrWalk = (ScmWalk) prog.steps().get(0);
 
-            // Verified: Decomposed into 2 constituent walks (fruit and bread)
+            // Verified: Decomposed into 2 constituent walks (bread and fruit)
             assertEquals(2, vrWalk.subSteps().size());
-            assertEquals("in_section_fruit", ((ScmWalk) vrWalk.subSteps().get(0)).relationName());
-            assertEquals("in_section_bread", ((ScmWalk) vrWalk.subSteps().get(1)).relationName());
+            assertEquals("in_section_bread", ((ScmWalk) vrWalk.subSteps().get(0)).relationName());
+            assertEquals("in_section_fruit", ((ScmWalk) vrWalk.subSteps().get(1)).relationName());
         }
     }
 }
