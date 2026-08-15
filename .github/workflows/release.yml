@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      HAS_PAT: ${{ secrets.ORGANIZATION_PAT }}
+      HAS_PAT: ${{ secrets.GH_PAT || secrets.ORGANIZATION_PAT }}
 
     steps:
       - name: Checkout impulse-graph-java
@@ -41,7 +41,7 @@ jobs:
           repository: impulse-graph/impulse-graph-spec
           path: impulse-graph-spec
           ref: main
-          token: ${{ secrets.ORGANIZATION_PAT }}
+          token: ${{ secrets.GH_PAT || secrets.ORGANIZATION_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Provision Test Vector Snapshot
         run: |
