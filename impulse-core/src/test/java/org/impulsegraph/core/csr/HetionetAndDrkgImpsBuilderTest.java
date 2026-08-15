@@ -91,6 +91,37 @@ public class HetionetAndDrkgImpsBuilderTest {
         System.out.printf("[*] Ingested %d relation types with total %,d edges%n",
                 relationEdges.size(), relationEdges.values().stream().mapToInt(List::size).sum());
 
+        // Map domains to IDs
+        List<String> sortedDomains = new ArrayList<>(distinctKinds);
+        Map<String, Integer> domainNameToId = new HashMap<>();
+        Map<String, Long> domainNodeCounts = new HashMap<>();
+        for (int d = 0; d < sortedDomains.size(); d++) {
+            domainNameToId.put(sortedDomains.get(d), d);
+        }
+        for (String kind : nodeToKind.values()) {
+            domainNodeCounts.put(kind, domainNodeCounts.getOrDefault(kind, 0L) + 1L);
+        }
+
+        // Map relations to source & target domain IDs
+        Map<String, int[]> relSrcTgtDomains = new HashMap<>();
+        try (BufferedReader br = new BufferedReader(new FileReader(edgesPath.toFile()))) {
+            br.readLine(); // skip header
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split("\t");
+                if (parts.length >= 3) {
+                    String srcStr = parts[0];
+                    String relName = parts[1];
+                    String tgtStr = parts[2];
+                    String srcKind = nodeToKind.get(srcStr);
+                    String tgtKind = nodeToKind.get(tgtStr);
+                    if (srcKind != null && tgtKind != null) {
+                        relSrcTgtDomains.put(relName, new int[]{domainNameToId.get(srcKind), domainNameToId.get(tgtKind)});
+                    }
+                }
+            }
+        }
+
         // Build GraphSnapshot using Arena
         try (Arena arena = Arena.ofShared()) {
             Map<String, RelationSnapshot> relSnapshots = new LinkedHashMap<>();
@@ -145,6 +176,15 @@ public class HetionetAndDrkgImpsBuilderTest {
                     .withCsc(true)
                     .withCoo(true);
 
+            for (int d = 0; d < sortedDomains.size(); d++) {
+                String dName = sortedDomains.get(d);
+                builder.withDomain(d, dName, (byte) 0x03, domainNodeCounts.getOrDefault(dName, 0L));
+            }
+
+            for (Map.Entry<String, int[]> e : relSrcTgtDomains.entrySet()) {
+                builder.withRelationDomain(e.getKey(), e.getValue()[0], e.getValue()[1]);
+            }
+
             byte[] impsBytes = builder.build(new BinarySnapshotLoader.DefaultLoadedSnapshot(
                     0x494D5053, (short) 9, graphSnapshot, Map.of(), Map.of(), Map.of(), Map.of()
             ));
@@ -160,10 +200,11 @@ public class HetionetAndDrkgImpsBuilderTest {
             BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(outImpsPath, arena);
             assertNotNull(loaded);
             assertEquals(24, loaded.relationCount());
+            assertEquals(11, loaded.domainCount());
             for (String rName : relationEdges.keySet()) {
                 assertNotNull(loaded.graph().getRelationSnapshot(rName), "Missing relation: " + rName);
             }
-            System.out.println("[+] Hetionet .imps Verified successfully with 24 relations!");
+            System.out.println("[+] Hetionet .imps Verified successfully with 11 domains and 24 relations!");
         }
     }
 
@@ -181,6 +222,7 @@ public class HetionetAndDrkgImpsBuilderTest {
 
         System.out.println("[*] Loading DRKG entities from " + nodesPath + "...");
         Map<String, Integer> entityToId = new HashMap<>(120_000);
+        Map<String, String> entityToDomain = new HashMap<>(120_000);
         Set<String> entityDomains = new TreeSet<>();
 
         try (BufferedReader br = new BufferedReader(new FileReader(nodesPath.toFile()))) {
@@ -191,8 +233,10 @@ public class HetionetAndDrkgImpsBuilderTest {
                 if (parts.length >= 1) {
                     String entity = parts[0];
                     if (!entityToId.containsKey(entity)) {
+                        String domain = entity.split("::")[0];
                         entityToId.put(entity, entityId++);
-                        entityDomains.add(entity.split("::")[0]);
+                        entityToDomain.put(entity, domain);
+                        entityDomains.add(domain);
                     }
                 }
             }
@@ -228,6 +272,36 @@ public class HetionetAndDrkgImpsBuilderTest {
         int totalEdges = relationEdges.values().stream().mapToInt(List::size).sum();
         System.out.printf("[*] Ingested %d DRKG relations with total %,d edges%n",
                 relationEdges.size(), totalEdges);
+
+        // Map domains to IDs
+        List<String> sortedDomains = new ArrayList<>(entityDomains);
+        Map<String, Integer> domainNameToId = new HashMap<>();
+        Map<String, Long> domainNodeCounts = new HashMap<>();
+        for (int d = 0; d < sortedDomains.size(); d++) {
+            domainNameToId.put(sortedDomains.get(d), d);
+        }
+        for (String dom : entityToDomain.values()) {
+            domainNodeCounts.put(dom, domainNodeCounts.getOrDefault(dom, 0L) + 1L);
+        }
+
+        // Map relations to source & target domain IDs
+        Map<String, int[]> relSrcTgtDomains = new HashMap<>();
+        try (BufferedReader br = new BufferedReader(new FileReader(edgesPath.toFile()))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split("\t");
+                if (parts.length >= 3) {
+                    String srcStr = parts[0];
+                    String relName = parts[1];
+                    String tgtStr = parts[2];
+                    String srcDom = entityToDomain.get(srcStr);
+                    String tgtDom = entityToDomain.get(tgtStr);
+                    if (srcDom != null && tgtDom != null) {
+                        relSrcTgtDomains.put(relName, new int[]{domainNameToId.get(srcDom), domainNameToId.get(tgtDom)});
+                    }
+                }
+            }
+        }
 
         // Build GraphSnapshot using Arena
         try (Arena arena = Arena.ofShared()) {
@@ -284,6 +358,15 @@ public class HetionetAndDrkgImpsBuilderTest {
                     .withCsc(true)
                     .withCoo(true);
 
+            for (int d = 0; d < sortedDomains.size(); d++) {
+                String dName = sortedDomains.get(d);
+                builder.withDomain(d, dName, (byte) 0x03, domainNodeCounts.getOrDefault(dName, 0L));
+            }
+
+            for (Map.Entry<String, int[]> e : relSrcTgtDomains.entrySet()) {
+                builder.withRelationDomain(e.getKey(), e.getValue()[0], e.getValue()[1]);
+            }
+
             byte[] impsBytes = builder.build(new BinarySnapshotLoader.DefaultLoadedSnapshot(
                     0x494D5053, (short) 9, graphSnapshot, Map.of(), Map.of(), Map.of(), Map.of()
             ));
@@ -299,10 +382,11 @@ public class HetionetAndDrkgImpsBuilderTest {
             BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(outImpsPath, arena);
             assertNotNull(loaded);
             assertEquals(107, loaded.relationCount());
+            assertEquals(13, loaded.domainCount());
             for (String rName : relationEdges.keySet()) {
                 assertNotNull(loaded.graph().getRelationSnapshot(rName), "Missing relation: " + rName);
             }
-            System.out.println("[+] DRKG .imps Verified successfully with 107 relations!");
+            System.out.println("[+] DRKG .imps Verified successfully with 13 domains and 107 relations!");
         }
     }
 }

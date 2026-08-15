@@ -25,6 +25,38 @@ public final class DefaultSnapshotBuilder {
         return new DefaultSnapshotBuilder().build(new BinarySnapshotLoader.DefaultLoadedSnapshot(SPEC_MAGIC, (short) SPEC_VERSION_PACKED, graph, Map.of(), Map.of(), Map.of(), Map.of()));
     }
 
+    public static class DomainEntry {
+        private final int domainId;
+        private final String name;
+        private final byte keyType;
+        private final long nodeCount;
+
+        public DomainEntry(int domainId, String name, byte keyType, long nodeCount) {
+            this.domainId = domainId;
+            this.name = name;
+            this.keyType = keyType;
+            this.nodeCount = nodeCount;
+        }
+
+        public int domainId() { return domainId; }
+        public String name() { return name; }
+        public byte keyType() { return keyType; }
+        public long nodeCount() { return nodeCount; }
+    }
+
+    private final List<DomainEntry> customDomains = new ArrayList<>();
+    private final Map<String, int[]> customRelationDomains = new HashMap<>();
+
+    public DefaultSnapshotBuilder withDomain(int domainId, String name, byte keyType, long nodeCount) {
+        customDomains.add(new DomainEntry(domainId, name, keyType, nodeCount));
+        return this;
+    }
+
+    public DefaultSnapshotBuilder withRelationDomain(String relName, int srcDomainId, int tgtDomainId) {
+        customRelationDomains.put(relName, new int[]{srcDomainId, tgtDomainId});
+        return this;
+    }
+
     public DefaultSnapshotBuilder withMetadata(String key, String value) {
         metadata.put(key, value);
         return this;
@@ -58,25 +90,25 @@ public final class DefaultSnapshotBuilder {
         }
 
         int accum = 0;
-        for (int i = 0; i < nodeCount; i++) {
-            cscRowOffSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i, accum);
-            accum += inDegrees[i];
+        for (int n = 0; n < nodeCount; n++) {
+            cscRowOffSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, n, accum);
+            accum += inDegrees[n];
         }
         cscRowOffSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeCount, accum);
 
-        int[] nextOffset = new int[nodeCount];
-        for (int i = 0; i < nodeCount; i++) {
-            nextOffset[i] = cscRowOffSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+        int[] currentOffsets = new int[nodeCount];
+        for (int n = 0; n < nodeCount; n++) {
+            currentOffsets[n] = cscRowOffSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, n);
         }
 
         for (int u = 0; u < nodeCount; u++) {
-            int start = csrRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
-            int end = csrRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
-            for (int idx = start; idx < end; idx++) {
-                int v = csrColumnTargets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+            int startIdx = csrRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+            int endIdx = csrRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+            for (int edgeIdx = startIdx; edgeIdx < endIdx; edgeIdx++) {
+                int v = csrColumnTargets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, edgeIdx);
                 if (v >= 0 && v < nodeCount) {
-                    int cscIdx = nextOffset[v]++;
-                    cscColIdxSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, cscIdx, u);
+                    int insertPos = currentOffsets[v]++;
+                    cscColIdxSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, insertPos, u);
                 }
             }
         }
@@ -100,6 +132,18 @@ public final class DefaultSnapshotBuilder {
 
         int dataOffset = 4096;
 
+        // Resolve domain list
+        List<DomainEntry> domainList = new ArrayList<>(this.customDomains);
+        if (domainList.isEmpty() && loaded != null && loaded.domainsById() != null && !loaded.domainsById().isEmpty()) {
+            for (BinarySnapshotLoader.LoadedDomain ld : loaded.domainsById().values()) {
+                domainList.add(new DomainEntry(ld.domainId(), ld.name(), ld.keyType(), 0L));
+            }
+        }
+        if (domainList.isEmpty()) {
+            domainList.add(new DomainEntry(0, "User", (byte) 0x03, 0L));
+        }
+        int domainCount = domainList.size();
+
         // Build Shared String Table
         ByteArrayOutputStream stringPoolOut = new ByteArrayOutputStream();
         stringPoolOut.write(0); // Offset 0 = empty string ""
@@ -117,7 +161,10 @@ public final class DefaultSnapshotBuilder {
             return off;
         };
 
-        int userDomNameOff = getOrAddString.apply("User");
+        for (DomainEntry dom : domainList) {
+            getOrAddString.apply(dom.name());
+        }
+
         List<Integer> relNameOffsets = new ArrayList<>();
         for (String rName : relNames) {
             relNameOffsets.add(getOrAddString.apply(rName));
@@ -135,14 +182,17 @@ public final class DefaultSnapshotBuilder {
 
             align128Out(dirTableOut);
 
-            // Write Domain Catalog Entry (Fixed 16 Bytes)
-            ByteBuffer domBuf = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
-            domBuf.putShort((short) 0);      // domain_id = 0
-            domBuf.put((byte) 0x03);         // key_type = INT32
-            domBuf.put((byte) 0);            // reserved
-            domBuf.putInt(userDomNameOff);   // name_offset
-            domBuf.putLong(0L);              // node_count = 0
-            dirTableOut.write(domBuf.array());
+            // Write Domain Catalog Entries (Fixed 16 Bytes each)
+            for (DomainEntry dom : domainList) {
+                int domNameOff = getOrAddString.apply(dom.name());
+                ByteBuffer domBuf = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
+                domBuf.putShort((short) dom.domainId());
+                domBuf.put(dom.keyType());
+                domBuf.put((byte) 0);           // reserved
+                domBuf.putInt(domNameOff);      // name_offset
+                domBuf.putLong(dom.nodeCount());// node_count
+                dirTableOut.write(domBuf.array());
+            }
 
             align128Out(dirTableOut);
 
@@ -222,10 +272,11 @@ public final class DefaultSnapshotBuilder {
 
                 // Relation Entry (Fixed 128 Bytes)
                 int rNameOff = relNameOffsets.get(relIdx);
+                int[] doms = customRelationDomains.getOrDefault(rName, new int[]{0, 0});
                 ByteBuffer relBuf = ByteBuffer.allocate(128).order(ByteOrder.LITTLE_ENDIAN);
                 relBuf.putShort((short) relIdx);  // relation_id
-                relBuf.putShort((short) 0);       // src_domain_id
-                relBuf.putShort((short) 0);       // tgt_domain_id
+                relBuf.putShort((short) doms[0]); // src_domain_id
+                relBuf.putShort((short) doms[1]); // tgt_domain_id
                 relBuf.put(encodingId);           // encoding_id = RAW (0) or TPU_BCOO (6)
                 relBuf.put((byte) 4);             // node_id_width = 4
                 relBuf.put((byte) 4);             // edge_index_width = 4
@@ -275,7 +326,7 @@ public final class DefaultSnapshotBuilder {
         hdrBuf.putInt(SPEC_MAGIC);              // magic
         hdrBuf.putShort((short) SPEC_VERSION_PACKED); // version = 9
         hdrBuf.putInt(dataOffset);              // data_offset = 4096
-        hdrBuf.putShort((short) 1);             // domain_count = 1
+        hdrBuf.putShort((short) domainCount);   // domain_count
         hdrBuf.putShort((short) relationCount); // relation_count
         hdrBuf.putLong(1700000000000L);         // timestamp_ms
         hdrBuf.putLong(1L);                     // required_features (4KB_PAGE_ALIGNED)
