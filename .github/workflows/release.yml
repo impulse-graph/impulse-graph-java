@@ -115,13 +115,66 @@ jobs:
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Generate Formatted Release Description
+        run: |
+          TAG_NAME="${{ steps.version_step.outputs.tag_name }}"
+          cat << EOF > release_description.md
+          ## Impulse Graph Java 25 Foreign Function & Memory (FFM) Engine
+
+          High-performance Java 25 off-heap snapshot graph analytics engine, 7-stage ImpScheme compiler, and multi-language JVM extensions.
+
+          ---
+
+          ### 📦 Consolidated Binary Distribution
+
+          - **Consolidated Tarball**: [\`impulse-graph-java-${TAG_NAME}-bin.tar.gz\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-graph-java-${TAG_NAME}-bin.tar.gz)
+
+          ---
+
+          ### ☕ Multi-Module JARs & Language Extensions
+
+          | Submodule | Module Artifact (\`.jar\`) | Sources | Javadoc |
+          | :--- | :--- | :--- | :--- |
+          | **\`impulse-core\`** | [\`impulse-core-0.9.0-SNAPSHOT.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-core-0.9.0-SNAPSHOT.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-core-0.9.0-SNAPSHOT-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-core-0.9.0-SNAPSHOT-javadoc.jar) |
+          | **\`impulse-api\`** | [\`impulse-api-0.9.0-SNAPSHOT.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-api-0.9.0-SNAPSHOT.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-api-0.9.0-SNAPSHOT-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-api-0.9.0-SNAPSHOT-javadoc.jar) |
+          | **\`impulse-spec\`** | [\`impulse-spec-0.9.0-SNAPSHOT.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-spec-0.9.0-SNAPSHOT.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-spec-0.9.0-SNAPSHOT-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-spec-0.9.0-SNAPSHOT-javadoc.jar) |
+          | **\`impulse-compiler\`** | [\`impulse-compiler-0.9.0-SNAPSHOT.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-compiler-0.9.0-SNAPSHOT.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-compiler-0.9.0-SNAPSHOT-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-compiler-0.9.0-SNAPSHOT-javadoc.jar) |
+          | **\`impulse-codegen\`** | [\`impulse-codegen-0.9.0-SNAPSHOT.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-codegen-0.9.0-SNAPSHOT.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-codegen-0.9.0-SNAPSHOT-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-codegen-0.9.0-SNAPSHOT-javadoc.jar) |
+          | **\`impulse-maven-plugin\`** | [\`impulse-maven-plugin-0.9.0-SNAPSHOT.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-maven-plugin-0.9.0-SNAPSHOT.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-maven-plugin-0.9.0-SNAPSHOT-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-maven-plugin-0.9.0-SNAPSHOT-javadoc.jar) |
+          | **\`impulse-gradle-plugin\`** | [\`impulse-gradle-plugin-0.9.0-SNAPSHOT.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-gradle-plugin-0.9.0-SNAPSHOT.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-gradle-plugin-0.9.0-SNAPSHOT-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-gradle-plugin-0.9.0-SNAPSHOT-javadoc.jar) |
+          | **\`impulse-kotlin\`** | [\`impulse-kotlin-0.9.0-SNAPSHOT.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-kotlin-0.9.0-SNAPSHOT.jar) | — | — |
+          | **\`impulse-scala_3\`** | [\`impulse-scala_3-0.9.0-SNAPSHOT.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-scala_3-0.9.0-SNAPSHOT.jar) | — | — |
+          | **\`impulse-clojure\`** | [\`impulse-clojure-0.9.0-SNAPSHOT.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-clojure-0.9.0-SNAPSHOT.jar) | — | — |
+
+          ---
+
+          ### 🛡️ SLSA Level 3 Attestation & Verification
+
+          Every artifact is cryptographically hashed and signed with Sigstore / Cosign keyless OIDC:
+          - **Checksums**: [\`SHA256SUMS\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/SHA256SUMS)
+          - **Signature**: [\`SHA256SUMS.sig\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/SHA256SUMS.sig)
+
+          \`\`\`bash
+          # Verify checksums
+          sha256sum -c SHA256SUMS
+
+          # Verify Cosign keyless signature
+          cosign verify-blob \
+            --certificate-identity-regexp "https://github.com/impulse-graph/impulse-graph-java/" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --signature SHA256SUMS.sig \
+            SHA256SUMS
+          \`\`\`
+          EOF
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version_step.outputs.tag_name }}
           name: "Impulse Graph Java ${{ steps.version_step.outputs.tag_name }}"
+          body_path: release_description.md
           files: |
             release-assets/*
-          generate_release_notes: true
+          generate_release_notes: false
           draft: false
           prerelease: ${{ steps.prerelease_check.outputs.is_prerelease == 'true' }}
