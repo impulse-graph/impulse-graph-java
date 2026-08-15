@@ -21,6 +21,7 @@
         <module>impulse-maven-plugin</module>
         <module>impulse-kotlin</module>
         <module>impulse-scala</module>
+        <module>impulse-clojure</module>
         <module>impulse-gradle-plugin</module>
     </modules>
 

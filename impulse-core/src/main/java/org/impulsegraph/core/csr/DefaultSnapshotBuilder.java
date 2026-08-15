@@ -127,7 +127,9 @@ public final class DefaultSnapshotBuilder {
     }
 
     public byte[] build(BinarySnapshotLoader.LoadedSnapshot loaded) {
-        Set<String> relNames = (loaded != null && loaded.graph() != null) ? loaded.graph().getAllRelationSnapshots().keySet() : Set.of();
+        List<String> relNames = (loaded != null && loaded.graph() != null)
+                ? new ArrayList<>(new java.util.TreeSet<>(loaded.graph().getAllRelationSnapshots().keySet()))
+                : List.of();
         int relationCount = relNames.size();
 
         int dataOffset = 4096;

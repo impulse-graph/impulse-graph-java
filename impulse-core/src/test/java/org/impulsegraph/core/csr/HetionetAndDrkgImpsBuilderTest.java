@@ -65,7 +65,7 @@ public class HetionetAndDrkgImpsBuilderTest {
                 totalNodes, distinctKinds.size(), distinctKinds);
 
         System.out.println("[*] Ingesting 24 Hetionet metaedge relations from " + edgesPath + "...");
-        Map<String, List<long[]>> relationEdges = new HashMap<>(32);
+        Map<String, List<long[]>> relationEdges = new TreeMap<>();
 
         try (BufferedReader br = new BufferedReader(new FileReader(edgesPath.toFile()))) {
             String header = br.readLine();
@@ -247,7 +247,7 @@ public class HetionetAndDrkgImpsBuilderTest {
                 totalNodes, entityDomains.size(), entityDomains);
 
         System.out.println("[*] Ingesting 107 DRKG relations from " + edgesPath + " (5.87M edges)...");
-        Map<String, List<long[]>> relationEdges = new HashMap<>(128);
+        Map<String, List<long[]>> relationEdges = new TreeMap<>();
 
         try (BufferedReader br = new BufferedReader(new FileReader(edgesPath.toFile()))) {
             String line;

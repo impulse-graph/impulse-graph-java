@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot, AutoCloseable {
 
     private final Arena arena;
-    private final Map<String, RelationSnapshot> relationMap = new ConcurrentHashMap<>();
+    private final Map<String, RelationSnapshot> relationMap = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>());
     private final Map<RelationSnapshot, DeltaLayer> deltaLayers = new ConcurrentHashMap<>();
     private final org.impulsegraph.api.stats.GraphStatistics graphStats = new org.impulsegraph.api.stats.GraphStatistics();
 
