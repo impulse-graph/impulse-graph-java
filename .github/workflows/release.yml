@@ -1,0 +1,127 @@
+name: Release & Artifact Build Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-*'
+      - 'v*-*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.9.0-preview.1)'
+        required: false
+        default: ''
+      prerelease:
+        description: 'Mark as pre-release'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  id-token: write # Required for Cosign keyless signing
+
+jobs:
+  build-and-release-java:
+    name: Build, Package & Release Java 25 Engine
+    runs-on: ubuntu-latest
+
+    env:
+      HAS_PAT: ${{ secrets.ORGANIZATION_PAT }}
+
+    steps:
+      - name: Checkout impulse-graph-java
+        uses: actions/checkout@v4
+
+      - name: Checkout impulse-graph-spec (if PAT available)
+        continue-on-error: true
+        if: env.HAS_PAT != ''
+        uses: actions/checkout@v4
+        with:
+          repository: impulse-graph/impulse-graph-spec
+          path: impulse-graph-spec
+          ref: main
+          token: ${{ secrets.ORGANIZATION_PAT }}
+
+      - name: Provision Test Vector Snapshot
+        run: |
+          mkdir -p datasets
+          if [ -f impulse-graph-spec/test-vectors/tc01_minimal_csr/snapshot.imps ]; then
+            cp impulse-graph-spec/test-vectors/tc01_minimal_csr/snapshot.imps datasets/rbac_snapshot.imps
+          fi
+
+      - name: Setup Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'oracle'
+          java-version: '25'
+          cache: 'maven'
+
+      - name: Determine Version & Set POMs
+        id: version_step
+        run: |
+          RAW_TAG="${{ github.ref_name }}"
+          if [ -n "${{ inputs.version }}" ]; then
+            RAW_TAG="${{ inputs.version }}"
+          fi
+          # Strip leading 'v' for Maven version if present
+          CLEAN_VERSION="${RAW_TAG#v}"
+          echo "tag_name=$RAW_TAG" >> $GITHUB_OUTPUT
+          echo "clean_version=$CLEAN_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build & Package Multi-Module JARs
+        run: |
+          mvn clean package source:jar javadoc:jar --batch-mode --errors -DskipTests=true
+
+      - name: Collect & Package Release Distributables
+        shell: bash
+        run: |
+          TAG_NAME="${{ steps.version_step.outputs.tag_name }}"
+          DIST_DIR="dist/impulse-graph-java-${TAG_NAME}"
+          mkdir -p "$DIST_DIR"
+          mkdir -p release-assets
+
+          # Copy all generated jars from submodules
+          find . -maxdepth 3 -path "*/target/*.jar" ! -path "*/target/*-sources.jar" ! -path "*/target/*-javadoc.jar" -exec cp {} "$DIST_DIR/" \;
+          find . -maxdepth 3 -path "*/target/*-sources.jar" -exec cp {} "$DIST_DIR/" \;
+          find . -maxdepth 3 -path "*/target/*-javadoc.jar" -exec cp {} "$DIST_DIR/" \;
+
+          # Also copy individual JARs to release-assets
+          cp "$DIST_DIR"/*.jar release-assets/ || true
+
+          # Create consolidated tarball
+          tar -czvf "release-assets/impulse-graph-java-${TAG_NAME}-bin.tar.gz" -C dist "impulse-graph-java-${TAG_NAME}"
+
+      - name: Generate SHA256 Checksums
+        run: |
+          cd release-assets
+          sha256sum * > SHA256SUMS
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.5.0
+
+      - name: Sign SHA256SUMS with Cosign (Keyless OIDC)
+        run: |
+          cd release-assets
+          cosign sign-blob --yes --output-signature SHA256SUMS.sig SHA256SUMS
+
+      - name: Determine Pre-release Status
+        id: prerelease_check
+        run: |
+          TAG_NAME="${{ steps.version_step.outputs.tag_name }}"
+          if [ "${{ inputs.prerelease }}" == "true" ] || [[ "$TAG_NAME" =~ -preview|-PREVIEW|-rc|-alpha|-beta ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version_step.outputs.tag_name }}
+          name: "Impulse Graph Java ${{ steps.version_step.outputs.tag_name }}"
+          files: |
+            release-assets/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ steps.prerelease_check.outputs.is_prerelease == 'true' }}
