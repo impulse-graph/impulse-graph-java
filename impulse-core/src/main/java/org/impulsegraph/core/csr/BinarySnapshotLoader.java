@@ -115,6 +115,41 @@ public final class BinarySnapshotLoader {
         public long offsetsBytes() { return offsetsBytes; }
     }
 
+    public static class LoadedIndex {
+        private final int indexId;
+        private final int domainId;
+        private final int relationId;
+        private final int attributeIndex;
+        private final byte indexType;
+        private final String name;
+        private final long dataOffset;
+        private final long dataBytes;
+        private final long payloadFeatureMask;
+
+        public LoadedIndex(int indexId, int domainId, int relationId, int attributeIndex, byte indexType,
+                           String name, long dataOffset, long dataBytes, long payloadFeatureMask) {
+            this.indexId = indexId;
+            this.domainId = domainId;
+            this.relationId = relationId;
+            this.attributeIndex = attributeIndex;
+            this.indexType = indexType;
+            this.name = name;
+            this.dataOffset = dataOffset;
+            this.dataBytes = dataBytes;
+            this.payloadFeatureMask = payloadFeatureMask;
+        }
+
+        public int indexId() { return indexId; }
+        public int domainId() { return domainId; }
+        public int relationId() { return relationId; }
+        public int attributeIndex() { return attributeIndex; }
+        public byte indexType() { return indexType; }
+        public String name() { return name; }
+        public long dataOffset() { return dataOffset; }
+        public long dataBytes() { return dataBytes; }
+        public long payloadFeatureMask() { return payloadFeatureMask; }
+    }
+
     public interface LoadedSnapshot extends AutoCloseable {
         int magic();
         short version();
@@ -208,6 +243,38 @@ public final class BinarySnapshotLoader {
         }
     }
 
+    public static Path resolveSnapshotPath(Path filePath) {
+        if (filePath == null) return null;
+        if (java.nio.file.Files.exists(filePath)) {
+            return filePath;
+        }
+
+        String envDir = System.getenv("IMPULSEGRAPH_DATA_DIR");
+        if (envDir == null || envDir.isBlank()) {
+            envDir = System.getenv("IMPULSE_DATA_DIR");
+        }
+
+        if (envDir != null && !envDir.isBlank()) {
+            Path base = Path.of(envDir);
+            Path candidate1 = base.resolve(filePath);
+            if (java.nio.file.Files.exists(candidate1)) {
+                return candidate1;
+            }
+
+            String fileStr = filePath.toString();
+            int dotPos = fileStr.indexOf('.');
+            if (dotPos > 0) {
+                String datasetName = fileStr.substring(0, dotPos);
+                Path candidate2 = base.resolve(datasetName).resolve(filePath);
+                if (java.nio.file.Files.exists(candidate2)) {
+                    return candidate2;
+                }
+            }
+        }
+
+        return filePath;
+    }
+
     public static LoadedSnapshot loadSnapshot(Path filePath, Arena arena) throws IOException {
         return loadSnapshot(filePath, arena, false);
     }
@@ -215,9 +282,15 @@ public final class BinarySnapshotLoader {
     public static LoadedSnapshot loadSnapshot(Path filePath, Arena arena, boolean verifyChecksum) throws IOException {
         Objects.requireNonNull(filePath, "filePath must not be null");
         Objects.requireNonNull(arena, "arena must not be null");
-        try (FileChannel channel = FileChannel.open(filePath, StandardOpenOption.READ)) {
+        Path targetPath = resolveSnapshotPath(filePath);
+        try (FileChannel channel = FileChannel.open(targetPath, StandardOpenOption.READ)) {
             long size = channel.size();
             MemorySegment segment = channel.map(FileChannel.MapMode.READ_ONLY, 0, size, arena);
+            
+            // Asynchronously prefetch the memory-mapped segment into physical RAM
+            // This invokes MADV_WILLNEED at the OS level, eliminating soft page fault latency.
+            segment.load();
+            
             return loadSnapshot(segment, arena, verifyChecksum);
         }
     }

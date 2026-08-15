@@ -10,7 +10,8 @@ import org.junit.jupiter.api.Test;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -25,13 +26,13 @@ public class AttributeProjectionAndReducerTest {
             RelationSnapshot rel = new RelationSnapshot(arena, 3, 2, offsets, targets);
             GraphSnapshot graph = new GraphSnapshot(arena, Map.of("routeToCity", rel));
 
-            ImpulseGraphQuery<BitSet> query = ImpulseGraphQuery.<BitSet>builder()
+            ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()
                     .input("TRUCK", ArgType.SINGLE_NODE)
                     .filterNodeAttribute("fuelSurcharge", ">", 5.0)
                     .walkEdgeFilteredAttribute("routeToCity", "miles", "<", 500.0)
                     .collect(ReturnType.ROARING_BITSET);
 
-            BitSet result = query.execute(graph, 0);
+            ImpulseBitSet result = query.execute(graph, 0);
             assertNotNull(result);
             assertEquals(2, result.cardinality(), "Filtered walk MUST reach targets 10 and 11");
         }
@@ -86,7 +87,7 @@ public class AttributeProjectionAndReducerTest {
         try (Arena arena = Arena.ofShared()) {
             GraphSnapshot graph = new GraphSnapshot(arena, Map.of());
 
-            ImpulseGraphQuery<BitSet> extQuery = ImpulseGraphQuery.<BitSet>builder()
+            ImpulseGraphQuery<ImpulseBitSet> extQuery = ImpulseGraphQuery.<ImpulseBitSet>builder()
                     .input("POWERGRID", ArgType.SINGLE_NODE)
                     .extended().islandDetect(0, 1)
                     .extended().rebacCheck("viewer")

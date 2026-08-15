@@ -8,7 +8,8 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 import java.util.Map;
 
 import static org.impulsegraph.vm.VmRegisterType.*;
@@ -68,16 +69,16 @@ public class VmExecutionEngineTest {
 
             // 1. Execute via Interpreter
             Object interpRes = ImpulseVmInterpreter.execute(prog, code.length, graph, 0, arena);
-            assertTrue(interpRes instanceof BitSet);
-            BitSet bsInterp = (BitSet) interpRes;
+            assertTrue(interpRes instanceof ImpulseBitSet);
+            ImpulseBitSet bsInterp = (ImpulseBitSet) interpRes;
             assertEquals(1, bsInterp.cardinality());
             assertTrue(bsInterp.get(2), "Interpreter MUST reach node 2");
 
             // 2. Execute via MethodHandle Compiler
             MethodHandle mh = ImpulseMethodHandleCompiler.compile(prog, code.length);
             Object mhRes = mh.invokeExact(graph, (Object) 0, arena);
-            assertTrue(mhRes instanceof BitSet);
-            BitSet bsMh = (BitSet) mhRes;
+            assertTrue(mhRes instanceof ImpulseBitSet);
+            ImpulseBitSet bsMh = (ImpulseBitSet) mhRes;
             assertEquals(1, bsMh.cardinality());
             assertTrue(bsMh.get(2), "MethodHandle compiler MUST reach node 2");
         }
@@ -88,11 +89,11 @@ public class VmExecutionEngineTest {
         try (Arena arena = Arena.ofShared()) {
             GraphSnapshot graph = new GraphSnapshot(arena, Map.of());
 
-            BitSet set1 = new BitSet();
+            ImpulseBitSet set1 = new OffHeapBitSet(arena, 1000);
             set1.set(10);
             set1.set(20);
 
-            BitSet set2 = new BitSet();
+            ImpulseBitSet set2 = new OffHeapBitSet(arena, 1000);
             set2.set(20);
             set2.set(30);
 
@@ -109,8 +110,8 @@ public class VmExecutionEngineTest {
 
             MemorySegment prog = buildProgram(arena, code);
             Object res = ImpulseVmInterpreter.execute(prog, code.length, graph, set1, arena);
-            assertTrue(res instanceof BitSet);
-            BitSet resBs = (BitSet) res;
+            assertTrue(res instanceof ImpulseBitSet);
+            ImpulseBitSet resBs = (ImpulseBitSet) res;
             assertEquals(2, resBs.cardinality());
             assertTrue(resBs.get(10));
             assertTrue(resBs.get(20));
@@ -145,8 +146,8 @@ public class VmExecutionEngineTest {
                 MemorySegment prog = buildProgram(arena, code);
 
                 Object result = ImpulseVmInterpreter.execute(prog, code.length, graph, null, arena);
-                assertTrue(result instanceof BitSet, "Single OP_HALT program returns default empty BitSet");
-                assertTrue(((BitSet) result).isEmpty(), "Single OP_HALT program should return empty BitSet");
+                assertTrue(result instanceof ImpulseBitSet, "Single OP_HALT program returns default empty ImpulseBitSet");
+                assertTrue(((ImpulseBitSet) result).isEmpty(), "Single OP_HALT program should return empty ImpulseBitSet");
             }
         }
     }

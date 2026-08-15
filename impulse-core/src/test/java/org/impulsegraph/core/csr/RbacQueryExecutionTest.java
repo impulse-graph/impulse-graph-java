@@ -10,7 +10,8 @@ import java.lang.foreign.Arena;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -45,14 +46,14 @@ class RbacQueryExecutionTest {
                     .walkEdge("groupToRole")
                     .collect(ReturnType.ROARING_BITSET);
 
-            BitSet inputUsers = new BitSet();
+            ImpulseBitSet inputUsers = new OffHeapBitSet(arena, 1000);
             inputUsers.set(0);
 
             Object result = userToRolesQuery.execute(loadedSnapshot.graph(), inputUsers);
             assertNotNull(result, "Execute result MUST NOT be null");
-            assertTrue(result instanceof BitSet, "Execute result MUST be a BitSet");
+            assertTrue(result instanceof ImpulseBitSet, "Execute result MUST be a ImpulseBitSet");
 
-            BitSet reachedRoles = (BitSet) result;
+            ImpulseBitSet reachedRoles = (ImpulseBitSet) result;
 
             // Seed was User 0 {0}; reached roles must be roles [0, 1, 2]
             assertFalse(reachedRoles.equals(inputUsers), "Execute result MUST NOT return input seed pass-through stub");

@@ -1,15 +1,14 @@
 package org.impulsegraph.api;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.function.Function;
 
 /**
  * Fluent builder for constructing immutable {@link ImpulseGraphQuery} AST pipelines.
  *
- * <p>Supports CSR forward edge traversals, attribute filtering, set operations,
- * fixed and convergent loop iterations, GraphBLAS matrix-vector operations, and extended domain opcodes.</p>
+ * <p>Supports CSR forward edge traversals, attribute filtering, CEL predicate evaluation,
+ * compile-time parameter binding, set operations, fixed and convergent loop iterations,
+ * GraphBLAS matrix-vector operations, and extended domain opcodes.</p>
  *
  * @param <R> Expected return type of the query pipeline result.
  */
@@ -18,7 +17,7 @@ public class ImpulseQueryBuilder<R> {
     /**
      * Represents an individual AST step node within a query execution pipeline.
      *
-     * @param op Opcode operation name (e.g. "INPUT", "WALK_EDGE", "REPEAT")
+     * @param op Opcode operation name (e.g. "INPUT", "WALK_EDGE", "WALK_EDGE_CEL", "REPEAT")
      * @param relation Target relation name or composite filter expression
      * @param argType Expected input parameter argument type
      * @param returnType Final expected return type of the terminal step
@@ -30,6 +29,7 @@ public class ImpulseQueryBuilder<R> {
     private String entityType;
     private ArgType inputArgType;
     private final List<StepNode> steps = new ArrayList<>();
+    private final Map<String, Object> parameters = new HashMap<>();
     private ReturnType finalReturnType;
 
     /**
@@ -40,7 +40,7 @@ public class ImpulseQueryBuilder<R> {
     /**
      * Define the input seed entity type and argument type for the query pipeline.
      *
-     * @param entityType Name of input entity domain (e.g. "USER", "Load")
+     * @param entityType Name of input entity domain (e.g. "USER", "Bus", "Load")
      * @param argType Argument type format (e.g. {@link ArgType#SINGLE_ID}, {@link ArgType#ROARING_BITSET})
      * @return This builder instance for method chaining
      */
@@ -52,14 +52,74 @@ public class ImpulseQueryBuilder<R> {
     }
 
     /**
+     * Bind a named parameter value (e.g. "@P1", "FRUIT" or "@minVoltage", 0.95) for compile-time substitution.
+     *
+     * @param name Parameter name (e.g. "@P1", "@threshold")
+     * @param value Bound parameter value (String, Long, Double, Boolean, etc.)
+     * @return This builder instance for method chaining
+     */
+    public ImpulseQueryBuilder<R> bindParameter(String name, Object value) {
+        if (name != null) {
+            this.parameters.put(name, value);
+        }
+        return this;
+    }
+
+    /**
+     * Bind multiple named parameters for compile-time substitution.
+     *
+     * @param params Map of parameter name to value bindings
+     * @return This builder instance for method chaining
+     */
+    public ImpulseQueryBuilder<R> bindParameters(Map<String, Object> params) {
+        if (params != null) {
+            this.parameters.putAll(params);
+        }
+        return this;
+    }
+
+    /**
+     * Returns the map of bound parameters configured on this builder.
+     */
+    public Map<String, Object> getParameters() {
+        return Collections.unmodifiableMap(parameters);
+    }
+
+    /**
      * Add a CSR forward edge walk step over the specified relation name.
      *
-     * @param relationName Name of edge relation (e.g. "userToGroup")
+     * @param relationName Name of edge relation (e.g. "userToGroup", "Branch")
      * @return This builder instance for method chaining
      */
     public ImpulseQueryBuilder<R> walkEdge(String relationName) {
         Objects.requireNonNull(relationName, "relationName must not be null");
         steps.add(new StepNode("WALK_EDGE", relationName, null, null, 0, List.of()));
+        return this;
+    }
+
+    /**
+     * Add a filtered CSR edge walk step with an embedded CEL expression.
+     *
+     * @param relationName Name of edge relation (e.g. "Branch", "in_section")
+     * @param celExpr CEL predicate expression (e.g. "edge.status == 1 && edge.rate_a >= @minRating")
+     * @return This builder instance for method chaining
+     */
+    public ImpulseQueryBuilder<R> walkEdgeWithCel(String relationName, String celExpr) {
+        Objects.requireNonNull(relationName, "relationName must not be null");
+        Objects.requireNonNull(celExpr, "celExpr must not be null");
+        steps.add(new StepNode("WALK_EDGE_CEL", relationName + ":" + celExpr, null, null, 0, List.of()));
+        return this;
+    }
+
+    /**
+     * Filter active candidate node set with an embedded CEL expression.
+     *
+     * @param celExpr CEL predicate expression (e.g. "node.vm < @minVoltage || node.vm > @maxVoltage")
+     * @return This builder instance for method chaining
+     */
+    public ImpulseQueryBuilder<R> filterWithCel(String celExpr) {
+        Objects.requireNonNull(celExpr, "celExpr must not be null");
+        steps.add(new StepNode("FILTER_CEL", celExpr, null, null, 0, List.of()));
         return this;
     }
 
@@ -97,6 +157,7 @@ public class ImpulseQueryBuilder<R> {
      */
     public ImpulseQueryBuilder<R> repeat(Function<ImpulseQueryBuilder<R>, ImpulseQueryBuilder<R>> stepFn, int count) {
         ImpulseQueryBuilder<R> subBuilder = new ImpulseQueryBuilder<>();
+        subBuilder.bindParameters(this.parameters);
         stepFn.apply(subBuilder);
         steps.add(new StepNode("REPEAT", null, null, null, count, subBuilder.steps));
         return this;
@@ -110,6 +171,7 @@ public class ImpulseQueryBuilder<R> {
      */
     public ImpulseQueryBuilder<R> repeatUntilStable(Function<ImpulseQueryBuilder<R>, ImpulseQueryBuilder<R>> stepFn) {
         ImpulseQueryBuilder<R> subBuilder = new ImpulseQueryBuilder<>();
+        subBuilder.bindParameters(this.parameters);
         stepFn.apply(subBuilder);
         steps.add(new StepNode("REPEAT_UNTIL_STABLE", null, null, null, 0, subBuilder.steps));
         return this;
@@ -141,12 +203,13 @@ public class ImpulseQueryBuilder<R> {
      */
     public ImpulseQueryBuilder<R> filterNodeAttribute(String attributeName, String op, double value) {
         Objects.requireNonNull(attributeName, "attributeName must not be null");
+        Objects.requireNonNull(op, "op must not be null");
         steps.add(new StepNode("FILTER_NODE", attributeName + ":" + op + ":" + value, null, null, 0, List.of()));
         return this;
     }
 
     /**
-     * Add a map-reduce projection expression combining node and edge attributes.
+     * Project an arithmetic combination of node and edge attributes onto the active candidate frontier.
      *
      * @param nodeAttribute Node attribute name
      * @param operator Math operator (e.g. "*", "+")
@@ -170,7 +233,7 @@ public class ImpulseQueryBuilder<R> {
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> reduceSum() {
         steps.add(new StepNode("REDUCE_SUM", null, null, ReturnType.COUNT, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class);
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class, parameters);
     }
 
     /**
@@ -182,7 +245,7 @@ public class ImpulseQueryBuilder<R> {
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> reduceMax() {
         steps.add(new StepNode("REDUCE_MAX", null, null, ReturnType.COUNT, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class);
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class, parameters);
     }
 
     /**
@@ -194,7 +257,7 @@ public class ImpulseQueryBuilder<R> {
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> reduceMin() {
         steps.add(new StepNode("REDUCE_MIN", null, null, ReturnType.COUNT, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class);
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class, parameters);
     }
 
     /**
@@ -206,7 +269,7 @@ public class ImpulseQueryBuilder<R> {
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> reduceAvg() {
         steps.add(new StepNode("REDUCE_AVG", null, null, ReturnType.COUNT, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class);
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class, parameters);
     }
 
     /**
@@ -218,7 +281,7 @@ public class ImpulseQueryBuilder<R> {
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> reduceFirst() {
         steps.add(new StepNode("REDUCE_FIRST", null, null, ReturnType.COUNT, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Object.class);
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Object.class, parameters);
     }
 
     /**
@@ -262,7 +325,7 @@ public class ImpulseQueryBuilder<R> {
     /**
      * Terminal collect step: materialize final result in the requested return type format.
      *
-     * @param returnType Requested result format (e.g. {@link ReturnType#ROARING_BITSET}, {@link ReturnType#ARRAY})
+     * @param returnType Requested result format (e.g. {@link ReturnType#ROARING_BITSET}, {@link ReturnType#NODE_ARRAY})
      * @param <T> Expected return type class
      * @return Immutable compiled query object
      */
@@ -270,7 +333,22 @@ public class ImpulseQueryBuilder<R> {
     public <T> ImpulseGraphQuery<T> collect(ReturnType returnType) {
         this.finalReturnType = Objects.requireNonNull(returnType, "returnType must not be null");
         steps.add(new StepNode("COLLECT", null, null, returnType, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Object.class);
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Object.class, parameters);
+    }
+
+    @SuppressWarnings("unchecked")
+    public <T> ImpulseGraphQuery<T> collectBitSet() {
+        return (ImpulseGraphQuery<T>) collect(ReturnType.ROARING_BITSET);
+    }
+
+    @SuppressWarnings("unchecked")
+    public <T> ImpulseGraphQuery<T> collectArray() {
+        return (ImpulseGraphQuery<T>) collect(ReturnType.NODE_ARRAY);
+    }
+
+    @SuppressWarnings("unchecked")
+    public <T> ImpulseGraphQuery<T> collectCount() {
+        return (ImpulseGraphQuery<T>) collect(ReturnType.COUNT);
     }
 
     public String getEntityType() {
@@ -330,12 +408,19 @@ public class ImpulseQueryBuilder<R> {
         private final ArgType inputArgType;
         private final List<StepNode> pipelineSteps;
         private final Class<R> resultType;
+        private final Map<String, Object> parameters;
 
-        public DefaultImpulseGraphQuery(String entityType, ArgType inputArgType, List<StepNode> pipelineSteps, Class<R> resultType) {
+        public DefaultImpulseGraphQuery(String entityType, ArgType inputArgType, List<StepNode> pipelineSteps, Class<R> resultType, Map<String, Object> parameters) {
             this.entityType = entityType;
             this.inputArgType = inputArgType;
             this.pipelineSteps = List.copyOf(pipelineSteps);
             this.resultType = resultType;
+            this.parameters = parameters != null ? Map.copyOf(parameters) : Map.of();
+        }
+
+        @Override
+        public Map<String, Object> getParameters() {
+            return parameters;
         }
 
         @Override

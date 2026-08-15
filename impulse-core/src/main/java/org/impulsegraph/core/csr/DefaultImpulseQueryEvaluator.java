@@ -8,7 +8,8 @@ import org.impulsegraph.api.ImpulseQueryBuilder;
 import org.impulsegraph.api.ReturnType;
 
 import java.util.Arrays;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -183,7 +184,7 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
         Set<Integer> set = new LinkedHashSet<>();
         if (input == null) return set;
 
-        if (input instanceof BitSet bs) {
+        if (input instanceof ImpulseBitSet bs) {
             for (int i = bs.nextSetBit(0); i >= 0; i = bs.nextSetBit(i + 1)) {
                 set.add(i);
             }
@@ -202,8 +203,8 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
     }
 
     private static Object formatOutput(Set<Integer> nodes, Object originalInput, ReturnType returnType) {
-        if (originalInput instanceof BitSet || returnType == ReturnType.ROARING_BITSET) {
-            BitSet bs = new BitSet();
+        if (originalInput instanceof ImpulseBitSet || returnType == ReturnType.ROARING_BITSET) {
+            ImpulseBitSet bs = new OffHeapBitSet(java.lang.foreign.Arena.ofAuto(), 1000);
             for (int n : nodes) bs.set(n);
             return bs;
         } else if (originalInput instanceof int[]) {

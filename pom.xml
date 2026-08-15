@@ -16,10 +16,12 @@
         <module>impulse-spec</module>
         <module>impulse-api</module>
         <module>impulse-core</module>
+        <module>impulse-compiler</module>
         <module>impulse-codegen</module>
         <module>impulse-maven-plugin</module>
         <module>impulse-kotlin</module>
         <module>impulse-scala</module>
+        <module>impulse-clojure</module>
         <module>impulse-gradle-plugin</module>
     </modules>
 

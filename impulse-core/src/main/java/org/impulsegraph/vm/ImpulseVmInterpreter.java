@@ -4,7 +4,8 @@ import org.impulsegraph.core.csr.GraphSnapshot;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 import static org.impulsegraph.vm.VmRegisterType.*;
 import static org.impulsegraph.vm.VmStateLayout.*;
@@ -19,7 +20,7 @@ public final class ImpulseVmInterpreter {
 
     public static Object execute(MemorySegment programSeg, long instructionCount, GraphSnapshot snapshot, Object input, Arena arena) {
         if (programSeg == null || instructionCount <= 0) {
-            return new BitSet();
+            return new OffHeapBitSet(arena, 1000);
         }
 
         try (VmQueryContext ctx = new VmQueryContext(snapshot, arena)) {
@@ -59,12 +60,34 @@ public final class ImpulseVmInterpreter {
                     }
 
                     case OP_CSR_WALK -> {
-                        VmHandlers.handleCsrWalk(state, ctx, instr);
-                        pc++;
+                        VmHandlers.handleCsrWalk(state, ctx, instr, input);
+                        if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0 && VmHandlers.checkFlag(state, FLAG_ZF)) {
+                            pc = instructionCount; // Short-circuit early exit
+                        } else {
+                            pc++;
+                        }
+                    }
+
+                    case OP_CSR_WALK_2HOP -> {
+                        VmHandlers.handleCsrWalk2Hop(state, ctx, instr, input);
+                        if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0 && VmHandlers.checkFlag(state, FLAG_ZF)) {
+                            pc = instructionCount; // Short-circuit early exit
+                        } else {
+                            pc++;
+                        }
                     }
 
                     case OP_CSC_WALK -> {
-                        VmHandlers.handleCscWalk(state, ctx, instr);
+                        VmHandlers.handleCscWalk(state, ctx, instr, input);
+                        if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0 && VmHandlers.checkFlag(state, FLAG_ZF)) {
+                            pc = instructionCount; // Short-circuit early exit
+                        } else {
+                            pc++;
+                        }
+                    }
+
+                    case OP_ADAPTIVE_WALK -> {
+                        VmHandlers.handleAdaptiveWalk(state, ctx, instr);
                         pc++;
                     }
 
@@ -292,20 +315,26 @@ public final class ImpulseVmInterpreter {
                         pc++;
                     }
 
+                    case OP_ASSERT_FINITE -> {
+                        VmHandlers.handleAssertFinite(state, ctx, instr);
+                        pc++;
+                    }
+
                     case OP_TRAP -> {
                         pc = instructionCount; // Stop loop on trap
                     }
 
                     case OP_ENTER_FRAME, OP_LEAVE_FRAME -> {
                         // NO-OP frame setup/teardown in JVM interpreter
+                        pc++;
                     }
 
                     case OP_HALT -> {
                         pc = instructionCount; // Stop loop
                     }
 
-                    case OP_RESERVED_0A, OP_RESERVED_0B, OP_RESERVED_0C, OP_RESERVED_0D, OP_RESERVED_0E, OP_RESERVED_0F,
-                         OP_RESERVED_1D, OP_RESERVED_1E, OP_RESERVED_1F, OP_RESERVED_20, OP_RESERVED_21, OP_RESERVED_22, OP_RESERVED_23, OP_RESERVED_24, OP_RESERVED_25, OP_RESERVED_26, OP_RESERVED_27, OP_RESERVED_28, OP_RESERVED_29, OP_RESERVED_2A, OP_RESERVED_2B, OP_RESERVED_2C, OP_RESERVED_2D, OP_RESERVED_2E, OP_RESERVED_2F,
+                    case OP_RESERVED_0A, OP_RESERVED_0B, OP_RESERVED_0C, OP_RESERVED_0D, OP_RESERVED_0F,
+                         OP_RESERVED_28, OP_RESERVED_29, OP_RESERVED_2B, OP_RESERVED_2C,
                          OP_RESERVED_3A, OP_RESERVED_3B, OP_RESERVED_3C, OP_RESERVED_3D, OP_RESERVED_3E, OP_RESERVED_3F,
                          OP_RESERVED_4C, OP_RESERVED_4D, OP_RESERVED_4E, OP_RESERVED_4F,
                          OP_RESERVED_59,
@@ -319,7 +348,7 @@ public final class ImpulseVmInterpreter {
                 }
             }
 
-            return (finalResult != null) ? finalResult : new BitSet();
+            return (finalResult != null) ? finalResult : new OffHeapBitSet(arena, 1000);
         }
     }
 }

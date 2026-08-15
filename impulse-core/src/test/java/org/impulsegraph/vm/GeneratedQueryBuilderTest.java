@@ -13,7 +13,8 @@ import org.junit.jupiter.api.Test;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 import java.util.List;
 import java.util.Map;
 
@@ -64,7 +65,7 @@ public class GeneratedQueryBuilderTest {
             super(builder);
         }
 
-        public ImpulseGraphQuery<BitSet> walkGroupToRole() {
+        public ImpulseGraphQuery<ImpulseBitSet> walkGroupToRole() {
             this.builder.walkEdge("groupToRole");
             return this.collectRoaringBitset();
         }
@@ -84,11 +85,11 @@ public class GeneratedQueryBuilderTest {
             GraphSnapshot graph = new GraphSnapshot(arena, Map.of("userToGroup", u2g, "groupToRole", g2r));
 
             // Execute strongly-typed generated builder query with IDE auto-complete methods!
-            ImpulseGraphQuery<BitSet> query = MockUserQueryBuilder.from(0)
+            ImpulseGraphQuery<ImpulseBitSet> query = MockUserQueryBuilder.from(0)
                     .walkUserToGroup()
                     .walkGroupToRole();
 
-            BitSet roleIds = query.execute(graph, 0);
+            ImpulseBitSet roleIds = query.execute(graph, 0);
             assertNotNull(roleIds);
             assertTrue(roleIds.get(100), "Strongly-typed query MUST reach Role ID 100 via impulse-vm execution engine");
 

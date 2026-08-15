@@ -78,6 +78,21 @@ public final class ImpulseLayoutsV0_9 {
         ValueLayout.JAVA_LONG.withName("offsets_bytes")
     ).withName("impulse_attribute_descriptor_v0_9_t");
 
+    // Section 2.6 Secondary Index Directory Entry (Fixed 64 Bytes POD)
+    public static final StructLayout IMPULSE_INDEX_DIRECTORY_ENTRY_V0_9_T_LAYOUT = MemoryLayout.structLayout(
+        ValueLayout.JAVA_INT.withName("index_id"),
+        ValueLayout.JAVA_SHORT.withName("domain_id"),
+        ValueLayout.JAVA_SHORT.withName("relation_id"),
+        ValueLayout.JAVA_SHORT.withName("attribute_index"),
+        ValueLayout.JAVA_BYTE.withName("index_type"),
+        ValueLayout.JAVA_BYTE.withName("reserved1"),
+        ValueLayout.JAVA_INT.withName("name_offset"),
+        ValueLayout.JAVA_LONG.withName("data_offset"),
+        ValueLayout.JAVA_LONG.withName("data_bytes"),
+        ValueLayout.JAVA_LONG.withName("payload_feature_mask"),
+        MemoryLayout.sequenceLayout(24, ValueLayout.JAVA_BYTE).withName("reserved_padding")
+    ).withName("impulse_index_directory_entry_v0_9_t");
+
     // 16-Byte Footer Trailer at EOF
     public static final StructLayout IMPULSE_FOOTER_TRAILER_V0_9_T_LAYOUT = MemoryLayout.structLayout(
         ValueLayout.JAVA_LONG.withName("footer_length"),

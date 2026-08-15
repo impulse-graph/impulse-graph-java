@@ -10,7 +10,8 @@ import org.junit.jupiter.api.Test;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 import java.util.Map;
 
 import static org.impulsegraph.vm.VmRegisterType.*;
@@ -116,9 +117,9 @@ public class CscVmWalkTest {
             MemorySegment prog = buildProgram(arena, code);
 
             Object result = ImpulseVmInterpreter.execute(prog, code.length, loadedGraph, 1, arena);
-            assertTrue(result instanceof BitSet);
+            assertTrue(result instanceof ImpulseBitSet);
 
-            BitSet outBs = (BitSet) result;
+            ImpulseBitSet outBs = (ImpulseBitSet) result;
 
             // Should contain in-neighbors of node 1: 0 and 2
             assertEquals(2, outBs.cardinality());

@@ -1,5 +1,7 @@
 package org.impulsegraph.api;
 
+import java.util.Map;
+
 /**
  * Strongly-typed, serializable representation of a graph query (e.g. reachability,
  * transitive closure, set algebra, neighborhood extraction).
@@ -36,6 +38,13 @@ public interface ImpulseGraphQuery<R> {
      * Returns the string name or structural operation description of this query root node.
      */
     String getOperationName();
+
+    /**
+     * Returns the map of bound parameters for this query.
+     */
+    default Map<String, Object> getParameters() {
+        return Map.of();
+    }
 
     /**
      * Returns a human-readable text tree representation of the query AST.

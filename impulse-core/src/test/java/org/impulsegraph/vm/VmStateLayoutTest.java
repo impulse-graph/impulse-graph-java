@@ -4,7 +4,8 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -67,7 +68,7 @@ public class VmStateLayoutTest {
             int h1 = ctx.acquireBitset();
             assertNotEquals(h0, h1);
 
-            BitSet bs0 = ctx.getBitset(h0);
+            ImpulseBitSet bs0 = ctx.getBitset(h0);
             assertNotNull(bs0);
             bs0.set(10);
             assertTrue(bs0.get(10));

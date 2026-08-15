@@ -11,7 +11,8 @@ import java.lang.foreign.Arena;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -51,7 +52,7 @@ public class RbacSnapshotQueryExample {
             System.out.println("[+] Built AST Query Operation: " + userToRolesQuery.getOperationName());
 
             // 4. Prepare input seed parameter (e.g. User Index 0)
-            BitSet inputUsers = new BitSet();
+            ImpulseBitSet inputUsers = new OffHeapBitSet(arena, 1000);
             inputUsers.set(0);
 
             // 5. Execute AST query pipeline

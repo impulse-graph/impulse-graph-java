@@ -6,7 +6,8 @@ import org.impulsegraph.api.ImpulseQueryBuilder;
 import org.impulsegraph.api.ReturnType;
 
 import java.util.Objects;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 /**
  * Strongly-typed base class for generated query builders.
@@ -33,7 +34,7 @@ public class TypedQueryBuilder<E, R> {
     }
 
     @SuppressWarnings("unchecked")
-    public ImpulseGraphQuery<BitSet> collectRoaringBitset() {
+    public ImpulseGraphQuery<ImpulseBitSet> collectRoaringBitset() {
         return builder.collect(ReturnType.ROARING_BITSET);
     }
 

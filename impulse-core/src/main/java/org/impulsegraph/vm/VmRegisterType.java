@@ -57,7 +57,7 @@ public final class VmRegisterType {
     public static final byte OP_RESERVED_0B            = (byte) 0x0B;
     public static final byte OP_RESERVED_0C            = (byte) 0x0C;
     public static final byte OP_RESERVED_0D            = (byte) 0x0D;
-    public static final byte OP_RESERVED_0E            = (byte) 0x0E;
+    public static final byte OP_CSR_WALK_2HOP          = (byte) 0x0E;
     public static final byte OP_RESERVED_0F            = (byte) 0x0F;
 
     public static final byte OP_CSR_WALK               = (byte) 0x10;
@@ -69,26 +69,32 @@ public final class VmRegisterType {
     public static final byte OP_CSR_WALK_REDUCE_SUM    = (byte) 0x16;
     public static final byte OP_CSR_WALK_REDUCE        = (byte) 0x17;
     public static final byte OP_CSC_WALK               = (byte) 0x18;
+    public static final byte OP_HAS_CSR                = (byte) 0x19;
+    public static final byte OP_HAS_CSC                = (byte) 0x1A;
+    public static final byte OP_HAS_COO                = (byte) 0x1B;
+    public static final byte OP_HAS_KEY_CATALOG        = (byte) 0x1C;
+    public static final byte OP_DENSE_WALK_LEGACY      = (byte) 0x1D;
+    public static final byte OP_ADAPTIVE_WALK          = (byte) 0x1D;
+    public static final byte OP_CREATE_SCRATCH_INDEX   = (byte) 0x1E;
+    public static final byte OP_DROP_SCRATCH_INDEX     = (byte) 0x1F;
 
-    public static final byte OP_RESERVED_1D            = (byte) 0x1D;
-    public static final byte OP_RESERVED_1E            = (byte) 0x1E;
-    public static final byte OP_RESERVED_1F            = (byte) 0x1F;
-    public static final byte OP_RESERVED_20            = (byte) 0x20;
-    public static final byte OP_RESERVED_21            = (byte) 0x21;
-    public static final byte OP_RESERVED_22            = (byte) 0x22;
-    public static final byte OP_RESERVED_23            = (byte) 0x23;
-    public static final byte OP_RESERVED_24            = (byte) 0x24;
-    public static final byte OP_RESERVED_25            = (byte) 0x25;
-    public static final byte OP_RESERVED_26            = (byte) 0x26;
-    public static final byte OP_RESERVED_27            = (byte) 0x27;
+    // Vector Predicate and SIMD Mask Opcodes (0x20 - 0x2F)
+    public static final byte OP_VEC_CMP_EQ             = (byte) 0x20;
+    public static final byte OP_VEC_CMP_GT             = (byte) 0x21;
+    public static final byte OP_VEC_CMP_LT             = (byte) 0x22;
+    public static final byte OP_VEC_CMP_BETWEEN        = (byte) 0x23;
+    public static final byte OP_MASK_AND               = (byte) 0x24;
+    public static final byte OP_MASK_OR                = (byte) 0x25;
+    public static final byte OP_MASK_NOT               = (byte) 0x26;
+    public static final byte OP_VEC_BLEND              = (byte) 0x27;
     public static final byte OP_RESERVED_28            = (byte) 0x28;
     public static final byte OP_RESERVED_29            = (byte) 0x29;
-    public static final byte OP_RESERVED_2A            = (byte) 0x2A;
+    public static final byte OP_ASSERT_FINITE          = (byte) 0x2A;
     public static final byte OP_RESERVED_2B            = (byte) 0x2B;
     public static final byte OP_RESERVED_2C            = (byte) 0x2C;
-    public static final byte OP_RESERVED_2D            = (byte) 0x2D;
-    public static final byte OP_RESERVED_2E            = (byte) 0x2E;
-    public static final byte OP_RESERVED_2F            = (byte) 0x2F;
+    public static final byte OP_VEC_MATH_UNARY         = (byte) 0x2D;
+    public static final byte OP_VEC_MATH_BINARY        = (byte) 0x2E;
+    public static final byte OP_VEC_MATH_TERNARY       = (byte) 0x2F;
 
     public static final byte OP_SET_UNION              = (byte) 0x30;
     public static final byte OP_SET_INTERSECT          = (byte) 0x31;

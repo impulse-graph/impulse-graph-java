@@ -3,16 +3,19 @@ package org.impulsegraph.vm;
 import org.impulsegraph.core.csr.BinarySnapshotLoader;
 import org.impulsegraph.core.csr.GraphSnapshot;
 import org.impulsegraph.core.csr.RelationSnapshot;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@Disabled("Manual showcase benchmark")
 public class PowergridVmBenchmarkTest {
 
     private static final Path SNAPSHOT_PATH = Path.of("/Users/jesse/impulse/impulse-powergrid/datasets/case1354pegase.v09.imps");
@@ -161,8 +164,8 @@ public class PowergridVmBenchmarkTest {
 
                 int h1 = ctx.acquireBitset();
                 int h2 = ctx.acquireBitset();
-                BitSet bs1 = ctx.getBitset(h1);
-                BitSet bs2 = ctx.getBitset(h2);
+                ImpulseBitSet bs1 = ctx.getBitset(h1);
+                ImpulseBitSet bs2 = ctx.getBitset(h2);
 
                 for (int i = 0; i < 200; i++) {
                     bs1.set(i);

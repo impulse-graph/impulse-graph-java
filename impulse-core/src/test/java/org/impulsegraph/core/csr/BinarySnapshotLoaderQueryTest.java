@@ -7,7 +7,8 @@ import java.lang.foreign.Arena;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.BitSet;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -49,7 +50,7 @@ class BinarySnapshotLoaderQueryTest {
             RelationSnapshot rel = graph.getAllRelationSnapshots().values().iterator().next();
             assertNotNull(rel, "RelationSnapshot MUST NOT be null");
 
-            BitSet activeTargets = new BitSet();
+            ImpulseBitSet activeTargets = new OffHeapBitSet(arena, 1000);
             int[] rowOffsets = rel.getRowOffsets();
             int[] columnIndices = rel.getColumnIndices();
             int startOff = rowOffsets[0];
