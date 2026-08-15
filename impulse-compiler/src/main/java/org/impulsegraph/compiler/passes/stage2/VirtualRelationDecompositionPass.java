@@ -87,6 +87,7 @@ public final class VirtualRelationDecompositionPass implements CompilerPass {
                 matches.add(name);
             }
         }
+        matches.sort(String::compareTo);
         return matches;
     }
 }

@@ -320,8 +320,8 @@ public class OptimizationRulesCoverageTest {
                 assertNotNull(decomp);
                 ScmWalk vrWalk = (ScmWalk) ((ScmProgram) decomp).steps().get(0);
                 assertEquals(2, vrWalk.subSteps().size());
-                assertEquals("in_section_fruit", ((ScmWalk) vrWalk.subSteps().get(0)).relationName());
-                assertEquals("in_section_bread", ((ScmWalk) vrWalk.subSteps().get(1)).relationName());
+                assertEquals("in_section_bread", ((ScmWalk) vrWalk.subSteps().get(0)).relationName());
+                assertEquals("in_section_fruit", ((ScmWalk) vrWalk.subSteps().get(1)).relationName());
             }
         }
 
@@ -347,6 +347,9 @@ public class OptimizationRulesCoverageTest {
                 assertNotNull(decomp);
                 ScmWalk vrWalk = (ScmWalk) ((ScmProgram) decomp).steps().get(0);
                 assertEquals(3, vrWalk.subSteps().size());
+                assertEquals("in_section_bread", ((ScmWalk) vrWalk.subSteps().get(0)).relationName());
+                assertEquals("in_section_dairy", ((ScmWalk) vrWalk.subSteps().get(1)).relationName());
+                assertEquals("in_section_fruit", ((ScmWalk) vrWalk.subSteps().get(2)).relationName());
             }
         }
 
