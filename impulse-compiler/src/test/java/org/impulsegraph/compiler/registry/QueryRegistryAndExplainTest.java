@@ -1,11 +1,14 @@
 package org.impulsegraph.compiler.registry;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.compiler.ast.ScmCollect;
 import org.impulsegraph.compiler.ast.ScmProgram;
 import org.impulsegraph.compiler.ast.ScmWalk;
 import org.impulsegraph.compiler.explain.QueryExplainer;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.impulsegraph.vm.ImpulseQueryCompiler.CompiledQuery;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -47,14 +50,14 @@ public class QueryRegistryAndExplainTest {
             colSeg.setAtIndex(ValueLayout.JAVA_INT, 0, 0);
 
             RelationSnapshot rel = new RelationSnapshot(arena, 1, 1, rowSeg, colSeg);
-            GraphSnapshot validSnapshot = new GraphSnapshot(arena, Map.of("userToGroup", rel));
+            ImpulseGraphSnapshot validSnapshot = new ImpulseGraphSnapshot(arena, Map.of("userToGroup", rel));
 
             Map<String, CompiledQuery> boundMap = registry.validateAndBindAll(validSnapshot, arena);
             assertEquals(1, boundMap.size());
             assertTrue(boundMap.containsKey("user_groups"));
 
             // 2. Candidate Snapshot MISSING required relation -> validation fails fast
-            GraphSnapshot invalidSnapshot = new GraphSnapshot(arena, Map.of("otherRelation", rel));
+            ImpulseGraphSnapshot invalidSnapshot = new ImpulseGraphSnapshot(arena, Map.of("otherRelation", rel));
             IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
                     registry.validateAndBindAll(invalidSnapshot, arena));
             assertTrue(ex.getMessage().contains("Blue/Green Swap Pre-Flight Gate Rejected"));

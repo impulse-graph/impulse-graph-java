@@ -1,5 +1,7 @@
 package org.impulsegraph.codegen;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.impulsegraph.api.schema.GraphSchema;
 import org.impulsegraph.api.schema.SchemaCodeGenerator;
 
@@ -43,8 +45,8 @@ public class GeneratorMain {
         Path targetPath = Paths.get(targetFolder);
         Files.createDirectories(targetPath);
 
-        Path schemaFile = Paths.get(yamlPath);
-        if (!Files.exists(schemaFile)) {
+        File schemaFile = new File(yamlPath);
+        if (!schemaFile.exists()) {
             throw new IllegalArgumentException("Schema file not found: " + yamlPath);
         }
 
@@ -52,78 +54,23 @@ public class GeneratorMain {
                 ? packageNameOverride
                 : "org.impulsegraph.generated";
 
-        String graphName = "ImpulseGraph";
+        ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+        ManifestModel model = mapper.readValue(schemaFile, ManifestModel.class);
 
-        List<String> lines = Files.readAllLines(schemaFile);
+        String graphName = (model.graphName != null) ? model.graphName : "ImpulseGraph";
+
         List<GraphSchema.EntityDef> entities = new ArrayList<>();
+        if (model.domains != null) {
+            for (Map.Entry<String, ManifestModel.DomainDef> entry : model.domains.entrySet()) {
+                entities.add(new GraphSchema.EntityDef(entry.getKey(), entry.getValue().attributes));
+            }
+        }
+
         List<GraphSchema.RelationDef> relations = new ArrayList<>();
-
-        String currentSection = null;
-        String currentNode = null;
-        String currentRel = null;
-        String relSource = "User";
-        String relTarget = "Group";
-        Map<String, String> currentAttrs = new HashMap<>();
-
-        for (String line : lines) {
-            String trimmed = line.trim();
-            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
-
-            if (trimmed.startsWith("package:")) {
-                if (packageNameOverride == null || packageNameOverride.isBlank()) {
-                    packageName = trimmed.substring("package:".length()).trim();
-                }
-            } else if (trimmed.startsWith("graphName:")) {
-                graphName = trimmed.substring("graphName:".length()).trim();
-            } else if (trimmed.equals("nodes:")) {
-                currentSection = "nodes";
-            } else if (trimmed.equals("relations:")) {
-                if (currentNode != null) {
-                    entities.add(new GraphSchema.EntityDef(currentNode, currentAttrs));
-                    currentNode = null;
-                    currentAttrs = new HashMap<>();
-                }
-                currentSection = "relations";
-            } else if ("nodes".equals(currentSection) && line.startsWith("  ") && line.endsWith(":")) {
-                if (currentNode != null) {
-                    entities.add(new GraphSchema.EntityDef(currentNode, currentAttrs));
-                    currentAttrs = new HashMap<>();
-                }
-                currentNode = line.replace(":", "").trim();
-            } else if ("relations".equals(currentSection) && line.startsWith("  ") && line.endsWith(":")) {
-                if (currentRel != null) {
-                    relations.add(new GraphSchema.RelationDef(currentRel, relSource, relTarget));
-                    relSource = "User";
-                    relTarget = "Group";
-                }
-                currentRel = line.replace(":", "").trim();
-            } else if (trimmed.startsWith("source:")) {
-                relSource = trimmed.substring("source:".length()).trim();
-            } else if (trimmed.startsWith("target:")) {
-                relTarget = trimmed.substring("target:".length()).trim();
-            } else if (trimmed.contains(":") && currentNode != null && "nodes".equals(currentSection)) {
-                String[] kv = trimmed.split(":");
-                if (kv.length == 2) {
-                    String key = kv[0].replace("-", "").trim();
-                    if (!key.equals("key") && !key.equals("denseId") && !key.equals("attributes")) {
-                        currentAttrs.put(key, kv[1].trim());
-                    }
-                }
-            }
-        }
-
-        if (currentNode != null) {
-            final String lastNode = currentNode;
-            if (entities.stream().noneMatch(e -> e.name().equals(lastNode))) {
-                entities.add(new GraphSchema.EntityDef(lastNode, currentAttrs));
-            }
-        }
-        if (currentRel != null) {
-            final String lastRel = currentRel;
-            final String src = relSource;
-            final String dst = relTarget;
-            if (relations.stream().noneMatch(r -> r.name().equals(lastRel))) {
-                relations.add(new GraphSchema.RelationDef(lastRel, src, dst));
+        if (model.relations != null) {
+            for (Map.Entry<String, ManifestModel.RelationDef> entry : model.relations.entrySet()) {
+                ManifestModel.RelationDef rel = entry.getValue();
+                relations.add(new GraphSchema.RelationDef(entry.getKey(), rel.source, rel.target));
             }
         }
 

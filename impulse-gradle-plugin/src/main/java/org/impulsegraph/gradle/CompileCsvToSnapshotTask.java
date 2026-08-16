@@ -1,8 +1,9 @@
 package org.impulsegraph.gradle;
 
-import org.impulsegraph.core.csr.DefaultSnapshotBuilder;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.storage.csr.DefaultSnapshotBuilder;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
 
 import java.io.BufferedReader;
 import java.io.File;

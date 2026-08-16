@@ -3,7 +3,7 @@ package org.impulsegraph.compiler.emitter;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.passes.stage2.RegisterAllocationPass;
 import org.impulsegraph.compiler.passes.stage2.RegisterAllocationPass.RegisterAssignment;
-import org.impulsegraph.core.csr.GraphSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.vm.ImpulseMethodHandleCompiler;
 import org.impulsegraph.vm.ImpulseQueryCompiler.CompiledQuery;
 import org.impulsegraph.vm.ImpulseQueryCompiler.RelationInstructionPatch;
@@ -39,7 +39,7 @@ public final class ImpOpsBytecodeEmitter {
     public static final byte FLAG_HALT_ON_EMPTY = 0x01;
     public static final byte FLAG_INPUT_SEED = 0x02;
 
-    public static EmittedProgram emit(ImpScmNode ast, GraphSnapshot snapshot, Arena arena) {
+    public static EmittedProgram emit(ImpScmNode ast, ImpulseGraphSnapshot snapshot, Arena arena) {
         Objects.requireNonNull(ast, "ast must not be null");
         Objects.requireNonNull(arena, "arena must not be null");
 
@@ -124,7 +124,7 @@ public final class ImpOpsBytecodeEmitter {
         return new EmittedProgram(programSeg, count, patches, relationIdMap, instrList);
     }
 
-    public static CompiledQuery compileToExecutable(ImpScmNode ast, GraphSnapshot snapshot, Arena arena) {
+    public static CompiledQuery compileToExecutable(ImpScmNode ast, ImpulseGraphSnapshot snapshot, Arena arena) {
         EmittedProgram emitted = emit(ast, snapshot, arena);
         return new CompiledQuery(
                 emitted.programSegment(),

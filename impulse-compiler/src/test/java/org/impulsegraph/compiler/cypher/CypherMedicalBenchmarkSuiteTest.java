@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.cypher;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.compiler.ast.ImpScmNode;
 import org.impulsegraph.compiler.emitter.ImpAsmDisassembler;
@@ -13,8 +16,8 @@ import org.impulsegraph.compiler.passes.stage2.PhysicalBindingPass;
 import org.impulsegraph.compiler.passes.stage2.RegisterAllocationPass;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.BinarySnapshotLoader;
-import org.impulsegraph.core.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.vm.ImpulseVmInterpreter;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -57,10 +60,10 @@ public class CypherMedicalBenchmarkSuiteTest {
             System.out.println("=========================================================================================================\n");
 
             BinarySnapshotLoader.LoadedSnapshot loadedHet = BinarySnapshotLoader.loadSnapshot(HETIONET_IMPS, arena);
-            GraphSnapshot hetionet = loadedHet.graph();
+            ImpulseGraphSnapshot hetionet = loadedHet.graph();
 
             BinarySnapshotLoader.LoadedSnapshot loadedDrkg = BinarySnapshotLoader.loadSnapshot(DRKG_IMPS, arena);
-            GraphSnapshot drkg = loadedDrkg.graph();
+            ImpulseGraphSnapshot drkg = loadedDrkg.graph();
 
             int diseaseSeed = findActiveSeedNode(hetionet, "DaG", false);
             int diseaseDdGSeed = findActiveSeedNode(hetionet, "DdG", false);
@@ -157,7 +160,7 @@ public class CypherMedicalBenchmarkSuiteTest {
     }
 
     private void runCypherBenchmark(String title, String dataset, String cypherQuery,
-                                    GraphSnapshot snapshot, int seedNode, Arena arena) {
+                                    ImpulseGraphSnapshot snapshot, int seedNode, Arena arena) {
         // 1. Parse openCypher string & Lower to ImpScheme AST
         var cypherCompilation = CypherCompiler.compile(cypherQuery);
         var ast = cypherCompilation.ast();
@@ -228,7 +231,7 @@ public class CypherMedicalBenchmarkSuiteTest {
         System.out.println();
     }
 
-    private int findActiveSeedNode(GraphSnapshot snapshot, String relName, boolean isReverse) {
+    private int findActiveSeedNode(ImpulseGraphSnapshot snapshot, String relName, boolean isReverse) {
         var rel = snapshot.getRelationSnapshot(relName);
         if (rel == null) {
             for (var entry : snapshot.getAllRelationSnapshots().entrySet()) {

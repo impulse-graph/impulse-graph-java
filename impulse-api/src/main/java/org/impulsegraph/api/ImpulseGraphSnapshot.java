@@ -51,6 +51,25 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
     MemorySegment getRelationTargetsSegment(String relationName);
 
     /**
+     * Obtains the {@link RelationSnapshot} for the given relation.
+     */
+    RelationSnapshot getRelationSnapshot(String relationName);
+
+    /**
+     * Returns a map of all relation snapshots.
+     */
+    Map<String, RelationSnapshot> getAllRelationSnapshots();
+    org.impulsegraph.api.stats.GraphStatistics getGraphStatistics();
+
+    /**
+     * Returns the graph mutator if one is attached, or null.
+     */
+    org.impulsegraph.api.mutation.GraphMutator getMutator();
+
+    void enterQuery();
+    void exitQuery();
+
+    /**
      * Returns the total off-heap memory footprint of this snapshot in bytes.
      */
     long getOffHeapMemorySizeBytes();

@@ -22,7 +22,12 @@
         </dependency>
         <dependency>
             <groupId>io.impulse.graph</groupId>
-            <artifactId>impulse-core</artifactId>
+            <artifactId>impulse-storage</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.impulse.graph</groupId>
+            <artifactId>impulse-vm</artifactId>
             <version>${project.version}</version>
         </dependency>
 

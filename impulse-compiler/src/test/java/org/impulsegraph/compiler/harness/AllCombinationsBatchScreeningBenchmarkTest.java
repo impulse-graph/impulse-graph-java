@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.harness;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.api.bitset.ImpulseBitSet;
 import org.impulsegraph.compiler.ast.*;
@@ -8,9 +11,9 @@ import org.impulsegraph.compiler.passes.stage1.*;
 import org.impulsegraph.compiler.passes.stage2.*;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.BinarySnapshotLoader;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.impulsegraph.vm.ImpulseVmInterpreter;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -54,7 +57,7 @@ public class AllCombinationsBatchScreeningBenchmarkTest {
             // SCREEN 1: HETIONET ALL-DISEASES 4-HOP DRUG REPURPOSING (CbGpPWpD)
             // -----------------------------------------------------------------------------------------
             BinarySnapshotLoader.LoadedSnapshot loadedHet = BinarySnapshotLoader.loadSnapshot(HETIONET_IMPS, arena);
-            GraphSnapshot hetionet = loadedHet.graph();
+            ImpulseGraphSnapshot hetionet = loadedHet.graph();
             RelationSnapshot relDaG = hetionet.getRelationSnapshot("DaG");
 
             // Find all disease nodes that have at least 1 associated gene in DaG
@@ -128,7 +131,7 @@ public class AllCombinationsBatchScreeningBenchmarkTest {
             // SCREEN 2: ALL-COMPOUNDS DDI & ADVERSE REACTION SCREEN (DRKG 5.87M edges)
             // -----------------------------------------------------------------------------------------
             BinarySnapshotLoader.LoadedSnapshot loadedDrkg = BinarySnapshotLoader.loadSnapshot(DRKG_IMPS, arena);
-            GraphSnapshot drkg = loadedDrkg.graph();
+            ImpulseGraphSnapshot drkg = loadedDrkg.graph();
             RelationSnapshot relDdi = drkg.getRelationSnapshot("DRUGBANK::ddi_interactor_in");
             String relDdiName = "DRUGBANK::ddi_interactor_in";
             if (relDdi == null) {

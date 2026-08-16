@@ -2,7 +2,7 @@ package org.impulsegraph.compiler.registry;
 
 import org.impulsegraph.compiler.ast.ImpScmNode;
 import org.impulsegraph.compiler.trace.CompilerOptions;
-import org.impulsegraph.core.csr.GraphSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.vm.ImpulseQueryCompiler.CompiledQuery;
 
 import java.lang.foreign.Arena;
@@ -59,7 +59,7 @@ public final class QueryRegistry {
      * Compiles and validates all registered queries against the candidate snapshot.
      * Throws IllegalStateException immediately if any query fails validation, aborting the swap.
      */
-    public Map<String, CompiledQuery> validateAndBindAll(GraphSnapshot candidateSnapshot, Arena arena) {
+    public Map<String, CompiledQuery> validateAndBindAll(ImpulseGraphSnapshot candidateSnapshot, Arena arena) {
         Objects.requireNonNull(candidateSnapshot, "candidateSnapshot must not be null");
         Objects.requireNonNull(arena, "arena must not be null");
 

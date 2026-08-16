@@ -1,12 +1,15 @@
 package org.impulsegraph.compiler.harness;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.api.ArgType;
 import org.impulsegraph.api.ImpulseGraphQuery;
 import org.impulsegraph.api.bitset.ImpulseBitSet;
 import org.impulsegraph.compiler.ast.*;
-import org.impulsegraph.core.csr.BinarySnapshotLoader;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.impulsegraph.vm.ImpulseQueryCompiler;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,7 +43,7 @@ public class EndToEndQueryAblationBenchmarkTest {
 
         try (Arena arena = Arena.ofShared()) {
             BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(HETIONET_IMPS, arena);
-            GraphSnapshot graph = loaded.graph();
+            ImpulseGraphSnapshot graph = loaded.graph();
 
             RelationSnapshot ctD = graph.getRelationSnapshot("CtD");
             RelationSnapshot daG = graph.getRelationSnapshot("DaG");
@@ -111,7 +114,7 @@ public class EndToEndQueryAblationBenchmarkTest {
 
         try (Arena arena = Arena.ofShared()) {
             BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(HETIONET_IMPS, arena);
-            GraphSnapshot graph = loaded.graph();
+            ImpulseGraphSnapshot graph = loaded.graph();
 
             RelationSnapshot cbG = graph.getRelationSnapshot("CbG");
             RelationSnapshot cuG = graph.getRelationSnapshot("CuG");
@@ -159,7 +162,7 @@ public class EndToEndQueryAblationBenchmarkTest {
 
         try (Arena arena = Arena.ofShared()) {
             BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(DRKG_IMPS, arena);
-            GraphSnapshot graph = loaded.graph();
+            ImpulseGraphSnapshot graph = loaded.graph();
 
             RelationSnapshot treatsRel = graph.getRelationSnapshot("DRUGBANK::treats::Compound:Disease");
             RelationSnapshot inhibitorRel = graph.getRelationSnapshot("DGIDB::INHIBITOR::Gene:Compound");

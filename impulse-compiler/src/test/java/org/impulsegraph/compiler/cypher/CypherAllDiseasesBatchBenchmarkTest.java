@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.cypher;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.compiler.ast.ImpScmNode;
 import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
@@ -12,8 +15,8 @@ import org.impulsegraph.compiler.passes.stage2.PhysicalBindingPass;
 import org.impulsegraph.compiler.passes.stage2.RegisterAllocationPass;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.BinarySnapshotLoader;
-import org.impulsegraph.core.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.vm.ImpulseVmInterpreter;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,10 +51,10 @@ public class CypherAllDiseasesBatchBenchmarkTest {
             System.out.println("=========================================================================================================");
 
             BinarySnapshotLoader.LoadedSnapshot loadedHet = BinarySnapshotLoader.loadSnapshot(HETIONET_IMPS, arena);
-            GraphSnapshot hetionet = loadedHet.graph();
+            ImpulseGraphSnapshot hetionet = loadedHet.graph();
 
             BinarySnapshotLoader.LoadedSnapshot loadedDrkg = BinarySnapshotLoader.loadSnapshot(DRKG_IMPS, arena);
-            GraphSnapshot drkg = loadedDrkg.graph();
+            ImpulseGraphSnapshot drkg = loadedDrkg.graph();
 
             // 1. Hetionet All Active Diseases for Q1 (4-Hop Drug Repurposing)
             runAllSeedsBenchmark(
@@ -101,7 +104,7 @@ public class CypherAllDiseasesBatchBenchmarkTest {
     }
 
     private void runAllSeedsBenchmark(String title, String dataset, String cypherQuery,
-                                      GraphSnapshot snapshot, String seedRelName, boolean isReverse, Arena arena) {
+                                      ImpulseGraphSnapshot snapshot, String seedRelName, boolean isReverse, Arena arena) {
         var rel = snapshot.getRelationSnapshot(seedRelName);
         if (rel == null) {
             for (var entry : snapshot.getAllRelationSnapshots().entrySet()) {

@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.harness;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.api.ArgType;
 import org.impulsegraph.api.ImpulseGraphQuery;
@@ -13,10 +16,10 @@ import org.impulsegraph.compiler.passes.stage1.*;
 import org.impulsegraph.compiler.passes.stage2.*;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.BinarySnapshotLoader;
-import org.impulsegraph.core.csr.DefaultImpulseQueryEvaluator;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import org.impulsegraph.vm.DefaultImpulseQueryEvaluator;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -66,7 +69,7 @@ public class OptimizationAblationBenchmarkTest {
             for (int n = 0; n < nodeCount; n++) ageAttr.setAtIndex(ValueLayout.JAVA_INT, n, 18 + (n % 96));
 
             RelationSnapshot rel = new RelationSnapshot(arena, nodeCount, edgeCount, rows, cols, List.of(ageAttr));
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("users", rel));
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("users", rel));
             snapshot.getGraphStatistics().putAttributeStatistics("age", ageStats);
 
             int runs = 10_000;
@@ -110,7 +113,7 @@ public class OptimizationAblationBenchmarkTest {
 
         try (Arena arena = Arena.ofShared()) {
             BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(DRKG_IMPS, arena);
-            GraphSnapshot graph = loaded.graph();
+            ImpulseGraphSnapshot graph = loaded.graph();
             RelationSnapshot rel = graph.getRelationSnapshot("DRUGBANK::treats::Compound:Disease");
             assertNotNull(rel);
 
@@ -171,7 +174,7 @@ public class OptimizationAblationBenchmarkTest {
 
         try (Arena arena = Arena.ofShared()) {
             BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(HETIONET_IMPS, arena);
-            GraphSnapshot graph = loaded.graph();
+            ImpulseGraphSnapshot graph = loaded.graph();
 
             // 3 Constituent relations: CbG (binds: 11,571 edges), CuG (upregulates: 18,756 edges), CdG (downregulates: 21,102 edges)
             RelationSnapshot cbG = graph.getRelationSnapshot("CbG");

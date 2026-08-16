@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.harness;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.api.ArgType;
 import org.impulsegraph.api.bitset.ImpulseBitSet;
@@ -12,9 +15,9 @@ import org.impulsegraph.compiler.passes.stage1.*;
 import org.impulsegraph.compiler.passes.stage2.*;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.BinarySnapshotLoader;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.impulsegraph.vm.ImpulseVmInterpreter;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -65,7 +68,7 @@ public class TwoHopFusionAblationBenchmarkTest {
 
             RelationSnapshot rel1 = new RelationSnapshot(arena, nodeCount, edgeCount, r1Offsets, r1Targets, java.util.List.of());
             RelationSnapshot rel2 = new RelationSnapshot(arena, nodeCount, edgeCount, r2Offsets, r2Targets, java.util.List.of());
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("rel1", rel1, "rel2", rel2));
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("rel1", rel1, "rel2", rel2));
 
             int runs = 10_000;
             int seed = 42;
@@ -154,7 +157,7 @@ public class TwoHopFusionAblationBenchmarkTest {
 
             RelationSnapshot rel1 = new RelationSnapshot(arena, nodeCount, 50, r1Offsets, r1Targets, java.util.List.of());
             RelationSnapshot rel2 = new RelationSnapshot(arena, nodeCount, 100, r2Offsets, r2Targets, java.util.List.of());
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("rel1", rel1, "rel2", rel2));
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("rel1", rel1, "rel2", rel2));
 
             // Set high multiplicity statistics on rel1
             org.impulsegraph.api.stats.RelationStatistics rel1Stats = new org.impulsegraph.api.stats.RelationStatistics(

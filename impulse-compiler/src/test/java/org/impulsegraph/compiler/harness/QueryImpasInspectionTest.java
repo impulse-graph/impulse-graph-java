@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.harness;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.api.ArgType;
 import org.impulsegraph.api.ImpulseGraphQuery;
@@ -17,8 +20,8 @@ import org.impulsegraph.compiler.passes.stage1.*;
 import org.impulsegraph.compiler.passes.stage2.*;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.BinarySnapshotLoader;
-import org.impulsegraph.core.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

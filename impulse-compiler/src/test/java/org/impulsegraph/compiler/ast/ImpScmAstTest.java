@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.ast;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.compiler.ast.parser.ImpScmParser;
 import org.impulsegraph.compiler.ast.parser.ImpScmSerializer;

@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.emitter;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.api.bitset.ImpulseBitSet;
 import org.impulsegraph.compiler.ast.ScmCollect;
@@ -7,8 +10,8 @@ import org.impulsegraph.compiler.ast.ScmWalk;
 import org.impulsegraph.compiler.registry.QueryCompilerEngine;
 import org.impulsegraph.compiler.registry.QueryObject;
 import org.impulsegraph.compiler.trace.CompilerOptions;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.impulsegraph.vm.ImpulseQueryCompiler.CompiledQuery;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,7 +43,7 @@ public class BytecodeExecutionIntegrationTest {
             for (int i = 0; i < colTargets.length; i++) colSeg.setAtIndex(ValueLayout.JAVA_INT, i, colTargets[i]);
 
             RelationSnapshot rel = new RelationSnapshot(arena, 4, 3, rowSeg, colSeg);
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("follows", rel));
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("follows", rel));
 
             // AST: (program (csr-walk "follows") (collect-bitset))
             ScmProgram ast = ScmProgram.of(

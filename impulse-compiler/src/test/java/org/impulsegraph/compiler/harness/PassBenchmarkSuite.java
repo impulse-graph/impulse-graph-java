@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.harness;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.api.stats.AttributeStatistics;
 import org.impulsegraph.api.stats.GraphStatistics;
@@ -13,8 +16,8 @@ import org.impulsegraph.compiler.passes.stage1.*;
 import org.impulsegraph.compiler.passes.stage2.*;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -50,7 +53,7 @@ public class PassBenchmarkSuite {
             for (int i = 0; i < colTargets.length; i++) colSeg.setAtIndex(ValueLayout.JAVA_INT, i, colTargets[i]);
 
             RelationSnapshot rel = new RelationSnapshot(arena, 2, 4, rowSeg, colSeg);
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("users", rel));
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("users", rel));
             snapshot.getGraphStatistics().putAttributeStatistics("age", ageStats);
 
             CompilerOptions opts = CompilerOptions.builder().withTracing(false).build();

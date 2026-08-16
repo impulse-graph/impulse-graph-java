@@ -7,7 +7,7 @@ import org.impulsegraph.compiler.ast.algebra.AlgebraicSignature;
 import org.impulsegraph.compiler.cel.CelAstNode;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.passes.CompilerPass;
-import org.impulsegraph.core.csr.GraphSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,7 +30,7 @@ public final class ZoneMapPruningPass implements CompilerPass {
     @Override
     public ImpScmNode transform(ImpScmNode ast, CompilerContext context) {
         if (ast == null) return null;
-        GraphSnapshot snapshot = context.snapshot();
+        ImpulseGraphSnapshot snapshot = context.snapshot();
         GraphStatistics stats = snapshot != null ? snapshot.getGraphStatistics() : null;
         return pruneScm(ast, stats);
     }

@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.harness;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.api.ReturnType;
 import org.impulsegraph.api.stats.AttributeStatistics;
@@ -12,8 +15,8 @@ import org.impulsegraph.compiler.passes.stage1.*;
 import org.impulsegraph.compiler.passes.stage2.*;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -49,7 +52,7 @@ public class OptimizationRulesCoverageTest {
 
             try (Arena arena = Arena.ofConfined()) {
                 RelationSnapshot rel = createMockRelation(arena, 2, 2);
-                GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("users", rel));
+                ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("users", rel));
                 snapshot.getGraphStatistics().putAttributeStatistics("age", ageStats);
 
                 ScmProgram ast = ScmProgram.of(
@@ -85,7 +88,7 @@ public class OptimizationRulesCoverageTest {
 
             try (Arena arena = Arena.ofConfined()) {
                 RelationSnapshot rel = createMockRelation(arena, 2, 2);
-                GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("users", rel));
+                ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("users", rel));
                 snapshot.getGraphStatistics().putAttributeStatistics("age", ageStats);
 
                 ScmProgram ast = ScmProgram.of(
@@ -118,7 +121,7 @@ public class OptimizationRulesCoverageTest {
 
             try (Arena arena = Arena.ofConfined()) {
                 RelationSnapshot rel = createMockRelation(arena, 2, 2);
-                GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("users", rel));
+                ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("users", rel));
                 snapshot.getGraphStatistics().putAttributeStatistics("age", ageStats);
 
                 ScmProgram ast = ScmProgram.of(
@@ -211,7 +214,7 @@ public class OptimizationRulesCoverageTest {
                 int[] rowOffsets = {0, 2, 4};
                 int[] colTargets = {0, 1, 2, 3};
                 RelationSnapshot rel = createMockRelation(arena, rowOffsets, colTargets);
-                GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("parentToChildren", rel));
+                ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("parentToChildren", rel));
 
                 assertTrue(rel.getStatistics().isInjective());
 
@@ -242,7 +245,7 @@ public class OptimizationRulesCoverageTest {
                 int[] colTargets2 = {10, 11, 12, 13};
                 RelationSnapshot rel2 = createMockRelation(arena, rowOffsets2, colTargets2);
 
-                GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("step1", rel1, "step2", rel2));
+                ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("step1", rel1, "step2", rel2));
 
                 ScmProgram ast = ScmProgram.of(
                         ScmWalk.forward("step1"),
@@ -268,7 +271,7 @@ public class OptimizationRulesCoverageTest {
                 int[] rowOffsets = {0, 2, 4};
                 int[] colTargets = {0, 1, 0, 2};
                 RelationSnapshot rel = createMockRelation(arena, rowOffsets, colTargets);
-                GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("userFriends", rel));
+                ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("userFriends", rel));
 
                 assertFalse(rel.getStatistics().isInjective());
 
@@ -303,7 +306,7 @@ public class OptimizationRulesCoverageTest {
                 RelationSnapshot secFruit = createMockRelation(arena, 1, 1);
                 RelationSnapshot secBread = createMockRelation(arena, 1, 1);
 
-                GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of(
+                ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of(
                         "in_section_fruit", secFruit,
                         "in_section_bread", secBread
                 ));
@@ -329,7 +332,7 @@ public class OptimizationRulesCoverageTest {
         @DisplayName("4b. Three-Way Coproduct Decomposition: in_section decomposes into fruit + bread + dairy")
         void testThreeWayCoproductDecomposition() {
             try (Arena arena = Arena.ofConfined()) {
-                GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of(
+                ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of(
                         "in_section_fruit", createMockRelation(arena, 1, 1),
                         "in_section_bread", createMockRelation(arena, 1, 1),
                         "in_section_dairy", createMockRelation(arena, 1, 1)
@@ -357,7 +360,7 @@ public class OptimizationRulesCoverageTest {
         @DisplayName("4c. Physical Binding after Coproduct Decomposition resolves all relation IDs")
         void testPhysicalBindingAfterDecomposition() {
             try (Arena arena = Arena.ofConfined()) {
-                GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of(
+                ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of(
                         "in_section_fruit", createMockRelation(arena, 1, 1),
                         "in_section_bread", createMockRelation(arena, 1, 1)
                 ));

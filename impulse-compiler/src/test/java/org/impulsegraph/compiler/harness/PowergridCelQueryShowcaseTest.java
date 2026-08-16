@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.harness;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.api.ImpulseGraphQuery;
 import org.impulsegraph.api.ReturnType;
@@ -13,8 +16,8 @@ import org.impulsegraph.compiler.passes.stage1.*;
 import org.impulsegraph.compiler.passes.stage2.*;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -44,7 +47,7 @@ public class PowergridCelQueryShowcaseTest {
             MemorySegment rows = arena.allocate(8L);
             MemorySegment cols = arena.allocate(4L);
             RelationSnapshot branchRel = new RelationSnapshot(arena, 1, 1, rows, cols);
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("Branch", branchRel));
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("Branch", branchRel));
             snapshot.getGraphStatistics().putAttributeStatistics("vm", vmStats);
 
             // Fluent Query with CEL Expression and Parameter Binding
@@ -94,7 +97,7 @@ public class PowergridCelQueryShowcaseTest {
             MemorySegment rows = arena.allocate(8L);
             MemorySegment cols = arena.allocate(4L);
             RelationSnapshot branchRel = new RelationSnapshot(arena, 1, 1, rows, cols);
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("Branch", branchRel));
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("Branch", branchRel));
 
             // Fluent Query: Detect energized lines exceeding 250 MVA rating
             ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()
@@ -133,7 +136,7 @@ public class PowergridCelQueryShowcaseTest {
             MemorySegment rows = arena.allocate(8L);
             MemorySegment cols = arena.allocate(4L);
             RelationSnapshot branchRel = new RelationSnapshot(arena, 1, 1, rows, cols);
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("Branch", branchRel));
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("Branch", branchRel));
 
             // Multi-Hop Transitive Islanding Frontier over closed breakers (edge.status == 1)
             ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()

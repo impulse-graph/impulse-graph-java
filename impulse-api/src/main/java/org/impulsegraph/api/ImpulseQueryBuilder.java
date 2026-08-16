@@ -427,13 +427,13 @@ public class ImpulseQueryBuilder<R> {
         @SuppressWarnings("unchecked")
         public R execute(ImpulseGraphSnapshot snapshot, Object input) {
             try {
-                Class<?> evalCls = Class.forName("org.impulsegraph.core.csr.DefaultImpulseQueryEvaluator");
+                Class<?> evalCls = Class.forName("org.impulsegraph.vm.DefaultImpulseQueryEvaluator");
                 var method = evalCls.getMethod("evaluate", ImpulseGraphQuery.class, ImpulseGraphSnapshot.class, Object.class);
                 return (R) method.invoke(null, this, snapshot, input);
             } catch (Exception e) {
                 try {
-                    Class<?> evalCls = Class.forName("org.impulsegraph.core.csr.DefaultImpulseQueryEvaluator");
-                    Class<?> graphCls = Class.forName("org.impulsegraph.core.csr.GraphSnapshot");
+                    Class<?> evalCls = Class.forName("org.impulsegraph.vm.DefaultImpulseQueryEvaluator");
+                    Class<?> graphCls = Class.forName("org.impulsegraph.api.ImpulseGraphSnapshot");
                     var method = evalCls.getMethod("evaluatePipeline", List.class, graphCls, Object.class);
                     Object graphObj = null;
                     if (snapshot != null) {
@@ -458,13 +458,13 @@ public class ImpulseQueryBuilder<R> {
         @SuppressWarnings("unchecked")
         public R execute(ImpulseGraph liveGraph, Object input) {
             try {
-                Class<?> evalCls = Class.forName("org.impulsegraph.core.csr.DefaultImpulseQueryEvaluator");
+                Class<?> evalCls = Class.forName("org.impulsegraph.vm.DefaultImpulseQueryEvaluator");
                 var method = evalCls.getMethod("evaluate", ImpulseGraphQuery.class, ImpulseGraph.class, Object.class);
                 return (R) method.invoke(null, this, liveGraph, input);
             } catch (Exception e) {
                 try {
-                    Class<?> evalCls = Class.forName("org.impulsegraph.core.csr.DefaultImpulseQueryEvaluator");
-                    Class<?> graphCls = Class.forName("org.impulsegraph.core.csr.GraphSnapshot");
+                    Class<?> evalCls = Class.forName("org.impulsegraph.vm.DefaultImpulseQueryEvaluator");
+                    Class<?> graphCls = Class.forName("org.impulsegraph.api.ImpulseGraphSnapshot");
                     var method = evalCls.getMethod("evaluatePipeline", List.class, graphCls, Object.class);
                     Object graphObj = null;
                     if (liveGraph != null) {

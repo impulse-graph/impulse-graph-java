@@ -1,12 +1,15 @@
 package org.impulsegraph.compiler.passes;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.passes.stage1.*;
 import org.impulsegraph.compiler.passes.stage2.*;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -51,7 +54,7 @@ public class CompilerPassTest {
     @DisplayName("Stage 2: FilterPushdown & PhysicalBinding & RegisterAllocation")
     void testStage2Passes() {
         try (Arena arena = Arena.ofConfined()) {
-            // Build a mock GraphSnapshot with relation "userToGroup"
+            // Build a mock ImpulseGraphSnapshot with relation "userToGroup"
             int[] rowOffsets = {0, 2, 3};
             int[] colTargets = {1, 2, 0};
 
@@ -62,7 +65,7 @@ public class CompilerPassTest {
             for (int i = 0; i < colTargets.length; i++) colSeg.setAtIndex(ValueLayout.JAVA_INT, i, colTargets[i]);
 
             RelationSnapshot rel = new RelationSnapshot(arena, 3, 3, rowSeg, colSeg);
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("userToGroup", rel));
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("userToGroup", rel));
 
             ScmProgram ast = ScmProgram.of(
                     ScmWalk.forward("userToGroup"),

@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.harness;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.api.ArgType;
 import org.impulsegraph.api.bitset.ImpulseBitSet;
@@ -10,8 +13,8 @@ import org.impulsegraph.compiler.passes.stage1.*;
 import org.impulsegraph.compiler.passes.stage2.*;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.BinarySnapshotLoader;
-import org.impulsegraph.core.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.vm.ImpulseVmInterpreter;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -55,11 +58,11 @@ public class CanonicalMedicalBenchmarkSuiteTest {
 
             // Load snapshots
             BinarySnapshotLoader.LoadedSnapshot loadedHet = BinarySnapshotLoader.loadSnapshot(HETIONET_IMPS, arena);
-            GraphSnapshot hetionet = loadedHet.graph();
+            ImpulseGraphSnapshot hetionet = loadedHet.graph();
             hetionet.getGraphStatistics(); // Warmup stats
 
             BinarySnapshotLoader.LoadedSnapshot loadedDrkg = BinarySnapshotLoader.loadSnapshot(DRKG_IMPS, arena);
-            GraphSnapshot drkg = loadedDrkg.graph();
+            ImpulseGraphSnapshot drkg = loadedDrkg.graph();
             drkg.getGraphStatistics(); // Warmup stats
 
             // Find active seed nodes
@@ -181,7 +184,7 @@ public class CanonicalMedicalBenchmarkSuiteTest {
     }
 
     private void runBenchmarkQuery(String title, String dataset, String description,
-                                   GraphSnapshot snapshot, ScmProgram ast, int seedNode, Arena arena) {
+                                   ImpulseGraphSnapshot snapshot, ScmProgram ast, int seedNode, Arena arena) {
         // 1. Compile query through optimizer pipeline
         CompilerOptions options = CompilerOptions.builder().withTracing(false).build();
         CompilerContext ctx = new CompilerContext(snapshot, options, new PassTracer(options));
@@ -249,7 +252,7 @@ public class CanonicalMedicalBenchmarkSuiteTest {
         System.out.println();
     }
 
-    private static int findActiveSeedNode(GraphSnapshot snapshot, String relName, boolean isReverse) {
+    private static int findActiveSeedNode(ImpulseGraphSnapshot snapshot, String relName, boolean isReverse) {
         var rel = snapshot.getRelationSnapshot(relName);
         if (rel == null) {
             for (var entry : snapshot.getAllRelationSnapshots().entrySet()) {

@@ -3,8 +3,8 @@ package org.impulsegraph.compiler.passes.stage2;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.passes.CompilerPass;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,11 +29,11 @@ public final class DirectionSelectionPass implements CompilerPass {
             return ast;
         }
 
-        GraphSnapshot snapshot = context.snapshot();
+        ImpulseGraphSnapshot snapshot = context.snapshot();
         return optimizeDirection(ast, snapshot);
     }
 
-    private ImpScmNode optimizeDirection(ImpScmNode node, GraphSnapshot snapshot) {
+    private ImpScmNode optimizeDirection(ImpScmNode node, ImpulseGraphSnapshot snapshot) {
         if (node instanceof ScmProgram prog) {
             List<ImpScmNode> steps = new ArrayList<>();
             for (ImpScmNode step : prog.steps()) {
@@ -71,7 +71,7 @@ public final class DirectionSelectionPass implements CompilerPass {
         return node;
     }
 
-    private static RelationSnapshot findRelation(GraphSnapshot snapshot, String relName) {
+    private static RelationSnapshot findRelation(ImpulseGraphSnapshot snapshot, String relName) {
         if (snapshot == null || relName == null) return null;
         RelationSnapshot rel = snapshot.getRelationSnapshot(relName);
         if (rel != null) return rel;

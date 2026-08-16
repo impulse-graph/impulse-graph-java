@@ -1,7 +1,7 @@
 package org.impulsegraph.gradle;
 
 import org.impulsegraph.api.ImpulseGraphSnapshot;
-import org.impulsegraph.core.csr.BinarySnapshotLoader;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 
 import java.io.File;
 import java.lang.foreign.Arena;

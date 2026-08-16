@@ -10,7 +10,7 @@ import org.impulsegraph.compiler.passes.stage2.*;
 import org.impulsegraph.compiler.registry.QueryObject;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.GraphSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
 
 import java.lang.foreign.Arena;
 import java.util.Objects;
@@ -22,7 +22,7 @@ public final class QueryExplainer {
 
     private QueryExplainer() {}
 
-    public static String explain(QueryObject queryObject, GraphSnapshot snapshot) {
+    public static String explain(QueryObject queryObject, ImpulseGraphSnapshot snapshot) {
         Objects.requireNonNull(queryObject, "queryObject must not be null");
 
         StringBuilder sb = new StringBuilder();

@@ -3,7 +3,7 @@ package org.impulsegraph.compiler.passes.stage2;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.passes.CompilerPass;
-import org.impulsegraph.core.csr.GraphSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,14 +24,14 @@ public final class PhysicalBindingPass implements CompilerPass {
     @Override
     public ImpScmNode transform(ImpScmNode ast, CompilerContext context) {
         if (ast == null) return null;
-        GraphSnapshot snapshot = context.snapshot();
+        ImpulseGraphSnapshot snapshot = context.snapshot();
         if (snapshot == null) {
             return ast;
         }
         return bindNode(ast, snapshot);
     }
 
-    private ImpScmNode bindNode(ImpScmNode node, GraphSnapshot snapshot) {
+    private ImpScmNode bindNode(ImpScmNode node, ImpulseGraphSnapshot snapshot) {
         if (node instanceof ScmProgram prog) {
             List<ImpScmNode> bound = new ArrayList<>();
             for (ImpScmNode step : prog.steps()) {
@@ -73,7 +73,7 @@ public final class PhysicalBindingPass implements CompilerPass {
         return node;
     }
 
-    private static int resolveRelationId(GraphSnapshot snapshot, String relName) {
+    private static int resolveRelationId(ImpulseGraphSnapshot snapshot, String relName) {
         if (snapshot == null || relName == null) return 0;
         Map<String, ?> map = snapshot.getAllRelationSnapshots();
 

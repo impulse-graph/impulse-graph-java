@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.jmh;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.compiler.ast.ImpScmNode;
 import org.impulsegraph.compiler.ast.ScmCollect;
@@ -16,9 +19,9 @@ import org.impulsegraph.compiler.passes.stage2.PhysicalBindingPass;
 import org.impulsegraph.compiler.passes.stage2.RegisterAllocationPass;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.BinarySnapshotLoader;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.impulsegraph.vm.ImpulseVmInterpreter;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
@@ -43,7 +46,7 @@ public class HetionetScreen1AllDiseasesJmhBenchmark {
     private static final Path HETIONET_PATH = Path.of("/Users/jesse/impulse/datasets/hetionet/hetionet.v09.imps");
 
     private Arena arena;
-    private GraphSnapshot hetionet;
+    private ImpulseGraphSnapshot hetionet;
     private ImpOpsBytecodeEmitter.EmittedProgram prog;
     private int[] allActiveDiseases;
     private int singleSeedDisease;

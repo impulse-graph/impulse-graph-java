@@ -19,9 +19,10 @@ It fills a critical gap in the JVM ecosystem by acting as the **"Apache Arrow fo
                           │ AST
            Impulse Compiler (Java 25 CBO JIT)
                           │ Optimized impOps (.impb)
-         ImpulseVM (Java 25 MethodHandles)
-                          │ Zero-copy pointers
+     impulse-vm (Java 25 Compute Plane & MethodHandles)
+                          │ Zero-copy vector reads
          ┌────────────────┴────────────────┐
+     impulse-storage (Zero-Dependency Data Plane)
    .imps Snapshot (mmap)         OverlayMutator (Off-Heap)
    (Read-Only Base)              (Lock-Free Delta Blocks)
 ```
@@ -37,9 +38,11 @@ Memory-maps `.imps` v0.9.0 binary snapshot files off-heap via `java.lang.foreign
 `impulse-core` and `impulse-api` maintain **strictly 0 external dependencies**. No Guava, no Netty, no Log4j. This guarantees zero CVE supply-chain bloat and maximum enterprise container security.
 
 ### Continuous HTAP & Mutation Overlays
-While `.imps` snapshots are fully immutable on disk, `impulse-core` implements an off-heap `OverlayMutator` and `ColumnarDeltaBlock` framework for lock-free HTAP workloads:
-- **Zero-Pause Query Execution:** Queries execute over `AtomicReference` states without acquiring read locks.
-- **Background Compaction:** A streaming Blue/Green compactor seamlessly merges the base mmap snapshot and millions of in-memory delta edges into a new `.imps` file on disk while queries sustain tens of millions of QPS.
+While `.imps` snapshots are fully immutable on disk, the `impulse-storage` module provides an `HtapLifecycleManager` to orchestrate lock-free HTAP workloads:
+- **Pluggable Delta Sources:** Pull continuous streams of `GraphMutation`s from Kafka, RocksDB, or REST APIs.
+- **Off-Heap Overlays:** Mutators write to an L1 delta cache (`OverlayMutator`) while queries execute over `AtomicReference` states without acquiring read locks.
+- **Pluggable Compaction Policies:** Time-based or Delta-threshold policies trigger background compaction per-relation.
+- **Blue/Green Swap:** Compaction seamlessly merges the base mmap snapshot and millions of in-memory delta edges into a new `.imps` file on disk while queries sustain tens of millions of QPS.
 
 ### ImpulseVM & JDK Vector API Acceleration
 Dynamically generates AVX-512 and ARM Neon SIMD assembly instructions at JVM JIT compile time via `jdk.incubator.vector`. Bytecode opcodes (`impOps`) are compiled dynamically via `MethodHandle` combinators, letting the HotSpot C2 compiler aggressively inline and vectorize the inner graph loops.
@@ -63,8 +66,9 @@ Dynamically generates AVX-512 and ARM Neon SIMD assembly instructions at JVM JIT
 
 | Artifact / Module | Size | Native Binaries? | Third-Party Deps | Purpose & Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **`impulse-api`** | ~50 KB | ❌ None | **0** | Lightweight public interfaces, fluent builder API (`ImpulseQueryBuilder`), and domain types. |
-| **`impulse-core`** | ~300 KB | ❌ None | **0** | Pure Java 25 off-heap HTAP engine and `ImpulseVM` bytecode interpreter. |
+| **`impulse-api`** | ~50 KB | ❌ None | **0** | Lightweight public interfaces, `DeltaSource`, `GraphMutation`, and JMX `ImpulseEngineMXBean`. |
+| **`impulse-storage`** | ~200 KB | ❌ None | **0** | Zero-dependency Data Plane: Binary `mmap` `.imps` loading, YAML Manifest tablespaces, and `HtapLifecycleManager`. |
+| **`impulse-vm`** | ~150 KB | ❌ None | **0** | Zero-dependency Compute Plane: Pure Java 25 off-heap HTAP engine and `ImpulseVM` bytecode interpreter. |
 | **`impulse-compiler`** | ~200 KB | ❌ None | **0** | Cypher & ImpScheme AST query planner, Stage 1/2 Optimizer, and `impOps` emitter. |
 | **`impulse-spec`** | ~100 KB | ❌ None | **0** | Binary Snapshot v0.9.0 header encoders, decoders, and structural spec definitions. |
 | **`impulse-kotlin`** | ~200 KB | ❌ None | Kotlin Stdlib | Idiomatic Kotlin extensions, coroutines support, and flow streams. |

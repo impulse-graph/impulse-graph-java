@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.harness;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.api.ArgType;
 import org.impulsegraph.api.ImpulseGraphQuery;
@@ -20,9 +23,9 @@ import org.impulsegraph.compiler.passes.stage1.ZoneMapPruningPass;
 import org.impulsegraph.compiler.passes.stage2.PhysicalBindingPass;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.DefaultImpulseQueryEvaluator;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.vm.DefaultImpulseQueryEvaluator;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.impulsegraph.vm.ImpulseQueryCompiler;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -65,7 +68,7 @@ public class ModeComparativeBenchmarkTest {
             }
 
             RelationSnapshot branchRel = new RelationSnapshot(arena, nodeCount, edgeCount, rowSeg, colSeg);
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("Branch", branchRel));
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("Branch", branchRel));
             snapshot.getGraphStatistics().putAttributeStatistics("mva_flow", mvaStats);
 
             int maxRatingLimit = 50_000;

@@ -5,8 +5,8 @@ import org.impulsegraph.api.stats.RelationStatistics;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.passes.CompilerPass;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,13 +29,13 @@ public final class VirtualRelationDecompositionPass implements CompilerPass {
     @Override
     public ImpScmNode transform(ImpScmNode ast, CompilerContext context) {
         if (ast == null) return null;
-        GraphSnapshot snapshot = context.snapshot();
+        ImpulseGraphSnapshot snapshot = context.snapshot();
         if (snapshot == null) return ast;
 
         return decomposeNode(ast, snapshot);
     }
 
-    private ImpScmNode decomposeNode(ImpScmNode node, GraphSnapshot snapshot) {
+    private ImpScmNode decomposeNode(ImpScmNode node, ImpulseGraphSnapshot snapshot) {
         if (node instanceof ScmProgram prog) {
             List<ImpScmNode> steps = new ArrayList<>();
             for (ImpScmNode step : prog.steps()) {
@@ -77,7 +77,7 @@ public final class VirtualRelationDecompositionPass implements CompilerPass {
         return node;
     }
 
-    private static List<String> findConstituentPartitions(GraphSnapshot snapshot, String relName) {
+    private static List<String> findConstituentPartitions(ImpulseGraphSnapshot snapshot, String relName) {
         List<String> matches = new ArrayList<>();
         if (snapshot == null || relName == null) return matches;
 

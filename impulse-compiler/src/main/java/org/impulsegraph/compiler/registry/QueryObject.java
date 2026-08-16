@@ -1,7 +1,7 @@
 package org.impulsegraph.compiler.registry;
 
 import org.impulsegraph.compiler.ast.ImpScmNode;
-import org.impulsegraph.core.csr.GraphSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.vm.ImpulseQueryCompiler.CompiledQuery;
 
 import java.util.Objects;
@@ -15,7 +15,7 @@ public final class QueryObject {
     private final String name;
     private final String sourceQuery;
     private final ImpScmNode stage1Ast;
-    private final ConcurrentHashMap<GraphSnapshot, CompiledQuery> compiledPlanCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ImpulseGraphSnapshot, CompiledQuery> compiledPlanCache = new ConcurrentHashMap<>();
 
     public QueryObject(String name, String sourceQuery, ImpScmNode stage1Ast) {
         this.name = Objects.requireNonNull(name, "name must not be null");
@@ -27,11 +27,11 @@ public final class QueryObject {
     public String sourceQuery() { return sourceQuery; }
     public ImpScmNode ast() { return stage1Ast; }
 
-    public CompiledQuery getCompiledPlan(GraphSnapshot snapshot) {
+    public CompiledQuery getCompiledPlan(ImpulseGraphSnapshot snapshot) {
         return compiledPlanCache.get(snapshot);
     }
 
-    public void cacheCompiledPlan(GraphSnapshot snapshot, CompiledQuery plan) {
+    public void cacheCompiledPlan(ImpulseGraphSnapshot snapshot, CompiledQuery plan) {
         if (snapshot != null && plan != null) {
             compiledPlanCache.put(snapshot, plan);
         }

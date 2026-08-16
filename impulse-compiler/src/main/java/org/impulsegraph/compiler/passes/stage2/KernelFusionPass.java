@@ -4,8 +4,8 @@ import org.impulsegraph.api.config.OptimizerConfig;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.passes.CompilerPass;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,7 +40,7 @@ public final class KernelFusionPass implements CompilerPass {
         if (ast instanceof ScmProgram prog) {
             List<ImpScmNode> originalSteps = prog.steps();
             List<ImpScmNode> fusedSteps = new ArrayList<>();
-            GraphSnapshot snapshot = context.snapshot();
+            ImpulseGraphSnapshot snapshot = context.snapshot();
 
             int i = 0;
             while (i < originalSteps.size()) {
@@ -67,7 +67,7 @@ public final class KernelFusionPass implements CompilerPass {
         return ast;
     }
 
-    private static boolean canFuse(ScmWalk w1, ScmWalk w2, GraphSnapshot snapshot) {
+    private static boolean canFuse(ScmWalk w1, ScmWalk w2, ImpulseGraphSnapshot snapshot) {
         // Both walks must be forward CSR without filter predicates or sub-steps
         if (w1.direction() != ScmWalk.Direction.FORWARD_CSR || w1.filterPredicate() != null || !w1.subSteps().isEmpty()) {
             return false;

@@ -8,8 +8,10 @@ public interface ImpulseEngineMXBean {
 
     long getActiveQueryCount();
     long getOffHeapMemorySizeBytes();
-    long getCompiledQueryCacheSize();
     int getRelationCount();
     double getCacheHitRatio();
-    void clearCompiledQueryCache();
+    long getTotalMutationsIngested();
+    long getCompactionCount();
+    long getUncompactedEdgeCount();
+
 }

@@ -3,8 +3,8 @@ package org.impulsegraph.compiler.passes.stage2;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.passes.CompilerPass;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 /**
  * Stage 2 Pass: Bind-time physical schema validation.
@@ -21,7 +21,7 @@ public final class BindTimeValidator implements CompilerPass {
 
     @Override
     public ImpScmNode transform(ImpScmNode ast, CompilerContext context) {
-        GraphSnapshot snapshot = context.snapshot();
+        ImpulseGraphSnapshot snapshot = context.snapshot();
         if (snapshot == null) {
             // Snapshot not yet bound (e.g. dry-run or pre-bind stage)
             return ast;
@@ -31,7 +31,7 @@ public final class BindTimeValidator implements CompilerPass {
         return ast;
     }
 
-    private void validateSnapshotBinding(ImpScmNode node, GraphSnapshot snapshot) {
+    private void validateSnapshotBinding(ImpScmNode node, ImpulseGraphSnapshot snapshot) {
         if (node instanceof ScmProgram prog) {
             for (ImpScmNode step : prog.steps()) {
                 validateSnapshotBinding(step, snapshot);
@@ -56,7 +56,7 @@ public final class BindTimeValidator implements CompilerPass {
         }
     }
 
-    private static RelationSnapshot findRelation(GraphSnapshot snapshot, String relName) {
+    private static RelationSnapshot findRelation(ImpulseGraphSnapshot snapshot, String relName) {
         if (snapshot == null || relName == null) return null;
         RelationSnapshot rel = snapshot.getRelationSnapshot(relName);
         if (rel != null) return rel;

@@ -1,4 +1,7 @@
 package org.impulsegraph.compiler.harness;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
 
 import org.impulsegraph.api.stats.AttributeStatistics;
 import org.impulsegraph.api.stats.GraphStatistics;
@@ -12,8 +15,8 @@ import org.impulsegraph.compiler.passes.stage1.*;
 import org.impulsegraph.compiler.passes.stage2.*;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
-import org.impulsegraph.core.csr.GraphSnapshot;
-import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -51,7 +54,7 @@ public class DifferentialCorrectnessHarnessTest {
             MemorySegment rows = arena.allocate(8L);
             MemorySegment cols = arena.allocate(4L);
             RelationSnapshot rel = new RelationSnapshot(arena, 1, 1, rows, cols);
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("userToGroup", rel));
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("userToGroup", rel));
             snapshot.getGraphStatistics().putAttributeStatistics("age", ageStats);
 
             // Query with impossible predicate: node.age > 250
@@ -137,7 +140,7 @@ public class DifferentialCorrectnessHarnessTest {
             for (int i = 0; i < colTargets.length; i++) colSeg.setAtIndex(ValueLayout.JAVA_INT, i, colTargets[i]);
 
             RelationSnapshot rel = new RelationSnapshot(arena, 2, 4, rowSeg, colSeg);
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of("parentToChildren", rel));
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("parentToChildren", rel));
 
             assertTrue(rel.getStatistics().isInjective(), "Relation must be classified as Injective");
 
@@ -175,7 +178,7 @@ public class DifferentialCorrectnessHarnessTest {
             RelationSnapshot secFruit = new RelationSnapshot(arena, 1, 1, rows, cols);
             RelationSnapshot secBread = new RelationSnapshot(arena, 1, 1, rows, cols);
 
-            GraphSnapshot snapshot = new GraphSnapshot(arena, Map.of(
+            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of(
                     "in_section_fruit", secFruit,
                     "in_section_bread", secBread
             ));

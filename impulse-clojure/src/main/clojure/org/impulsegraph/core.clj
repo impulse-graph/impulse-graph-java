@@ -1,5 +1,7 @@
 (ns org.impulsegraph.core
-  (:import [org.impulsegraph.core.csr BinarySnapshotLoader GraphSnapshot DefaultImpulseQueryEvaluator]
+  (:import [org.impulsegraph.storage.csr BinarySnapshotLoader GraphSnapshot]
+           [org.impulsegraph.api ImpulseGraphSnapshot]
+           [org.impulsegraph.vm DefaultImpulseQueryEvaluator]
            [org.impulsegraph.api ImpulseQueryBuilder ReturnType ArgType]
            [java.lang.foreign Arena]
            [java.nio.file Files]
@@ -16,7 +18,7 @@
 
 (defn close-snapshot
   "Closes the snapshot and releases off-heap memory mappings."
-  [^GraphSnapshot snapshot]
+  [^ImpulseGraphSnapshot snapshot]
   (.close snapshot))
 
 (defrecord TraversalStep [relation-name direction filter-expr])
