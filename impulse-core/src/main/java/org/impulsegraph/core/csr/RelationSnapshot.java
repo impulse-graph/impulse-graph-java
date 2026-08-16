@@ -112,11 +112,58 @@ public class RelationSnapshot implements AutoCloseable {
 
     private volatile org.impulsegraph.api.stats.RelationStatistics cachedStats;
 
+    private volatile String metadataJson;
+
+    public void injectMetadata(String metadataJson) {
+        this.metadataJson = metadataJson;
+    }
+
+    private int extractInt(String json, String key) {
+        int idx = json.indexOf(key);
+        if (idx == -1) return 0;
+        idx += key.length();
+        int end = idx;
+        while (end < json.length() && Character.isDigit(json.charAt(end))) {
+            end++;
+        }
+        if (end == idx) return 0;
+        return Integer.parseInt(json.substring(idx, end));
+    }
+
+    private org.impulsegraph.api.stats.RelationStatistics parseFromJson(String json) {
+        int maxDegree = extractInt(json, "\"max\":");
+        int p50 = extractInt(json, "\"p50\":");
+        int p90 = extractInt(json, "\"p90\":");
+        int p99 = extractInt(json, "\"p99\":");
+        int zeroCount = extractInt(json, "\"zero_count\":");
+        
+        int uniqueSources = Math.max(0, nodeCount - zeroCount);
+        double avgOut = nodeCount > 0 ? (double) edgeCount / nodeCount : 0.0;
+        double sparsity = nodeCount > 0 ? (double) uniqueSources / nodeCount : 0.0;
+        
+        org.impulsegraph.api.stats.RelationStatistics.Multiplicity multiplicity = 
+            org.impulsegraph.api.stats.RelationStatistics.Multiplicity.MANY_TO_MANY;
+            
+        if (maxDegree <= 1) {
+            multiplicity = org.impulsegraph.api.stats.RelationStatistics.Multiplicity.MANY_TO_ONE;
+        }
+        
+        return new org.impulsegraph.api.stats.RelationStatistics(
+            nodeCount, edgeCount, uniqueSources, maxDegree, avgOut, 0.0,
+            p50, p90, p99, sparsity, new org.impulsegraph.api.bitset.OffHeapBitSet(arena, 0),
+            multiplicity, 0, avgOut, false, false, false
+        );
+    }
+
     public org.impulsegraph.api.stats.RelationStatistics getStatistics() {
         if (cachedStats == null) {
             synchronized (this) {
                 if (cachedStats == null) {
-                    cachedStats = org.impulsegraph.core.stats.RelationStatisticsCalculator.calculate(this);
+                    if (metadataJson != null && !metadataJson.isEmpty()) {
+                        cachedStats = parseFromJson(metadataJson);
+                    } else {
+                        cachedStats = org.impulsegraph.core.stats.RelationStatisticsCalculator.calculate(this);
+                    }
                 }
             }
         }

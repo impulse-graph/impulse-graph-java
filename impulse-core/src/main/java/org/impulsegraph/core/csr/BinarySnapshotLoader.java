@@ -400,6 +400,7 @@ public final class BinarySnapshotLoader {
             // Read Relation Directory Entries (Fixed 128 Bytes)
             Map<Integer, LoadedRelation> relationsById = new HashMap<>();
             Map<String, RelationSnapshot> relationSnapshots = new HashMap<>();
+            Map<Integer, RelationSnapshot> relIdToSnapshot = new HashMap<>();
 
             for (int j = 0; j < relationCount; j++) {
                 if (buf.position() + 128 > segSize) break;
@@ -475,6 +476,7 @@ public final class BinarySnapshotLoader {
                         arena, (int) nodeCount, (int) edgeCount, offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg, attrSegments, nodeIdWidth, edgeIndexWidth
                 );
                 relationSnapshots.put(relName, relSnap);
+                relIdToSnapshot.put(relId, relSnap);
                 relationSnapshots.putIfAbsent("rel_" + srcDomId + "_" + tgtDomId, relSnap);
 
                 LoadedDomain srcDom = domainsById.get(srcDomId);
@@ -495,6 +497,13 @@ public final class BinarySnapshotLoader {
             Map<String, String> metadata = parseMetadataFooter(segment, segSize);
             GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata);
 
+            
+            for (Map.Entry<Integer, RelationSnapshot> entry : relIdToSnapshot.entrySet()) {
+                String json = metadata.get("impulse.stats.relation." + entry.getKey() + ".out_degree");
+                if (json != null) {
+                    entry.getValue().injectMetadata(json);
+                }
+            }
             return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, (short) ver, graph, domainsById, domainsByName, relationsById, metadata);
 
         } else {
@@ -529,6 +538,7 @@ public final class BinarySnapshotLoader {
 
             Map<Integer, LoadedRelation> relationsById = new HashMap<>();
             Map<String, RelationSnapshot> relationSnapshots = new HashMap<>();
+            Map<Integer, RelationSnapshot> relIdToSnapshot = new HashMap<>();
 
             for (int j = 0; j < relationCount; j++) {
                 int entrySize = (ver == 0x0204) ? 128 : 109;
@@ -566,6 +576,7 @@ public final class BinarySnapshotLoader {
                         arena, (int) nodeCount, (int) edgeCount, offsetsSeg, targetsSeg
                 );
                 relationSnapshots.put(relName, relSnap);
+                relIdToSnapshot.put(relId, relSnap);
 
                 LoadedRelation rel = new LoadedRelation(
                         relId, srcDomId, tgtDomId, encodingId, (byte) 4, (byte) 4,
@@ -578,6 +589,13 @@ public final class BinarySnapshotLoader {
             Map<String, String> metadata = parseMetadataFooter(segment, segSize);
             GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata);
 
+            
+            for (Map.Entry<Integer, RelationSnapshot> entry : relIdToSnapshot.entrySet()) {
+                String json = metadata.get("impulse.stats.relation." + entry.getKey() + ".out_degree");
+                if (json != null) {
+                    entry.getValue().injectMetadata(json);
+                }
+            }
             return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, (short) ver, graph, domainsById, domainsByName, relationsById, metadata);
         }
     }
