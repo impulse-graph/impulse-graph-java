@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>io.impulse.graph</groupId>
+        <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-java-parent</artifactId>
         <version>0.9.0-SNAPSHOT</version>
     </parent>
