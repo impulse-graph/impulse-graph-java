@@ -217,6 +217,31 @@ public class NodeIdentityOverlay {
     }
 
     /**
+     * Removes the identity mapping for a dense node ID. 
+     * This ensures that if the external key is re-inserted, it receives a fresh physical ID,
+     * preventing the resurrection of logically deleted edges.
+     *
+     * @param domainId domain identifier
+     * @param denseId  dense node ID to unmap
+     */
+    public void removeMapping(int domainId, int denseId) {
+        ConcurrentHashMap<Integer, Object> denseMap = denseToExternal.get(domainId);
+        if (denseMap != null) {
+            Object externalId = denseMap.remove(denseId);
+            if (externalId != null) {
+                ConcurrentHashMap<Object, Integer> extMap = externalToDense.get(domainId);
+                if (extMap != null) {
+                    extMap.remove(externalId, denseId);
+                }
+            }
+        }
+    }
+
+    public void removeMapping(int denseId) {
+        removeMapping(0, denseId);
+    }
+
+    /**
      * Validates whether a given dense node ID is within valid bounds for domain 0.
      *
      * @param denseId dense node ID

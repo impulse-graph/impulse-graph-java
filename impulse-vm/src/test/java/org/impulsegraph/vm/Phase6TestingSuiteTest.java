@@ -42,7 +42,7 @@ class Phase6TestingSuiteTest {
 
             Path snapshotFile = tempDir.resolve("empty_bootstrapped.imps");
             OverlayCompactor compactor = new OverlayCompactor(mutator);
-            GraphSnapshot compactedGraph = compactor.compactToDisk(snapshotFile);
+            GraphSnapshot compactedGraph = compactor.compactToDisk(snapshotFile, java.util.Collections.emptyMap());
 
             assertNotNull(compactedGraph);
             RelationSnapshot rel = compactedGraph.getRelationSnapshot("rel_0_0To0");
@@ -76,7 +76,7 @@ class Phase6TestingSuiteTest {
 
             Path snapshotFile = tempDir.resolve("dangling_prevent.imps");
             OverlayCompactor compactor = new OverlayCompactor(mutator);
-            GraphSnapshot compactedGraph = compactor.compactToDisk(snapshotFile);
+            GraphSnapshot compactedGraph = compactor.compactToDisk(snapshotFile, java.util.Collections.emptyMap());
 
             RelationSnapshot rel = compactedGraph.getRelationSnapshot("rel_0_0To0");
             assertEquals(4, rel.getNodeCount()); // ID space preserved

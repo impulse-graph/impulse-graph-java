@@ -180,6 +180,7 @@ public class OverlayMutator implements org.impulsegraph.api.mutation.GraphMutato
                 }
                 case NodeDeleteMutation del -> {
                     deletedNodes.deleteNode(del.domainId(), del.nodeDenseId());
+                    identityOverlay.removeMapping(del.domainId(), del.nodeDenseId());
                 }
                 case EdgeUpsertMutation upsert -> {
                     // Undelete from tombstone map if previously deleted in overlay
