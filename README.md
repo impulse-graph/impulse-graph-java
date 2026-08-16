@@ -14,10 +14,10 @@ It fills a critical gap in the JVM ecosystem by acting as the **"Apache Arrow fo
   Application Code (Spring Boot, gRPC, JVM Services)
                           │
          ┌────────────────┼────────────────┐
-    @ImpKQuery       Cypher DML         @ImpLog
+  Java Fluent API + CEL (Primary)      Scripting (ImpK, ImpLog, Cypher)
          └────────────────┼────────────────┘
                           │ AST
-           Impulse Compiler (Java 25 CBO)
+           Impulse Compiler (Java 25 CBO JIT)
                           │ Optimized impOps (.impb)
          ImpulseVM (Java 25 MethodHandles)
                           │ Zero-copy pointers
@@ -63,50 +63,42 @@ Dynamically generates AVX-512 and ARM Neon SIMD assembly instructions at JVM JIT
 
 | Artifact / Module | Size | Native Binaries? | Third-Party Deps | Purpose & Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **`impulse-api`** | ~50 KB | ❌ None | **0** | Lightweight public interfaces, annotations (`@ImpKQuery`, `@ImpLogRule`, `@ImpulseRepository`), and domain types. |
+| **`impulse-api`** | ~50 KB | ❌ None | **0** | Lightweight public interfaces, fluent builder API (`ImpulseQueryBuilder`), and domain types. |
 | **`impulse-core`** | ~300 KB | ❌ None | **0** | Pure Java 25 off-heap HTAP engine and `ImpulseVM` bytecode interpreter. |
 | **`impulse-compiler`** | ~200 KB | ❌ None | **0** | Cypher & ImpScheme AST query planner, Stage 1/2 Optimizer, and `impOps` emitter. |
 | **`impulse-spec`** | ~100 KB | ❌ None | **0** | Binary Snapshot v0.9.0 header encoders, decoders, and structural spec definitions. |
 | **`impulse-kotlin`** | ~200 KB | ❌ None | Kotlin Stdlib | Idiomatic Kotlin extensions, coroutines support, and flow streams. |
 | **`impulse-scala`** | ~250 KB | ❌ None | Scala 3 Library | Scala 3 type-safe GraphBLAS matrix math API wrappers. |
-| **`impulse-maven-plugin`** | ~1 MB | ✅ Embedded | Maven Plugin API | Build-time Maven plugin for compiling `@ImpKQuery` annotations to binary `.impb` bytecode (`mvn compile`). |
-| **`impulse-gradle-plugin`** | ~1 MB | ✅ Embedded | Gradle API | Build-time Gradle plugin for compiling `@ImpKQuery` annotations to binary `.impb` bytecode (`./gradlew build`). |
 
 ---
 
 ## 🔄 Execution Modes
 
-### Mode 1: Pure Java 25 Off-Heap Mode (Enterprise Default)
-Runs 100% inside the JVM. Queries are compiled ahead-of-time (AOT) at build time via `impulse-maven-plugin` or `impulse-gradle-plugin` into binary `.impb` bytecode files. At runtime, `impulse-core` executes bytecode off-heap with zero native shared libraries in production.
+Because ImpulseVM dynamic JIT compilation is so incredibly fast (< 3 µs per query via `MethodHandles`), **Ahead-of-Time (AOT) compilation plugins have been retired.** All query parsing and optimization now happens entirely at runtime via our embedded Cost-Based Optimizer (CBO).
 
-### Mode 2: Build-Time AOT Script Compilation (`@ImpKQuery`)
-Developers write inline `ImpK` DSL or Cypher queries directly inside Java annotations:
+### Mode 1: Java Fluent API + CEL (Primary API)
+The primary interface for developers using Impulse Graph in a JVM application is the `ImpulseQueryBuilder`. It supports pure Java fluent traversals interspersed with Common Expression Language (CEL) predicates:
 
 ```java
-package com.mycompany.repository;
+import org.impulsegraph.api.ImpulseQueryBuilder;
+import org.impulsegraph.api.ArgType;
 
-import org.impulsegraph.api.annotations.ImpKQuery;
-import org.impulsegraph.api.annotations.ImpulseRepository;
+var query = new ImpulseQueryBuilder<BitSet>()
+    .input("User", ArgType.SINGLE_LONG)
+    .walkEdge("FOLLOWS")
+    .filterWithCel("age > 30")
+    .walkEdgeWithCel("PURCHASED", "amount > 100.00")
+    .build();
 
-@ImpulseRepository
-public interface FollowerRepository {
-
-    @ImpKQuery("""
-        MATCH (u:User)-[:FOLLOWS]->(f:User)
-        WHERE u.id == $startNode
-        RETURN f.id
-        """)
-    long[] findFollowers(long startNode);
-}
+// Evaluates natively via the ImpulseVM vector engine
+var bitset = evaluator.evaluate(query, graph, userId);
 ```
 
-During `mvn compile` or `./gradlew build`, the plugin statically compiles the query to binary `impOps` bytecode (`.impb`) and generates an optimized implementation running off-heap on `impulse-core`.
-
-### Mode 3: Dynamic Runtime Compilation
-If an interactive application (e.g., ad-hoc web query console) requires compiling dynamic text scripts at runtime, simply include `impulse-compiler`. It embeds the 0-dependency Java-native Cypher and ImpScheme AST Cost-Based Optimizer pipelines to emit `impOps` dynamically in milliseconds.
-
----
-
+### Mode 2: Dynamic Scripting (ImpK, ImpLog, Cypher)
+For complex analytical workloads, external rule engines, or ad-hoc web consoles, developers can dynamically compile string scripts directly to bytecode at runtime. The compiler supports three frontend domain-specific languages:
+1. **Cypher**: Standard declarative graph pattern matching (`MATCH (n)-[:KNOWS]->(m) RETURN m`). Includes full mutation CRUD DML support via the `OverlayMutator`.
+2. **ImpK (GraphBLAS)**: Explicit matrix-vector math for PageRank, connected components, and SIMD array operations.
+3. **ImpLog (Datalog)**: Declarative logic programming for ReBAC (Zanzibar) authorization and recursive transitive closures.
 ## 🛠️ Prerequisites & Build Instructions
 
 * **JDK 25** (with `--enable-preview` and `--add-modules jdk.incubator.vector`)
