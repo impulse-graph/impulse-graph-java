@@ -3,8 +3,11 @@ package org.impulsegraph.api.bitset;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
+import jdk.incubator.vector.LongVector;
+import jdk.incubator.vector.VectorSpecies;
 
 public class OffHeapBitSet implements ImpulseBitSet {
+    private static final VectorSpecies<Long> SPECIES = LongVector.SPECIES_PREFERRED;
     private final MemorySegment segment;
     private final int wordCount;
 
@@ -87,7 +90,14 @@ public class OffHeapBitSet implements ImpulseBitSet {
     public void or(ImpulseBitSet set) {
         if (set instanceof OffHeapBitSet other) {
             int minWords = Math.min(this.wordCount, other.wordCount);
-            for (int i = 0; i < minWords; i++) {
+            int i = 0;
+            int upperBound = SPECIES.loopBound(minWords);
+            for (; i < upperBound; i += SPECIES.length()) {
+                LongVector v1 = LongVector.fromMemorySegment(SPECIES, this.segment, (long) i * 8, java.nio.ByteOrder.nativeOrder());
+                LongVector v2 = LongVector.fromMemorySegment(SPECIES, other.segment, (long) i * 8, java.nio.ByteOrder.nativeOrder());
+                v1.or(v2).intoMemorySegment(this.segment, (long) i * 8, java.nio.ByteOrder.nativeOrder());
+            }
+            for (; i < minWords; i++) {
                 long w1 = this.segment.getAtIndex(ValueLayout.JAVA_LONG, i);
                 long w2 = other.segment.getAtIndex(ValueLayout.JAVA_LONG, i);
                 this.segment.setAtIndex(ValueLayout.JAVA_LONG, i, w1 | w2);
@@ -103,20 +113,25 @@ public class OffHeapBitSet implements ImpulseBitSet {
     public void and(ImpulseBitSet set) {
         if (set instanceof OffHeapBitSet other) {
             int minWords = Math.min(this.wordCount, other.wordCount);
-            for (int i = 0; i < minWords; i++) {
+            int i = 0;
+            int upperBound = SPECIES.loopBound(minWords);
+            for (; i < upperBound; i += SPECIES.length()) {
+                LongVector v1 = LongVector.fromMemorySegment(SPECIES, this.segment, (long) i * 8, java.nio.ByteOrder.nativeOrder());
+                LongVector v2 = LongVector.fromMemorySegment(SPECIES, other.segment, (long) i * 8, java.nio.ByteOrder.nativeOrder());
+                v1.and(v2).intoMemorySegment(this.segment, (long) i * 8, java.nio.ByteOrder.nativeOrder());
+            }
+            for (; i < minWords; i++) {
                 long w1 = this.segment.getAtIndex(ValueLayout.JAVA_LONG, i);
                 long w2 = other.segment.getAtIndex(ValueLayout.JAVA_LONG, i);
                 this.segment.setAtIndex(ValueLayout.JAVA_LONG, i, w1 & w2);
             }
-            for (int i = minWords; i < this.wordCount; i++) {
+            for (; i < this.wordCount; i++) {
                 this.segment.setAtIndex(ValueLayout.JAVA_LONG, i, 0L);
             }
         } else {
             for (int i = this.nextSetBit(0); i >= 0; i = this.nextSetBit(i + 1)) {
                 if (!set.get(i)) {
-                    int wordIndex = i >> 6;
-                    long word = segment.getAtIndex(ValueLayout.JAVA_LONG, wordIndex);
-                    segment.setAtIndex(ValueLayout.JAVA_LONG, wordIndex, word & ~(1L << i));
+                    this.clear(i);
                 }
             }
         }
@@ -126,18 +141,21 @@ public class OffHeapBitSet implements ImpulseBitSet {
     public void andNot(ImpulseBitSet set) {
         if (set instanceof OffHeapBitSet other) {
             int minWords = Math.min(this.wordCount, other.wordCount);
-            for (int i = 0; i < minWords; i++) {
+            int i = 0;
+            int upperBound = SPECIES.loopBound(minWords);
+            for (; i < upperBound; i += SPECIES.length()) {
+                LongVector v1 = LongVector.fromMemorySegment(SPECIES, this.segment, (long) i * 8, java.nio.ByteOrder.nativeOrder());
+                LongVector v2 = LongVector.fromMemorySegment(SPECIES, other.segment, (long) i * 8, java.nio.ByteOrder.nativeOrder());
+                v1.and(v2.not()).intoMemorySegment(this.segment, (long) i * 8, java.nio.ByteOrder.nativeOrder());
+            }
+            for (; i < minWords; i++) {
                 long w1 = this.segment.getAtIndex(ValueLayout.JAVA_LONG, i);
                 long w2 = other.segment.getAtIndex(ValueLayout.JAVA_LONG, i);
                 this.segment.setAtIndex(ValueLayout.JAVA_LONG, i, w1 & ~w2);
             }
         } else {
             for (int i = set.nextSetBit(0); i >= 0; i = set.nextSetBit(i + 1)) {
-                int wordIndex = i >> 6;
-                if (wordIndex < this.wordCount) {
-                    long word = segment.getAtIndex(ValueLayout.JAVA_LONG, wordIndex);
-                    segment.setAtIndex(ValueLayout.JAVA_LONG, wordIndex, word & ~(1L << i));
-                }
+                this.clear(i);
             }
         }
     }

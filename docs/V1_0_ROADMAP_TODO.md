@@ -33,6 +33,11 @@ This document outlines the detailed engineering task checklist required to bring
   - Replace heavy `ForkJoinPool` with pre-allocated, pre-warmed static carrier platform threads.
   - Implement deterministic range slicing over `MemorySegment` off-heap buffers with 0 heap object allocations per query.
   - Implement dynamic single-cycle switching between sequential SIMD (`max_dop == 1`) and multi-carrier execution (`max_dop > 1`).
+- [x] **Live Ingestion & Streaming Mutation Architecture ([`docs/ingestion-strategies.md`](file:///Users/jesse/impulse/impulse-graph-java/docs/ingestion-strategies.md))**:
+  - Composable 5-dimension Lego block taxonomy (Storage, Deletions, Ingestion, Transposition, Persistence).
+  - Single-Writer Multi-Reader (SWMR) zero-lock concurrency model.
+  - Tombstone BitSet filtering (`_mm512_andnot_si512`) and Paged Appendices.
+  - Dynamic `.imps` embedded metadata and automatic pod startup catch-up protocol.
 - [ ] Multi-Layout Execution Kernels: CSR (Push), CSC (Pull direction optimization), COO (Edge stream), and DENSE (512-bit AVX bitmatrix).
 - [ ] Validate 100% pass rate against all spec test vectors (`tc01`..`tc36` and `vm-impas`).
 - [ ] Benchmark execution latency to verify **1x–2x parity vs C++20 kernel** under JMH harnesses.
