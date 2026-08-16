@@ -472,7 +472,7 @@ public final class BinarySnapshotLoader {
                 }
 
                 RelationSnapshot relSnap = new RelationSnapshot(
-                        arena, (int) nodeCount, (int) edgeCount, offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg, attrSegments
+                        arena, (int) nodeCount, (int) edgeCount, offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg, attrSegments, nodeIdWidth, edgeIndexWidth
                 );
                 relationSnapshots.put(relName, relSnap);
                 relationSnapshots.putIfAbsent("rel_" + srcDomId + "_" + tgtDomId, relSnap);

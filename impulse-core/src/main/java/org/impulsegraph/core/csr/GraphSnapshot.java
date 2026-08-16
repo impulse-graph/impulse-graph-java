@@ -4,6 +4,9 @@ import java.lang.foreign.Arena;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import org.impulsegraph.core.mutation.DualColumnarOverlay;
+import org.impulsegraph.core.mutation.DeletedNodeBitSet;
+import org.impulsegraph.core.mutation.OffHeapTombstoneBitSet;
 
 /**
  * High-performance off-heap multi-relation graph container holding relation snapshots across domain types.
@@ -12,7 +15,9 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
 
     private final Arena arena;
     private final Map<String, RelationSnapshot> relationMap = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>());
-    private final Map<RelationSnapshot, DeltaLayer> deltaLayers = new ConcurrentHashMap<>();
+    private final Map<RelationSnapshot, DualColumnarOverlay> overlays = new ConcurrentHashMap<>();
+    private final Map<RelationSnapshot, OffHeapTombstoneBitSet> edgeTombstones = new ConcurrentHashMap<>();
+    private DeletedNodeBitSet deletedNodes;
     private final org.impulsegraph.api.stats.GraphStatistics graphStats = new org.impulsegraph.api.stats.GraphStatistics();
 
     public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots) {
@@ -46,9 +51,18 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
         return relationMap;
     }
 
-    public DeltaLayer getDeltaLayer(RelationSnapshot snapshot) {
+    public DeletedNodeBitSet getDeletedNodes() {
+        return deletedNodes;
+    }
+
+    public OffHeapTombstoneBitSet getEdgeTombstones(RelationSnapshot snapshot) {
         if (snapshot == null) return null;
-        return deltaLayers.computeIfAbsent(snapshot, k -> new DeltaLayer());
+        return edgeTombstones.computeIfAbsent(snapshot, k -> new OffHeapTombstoneBitSet(arena, Math.max(128L, snapshot.getEdgeCount())));
+    }
+
+    public DualColumnarOverlay getOverlay(RelationSnapshot snapshot) {
+        if (snapshot == null) return null;
+        return overlays.computeIfAbsent(snapshot, k -> new DualColumnarOverlay(arena));
     }
 
     public long getOffHeapMemorySizeBytes() {

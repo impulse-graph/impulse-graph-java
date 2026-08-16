@@ -2,6 +2,10 @@ package org.impulsegraph.vm;
 
 import org.impulsegraph.core.csr.GraphSnapshot;
 import org.impulsegraph.core.csr.RelationSnapshot;
+import org.impulsegraph.core.mutation.DualColumnarOverlay;
+import org.impulsegraph.core.mutation.DeletedNodeBitSet;
+import org.impulsegraph.core.mutation.OffHeapTombstoneBitSet;
+import org.impulsegraph.core.mutation.OverlayMutator;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -157,6 +161,9 @@ public final class VmHandlers {
 
     public static void executeCsrWalk(MemorySegment state, VmQueryContext ctx, int dstReg, int srcReg, int relId, byte flags, Object input) {
         RelationSnapshot rel = resolveRelation(ctx, relId);
+        final DualColumnarOverlay overlay = (rel != null && ctx.snapshot() != null) ? ctx.snapshot().getOverlay(rel) : null;
+        final boolean hasOverlay = overlay != null && overlay.getMutationCount() > 0;
+
 
         byte srcType = getRegisterType(state, srcReg);
         long srcVal = getRegisterValue(state, srcReg);
@@ -171,7 +178,7 @@ public final class VmHandlers {
 
         if (rel != null) {
             if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
-                rel.copyTargetsSimd((int) srcVal, outBs);
+                if (hasOverlay) executeFusedWalkScalar((int) srcVal, rel, overlay, outBs, ctx); else rel.copyTargetsSimd((int) srcVal, outBs);
             } else if (srcType == TYPE_BITSET_HANDLE) {
                 ImpulseBitSet inBs = ctx.getBitset((int) srcVal);
                 if (inBs != null) {
@@ -194,7 +201,7 @@ public final class VmHandlers {
                                 if (startV >= nodeCount) break;
                                 int endV = Math.min(startV + chunkSize, nodeCount);
                                 for (int u = inBs.nextSetBit(startV); u >= 0 && u < endV; u = inBs.nextSetBit(u + 1)) {
-                                    rel.copyTargetsSimd(u, localBs);
+                                    if (hasOverlay) executeFusedWalkScalar(u, rel, overlay, localBs, ctx); else rel.copyTargetsSimd(u, localBs);
                                 }
                             }
                         });
@@ -204,7 +211,7 @@ public final class VmHandlers {
                         }
                     } else {
                         for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
-                            rel.copyTargetsSimd(u, outBs);
+                            if (hasOverlay) executeFusedWalkScalar(u, rel, overlay, outBs, ctx); else rel.copyTargetsSimd(u, outBs);
                         }
                     }
                 }
@@ -213,6 +220,31 @@ public final class VmHandlers {
 
         setRegister(state, dstReg, outHandle, TYPE_BITSET_HANDLE);
         setFlag(state, FLAG_ZF, outBs.isEmpty());
+    }
+
+    private static void executeFusedWalkScalar(int srcId, RelationSnapshot rel, DualColumnarOverlay overlay, ImpulseBitSet outBs, VmQueryContext ctx) {
+        DeletedNodeBitSet deletedNodes = ctx.snapshot() != null ? ctx.snapshot().getDeletedNodes() : null;
+        if (deletedNodes != null && deletedNodes.isDeleted(0, srcId)) return;
+
+        OffHeapTombstoneBitSet tombstones = ctx.snapshot() != null ? ctx.snapshot().getEdgeTombstones(rel) : null;
+
+        if (srcId < rel.getNodeCount()) {
+            int start = rel.getRowOffsetsSegment().getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, srcId);
+            int end = rel.getRowOffsetsSegment().getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, srcId + 1);
+            for (int i = start; i < end; i++) {
+                if (tombstones != null && tombstones.get(i)) continue;
+                int tgt = rel.getColumnTargetsSegment().getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, i);
+                if (deletedNodes != null && deletedNodes.isDeleted(0, tgt)) continue;
+                outBs.set(tgt);
+            }
+        }
+        if (overlay != null) {
+            int[] additions = overlay.getForwardEdges(srcId);
+            for (int tgt : additions) {
+                if (deletedNodes != null && deletedNodes.isDeleted(0, tgt)) continue;
+                outBs.set(tgt);
+            }
+        }
     }
 
     public static void handleCsrWalk2Hop(MemorySegment state, VmQueryContext ctx, Instruction instr, Object input) {
