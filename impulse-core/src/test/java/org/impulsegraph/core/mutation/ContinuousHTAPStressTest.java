@@ -22,8 +22,8 @@ public class ContinuousHTAPStressTest {
     private static final int READ_THREADS = 4;
     private static final int MAX_NODES = 20_000_000;
     private static final int MAX_EDGES = 150_000_000;
-    private static final long DURATION_MINUTES = 1;
-    private static final long COMPACT_INTERVAL_SECONDS = 20;
+    private static final long DURATION_MINUTES = 15;
+    private static final long COMPACT_INTERVAL_SECONDS = 300;
 
     private static final AtomicLong totalQueries = new AtomicLong();
     private static final AtomicLong totalMutations = new AtomicLong();
