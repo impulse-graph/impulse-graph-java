@@ -276,10 +276,14 @@ public final class BinarySnapshotLoader {
     }
 
     public static LoadedSnapshot loadSnapshot(Path filePath, Arena arena) throws IOException {
-        return loadSnapshot(filePath, arena, false);
+        return loadSnapshot(filePath, arena, false, false);
     }
 
     public static LoadedSnapshot loadSnapshot(Path filePath, Arena arena, boolean verifyChecksum) throws IOException {
+        return loadSnapshot(filePath, arena, verifyChecksum, false);
+    }
+
+    public static LoadedSnapshot loadSnapshot(Path filePath, Arena arena, boolean verifyChecksum, boolean forceReadOnly) throws IOException {
         Objects.requireNonNull(filePath, "filePath must not be null");
         Objects.requireNonNull(arena, "arena must not be null");
         Path targetPath = resolveSnapshotPath(filePath);
@@ -291,22 +295,30 @@ public final class BinarySnapshotLoader {
             // This invokes MADV_WILLNEED at the OS level, eliminating soft page fault latency.
             segment.load();
             
-            return loadSnapshot(segment, arena, verifyChecksum);
+            return loadSnapshot(segment, arena, verifyChecksum, forceReadOnly);
         }
     }
 
     public static LoadedSnapshot loadSnapshot(byte[] data, Arena arena) {
-        return loadSnapshot(data, arena, false);
+        return loadSnapshot(data, arena, false, false);
     }
 
     public static LoadedSnapshot loadSnapshot(byte[] data, Arena arena, boolean verifyChecksum) {
+        return loadSnapshot(data, arena, verifyChecksum, false);
+    }
+
+    public static LoadedSnapshot loadSnapshot(byte[] data, Arena arena, boolean verifyChecksum, boolean forceReadOnly) {
         Objects.requireNonNull(data, "snapshot data must not be null");
         Objects.requireNonNull(arena, "arena must not be null");
         MemorySegment segment = MemorySegment.ofArray(data);
-        return loadSnapshot(segment, arena, verifyChecksum);
+        return loadSnapshot(segment, arena, verifyChecksum, forceReadOnly);
     }
 
     public static LoadedSnapshot loadSnapshot(MemorySegment segment, Arena arena, boolean verifyChecksum) {
+        return loadSnapshot(segment, arena, verifyChecksum, false);
+    }
+
+    public static LoadedSnapshot loadSnapshot(MemorySegment segment, Arena arena, boolean verifyChecksum, boolean forceReadOnly) {
         Objects.requireNonNull(segment, "snapshot segment must not be null");
         Objects.requireNonNull(arena, "arena must not be null");
 
@@ -496,6 +508,14 @@ public final class BinarySnapshotLoader {
 
             Map<String, String> metadata = parseMetadataFooter(segment, segSize);
             GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata);
+            if (!forceReadOnly) {
+                String mutableStr = metadata.get("impulse.graph.mutable");
+                if ("true".equalsIgnoreCase(mutableStr)) {
+                    org.impulsegraph.core.mutation.OverlayMutator mutator = new org.impulsegraph.core.mutation.OverlayMutator(graph, arena);
+                    graph.setMutator(mutator);
+                }
+            }
+
 
             
             for (Map.Entry<Integer, RelationSnapshot> entry : relIdToSnapshot.entrySet()) {
@@ -588,6 +608,14 @@ public final class BinarySnapshotLoader {
 
             Map<String, String> metadata = parseMetadataFooter(segment, segSize);
             GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata);
+            if (!forceReadOnly) {
+                String mutableStr = metadata.get("impulse.graph.mutable");
+                if ("true".equalsIgnoreCase(mutableStr)) {
+                    org.impulsegraph.core.mutation.OverlayMutator mutator = new org.impulsegraph.core.mutation.OverlayMutator(graph, arena);
+                    graph.setMutator(mutator);
+                }
+            }
+
 
             
             for (Map.Entry<Integer, RelationSnapshot> entry : relIdToSnapshot.entrySet()) {

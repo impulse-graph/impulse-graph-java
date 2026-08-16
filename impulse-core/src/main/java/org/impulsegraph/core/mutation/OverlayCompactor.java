@@ -209,6 +209,7 @@ public class OverlayCompactor {
             for (Map.Entry<String, String> entry : statsCollector.toJsonMap().entrySet()) {
                 builder.withMetadata(entry.getKey(), entry.getValue());
             }
+            builder.withMetadata("impulse.graph.mutable", "true");
 
             byte[] snapshotBytes = builder.build(loadedToBuild);
 

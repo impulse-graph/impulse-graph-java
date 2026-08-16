@@ -23,8 +23,8 @@ public class ContinuousHTAPStressTest {
     private static final int READ_THREADS = 4;
     private static final int MAX_NODES = 20_000_000;
     private static final int MAX_EDGES = 150_000_000;
-    private static final long DURATION_MINUTES = 2;
-    private static final long COMPACT_INTERVAL_SECONDS = 45;
+    private static final long DURATION_MINUTES = 3;
+    private static final long COMPACT_INTERVAL_SECONDS = 30;
 
     private static final AtomicLong totalQueries = new AtomicLong();
     private static final AtomicLong totalMutations = new AtomicLong();
@@ -102,7 +102,7 @@ public class ContinuousHTAPStressTest {
             baseSnapshot = (GraphSnapshot) bootCompactor.compactToDisk(initialFile);
         }
         
-        OverlayMutator liveMutator = new OverlayMutator(baseSnapshot, globalArena);
+        OverlayMutator liveMutator = baseSnapshot.getMutator() != null ? baseSnapshot.getMutator() : new OverlayMutator(baseSnapshot, globalArena);
         stateRef.set(new State(new DefaultImpulseGraph(baseSnapshot, liveMutator), liveMutator));
         
         System.out.println("Base Graph Initialized. Starting Threads...");
@@ -156,7 +156,7 @@ public class ContinuousHTAPStressTest {
             OverlayCompactor compactor = new OverlayCompactor((GraphSnapshot) current.graph.getBaseSnapshot(), current.mutator);
             GraphSnapshot newSnapshot = (GraphSnapshot) compactor.compactToDisk(newSnapshotPath);
             
-            OverlayMutator newMutator = new OverlayMutator(newSnapshot, globalArena);
+            OverlayMutator newMutator = newSnapshot.getMutator() != null ? newSnapshot.getMutator() : new OverlayMutator(newSnapshot, globalArena);
             stateRef.set(new State(new DefaultImpulseGraph(newSnapshot, newMutator), newMutator));
             
             System.out.println(">>> COMPACTION DONE. SWAPPING REFERENCES.");
