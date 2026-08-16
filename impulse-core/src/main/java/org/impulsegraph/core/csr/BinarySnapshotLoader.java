@@ -493,7 +493,7 @@ public final class BinarySnapshotLoader {
             }
 
             Map<String, String> metadata = parseMetadataFooter(segment, segSize);
-            GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots);
+            GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata);
 
             return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, (short) ver, graph, domainsById, domainsByName, relationsById, metadata);
 
@@ -576,7 +576,7 @@ public final class BinarySnapshotLoader {
             }
 
             Map<String, String> metadata = parseMetadataFooter(segment, segSize);
-            GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots);
+            GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata);
 
             return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, (short) ver, graph, domainsById, domainsByName, relationsById, metadata);
         }

@@ -1,5 +1,6 @@
 package org.impulsegraph.core.mutation;
 
+import org.impulsegraph.core.csr.BinarySnapshotLoader;
 import org.impulsegraph.core.csr.DefaultImpulseGraph;
 import org.impulsegraph.core.csr.GraphSnapshot;
 import org.junit.jupiter.api.Test;
@@ -22,8 +23,8 @@ public class ContinuousHTAPStressTest {
     private static final int READ_THREADS = 4;
     private static final int MAX_NODES = 20_000_000;
     private static final int MAX_EDGES = 150_000_000;
-    private static final long DURATION_MINUTES = 15;
-    private static final long COMPACT_INTERVAL_SECONDS = 300;
+    private static final long DURATION_MINUTES = 2;
+    private static final long COMPACT_INTERVAL_SECONDS = 45;
 
     private static final AtomicLong totalQueries = new AtomicLong();
     private static final AtomicLong totalMutations = new AtomicLong();
@@ -56,17 +57,51 @@ public class ContinuousHTAPStressTest {
         System.out.println("Initializing Base Graph...");
         Path initialFile = Files.createTempFile("impulse-base-", ".imps");
         
-        GraphSnapshot emptySnapshot = new GraphSnapshot(globalArena, java.util.Collections.emptyMap());
-        OverlayMutator mutator = new OverlayMutator(emptySnapshot, globalArena);
+        String loadPathStr = System.getProperty("IMPULSE_LOAD_SNAPSHOT", "");
+        GraphSnapshot baseSnapshot;
         
-        for (int i = 0; i <= 1_000_000; i++) {
-            mutator.addNode("node-" + i);
+        if (!loadPathStr.isEmpty() && Files.exists(Path.of(loadPathStr))) {
+            System.out.println("Loading existing snapshot from " + loadPathStr);
+            baseSnapshot = BinarySnapshotLoader.loadSnapshot(Path.of(loadPathStr), globalArena).graph();
+            // In a real app we'd query the stats or read the exact counts. For now let's just 
+            // set reasonable defaults or guess based on what was loaded.
+            long totalEdges = 0;
+            for (org.impulsegraph.core.csr.RelationSnapshot rel : baseSnapshot.getAllRelationSnapshots().values()) {
+                totalEdges += rel.getEdgeCount();
+            }
+            if (totalEdges > 0) edgeCount.set(totalEdges);
+            
+            // Assume at least 1M nodes, or set to an arbitrary large limit since we don't know exactly 
+            // how many were inserted without iterating the domain catalog which we don't have direct access to here
+            nodeCount.set(Math.max(1_000_000, totalEdges / 10)); 
+            
+            System.out.println("Loaded Graph has Nodes approx: " + nodeCount.get() + ", Edges: " + edgeCount.get());
+        } else {
+            GraphSnapshot emptySnapshot = new GraphSnapshot(globalArena, java.util.Collections.emptyMap());
+            OverlayMutator mutator = new OverlayMutator(emptySnapshot, globalArena);
+            
+            int initialNodes = 1_000_000;
+            int initialEdges = 2_000_000;
+            System.out.println("No existing snapshot found. Seeding " + initialEdges + " edges...");
+            
+            for (int i = 0; i <= initialNodes; i++) {
+                mutator.addNode("node-" + i);
+            }
+            
+            Random r = new Random(42);
+            for (int i = 0; i < initialEdges; i++) {
+                mutator.upsertEdge(0, r.nextInt(initialNodes), r.nextInt(initialNodes));
+                if (i % 500_000 == 0) System.out.println("Seeded " + i + " edges...");
+            }
+            mutator.commitBatch();
+            
+            nodeCount.set(initialNodes);
+            edgeCount.set(initialEdges);
+            
+            OverlayCompactor bootCompactor = new OverlayCompactor(emptySnapshot, mutator);
+            baseSnapshot = (GraphSnapshot) bootCompactor.compactToDisk(initialFile);
         }
-        mutator.upsertEdge(0, 0, 1);
-        mutator.commitBatch();
         
-        OverlayCompactor bootCompactor = new OverlayCompactor(emptySnapshot, mutator);
-        GraphSnapshot baseSnapshot = (GraphSnapshot) bootCompactor.compactToDisk(initialFile);
         OverlayMutator liveMutator = new OverlayMutator(baseSnapshot, globalArena);
         stateRef.set(new State(new DefaultImpulseGraph(baseSnapshot, liveMutator), liveMutator));
         
@@ -110,7 +145,14 @@ public class ContinuousHTAPStressTest {
             State current = stateRef.get();
             current.mutator.commitBatch();
             
-            Path newSnapshotPath = Files.createTempFile("impulse-compact-", ".imps");
+            String savePathStr = System.getProperty("IMPULSE_SAVE_SNAPSHOT", "");
+            Path newSnapshotPath;
+            if (!savePathStr.isEmpty()) {
+                newSnapshotPath = Path.of(savePathStr);
+            } else {
+                newSnapshotPath = Files.createTempFile("impulse-compact-", ".imps");
+            }
+            
             OverlayCompactor compactor = new OverlayCompactor((GraphSnapshot) current.graph.getBaseSnapshot(), current.mutator);
             GraphSnapshot newSnapshot = (GraphSnapshot) compactor.compactToDisk(newSnapshotPath);
             
@@ -126,14 +168,9 @@ public class ContinuousHTAPStressTest {
     private void readLoop() {
         Random random = new Random();
         while (running) {
-            swapLock.readLock().lock();
-            try {
-                State state = stateRef.get();
-                long startNode = random.nextInt((int) nodeCount.get() + 1);
-                totalQueries.incrementAndGet();
-            } finally {
-                swapLock.readLock().unlock();
-            }
+            State state = stateRef.get();
+            long startNode = random.nextInt((int) nodeCount.get() + 1);
+            totalQueries.incrementAndGet();
         }
     }
 

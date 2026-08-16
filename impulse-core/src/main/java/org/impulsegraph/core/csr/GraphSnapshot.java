@@ -9,19 +9,60 @@ import org.impulsegraph.core.mutation.DualColumnarOverlay;
 /**
  * High-performance off-heap multi-relation graph container holding relation snapshots across domain types.
  */
-public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot, AutoCloseable {
+public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot, AutoCloseable, org.impulsegraph.core.stats.StatisticsView {
 
     private final Arena arena;
     private final Map<String, RelationSnapshot> relationMap = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>());
     private final Map<RelationSnapshot, DualColumnarOverlay> overlays = new ConcurrentHashMap<>();
     private final org.impulsegraph.api.stats.GraphStatistics graphStats = new org.impulsegraph.api.stats.GraphStatistics();
+    private final Map<String, String> metadata = new ConcurrentHashMap<>();
     private org.impulsegraph.core.mutation.OverlayMutator mutator;
 
     public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots) {
+        this(arena, snapshots, Map.of());
+    }
+
+    public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots, Map<String, String> metadata) {
         this.arena = Objects.requireNonNull(arena, "Arena must not be null");
         if (snapshots != null) {
             this.relationMap.putAll(snapshots);
         }
+        if (metadata != null) {
+            this.metadata.putAll(metadata);
+        }
+    }
+
+    @Override
+    public int getEstimatedOutDegreePercentile(int relationId, double percentile) {
+        String key = "stats.out_degree." + relationId;
+        String json = metadata.get(key);
+        if (json == null) return -1;
+        try {
+            // Very simple JSON parser for {"pct_99": 42}
+            int pctInt = (int) Math.round(percentile * 100);
+            String search = "\"pct_" + pctInt + "\":";
+            int idx = json.indexOf(search);
+            if (idx == -1) return -1;
+            int start = idx + search.length();
+            int end = json.indexOf(",", start);
+            if (end == -1) end = json.indexOf("}", start);
+            if (end == -1) return -1;
+            return Integer.parseInt(json.substring(start, end).trim());
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    @Override
+    public long getEstimatedDomainCount(int domainId) {
+        // If exact count is available via relation map, we could return it.
+        // For CBO stats, we look for numeric stat if tracked.
+        return -1;
+    }
+
+    @Override
+    public String getRawStatisticJson(String metadataKey) {
+        return metadata.get(metadataKey);
     }
 
     public RelationSnapshot getRelationSnapshot(String relationName) {

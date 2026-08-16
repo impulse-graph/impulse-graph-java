@@ -188,10 +188,14 @@ public class DeltaBlockIndex implements AutoCloseable {
             int blockIdx = blocks.indexOf(targetBlock);
             if (blockIdx >= 0) {
                 blocks.set(blockIdx, splits[0]);
-                blocks.add(blockIdx + 1, splits[1]);
+                blocks.add(splits[1]);
+                mapBlockToNodes(blockIdx, splits[0]);
+                mapBlockToNodes(blocks.size() - 1, splits[1]);
             } else {
                 blocks.add(splits[0]);
                 blocks.add(splits[1]);
+                mapBlockToNodes(blocks.size() - 2, splits[0]);
+                mapBlockToNodes(blocks.size() - 1, splits[1]);
             }
 
             // Decide which split block gets the new edge
@@ -203,10 +207,8 @@ public class DeltaBlockIndex implements AutoCloseable {
             } else {
                 targetBlock = new ColumnarDeltaBlock(arena, defaultBlockCapacity, attrBytesPerEdge, sortKey);
                 blocks.add(targetBlock);
+                mapBlockToNodes(blocks.size() - 1, targetBlock);
             }
-
-            // Rebuild node-to-block routing for all blocks
-            rebuildNodeRouting();
         }
 
         targetBlock.append(srcId, dstId, attr);
@@ -216,15 +218,18 @@ public class DeltaBlockIndex implements AutoCloseable {
         }
     }
 
+    private void mapBlockToNodes(int bId, ColumnarDeltaBlock b) {
+        if (b.isEmpty()) return;
+        int count = b.count();
+        for (int i = 0; i < count; i++) {
+            int k = (sortKey == ColumnarDeltaBlock.SortKey.SRC_ID) ? b.getSrcId(i) : b.getDstId(i);
+            mapNodeToBlock(k, bId);
+        }
+    }
+
     private void rebuildNodeRouting() {
         for (int bId = 0; bId < blocks.size(); bId++) {
-            ColumnarDeltaBlock b = blocks.get(bId);
-            if (b.isEmpty()) continue;
-            int count = b.count();
-            for (int i = 0; i < count; i++) {
-                int k = (sortKey == ColumnarDeltaBlock.SortKey.SRC_ID) ? b.getSrcId(i) : b.getDstId(i);
-                mapNodeToBlock(k, bId);
-            }
+            mapBlockToNodes(bId, blocks.get(bId));
         }
     }
 

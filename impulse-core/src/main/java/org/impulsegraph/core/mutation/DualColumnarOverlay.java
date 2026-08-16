@@ -64,20 +64,12 @@ public class DualColumnarOverlay implements AutoCloseable {
         long edgeKey = packEdgeKey(srcId, dstId);
         tombstones.remove(edgeKey);
 
-        // Check if edge already exists in delta block to avoid redundant duplicate entries
-        int[] existingTargets = csrIndex.getTargets(srcId);
-        boolean alreadyInDelta = false;
-        for (int t : existingTargets) {
-            if (t == dstId) {
-                alreadyInDelta = true;
-                break;
-            }
-        }
-
-        if (!alreadyInDelta) {
-            csrIndex.append(srcId, dstId, attr);
-            cscIndex.append(srcId, dstId, attr);
-        }
+        // We do NOT check if the edge is already in the delta block here,
+        // because doing so forces the delta block to sort itself on every single insertion,
+        // which completely destroys bulk-load performance.
+        // Duplicates will be gracefully handled and merged by the OverlayCompactor.
+        csrIndex.append(srcId, dstId, attr);
+        cscIndex.append(srcId, dstId, attr);
         mutationCounter.incrementAndGet();
     }
 

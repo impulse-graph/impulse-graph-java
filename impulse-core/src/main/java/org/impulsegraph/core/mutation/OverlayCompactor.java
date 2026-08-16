@@ -66,6 +66,8 @@ public class OverlayCompactor {
         DeletedNodeBitSet deletedNodes = mutator.getDeletedNodes();
         BinarySnapshotLoader.LoadedSnapshot loaded = mutator.getLoadedSnapshot();
 
+        org.impulsegraph.core.stats.StreamingStatsCollector statsCollector = new org.impulsegraph.core.stats.StreamingStatsCollector();
+
         // 1. Build Domain List
         DefaultSnapshotBuilder builder = new DefaultSnapshotBuilder();
         List<DefaultSnapshotBuilder.DomainEntry> domains = new ArrayList<>();
@@ -167,6 +169,10 @@ public class OverlayCompactor {
                         currentEdgeAccum++;
                     }
                     rowOffsetsList.add(currentEdgeAccum);
+                    
+                    if (statsCollector != null) {
+                        statsCollector.observeOutDegree(relIdx, targetSet.size());
+                    }
                 }
 
                 int edgeCount = columnTargetsList.size();
@@ -198,6 +204,11 @@ public class OverlayCompactor {
                     loaded != null ? loaded.relationsById() : Map.of(),
                     loaded != null ? loaded.getMetadataMap() : Map.of()
             );
+
+            // Serialize stats to unified UTF-8 metadata stream
+            for (Map.Entry<String, String> entry : statsCollector.toJsonMap().entrySet()) {
+                builder.withMetadata(entry.getKey(), entry.getValue());
+            }
 
             byte[] snapshotBytes = builder.build(loadedToBuild);
 

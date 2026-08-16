@@ -279,7 +279,41 @@ public class ColumnarDeltaBlock {
             sorted = true;
             return;
         }
-        quickSort(0, count - 1);
+
+        Integer[] indices = new Integer[count];
+        for (int i = 0; i < count; i++) indices[i] = i;
+        java.util.Arrays.sort(indices, this::compareIndices);
+
+        int[] tempSrc = new int[count];
+        int[] tempDst = new int[count];
+        long[] tempAttr8 = (attrBytesPerEdge == 8) ? new long[count] : null;
+        int[] tempAttr4 = (attrBytesPerEdge == 4) ? new int[count] : null;
+        byte[] tempAttrB = (attrBytesPerEdge > 0 && attrBytesPerEdge != 4 && attrBytesPerEdge != 8) ? new byte[count * attrBytesPerEdge] : null;
+
+        for (int i = 0; i < count; i++) {
+            int oldIdx = indices[i];
+            tempSrc[i] = srcSegment.getAtIndex(ValueLayout.JAVA_INT, oldIdx);
+            tempDst[i] = dstSegment.getAtIndex(ValueLayout.JAVA_INT, oldIdx);
+            if (attrBytesPerEdge == 8) {
+                tempAttr8[i] = attrSegment.getAtIndex(ValueLayout.JAVA_LONG, oldIdx);
+            } else if (attrBytesPerEdge == 4) {
+                tempAttr4[i] = attrSegment.getAtIndex(ValueLayout.JAVA_INT, oldIdx);
+            } else if (attrBytesPerEdge > 0) {
+                MemorySegment.copy(attrSegment, (long) oldIdx * attrBytesPerEdge, MemorySegment.ofArray(tempAttrB), (long) i * attrBytesPerEdge, attrBytesPerEdge);
+            }
+        }
+
+        MemorySegment.copy(MemorySegment.ofArray(tempSrc), 0, srcSegment, 0, (long) count * 4);
+        MemorySegment.copy(MemorySegment.ofArray(tempDst), 0, dstSegment, 0, (long) count * 4);
+        
+        if (attrBytesPerEdge == 8) {
+            MemorySegment.copy(MemorySegment.ofArray(tempAttr8), 0, attrSegment, 0, (long) count * 8);
+        } else if (attrBytesPerEdge == 4) {
+            MemorySegment.copy(MemorySegment.ofArray(tempAttr4), 0, attrSegment, 0, (long) count * 4);
+        } else if (attrBytesPerEdge > 0) {
+            MemorySegment.copy(MemorySegment.ofArray(tempAttrB), 0, attrSegment, 0, (long) count * attrBytesPerEdge);
+        }
+
         sorted = true;
         recomputeBounds();
     }
@@ -318,43 +352,6 @@ public class ColumnarDeltaBlock {
         this.maxSrcId = maxS;
         this.minDstId = minD;
         this.maxDstId = maxD;
-    }
-
-    private void quickSort(int low, int high) {
-        if (high - low < 16) {
-            insertionSort(low, high);
-            return;
-        }
-
-        int mid = (low + high) >>> 1;
-        // Median-of-three pivot selection
-        if (compareIndices(low, mid) > 0) swap(low, mid);
-        if (compareIndices(low, high) > 0) swap(low, high);
-        if (compareIndices(mid, high) > 0) swap(mid, high);
-
-        swap(mid, high - 1);
-        int pivotIndex = high - 1;
-
-        int i = low;
-        int j = high - 1;
-        while (true) {
-            while (compareIndices(++i, pivotIndex) < 0) ;
-            while (compareIndices(--j, pivotIndex) > 0) ;
-            if (i >= j) break;
-            swap(i, j);
-        }
-        swap(i, high - 1);
-
-        quickSort(low, i - 1);
-        quickSort(i + 1, high);
-    }
-
-    private void insertionSort(int low, int high) {
-        for (int i = low + 1; i <= high; i++) {
-            for (int j = i; j > low && compareIndices(j - 1, j) > 0; j--) {
-                swap(j - 1, j);
-            }
-        }
     }
 
     private int compareIndices(int i, int j) {
