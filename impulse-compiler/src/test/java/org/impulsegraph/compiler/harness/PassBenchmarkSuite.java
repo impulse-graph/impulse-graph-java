@@ -1,6 +1,6 @@
 package org.impulsegraph.compiler.harness;
 import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 
 import org.impulsegraph.api.stats.AttributeStatistics;
@@ -52,8 +52,8 @@ public class PassBenchmarkSuite {
             MemorySegment colSeg = arena.allocate((long) colTargets.length * ValueLayout.JAVA_INT.byteSize());
             for (int i = 0; i < colTargets.length; i++) colSeg.setAtIndex(ValueLayout.JAVA_INT, i, colTargets[i]);
 
-            RelationSnapshot rel = new RelationSnapshot(arena, 2, 4, rowSeg, colSeg);
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("users", rel));
+            org.impulsegraph.storage.csr.RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 2, 4, rowSeg, colSeg);
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("users", rel));
             snapshot.getGraphStatistics().putAttributeStatistics("age", ageStats);
 
             CompilerOptions opts = CompilerOptions.builder().withTracing(false).build();

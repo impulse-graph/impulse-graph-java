@@ -1,6 +1,6 @@
 package org.impulsegraph.compiler.harness;
 import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 
 import org.impulsegraph.api.ArgType;
@@ -54,8 +54,8 @@ public class PowergridParamSweepBenchmarkTest {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment rows = arena.allocate(8L);
             MemorySegment cols = arena.allocate(4L);
-            RelationSnapshot branchRel = new RelationSnapshot(arena, 1, 1, rows, cols);
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("Branch", branchRel));
+            org.impulsegraph.storage.csr.RelationSnapshot branchRel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 1, 1, rows, cols);
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("Branch", branchRel));
             snapshot.getGraphStatistics().putAttributeStatistics("mva_flow", mvaStats);
 
             // Pre-parse the query CEL AST template

@@ -1,6 +1,6 @@
 package org.impulsegraph.compiler.harness;
 import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 
 import org.impulsegraph.api.ArgType;
@@ -66,9 +66,9 @@ public class TwoHopFusionAblationBenchmarkTest {
                 r2Targets.setAtIndex(ValueLayout.JAVA_INT, e, (e * 13) % nodeCount);
             }
 
-            RelationSnapshot rel1 = new RelationSnapshot(arena, nodeCount, edgeCount, r1Offsets, r1Targets, java.util.List.of());
-            RelationSnapshot rel2 = new RelationSnapshot(arena, nodeCount, edgeCount, r2Offsets, r2Targets, java.util.List.of());
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("rel1", rel1, "rel2", rel2));
+            org.impulsegraph.storage.csr.RelationSnapshot rel1 = new org.impulsegraph.storage.csr.RelationSnapshot(arena, nodeCount, edgeCount, r1Offsets, r1Targets, java.util.List.of());
+            org.impulsegraph.storage.csr.RelationSnapshot rel2 = new org.impulsegraph.storage.csr.RelationSnapshot(arena, nodeCount, edgeCount, r2Offsets, r2Targets, java.util.List.of());
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("rel1", rel1, "rel2", rel2));
 
             int runs = 10_000;
             int seed = 42;
@@ -155,9 +155,9 @@ public class TwoHopFusionAblationBenchmarkTest {
             r2Offsets.setAtIndex(ValueLayout.JAVA_INT, 6, 100);
             for (int e = 0; e < 100; e++) r2Targets.setAtIndex(ValueLayout.JAVA_INT, e, e + 10);
 
-            RelationSnapshot rel1 = new RelationSnapshot(arena, nodeCount, 50, r1Offsets, r1Targets, java.util.List.of());
-            RelationSnapshot rel2 = new RelationSnapshot(arena, nodeCount, 100, r2Offsets, r2Targets, java.util.List.of());
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("rel1", rel1, "rel2", rel2));
+            org.impulsegraph.storage.csr.RelationSnapshot rel1 = new org.impulsegraph.storage.csr.RelationSnapshot(arena, nodeCount, 50, r1Offsets, r1Targets, java.util.List.of());
+            org.impulsegraph.storage.csr.RelationSnapshot rel2 = new org.impulsegraph.storage.csr.RelationSnapshot(arena, nodeCount, 100, r2Offsets, r2Targets, java.util.List.of());
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("rel1", rel1, "rel2", rel2));
 
             // Set high multiplicity statistics on rel1
             org.impulsegraph.api.stats.RelationStatistics rel1Stats = new org.impulsegraph.api.stats.RelationStatistics(
@@ -205,7 +205,7 @@ public class TwoHopFusionAblationBenchmarkTest {
                 attrSeg.setAtIndex(ValueLayout.JAVA_FLOAT, i, (float) (i * 0.1));
             }
 
-            RelationSnapshot rel = new RelationSnapshot(arena, 1, count, rOffsets, cTargets, java.util.List.of(attrSeg));
+            org.impulsegraph.storage.csr.RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 1, count, rOffsets, cTargets, java.util.List.of(attrSeg));
 
             int runs = 5_000;
             float threshold = 500.0f; // matches i >= 5000

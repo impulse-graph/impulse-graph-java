@@ -1,6 +1,6 @@
 package org.impulsegraph.compiler.emitter;
 import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 
 import org.impulsegraph.api.bitset.ImpulseBitSet;
@@ -42,8 +42,8 @@ public class BytecodeExecutionIntegrationTest {
             MemorySegment colSeg = arena.allocate((long) colTargets.length * 4);
             for (int i = 0; i < colTargets.length; i++) colSeg.setAtIndex(ValueLayout.JAVA_INT, i, colTargets[i]);
 
-            RelationSnapshot rel = new RelationSnapshot(arena, 4, 3, rowSeg, colSeg);
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("follows", rel));
+            org.impulsegraph.storage.csr.RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 4, 3, rowSeg, colSeg);
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("follows", rel));
 
             // AST: (program (csr-walk "follows") (collect-bitset))
             ScmProgram ast = ScmProgram.of(

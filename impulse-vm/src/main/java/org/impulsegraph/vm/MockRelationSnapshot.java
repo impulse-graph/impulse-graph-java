@@ -31,9 +31,11 @@ public class MockRelationSnapshot implements RelationSnapshot {
     @Override public boolean hasCsr() { return rowOffsets != null; }
     @Override public int getNodeCount() { return nodeCount; }
     @Override public int getDegree(int nodeId) { return 0; }
+    @Override public int getInDegree(int nodeId) { return 0; }
     @Override public int[] getTargets(int nodeId) { return new int[0]; }
     @Override public void copyTargetsSimd(int nodeId, ImpulseBitSet frontier) {}
     @Override public void copyInTargetsSimd(int nodeId, ImpulseBitSet frontier) {}
+    @Override public void copyTargetsSimdFilteredFloat(int nodeId, MemorySegment attrSegment, float threshold, byte cmpOp, ImpulseBitSet outBs) {}
     @Override public java.util.List<MemorySegment> getAttributeSegments() { return null; }
     @Override public void setCscSegments(MemorySegment rowOffsets, MemorySegment colTargets) {
         this.cscRowOffsets = rowOffsets;

@@ -1,6 +1,6 @@
 package org.impulsegraph.compiler.harness;
 import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 
 import org.impulsegraph.api.ArgType;
@@ -67,8 +67,8 @@ public class ModeComparativeBenchmarkTest {
                 colSeg.setAtIndex(ValueLayout.JAVA_INT, e, (e * 31) % nodeCount);
             }
 
-            RelationSnapshot branchRel = new RelationSnapshot(arena, nodeCount, edgeCount, rowSeg, colSeg);
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("Branch", branchRel));
+            org.impulsegraph.storage.csr.RelationSnapshot branchRel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, nodeCount, edgeCount, rowSeg, colSeg);
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("Branch", branchRel));
             snapshot.getGraphStatistics().putAttributeStatistics("mva_flow", mvaStats);
 
             int maxRatingLimit = 50_000;

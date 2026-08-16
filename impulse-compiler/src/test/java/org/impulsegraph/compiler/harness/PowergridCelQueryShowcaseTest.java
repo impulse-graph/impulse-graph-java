@@ -1,6 +1,6 @@
 package org.impulsegraph.compiler.harness;
 import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 
 import org.impulsegraph.api.ImpulseGraphQuery;
@@ -46,8 +46,8 @@ public class PowergridCelQueryShowcaseTest {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment rows = arena.allocate(8L);
             MemorySegment cols = arena.allocate(4L);
-            RelationSnapshot branchRel = new RelationSnapshot(arena, 1, 1, rows, cols);
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("Branch", branchRel));
+            org.impulsegraph.storage.csr.RelationSnapshot branchRel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 1, 1, rows, cols);
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("Branch", branchRel));
             snapshot.getGraphStatistics().putAttributeStatistics("vm", vmStats);
 
             // Fluent Query with CEL Expression and Parameter Binding
@@ -96,8 +96,8 @@ public class PowergridCelQueryShowcaseTest {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment rows = arena.allocate(8L);
             MemorySegment cols = arena.allocate(4L);
-            RelationSnapshot branchRel = new RelationSnapshot(arena, 1, 1, rows, cols);
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("Branch", branchRel));
+            org.impulsegraph.storage.csr.RelationSnapshot branchRel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 1, 1, rows, cols);
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("Branch", branchRel));
 
             // Fluent Query: Detect energized lines exceeding 250 MVA rating
             ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()
@@ -135,8 +135,8 @@ public class PowergridCelQueryShowcaseTest {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment rows = arena.allocate(8L);
             MemorySegment cols = arena.allocate(4L);
-            RelationSnapshot branchRel = new RelationSnapshot(arena, 1, 1, rows, cols);
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("Branch", branchRel));
+            org.impulsegraph.storage.csr.RelationSnapshot branchRel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 1, 1, rows, cols);
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("Branch", branchRel));
 
             // Multi-Hop Transitive Islanding Frontier over closed breakers (edge.status == 1)
             ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()

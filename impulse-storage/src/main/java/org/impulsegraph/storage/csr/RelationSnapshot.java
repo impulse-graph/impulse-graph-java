@@ -294,13 +294,6 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
     private static final jdk.incubator.vector.VectorSpecies<Integer> INT_SPECIES = jdk.incubator.vector.IntVector.SPECIES_PREFERRED;
     private static final jdk.incubator.vector.VectorSpecies<Float> FLOAT_SPECIES = jdk.incubator.vector.FloatVector.SPECIES_PREFERRED;
 
-    public static final byte CMP_GT = 0x01;
-    public static final byte CMP_GTE = 0x02;
-    public static final byte CMP_LT = 0x03;
-    public static final byte CMP_LTE = 0x04;
-    public static final byte CMP_EQ = 0x05;
-    public static final byte CMP_NEQ = 0x06;
-
     /**
      * SIMD vectorized target node traversal into a destination ImpulseBitSet.
      * Uses Java 25 Vector API (AVX-512 / AVX2 / ARM Neon) to load vector tiles of target IDs directly off-heap.

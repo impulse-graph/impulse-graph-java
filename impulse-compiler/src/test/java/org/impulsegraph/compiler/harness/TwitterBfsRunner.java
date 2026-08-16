@@ -1,6 +1,6 @@
 package org.impulsegraph.compiler.harness;
 import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
@@ -14,6 +14,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.impulsegraph.api.bitset.ImpulseBitSet;
 import org.impulsegraph.api.bitset.OffHeapBitSet;
+import org.impulsegraph.vm.ImpulseVmInterpreter;
+import org.impulsegraph.vm.ImpulseMethodHandleCompiler;
 
 import static org.impulsegraph.vm.VmRegisterType.*;
 import static org.impulsegraph.vm.VmStateLayout.*;

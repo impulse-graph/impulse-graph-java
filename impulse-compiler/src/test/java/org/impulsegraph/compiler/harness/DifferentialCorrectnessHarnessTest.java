@@ -1,6 +1,6 @@
 package org.impulsegraph.compiler.harness;
 import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 
 import org.impulsegraph.api.stats.AttributeStatistics;
@@ -53,8 +53,8 @@ public class DifferentialCorrectnessHarnessTest {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment rows = arena.allocate(8L);
             MemorySegment cols = arena.allocate(4L);
-            RelationSnapshot rel = new RelationSnapshot(arena, 1, 1, rows, cols);
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("userToGroup", rel));
+            org.impulsegraph.storage.csr.RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 1, 1, rows, cols);
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("userToGroup", rel));
             snapshot.getGraphStatistics().putAttributeStatistics("age", ageStats);
 
             // Query with impossible predicate: node.age > 250
@@ -139,8 +139,8 @@ public class DifferentialCorrectnessHarnessTest {
             MemorySegment colSeg = arena.allocate((long) colTargets.length * ValueLayout.JAVA_INT.byteSize());
             for (int i = 0; i < colTargets.length; i++) colSeg.setAtIndex(ValueLayout.JAVA_INT, i, colTargets[i]);
 
-            RelationSnapshot rel = new RelationSnapshot(arena, 2, 4, rowSeg, colSeg);
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("parentToChildren", rel));
+            org.impulsegraph.storage.csr.RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 2, 4, rowSeg, colSeg);
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("parentToChildren", rel));
 
             assertTrue(rel.getStatistics().isInjective(), "Relation must be classified as Injective");
 
@@ -175,10 +175,10 @@ public class DifferentialCorrectnessHarnessTest {
             MemorySegment rows = arena.allocate(8L);
             MemorySegment cols = arena.allocate(4L);
 
-            RelationSnapshot secFruit = new RelationSnapshot(arena, 1, 1, rows, cols);
-            RelationSnapshot secBread = new RelationSnapshot(arena, 1, 1, rows, cols);
+            org.impulsegraph.storage.csr.RelationSnapshot secFruit = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 1, 1, rows, cols);
+            org.impulsegraph.storage.csr.RelationSnapshot secBread = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 1, 1, rows, cols);
 
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of(
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of(
                     "in_section_fruit", secFruit,
                     "in_section_bread", secBread
             ));

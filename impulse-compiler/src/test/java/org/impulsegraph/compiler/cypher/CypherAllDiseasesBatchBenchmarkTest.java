@@ -1,6 +1,6 @@
 package org.impulsegraph.compiler.cypher;
 import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 
 import org.impulsegraph.compiler.ast.ImpScmNode;

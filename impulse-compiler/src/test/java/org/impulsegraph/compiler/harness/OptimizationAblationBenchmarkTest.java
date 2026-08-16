@@ -1,6 +1,6 @@
 package org.impulsegraph.compiler.harness;
 import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 
 import org.impulsegraph.api.ArgType;
@@ -68,8 +68,8 @@ public class OptimizationAblationBenchmarkTest {
             for (int e = 0; e < edgeCount; e++) cols.setAtIndex(ValueLayout.JAVA_INT, e, (e * 31) % nodeCount);
             for (int n = 0; n < nodeCount; n++) ageAttr.setAtIndex(ValueLayout.JAVA_INT, n, 18 + (n % 96));
 
-            RelationSnapshot rel = new RelationSnapshot(arena, nodeCount, edgeCount, rows, cols, List.of(ageAttr));
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("users", rel));
+            org.impulsegraph.storage.csr.RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, nodeCount, edgeCount, rows, cols, List.of(ageAttr));
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("users", rel));
             snapshot.getGraphStatistics().putAttributeStatistics("age", ageStats);
 
             int runs = 10_000;

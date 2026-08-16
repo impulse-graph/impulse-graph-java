@@ -1,6 +1,6 @@
 package org.impulsegraph.compiler.passes;
 import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 
 
 import org.impulsegraph.compiler.ast.*;
@@ -64,8 +64,8 @@ public class CompilerPassTest {
             MemorySegment colSeg = arena.allocate((long) colTargets.length * ValueLayout.JAVA_INT.byteSize());
             for (int i = 0; i < colTargets.length; i++) colSeg.setAtIndex(ValueLayout.JAVA_INT, i, colTargets[i]);
 
-            RelationSnapshot rel = new RelationSnapshot(arena, 3, 3, rowSeg, colSeg);
-            ImpulseGraphSnapshot snapshot = new ImpulseGraphSnapshot(arena, Map.of("userToGroup", rel));
+            org.impulsegraph.storage.csr.RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 3, 3, rowSeg, colSeg);
+            ImpulseGraphSnapshot snapshot = new org.impulsegraph.storage.csr.GraphSnapshot(arena, Map.of("userToGroup", rel));
 
             ScmProgram ast = ScmProgram.of(
                     ScmWalk.forward("userToGroup"),
