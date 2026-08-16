@@ -5,8 +5,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import org.impulsegraph.core.mutation.DualColumnarOverlay;
-import org.impulsegraph.core.mutation.DeletedNodeBitSet;
-import org.impulsegraph.core.mutation.OffHeapTombstoneBitSet;
 
 /**
  * High-performance off-heap multi-relation graph container holding relation snapshots across domain types.
@@ -16,9 +14,8 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
     private final Arena arena;
     private final Map<String, RelationSnapshot> relationMap = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>());
     private final Map<RelationSnapshot, DualColumnarOverlay> overlays = new ConcurrentHashMap<>();
-    private final Map<RelationSnapshot, OffHeapTombstoneBitSet> edgeTombstones = new ConcurrentHashMap<>();
-    private DeletedNodeBitSet deletedNodes;
     private final org.impulsegraph.api.stats.GraphStatistics graphStats = new org.impulsegraph.api.stats.GraphStatistics();
+    private org.impulsegraph.core.mutation.OverlayMutator mutator;
 
     public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots) {
         this.arena = Objects.requireNonNull(arena, "Arena must not be null");
@@ -51,18 +48,17 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
         return relationMap;
     }
 
-    public DeletedNodeBitSet getDeletedNodes() {
-        return deletedNodes;
-    }
-
-    public OffHeapTombstoneBitSet getEdgeTombstones(RelationSnapshot snapshot) {
-        if (snapshot == null) return null;
-        return edgeTombstones.computeIfAbsent(snapshot, k -> new OffHeapTombstoneBitSet(arena, Math.max(128L, snapshot.getEdgeCount())));
-    }
-
     public DualColumnarOverlay getOverlay(RelationSnapshot snapshot) {
         if (snapshot == null) return null;
         return overlays.computeIfAbsent(snapshot, k -> new DualColumnarOverlay(arena));
+    }
+
+    public org.impulsegraph.core.mutation.OverlayMutator getMutator() {
+        return mutator;
+    }
+
+    public void setMutator(org.impulsegraph.core.mutation.OverlayMutator mutator) {
+        this.mutator = mutator;
     }
 
     public long getOffHeapMemorySizeBytes() {

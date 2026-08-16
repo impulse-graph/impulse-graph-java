@@ -93,6 +93,7 @@ public class OverlayMutator implements AutoCloseable {
                 }
                 relIdx++;
             }
+            baseSnapshot.setMutator(this);
         }
     }
 

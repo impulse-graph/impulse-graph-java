@@ -161,8 +161,8 @@ public final class VmHandlers {
 
     public static void executeCsrWalk(MemorySegment state, VmQueryContext ctx, int dstReg, int srcReg, int relId, byte flags, Object input) {
         RelationSnapshot rel = resolveRelation(ctx, relId);
-        final DualColumnarOverlay overlay = (rel != null && ctx.snapshot() != null) ? ctx.snapshot().getOverlay(rel) : null;
-        final boolean hasOverlay = overlay != null && overlay.getMutationCount() > 0;
+        final org.impulsegraph.core.mutation.OverlayMutator mutator = (ctx.snapshot() != null) ? ctx.snapshot().getMutator() : null;
+        final boolean hasOverlay = mutator != null && mutator.getPendingBatchSize() + mutator.getCommittedBatchCount() > 0;
 
 
         byte srcType = getRegisterType(state, srcReg);
@@ -178,7 +178,7 @@ public final class VmHandlers {
 
         if (rel != null) {
             if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
-                if (hasOverlay) executeFusedWalkScalar((int) srcVal, rel, overlay, outBs, ctx); else rel.copyTargetsSimd((int) srcVal, outBs);
+                if (hasOverlay) executeFusedWalkScalar((int) srcVal, relId, rel, mutator, outBs); else rel.copyTargetsSimd((int) srcVal, outBs);
             } else if (srcType == TYPE_BITSET_HANDLE) {
                 ImpulseBitSet inBs = ctx.getBitset((int) srcVal);
                 if (inBs != null) {
@@ -201,7 +201,7 @@ public final class VmHandlers {
                                 if (startV >= nodeCount) break;
                                 int endV = Math.min(startV + chunkSize, nodeCount);
                                 for (int u = inBs.nextSetBit(startV); u >= 0 && u < endV; u = inBs.nextSetBit(u + 1)) {
-                                    if (hasOverlay) executeFusedWalkScalar(u, rel, overlay, localBs, ctx); else rel.copyTargetsSimd(u, localBs);
+                                    if (hasOverlay) executeFusedWalkScalar(u, relId, rel, mutator, localBs); else rel.copyTargetsSimd(u, localBs);
                                 }
                             }
                         });
@@ -211,7 +211,7 @@ public final class VmHandlers {
                         }
                     } else {
                         for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
-                            if (hasOverlay) executeFusedWalkScalar(u, rel, overlay, outBs, ctx); else rel.copyTargetsSimd(u, outBs);
+                            if (hasOverlay) executeFusedWalkScalar(u, relId, rel, mutator, outBs); else rel.copyTargetsSimd(u, outBs);
                         }
                     }
                 }
@@ -222,27 +222,31 @@ public final class VmHandlers {
         setFlag(state, FLAG_ZF, outBs.isEmpty());
     }
 
-    private static void executeFusedWalkScalar(int srcId, RelationSnapshot rel, DualColumnarOverlay overlay, ImpulseBitSet outBs, VmQueryContext ctx) {
-        DeletedNodeBitSet deletedNodes = ctx.snapshot() != null ? ctx.snapshot().getDeletedNodes() : null;
-        if (deletedNodes != null && deletedNodes.isDeleted(0, srcId)) return;
-
-        OffHeapTombstoneBitSet tombstones = ctx.snapshot() != null ? ctx.snapshot().getEdgeTombstones(rel) : null;
+    private static void executeFusedWalkScalar(int srcId, int relId, RelationSnapshot rel, org.impulsegraph.core.mutation.OverlayMutator mutator, ImpulseBitSet outBs) {
+        if (mutator != null && mutator.isNodeDeleted(0, srcId)) return;
 
         if (srcId < rel.getNodeCount()) {
             int start = rel.getRowOffsetsSegment().getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, srcId);
             int end = rel.getRowOffsetsSegment().getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, srcId + 1);
+            org.impulsegraph.core.mutation.OffHeapTombstoneBitSet tombstones = mutator != null ? mutator.getEdgeTombstoneBitSet(relId) : null;
+            
             for (int i = start; i < end; i++) {
                 if (tombstones != null && tombstones.get(i)) continue;
                 int tgt = rel.getColumnTargetsSegment().getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, i);
-                if (deletedNodes != null && deletedNodes.isDeleted(0, tgt)) continue;
+                if (mutator != null && mutator.isNodeDeleted(0, tgt)) continue;
+                if (mutator != null && mutator.isEdgeDeleted(relId, srcId, tgt)) continue;
                 outBs.set(tgt);
             }
         }
-        if (overlay != null) {
-            int[] additions = overlay.getForwardEdges(srcId);
-            for (int tgt : additions) {
-                if (deletedNodes != null && deletedNodes.isDeleted(0, tgt)) continue;
-                outBs.set(tgt);
+        if (mutator != null) {
+            org.impulsegraph.core.mutation.DualColumnarOverlay overlay = mutator.getCommittedEdgeAdditions().get(relId);
+            if (overlay != null) {
+                int[] additions = overlay.getForwardEdges(srcId);
+                for (int tgt : additions) {
+                    if (!mutator.isNodeDeleted(0, tgt) && !mutator.isEdgeDeleted(relId, srcId, tgt)) {
+                        outBs.set(tgt);
+                    }
+                }
             }
         }
     }
