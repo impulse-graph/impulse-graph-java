@@ -19,6 +19,11 @@ public interface ImpulseGraph extends AutoCloseable {
     void addEdge(String relationName, long srcNodeId, long tgtNodeId);
 
     /**
+     * Adds an edge from source node ID to target node ID for a specified relation, with payload attributes.
+     */
+    void addEdge(String relationName, long srcNodeId, long tgtNodeId, Object... attributes);
+
+    /**
      * Removes an edge (tombstone) from source node ID to target node ID for a specified relation.
      */
     void removeEdge(String relationName, long srcNodeId, long tgtNodeId);
