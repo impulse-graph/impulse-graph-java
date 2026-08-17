@@ -21,6 +21,7 @@ public class ManifestYamlParser {
         Map<String, GraphManifest.TablespaceDef> tablespaces = new LinkedHashMap<>();
         Map<String, GraphManifest.DomainDef> domains = new LinkedHashMap<>();
         Map<String, GraphManifest.RelationDef> relations = new LinkedHashMap<>();
+        Map<String, GraphManifest.VirtualRelationDef> virtualRelations = new LinkedHashMap<>();
         
         String currentSection = null;
         String currentItem = null;
@@ -28,6 +29,7 @@ public class ManifestYamlParser {
         
         Map<String, String> currentItemProps = new HashMap<>();
         Map<String, String> currentAttributes = new HashMap<>();
+        List<String> currentComponents = new ArrayList<>();
 
         for (String line : lines) {
             if (line.trim().isEmpty() || line.trim().startsWith("#")) continue;
@@ -41,29 +43,36 @@ public class ManifestYamlParser {
                 } else if (trimmed.startsWith("version:")) {
                     version = extractValue(trimmed);
                 } else if (trimmed.equals("tablespaces:")) {
-                    saveCurrentItem(currentSection, currentItem, currentItemProps, currentAttributes, tablespaces, domains, relations);
+                    saveCurrentItem(currentSection, currentItem, currentItemProps, currentAttributes, currentComponents, tablespaces, domains, relations, virtualRelations);
                     currentSection = "tablespaces";
                     currentItem = null;
                 } else if (trimmed.equals("domains:")) {
-                    saveCurrentItem(currentSection, currentItem, currentItemProps, currentAttributes, tablespaces, domains, relations);
+                    saveCurrentItem(currentSection, currentItem, currentItemProps, currentAttributes, currentComponents, tablespaces, domains, relations, virtualRelations);
                     currentSection = "domains";
                     currentItem = null;
                 } else if (trimmed.equals("relations:")) {
-                    saveCurrentItem(currentSection, currentItem, currentItemProps, currentAttributes, tablespaces, domains, relations);
+                    saveCurrentItem(currentSection, currentItem, currentItemProps, currentAttributes, currentComponents, tablespaces, domains, relations, virtualRelations);
                     currentSection = "relations";
+                    currentItem = null;
+                } else if (trimmed.equals("virtual_relations:")) {
+                    saveCurrentItem(currentSection, currentItem, currentItemProps, currentAttributes, currentComponents, tablespaces, domains, relations, virtualRelations);
+                    currentSection = "virtual_relations";
                     currentItem = null;
                 }
             } else if (indent == 2) {
                 if (trimmed.endsWith(":")) {
-                    saveCurrentItem(currentSection, currentItem, currentItemProps, currentAttributes, tablespaces, domains, relations);
+                    saveCurrentItem(currentSection, currentItem, currentItemProps, currentAttributes, currentComponents, tablespaces, domains, relations, virtualRelations);
                     currentItem = trimmed.substring(0, trimmed.length() - 1);
                     currentItemProps.clear();
                     currentAttributes.clear();
+                    currentComponents.clear();
                     currentSubSection = null;
                 }
             } else if (indent == 4) {
                 if (trimmed.equals("attributes:")) {
                     currentSubSection = "attributes";
+                } else if (trimmed.equals("components:")) {
+                    currentSubSection = "components";
                 } else if (trimmed.contains(":")) {
                     String[] parts = splitKv(trimmed);
                     currentItemProps.put(parts[0], parts[1]);
@@ -72,18 +81,21 @@ public class ManifestYamlParser {
                 if ("attributes".equals(currentSubSection) && trimmed.contains(":")) {
                     String[] parts = splitKv(trimmed);
                     currentAttributes.put(parts[0], parts[1]);
+                } else if ("components".equals(currentSubSection) && trimmed.startsWith("-")) {
+                    currentComponents.add(trimmed.substring(1).trim().replace("\"", ""));
                 }
             }
         }
-        saveCurrentItem(currentSection, currentItem, currentItemProps, currentAttributes, tablespaces, domains, relations);
+        saveCurrentItem(currentSection, currentItem, currentItemProps, currentAttributes, currentComponents, tablespaces, domains, relations, virtualRelations);
 
-        return new GraphManifest(graphName, version, tablespaces, domains, relations);
+        return new GraphManifest(graphName, version, tablespaces, domains, relations, virtualRelations);
     }
 
-    private static void saveCurrentItem(String section, String item, Map<String, String> props, Map<String, String> attrs,
+    private static void saveCurrentItem(String section, String item, Map<String, String> props, Map<String, String> attrs, List<String> comps,
                                         Map<String, GraphManifest.TablespaceDef> t,
                                         Map<String, GraphManifest.DomainDef> d,
-                                        Map<String, GraphManifest.RelationDef> r) {
+                                        Map<String, GraphManifest.RelationDef> r,
+                                        Map<String, GraphManifest.VirtualRelationDef> vr) {
         if (item == null || section == null) return;
         
         if ("tablespaces".equals(section)) {
@@ -103,6 +115,10 @@ public class ManifestYamlParser {
                 props.get("target"),
                 props.get("tablespace"),
                 new HashMap<>(attrs)
+            ));
+        } else if ("virtual_relations".equals(section)) {
+            vr.put(item, new GraphManifest.VirtualRelationDef(
+                new ArrayList<>(comps)
             ));
         }
     }

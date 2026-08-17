@@ -38,66 +38,55 @@ relations:
     tablespace: purchased_part2
 ```
 
-> **Note**: Domains must reside entirely within a single tablespace. Relations can be logically split by mapping them to multiple tablespaces using different relation identifiers (e.g. `PURCHASED` vs `PURCHASED_ARCHIVE`).
+## Attributes and Data Types
 
-## Virtual Relations (Coproduct Decomposition)
+You can attach strongly-typed attributes to both domains and relations. Based on the Impulse Graph Schema Specification, the supported data types are:
+* **Integers**: `Int8`, `Int16`, `Int32`, `Int64`
+* **Floating Point**: `Float32`, `Float64`
+* **Strings**: `VarString` (variable length, uses string pool) and `FixedString(N)` (fixed byte length for fast scanning)
+* **Boolean**: `Bool`
+* **Dates**: `TimestampMicro`
 
-Impulse Graph supports **Virtual Relations**—a powerful feature where the query planner automatically decomposes a single logical relation walk into a union of multiple physical edge tables based on an underscore prefix naming convention (`relName_*`).
+For **Embeddings** and vector representations, define a primitive array dimension using the schema (e.g. `dimension: 128`). In the basic `manifest.yaml`, it is commonly noted with array syntax:
 
-This is extremely useful in social media and interaction networks where a generic action (like "interacting with a post") is physically partitioned into discrete tablespaces by interaction type.
-
-### Example: Social Media Interactions
+### Example with Attributes
 
 ```yaml
-version: "1.0"
-graphName: "SocialMediaGraph"
-
-tablespaces:
-  core_users:
-    file: "chunks/users.imps"
-  core_posts:
-    file: "chunks/posts.imps"
-  
-  # Partitioned interaction tablespaces
-  likes_ts:
-    file: "chunks/interactions_likes.imps"
-  comments_ts:
-    file: "chunks/interactions_comments.imps"
-  shares_ts:
-    file: "chunks/interactions_shares.imps"
-
 domains:
   User:
     tablespace: core_users
-  Post:
-    tablespace: core_posts
+    attributes:
+      account_status: "FixedString(8)"
+      display_name: "VarString"
+      embedding: "Float32[128]"
 
 relations:
-  # These are physical constituent relations matching the 'ENGAGED_WITH_*' prefix
   ENGAGED_WITH_LIKES:
     source: User
     target: Post
     tablespace: likes_ts
-  ENGAGED_WITH_COMMENTS:
-    source: User
-    target: Post
-    tablespace: comments_ts
-  ENGAGED_WITH_SHARES:
-    source: User
-    target: Post
-    tablespace: shares_ts
+    attributes:
+      affinityScore: "Float32"
+      timestamp: "TimestampMicro"
 ```
 
-With this manifest, if you query the **Virtual Relation** `ENGAGED_WITH`:
+## Virtual Relations (Coproducts)
 
-```java
-var query = new ImpulseQueryBuilder<BitSet>()
-    .input("User", ArgType.SINGLE_LONG)
-    .walkEdge("ENGAGED_WITH") // Virtual relation
-    .build();
+A **Virtual Relation** allows you to logically group multiple physical relations into a single queryable edge name. This avoids the need for prefix matching or dynamic rules, acting simply as an explicit composite array.
+
+### Example: Social Media Interactions
+
+```yaml
+virtual_relations:
+  ENGAGED_WITH:
+    components:
+      - ENGAGED_WITH_LIKES
+      - ENGAGED_WITH_COMMENTS
+      - ENGAGED_WITH_SHARES
+      - ENGAGED_WITH_POSTS
 ```
 
-The Stage 2 Compiler (`VirtualRelationDecompositionPass`) will automatically detect the `ENGAGED_WITH_` prefix, decompose the virtual super-relation, and simultaneously walk the `LIKES`, `COMMENTS`, and `SHARES` physical tablespaces in a highly optimized vector coproduct!
+When you query `.walkEdge("ENGAGED_WITH")`, the query planner statically expands it into a coproduct of the defined component relations.
 
 ## Loading from a Manifest
 
