@@ -1,5 +1,8 @@
 # Impulse Graph Engine — Java v1.0.0 Production Readiness TODO Roadmap
 
+> [!WARNING]
+> **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
+
 This document outlines the detailed engineering task checklist required to bring **`impulse-graph-java`** from initial public preview (v0.9.0) to **v1.0.0 major production readiness**, aligned with the master ecosystem roadmap ([`impulse-website/docs/roadmap.md`](file:///Users/jesse/impulse/impulse-website/docs/roadmap.md)).
 
 ---

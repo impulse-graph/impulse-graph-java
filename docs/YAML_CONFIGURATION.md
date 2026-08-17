@@ -1,5 +1,8 @@
 # YAML Manifest Tablespace Configuration
 
+> [!WARNING]
+> **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
+
 For enterprise deployments with datasets exceeding single-file I/O limits, Impulse Graph supports multi-file chunking and composite graph loading via a declarative `manifest.yaml` configuration.
 
 ## Manifest Structure

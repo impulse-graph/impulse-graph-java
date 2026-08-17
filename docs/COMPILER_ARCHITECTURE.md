@@ -1,5 +1,8 @@
 # Impulse Graph Java Compiler Suite (`impulse-compiler`)
 
+> [!WARNING]
+> **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
+
 The `impulse-compiler` module is a pure Java 25 implementation of the **7-stage optimizing ImpScheme (ImpScm), openCypher, and CEL compiler pipeline**, generating zero-allocation `impOps` binary bytecode for direct execution via Java 25 Foreign Function & Memory (FFM) and Vector API.
 
 ---

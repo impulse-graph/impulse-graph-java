@@ -1,5 +1,8 @@
 # ImpulseGraph Query Context & Execution
 
+> [!WARNING]
+> **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
+
 This document describes how `ImpulseGraphQuery` objects interact with the underlying graph data via a context mechanism, especially in high-availability scenarios involving "blue/green" snapshot swaps.
 
 ## The Query Lifecycle

@@ -1,5 +1,8 @@
 # Impulse Graph Engine — Java 25 FFM Core (`impulse-graph-java`)
 
+> [!WARNING]
+> **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
+
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 A high-performance, off-heap **Java 25 FFM** execution engine and multi-module ecosystem for the **Impulse Graph Engine**. 

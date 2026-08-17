@@ -1,5 +1,8 @@
 # Getting Started with Impulse Graph (Java 25 FFM)
 
+> [!WARNING]
+> **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
+
 Welcome to the **Impulse Graph Engine**. This guide will walk you through the basics of loading a graph snapshot and executing queries using the `impulse-api` and `impulse-storage` modules.
 
 ## 1. Installation

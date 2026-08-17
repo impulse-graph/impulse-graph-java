@@ -1,5 +1,8 @@
 # ImpulseGraph Tooling & Code Generation Organization
 
+> [!WARNING]
+> **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
+
 This document outlines the organization of the tools used to generate code from the ImpulseGraph YAML schema.
 
 ## Module Structure

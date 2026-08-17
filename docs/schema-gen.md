@@ -1,5 +1,8 @@
 # ImpulseGraph Schema Definition
 
+> [!WARNING]
+> **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
+
 This document defines the YAML schema used to generate strongly-typed Java classes, ID mappers, and binary snapshot layouts for the ImpulseGraph Engine.
 
 ## Purpose

@@ -1,5 +1,8 @@
 # Impulse Graph Java (`impulse-graph-java`) Bug Tracker
 
+> [!WARNING]
+> **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
+
 This document details identified bugs, build failures, functional defects, root cause analyses, proposed fixes, and mandatory test cases required to prevent regressions across `impulse-graph-java`.
 
 > [!NOTE]
