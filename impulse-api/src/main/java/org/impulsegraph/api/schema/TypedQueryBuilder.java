@@ -33,6 +33,16 @@ public class TypedQueryBuilder<E, R> {
         return builder;
     }
 
+    public TypedQueryBuilder<E, R> filterWithCel(String celExpr) {
+        builder.filterWithCel(celExpr);
+        return this;
+    }
+
+    public TypedQueryBuilder<E, R> projectExpression(String nodeAttribute, String operator, String edgeAttribute) {
+        builder.projectExpression(nodeAttribute, operator, edgeAttribute);
+        return this;
+    }
+
     @SuppressWarnings("unchecked")
     public ImpulseGraphQuery<ImpulseBitSet> collectRoaringBitset() {
         return builder.collect(ReturnType.ROARING_BITSET);

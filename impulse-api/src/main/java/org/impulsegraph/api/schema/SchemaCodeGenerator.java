@@ -72,17 +72,6 @@ public class SchemaCodeGenerator {
             sb.append("    }\n\n");
         }
 
-        // Generate attribute filter methods
-        for (Map.Entry<String, String> attr : entity.attributes().entrySet()) {
-            String attrName = attr.getKey();
-            String methodName = "filter" + capitalize(attrName);
-
-            sb.append("    public ").append(className).append("<R> ").append(methodName).append("(String op, double val) {\n");
-            sb.append("        this.builder.filterNodeAttribute(\"").append(attrName).append("\", op, val);\n");
-            sb.append("        return this;\n");
-            sb.append("    }\n\n");
-        }
-
         sb.append("}\n");
         return sb.toString();
     }
