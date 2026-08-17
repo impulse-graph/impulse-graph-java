@@ -4,7 +4,7 @@ For enterprise deployments with datasets exceeding single-file I/O limits, Impul
 
 ## Manifest Structure
 
-A `manifest.yaml` defines domains, relations, and the physical `.imps` chunk files that back them. The engine seamlessly maps these chunks into a unified `ImpulseGraphSnapshot`.
+A `manifest.yaml` defines domains, relations, and the physical `.imps` tablespaces that back them. 
 
 ### Example `manifest.yaml`
 
@@ -13,24 +13,32 @@ version: "1.0"
 graphName: "EnterpriseKnowledgeGraph"
 
 tablespaces:
+  users_space:
+    file: "chunks/users.imps"
+    mode: "read-only"
+  purchased_part1:
+    file: "chunks/purchased_01.imps"
+  purchased_part2:
+    file: "chunks/purchased_02.imps"
+
+domains:
   Users:
-    type: domain
-    files:
-      - "chunks/users_01.imps"
-      - "chunks/users_02.imps"
+    tablespace: users_space
   Products:
-    type: domain
-    files:
-      - "chunks/products_01.imps"
+    tablespace: users_space
+
+relations:
   PURCHASED:
-    type: relation
-    sourceDomain: Users
-    targetDomain: Products
-    files:
-      - "chunks/purchased_01.imps"
-      - "chunks/purchased_02.imps"
-      - "chunks/purchased_03.imps"
+    source: Users
+    target: Products
+    tablespace: purchased_part1
+  PURCHASED_ARCHIVE:
+    source: Users
+    target: Products
+    tablespace: purchased_part2
 ```
+
+> **Note**: Domains must reside entirely within a single tablespace. Relations can be logically split by mapping them to multiple tablespaces using different relation identifiers (e.g. `PURCHASED` vs `PURCHASED_ARCHIVE`).
 
 ## Loading from a Manifest
 
@@ -57,12 +65,3 @@ public class ManifestLoaderExample {
     }
 }
 ```
-
-## Configuration Properties
-
-* **`version`**: The manifest version (currently "1.0").
-* **`graphName`**: An identifier for your unified graph.
-* **`tablespaces`**: The definition of logical entities.
-  * **`type`**: `domain` (nodes) or `relation` (edges).
-  * **`sourceDomain` / `targetDomain`**: Required for `relation` types to define schema topology.
-  * **`files`**: An ordered array of relative or absolute paths to physical `.imps` binaries.
