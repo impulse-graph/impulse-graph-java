@@ -261,3 +261,12 @@ public class BuildSnapshotExample {
     }
 }
 ```
+
+---
+
+## 6. Next Steps & Advanced Topics
+
+For deeper architectural topics, complex query patterns, and advanced features, see:
+- [**Advanced Querying Guide**](file:///Users/jesse/impulse/impulse-graph-java/docs/ADVANCED_QUERYING.md) — Fixed-point loops (`repeatUntilStable`), monoidic path reductions (MIN/MAX/SUM), state vector projections (`.project`), CEL parameter sweeps, and BitSet algebra.
+- [**Compiler Architecture**](file:///Users/jesse/impulse/impulse-graph-java/docs/COMPILER_ARCHITECTURE.md) — Multi-pass optimization pipeline, AST transformations, and bytecode emission.
+- [**Ingestion Strategies**](file:///Users/jesse/impulse/impulse-graph-java/docs/ingestion-strategies.md) — Streaming large-scale datasets directly to `.imps` files.

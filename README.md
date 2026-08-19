@@ -110,6 +110,14 @@ try (ImpulseStatement stmt = snap.prepare("MATCH (u:User)-[:knows]->(f:User) WHE
 
 ---
 
+## 📚 Documentation
+
+- [**Quickstart Guide**](docs/GETTING_STARTED.md) — Loading snapshots, basic traversals, filtering, and prepared statements.
+- [**Advanced Querying Guide**](docs/ADVANCED_QUERYING.md) — Fixed-point loops (`repeatUntilStable`), monoidic reductions, state projections, and BitSet algebra.
+- [**Compiler Architecture**](docs/COMPILER_ARCHITECTURE.md) — IR passes, optimization pipeline, and bytecode generation.
+
+---
+
 ## 🛠️ Build & Test Instructions
 
 ```bash
