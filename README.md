@@ -93,16 +93,12 @@ List<String> mutual = userDomain.from(aliceFriends).toKeyList();
 Set<String> recent = userDomain.fromKey("usr_alice")
     .out("TRANSACTED", "edge.timestamp >= 1700000000 && edge.timestamp <= 1710000000")
     .toKeySet();
-
-// 6. Transitive Reachability (Network Expansion)
-Set<Long> fullNetwork = userDomain.fromKey("usr_alice")
-    .repeatUntilStable(step -> step.out("knows"))
-    .toSet();
 ```
 
-### 4. Parameterized Graph Queries (`ImpulseStatement`)
+### 4. Parameterized Cypher Queries (`ImpulseStatement`)
 ```java
-try (ImpulseStatement stmt = snap.prepare("FROM User WHERE id = $id -> out('knows')")) {
+// OpenCypher query with automatic set deduplication
+try (ImpulseStatement stmt = snap.prepare("MATCH (u:User)-[:knows]->(f:User) WHERE u.id = $id RETURN f")) {
     stmt.bindNode("$id", 0);
     try (RowReader rows = stmt.execute()) {
         while (rows.next()) {

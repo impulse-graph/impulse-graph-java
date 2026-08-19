@@ -162,17 +162,6 @@ public class TraversalExamples {
         Set<String> recentMerchants = userDomain.fromKey("usr_alice")
             .out("TRANSACTED", "edge.timestamp >= 1700000000 && edge.timestamp <= 1710000000")
             .toKeySet();
-
-        // --- 7. Transitive Reachability (Expanding Networks) ---
-        // Repeat step until no new nodes are reached:
-        Set<Long> fullNetwork = userDomain.fromKey("usr_alice")
-            .repeatUntilStable(step -> step.out("knows"))
-            .toSet();
-
-        // Or bounded expansion up to N steps:
-        Set<Long> upTo3Hops = userDomain.fromKey("usr_alice")
-            .repeat(3, step -> step.out("knows"))
-            .toSet();
     }
 }
 ```
@@ -182,9 +171,9 @@ public class TraversalExamples {
 
 ---
 
-## 4. Parameterized Graph Queries (`ImpulseStatement`)
+## 4. Parameterized Cypher Queries (`ImpulseStatement`)
 
-For applications executing declarative Cypher or graph pattern queries, `snap.prepare(...)` compiles queries into parameterized statements. Execution uses a familiar cursor model similar to JDBC or SQLite:
+You can execute declarative openCypher graph queries using `snap.prepare(...)`. Execution uses a familiar cursor model similar to JDBC or SQLite:
 
 ```java
 import org.impulsegraph.api.ImpulseGraphSnapshot;
@@ -194,10 +183,10 @@ import org.impulsegraph.api.statement.RowReader;
 public class StatementExample {
 
     public static void executeQuery(ImpulseGraphSnapshot snap) {
-        // 1. Prepare parameterized graph query
-        String query = "FROM User WHERE id = $userId -> out('knows')";
+        // 1. Prepare parameterized openCypher query with RETURN clause
+        String cypher = "MATCH (u:User)-[:knows]->(f:User) WHERE u.id = $userId RETURN f";
         
-        try (ImpulseStatement stmt = snap.prepare(query)) {
+        try (ImpulseStatement stmt = snap.prepare(cypher)) {
             // 2. Bind parameter and execute
             stmt.bindNode("$userId", 0);
 
@@ -216,6 +205,10 @@ public class StatementExample {
     }
 }
 ```
+
+> [!NOTE]
+> **Automatic Set Deduplication vs. Standard Cypher**:
+> Unlike standard openCypher implementations that preserve duplicate paths/multisets unless `RETURN DISTINCT` is specified, Impulse Graph evaluates traversals over unique node sets, automatically deduplicating reachable nodes in the target frontier.
 
 ---
 
