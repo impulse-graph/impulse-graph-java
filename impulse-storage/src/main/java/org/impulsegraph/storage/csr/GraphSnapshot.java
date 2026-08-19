@@ -118,6 +118,14 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
 
     @Override
     public long getNodeCount(String domainName) {
+        if (domainName != null) {
+            String meta = metadata.get("domain." + domainName + ".nodeCount");
+            if (meta != null) {
+                try {
+                    return Long.parseLong(meta);
+                } catch (NumberFormatException ignored) {}
+            }
+        }
         return 0;
     }
 

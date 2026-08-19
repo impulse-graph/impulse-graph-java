@@ -49,6 +49,7 @@ public final class DefaultSnapshotBuilder {
 
     public DefaultSnapshotBuilder withDomain(int domainId, String name, byte keyType, long nodeCount) {
         customDomains.add(new DomainEntry(domainId, name, keyType, nodeCount));
+        withMetadata("domain." + name + ".nodeCount", String.valueOf(nodeCount));
         return this;
     }
 
