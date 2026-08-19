@@ -151,6 +151,11 @@ $$\text{Pipeline} = \text{Anchor}(D_0, F_0, S_0) \gg= T_1 \gg= T_2 \dots \gg= T_
 * **5. Terminal Materialization (`collect()`)**:
   Projects the final target domain's active nodes and state into Arrow columnar arrays, BitSets, or scalar aggregates.
 
+### 3.16 Prohibition of Imperative Point-Lookup Workarounds & Feature Honesty Mandate
+* **Strict Engine-Native Execution Mandate**: Graph traversals, projections, attribute calculations, and filters MUST be evaluated strictly through the native Impulse Graph engine kernels (`.project(...)`, `.filter(...)`, `.out(...)`, `ImpulseStatement`, `ImpulseVM`). AI agents MUST NEVER construct client-side imperative `for` loops that treat the graph merely as an ID lookup table to perform manual point lookups or calculations in user code.
+* **Failure Classification of Imperative Substitutes**: Falling back to manual imperative client-side loops or iterative buffer lookups is considered an architectural failure.
+* **Honest Engine Capability Reporting**: If a requested traversal feature, state projection expression, or query capability is not yet implemented end-to-end in the current engine/VM runtime, AI agents MUST directly, explicitly, and honestly state that **it is not currently possible given engine functionality**, rather than fabricating imperative workarounds as a substitute.
+
 ---
 
 ## 4. Package Registry Distribution Matrix
