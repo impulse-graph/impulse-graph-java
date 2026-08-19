@@ -69,38 +69,39 @@ try (Arena arena = Arena.ofShared()) {
 }
 ```
 
-### 3. Kleisli Frontier Traversals
+### 3. Querying the Graph (Fluent Traversal API)
 ```java
-// 1. Single seed traversal: User 42 -> knows -> target IDs
-List<Long> friends = snap.domain("User").from(42).out("knows").toList();
+var userDomain = snap.domain("User");
 
-// 2. Batch multi-seed frontier: seeds [10, 20, 30] -> knows
-List<Long> batch = snap.domain("User").from(10, 20, 30).out("knows").toList();
+// 1. Domain Key <-> Internal ID Resolution
+long denseId = userDomain.toDenseId("usr_alice"); // 0L
+String key = userDomain.toKey(0); // "usr_alice"
 
-// 3. In-domain filter + traversal
-long count = snap.domain("User").from(10, 20, 30)
+// 2. Single-Node Query: find friends of "usr_alice"
+List<String> friends = userDomain.fromKey("usr_alice").out("knows").toKeyList(); // ["usr_bob", "usr_charlie"]
+
+// 3. Multi-Node Starting Points
+Set<String> sharedFriends = userDomain.fromKeys("usr_alice", "usr_bob").out("knows").toKeySet();
+
+// 4. Filtering Candidate Nodes
+long count = userDomain.fromKeys("usr_alice", "usr_bob")
     .filter("node.age >= 21")
     .out("PURCHASED")
     .count();
 
-// 4. Fixed-point reachability
-ImpulseBitSet reachable = snap.domain("User").from(42)
+// 5. Transitive Reachability
+Set<Long> connected = userDomain.fromKey("usr_alice")
     .repeatUntilStable(step -> step.out("knows"))
-    .toBitSet();
-
-// 5. Domain Key <-> Dense ID Mapping (Read-Only)
-var userDomain = snap.domain("User");
-long denseId = userDomain.toDenseId("usr_alice"); // 0L
-List<String> friendKeys = userDomain.fromKey("usr_alice").out("knows").toKeyList(); // ["usr_bob", "usr_charlie"]
+    .toSet();
 ```
 
-### 4. SQLite-Style Prepared Statements
+### 4. Parameterized Graph Queries (`ImpulseStatement`)
 ```java
 try (ImpulseStatement stmt = snap.prepare("FROM User WHERE id = $id -> out('knows')")) {
-    stmt.bindNode("$id", 42);
+    stmt.bindNode("$id", 0);
     try (RowReader rows = stmt.execute()) {
         while (rows.next()) {
-            System.out.println("Target: " + rows.getNodeId(0));
+            System.out.println("Friend Node ID: " + rows.getNodeId(0));
         }
     }
 }

@@ -1,31 +1,39 @@
-# Quickstart Guide — Impulse Graph Engine (Java 25 FFM)
+# Quickstart Guide — Impulse Graph Engine (Java)
 
-A quick-start guide for loading zero-copy `.imps` binary snapshots, running SIMD-accelerated Kleisli frontier traversals, and executing SQLite-style parameterized prepared statements using **Java 25 Foreign Function & Memory (FFM)**.
+A practical guide for loading immutable binary snapshot files (`.imps`), querying connections across entity types, and executing parameterized graph queries in Java.
 
 ---
 
-## 1. Maven Dependencies & JVM Flags
+## 1. Installation & Setup
+
+> [!TIP]
+> **Build from Source Recommendation**:
+> While Impulse Graph is in snapshot development, build the Java modules from source and install them directly into your local Maven cache (`~/.m2`):
+> ```bash
+> cd ~/impulse/impulse-graph-java
+> mvn clean install -DskipTests
+> ```
 
 ### 1.1 Maven Coordinates (`pom.xml`)
-Add the 3 core modules to your project:
+Add the core engine modules to your `pom.xml`:
 
 ```xml
 <dependencies>
-    <!-- Public API Contracts -->
+    <!-- Public API -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-api</artifactId>
         <version>0.9.0-SNAPSHOT</version>
     </dependency>
 
-    <!-- Zero-Copy Storage Layer (FFM Mmap Loader & Snapshot Builder) -->
+    <!-- Storage Layer & Snapshot Builder -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-storage</artifactId>
         <version>0.9.0-SNAPSHOT</version>
     </dependency>
 
-    <!-- ImpulseVM Compute Engine (SIMD Handlers & Statement Runner) -->
+    <!-- Compute Engine & Query Interpreter -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-vm</artifactId>
@@ -35,13 +43,13 @@ Add the 3 core modules to your project:
 ```
 
 ### 1.2 Required JVM Arguments
-Because Impulse Graph leverages Java 25 Foreign Function & Memory (FFM) and Vector API SIMD acceleration, configure your JVM runtime flags:
+Configure your runtime and build plugins with standard Java 25 preview and vector access flags:
 
 ```bash
 --enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED
 ```
 
-In your `pom.xml` build configuration:
+In your `pom.xml`:
 ```xml
 <plugin>
     <groupId>org.apache.maven.plugins</groupId>
@@ -57,7 +65,11 @@ In your `pom.xml` build configuration:
 
 ## 2. Loading a Binary Snapshot (`.imps`)
 
-Snapshots are mapped into off-heap memory via `java.lang.foreign.Arena` in **sub-millisecond cold start** with **zero heap allocation and zero GC pauses**:
+> [!NOTE]
+> **Creating Snapshots**:
+> You can create binary snapshots directly from code using the Java API (see [Section 5](#5-building-snapshots-from-code)), or generate them from CSV, TSV, and Parquet files using the CLI utilities in [`impulse-graph-tooling`](file:///Users/jesse/impulse/impulse-graph-tooling).
+
+To load and query a snapshot file:
 
 ```java
 import org.impulsegraph.api.ImpulseGraphSnapshot;
@@ -68,16 +80,14 @@ import java.nio.file.Path;
 
 public class LoadSnapshotExample {
     public static void main(String[] args) {
-        // 1. Manage off-heap lifecycle with a shared Arena
+        // Manage off-heap lifecycle with an Arena
         try (Arena arena = Arena.ofShared()) {
-            
-            // 2. Zero-copy memory-map snapshot file (< 1 ms cold start)
             Path snapshotPath = Path.of("datasets/hetionet.imps");
             var loaded = BinarySnapshotLoader.loadSnapshot(snapshotPath, arena);
             ImpulseGraphSnapshot snap = loaded.getGraph();
 
             System.out.println("Snapshot loaded: " + snap.getRelationCount() + " relations.");
-            System.out.println("Memory footprint: " + (snap.getOffHeapMemorySizeBytes() / (1024 * 1024)) + " MB");
+            System.out.println("Memory size: " + (snap.getOffHeapMemorySizeBytes() / (1024 * 1024)) + " MB");
         }
     }
 }
@@ -85,98 +95,77 @@ public class LoadSnapshotExample {
 
 ---
 
-## 3. Query Pattern 1: High-Level Kleisli Fluent Traversal
+## 3. Querying Connections (Fluent Traversal API)
 
-All traversals in Impulse Graph start by anchoring to a specific **Domain Context** (`snap.domain("User")`). Dense node IDs ($0 \dots N_d-1$) are strictly per-domain.
+All queries start from a specific **node type / domain** (e.g. `User`, `Product`, `Disease`).
+
+Within a domain context, you can:
+1. **Translate between external keys and internal dense IDs** (`toDenseId` / `toKey`).
+2. **Filter** candidate nodes with `.filter(...)`.
+3. **Walk edges** to connected node types with `.out("relationName")`.
+4. **Collect results** into lists, sets, or key collections (`.toKeyList()`, `.toList()`, `.toSet()`, `.count()`).
 
 ```java
 import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.bitset.ImpulseBitSet;
-import org.impulsegraph.api.traversal.Reducer;
 
 import java.util.List;
 import java.util.Set;
 
 public class TraversalExamples {
 
-    public static void runTraversals(ImpulseGraphSnapshot snap) {
-        // --- 1. Single Seed Traversal (1-Hop & Multi-Hop) ---
-        // Find all friends of User 42
-        List<Long> friends = snap.domain("User")
-            .from(42)
-            .out("knows")
-            .toList();
-
-        // 2-Hop Traversal: User -> Compound -> Disease
-        Set<Long> diseases = snap.domain("User")
-            .from(42)
-            .out("PURCHASED")
-            .out("TREATS")
-            .toSet();
-
-        // --- 2. Batch Multi-Seed Frontier Traversal ---
-        // Traverse simultaneously from seeds [10, 20, 30] in a single SIMD pass
-        List<Long> batchTargets = snap.domain("User")
-            .from(10, 20, 30)
-            .out("knows")
-            .toList();
-
-        // --- 3. In-Domain Filtering with CEL Predicates ---
-        // Filter candidate nodes in-domain before traversing
-        long qualifyingCount = snap.domain("User")
-            .from(10, 20, 30, 40)
-            .filter("node.age >= 21")
-            .out("PURCHASED")
-            .count();
-
-        // --- 4. Monoidic Path Reduction ---
-        // When multiple paths converge, combine target node states (OR, MIN, MAX, SUM)
-        ImpulseBitSet reachability = snap.domain("User")
-            .from(10, 20)
-            .out("knows", Reducer.OR)
-            .toBitSet();
-
-        // --- 5. Fixed-Point Loop (Transitive Reachability / ReBAC) ---
-        // Repeat step until frontier stabilizes (Frontier_{t+1} == Frontier_t)
-        ImpulseBitSet transitiveFriends = snap.domain("User")
-            .from(42)
-            .repeatUntilStable(step -> step.out("knows"))
-            .toBitSet();
-
-        // --- 6. Domain-Wide Aggregation ---
-        // Traverse from ALL nodes in the User domain
-        long totalActivePurchases = snap.domain("User")
-            .all()
-            .out("PURCHASED")
-            .count();
-
-        // --- 7. Domain Key <-> Dense ID Mapping (Read-Only from Snapshot) ---
+    public static void runQueries(ImpulseGraphSnapshot snap) {
+        // --- 1. Working with Domain Keys vs. Internal IDs ---
         var userDomain = snap.domain("User");
 
-        // External Business Key -> Internal Dense ID (0 ... N_d - 1)
-        long aliceDenseId = userDomain.toDenseId("usr_alice"); // 0L
+        // External Business Key -> Internal Engine ID
+        long aliceId = userDomain.toDenseId("usr_alice"); // e.g. 0L
 
-        // Internal Dense ID -> External Business Key String
+        // Internal Engine ID -> External Business Key
         String aliceKey = userDomain.toKey(0); // "usr_alice"
 
-        // Traversal initiated directly from external Business Key
+        // --- 2. Single-Node Starting Point (1-Hop & Multi-Hop) ---
+        // Find all friends of "usr_alice"
         List<String> friendKeys = userDomain.fromKey("usr_alice")
             .out("knows")
             .toKeyList(); // ["usr_bob", "usr_charlie"]
 
-        // Multi-key batch frontier
-        Set<String> batchKeys = userDomain.fromKeys("usr_alice", "usr_bob")
+        // 2-Hop Traversal: User -> Product -> Category
+        Set<String> categories = userDomain.fromKey("usr_alice")
+            .out("PURCHASED")
+            .out("IN_CATEGORY")
+            .toKeySet();
+
+        // --- 3. Traversing from Multiple Starting Nodes ---
+        // Walk outgoing connections from multiple users in a single pass
+        Set<String> sharedFriends = userDomain.fromKeys("usr_alice", "usr_bob")
             .out("knows")
             .toKeySet();
+
+        // --- 4. Filtering Candidate Nodes ---
+        // Filter nodes before following connections
+        long adultPurchases = userDomain.fromKeys("usr_alice", "usr_bob")
+            .filter("node.age >= 21")
+            .out("PURCHASED")
+            .count();
+
+        // --- 5. Transitive Reachability (Expanding Networks) ---
+        // Repeat step until no new nodes are reached
+        Set<Long> allConnectedUserIds = userDomain.fromKey("usr_alice")
+            .repeatUntilStable(step -> step.out("knows"))
+            .toSet();
     }
 }
 ```
 
+> [!TIP]
+> When multiple paths reach the same target node, deduplication is handled automatically without extra configuration.
+
 ---
 
-## 4. Query Pattern 2: SQLite-Style Statement API (`ImpulseStatement`)
+## 4. Parameterized Graph Queries (`ImpulseStatement`)
 
-For applications that prefer parameterized statements, bind parameters dynamically and iterate over zero-copy `RowReader` cursors:
+For applications executing declarative Cypher or graph pattern queries, `snap.prepare(...)` compiles queries into parameterized statements. Execution uses a familiar cursor model similar to JDBC or SQLite:
 
 ```java
 import org.impulsegraph.api.ImpulseGraphSnapshot;
@@ -185,25 +174,25 @@ import org.impulsegraph.api.statement.RowReader;
 
 public class StatementExample {
 
-    public static void executeStatement(ImpulseGraphSnapshot snap) {
-        // 1. Prepare parameterized statement
-        String query = "FROM User WHERE id = $userId -> out('knows') -> out('likes')";
+    public static void executeQuery(ImpulseGraphSnapshot snap) {
+        // 1. Prepare parameterized graph query
+        String query = "FROM User WHERE id = $userId -> out('knows')";
         
         try (ImpulseStatement stmt = snap.prepare(query)) {
             // 2. Bind parameter and execute
-            stmt.bindNode("$userId", 42);
+            stmt.bindNode("$userId", 0);
 
             try (RowReader rows = stmt.execute()) {
-                System.out.println("Result column: " + rows.getColumnName(0));
+                System.out.println("Result Column: " + rows.getColumnName(0));
                 while (rows.next()) {
-                    long targetNodeId = rows.getNodeId(0);
-                    System.out.println("Reached Target: " + targetNodeId);
+                    long friendId = rows.getNodeId(0);
+                    System.out.println("Found Friend Node ID: " + friendId);
                 }
             }
 
-            // 3. Re-bind to a different seed without re-compiling
-            stmt.bindNode("$userId", 100);
-            System.out.println("Re-bound count: " + stmt.count());
+            // 3. Re-bind to a different user without re-preparing the statement
+            stmt.bindNode("$userId", 1);
+            System.out.println("User 1 Friends Count: " + stmt.count());
         }
     }
 }
@@ -211,9 +200,9 @@ public class StatementExample {
 
 ---
 
-## 5. Building & Writing Snapshots from Code
+## 5. Building Snapshots from Code
 
-You can create brand-new `.imps` snapshots directly in Java using `DefaultSnapshotBuilder`:
+To programmatically build and save a new `.imps` snapshot file with custom domains, entity keys, and relations:
 
 ```java
 import org.impulsegraph.storage.csr.DefaultSnapshotBuilder;
@@ -225,34 +214,35 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 public class BuildSnapshotExample {
 
     public static void createSnapshot() throws Exception {
         try (Arena arena = Arena.ofShared()) {
-            // Define CSR offsets and target arrays for relation "knows"
-            // Node 0 -> [1, 2], Node 1 -> [2], Node 2 -> []
-            MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 2, 3, 3);
-            MemorySegment targets = arena.allocateFrom(ValueLayout.JAVA_INT, 1, 2, 2);
+            // Define connections for relation "knows":
+            // Node 0 (Alice) -> [Node 1 (Bob), Node 2 (Charlie)]
+            // Node 1 (Bob)   -> [Node 2 (Charlie), Node 3 (Dave)]
+            // Node 2 (Charlie) -> [Node 3 (Dave)]
+            // Node 3 (Dave)    -> []
+            MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 2, 4, 5, 5);
+            MemorySegment targets = arena.allocateFrom(ValueLayout.JAVA_INT, 1, 2, 2, 3, 3);
 
-            RelationSnapshot knowsRel = new RelationSnapshot(arena, 3, 3, offsets, targets);
+            RelationSnapshot knowsRel = new RelationSnapshot(arena, 4, 5, offsets, targets);
             GraphSnapshot graph = new GraphSnapshot(arena, Map.of("knows", knowsRel));
 
-            // Serialize direct to .imps binary format
-            byte[] impsBytes = DefaultSnapshotBuilder.writeSnapshotBytes(graph);
-            Files.write(Path.of("output_graph.imps"), impsBytes);
+            // Build snapshot with domain metadata and business keys
+            byte[] snapshotBytes = new DefaultSnapshotBuilder()
+                    .withDomain(0, "User", (byte) 1, 4)
+                    .withDomainKeys("User", List.of("usr_alice", "usr_bob", "usr_charlie", "usr_dave"))
+                    .build(new BinarySnapshotLoader.DefaultLoadedSnapshot(
+                            BinarySnapshotLoader.SNAPSHOT_MAGIC, (short) 9, graph, Map.of(), Map.of(), Map.of(), Map.of()
+                    ));
 
-            System.out.println("Wrote snapshot file (" + impsBytes.length + " bytes)");
+            Files.write(Path.of("my_graph.imps"), snapshotBytes);
+            System.out.println("Saved snapshot (" + snapshotBytes.length + " bytes)");
         }
     }
 }
 ```
-
----
-
-## 6. Performance Summary & Execution Directives
-
-- **Zero Allocations in Query Hot Path**: `snap.domain(...).from(...).out(...).toBitSet()` executes in off-heap bitsets with no JVM object allocations inside the loop.
-- **SIMD Vectorization**: Outgoing target scans execute in unrolled 512-bit vector registers via AVX-512 / ARM Neon.
-- **Lock-Free Read Operations**: Any number of threads can query `ImpulseGraphSnapshot` concurrently without synchronization locks or contention.
