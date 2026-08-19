@@ -126,9 +126,14 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
                 var first = getAllRelationSnapshots().values().iterator().next();
                 if (first != null) nodeCount = first.getNodeCount();
             }
-            return (org.impulsegraph.api.traversal.DomainView) cls.getConstructor(
-                    ImpulseGraphSnapshot.class, String.class, int.class, long.class
-            ).newInstance(this, domainName, 0, nodeCount);
+            try {
+                var m = cls.getMethod("getOrCreate", ImpulseGraphSnapshot.class, String.class, int.class, long.class);
+                return (org.impulsegraph.api.traversal.DomainView) m.invoke(null, this, domainName, 0, nodeCount);
+            } catch (NoSuchMethodException e) {
+                return (org.impulsegraph.api.traversal.DomainView) cls.getConstructor(
+                        ImpulseGraphSnapshot.class, String.class, int.class, long.class
+                ).newInstance(this, domainName, 0, nodeCount);
+            }
         } catch (Exception e) {
             throw new UnsupportedOperationException("Failed to construct DomainView: " + e.getMessage(), e);
         }

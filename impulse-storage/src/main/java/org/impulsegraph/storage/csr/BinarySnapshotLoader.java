@@ -165,6 +165,7 @@ public final class BinarySnapshotLoader {
         Map<String, LoadedDomain> domainsByName();
         Map<Integer, LoadedRelation> relationsById();
         GraphSnapshot graph();
+        default GraphSnapshot getGraph() { return graph(); }
         String getMetadata(String key);
         Map<String, String> getMetadataMap();
         default String getSha256Checksum() { return ""; }

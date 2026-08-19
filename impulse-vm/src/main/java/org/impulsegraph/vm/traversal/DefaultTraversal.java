@@ -132,6 +132,28 @@ public class DefaultTraversal<T> implements Traversal<T> {
     }
 
     @Override
+    public List<String> toKeyList() {
+        List<Long> ids = toList();
+        org.impulsegraph.api.traversal.DomainView dv = snapshot.domain(currentDomain);
+        List<String> keys = new ArrayList<>(ids.size());
+        for (long id : ids) {
+            keys.add(dv.toKey(id));
+        }
+        return Collections.unmodifiableList(keys);
+    }
+
+    @Override
+    public Set<String> toKeySet() {
+        Set<Long> ids = toSet();
+        org.impulsegraph.api.traversal.DomainView dv = snapshot.domain(currentDomain);
+        Set<String> keys = new LinkedHashSet<>(ids.size());
+        for (long id : ids) {
+            keys.add(dv.toKey(id));
+        }
+        return Collections.unmodifiableSet(keys);
+    }
+
+    @Override
     public ImpulseBitSet toBitSet() {
         ImpulseGraphQuery<ImpulseBitSet> query = builder.collectRoaringBitset();
         return DefaultImpulseQueryEvaluator.getInstance().evaluate(query, snapshot, seedInput);

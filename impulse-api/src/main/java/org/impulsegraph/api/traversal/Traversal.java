@@ -80,6 +80,16 @@ public interface Traversal<T> {
     Set<Long> toSet();
 
     /**
+     * Terminal step: returns target frontier nodes resolved to external business key strings in the active domain.
+     */
+    List<String> toKeyList();
+
+    /**
+     * Terminal step: returns target frontier nodes resolved to unique external business key strings in the active domain.
+     */
+    Set<String> toKeySet();
+
+    /**
      * Terminal step: returns target frontier as a zero-copy off-heap {@link ImpulseBitSet}.
      */
     ImpulseBitSet toBitSet();
