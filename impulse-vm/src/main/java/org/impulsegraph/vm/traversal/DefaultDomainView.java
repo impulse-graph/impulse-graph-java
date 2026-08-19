@@ -64,6 +64,10 @@ public class DefaultDomainView implements DomainView {
     @Override
     public DomainView registerKey(String key, long denseId) {
         if (key != null) {
+            if (nodeCount > 0 && (denseId < 0 || denseId >= nodeCount)) {
+                throw new IllegalArgumentException("Dense node ID " + denseId + " is out of bounds for domain '"
+                        + domainName + "' (nodeCount = " + nodeCount + "). Dense IDs must be in range [0, " + (nodeCount - 1) + "].");
+            }
             keyToIdMap.put(key, denseId);
             idToKeyMap.put(denseId, key);
         }
