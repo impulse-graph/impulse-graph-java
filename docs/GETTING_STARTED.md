@@ -149,6 +149,28 @@ public class TraversalExamples {
             .all()
             .out("PURCHASED")
             .count();
+
+        // --- 7. Domain Key <-> Dense ID Mapping ---
+        var userDomain = snap.domain("User");
+        userDomain.registerKey("usr_alice", 0)
+                  .registerKey("usr_bob", 1)
+                  .registerKey("usr_charlie", 2);
+
+        // Key -> Dense ID (0 ... N_d - 1)
+        long aliceDenseId = userDomain.toDenseId("usr_alice"); // 0L
+
+        // Dense ID -> Key String
+        String aliceKey = userDomain.toKey(0); // "usr_alice"
+
+        // Traversal initiated directly from external Business Key
+        List<String> friendKeys = userDomain.fromKey("usr_alice")
+            .out("knows")
+            .toKeyList(); // ["usr_bob", "usr_charlie"]
+
+        // Multi-key batch frontier
+        Set<String> batchKeys = userDomain.fromKeys("usr_alice", "usr_bob")
+            .out("knows")
+            .toKeySet();
     }
 }
 ```

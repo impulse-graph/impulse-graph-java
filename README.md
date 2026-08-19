@@ -87,6 +87,12 @@ long count = snap.domain("User").from(10, 20, 30)
 ImpulseBitSet reachable = snap.domain("User").from(42)
     .repeatUntilStable(step -> step.out("knows"))
     .toBitSet();
+
+// 5. Domain Key <-> Dense ID Mapping
+var userDomain = snap.domain("User");
+userDomain.registerKey("usr_alice", 0).registerKey("usr_bob", 1);
+long denseId = userDomain.toDenseId("usr_alice"); // 0L
+List<String> friendKeys = userDomain.fromKey("usr_alice").out("knows").toKeyList(); // ["usr_bob"]
 ```
 
 ### 4. SQLite-Style Prepared Statements
