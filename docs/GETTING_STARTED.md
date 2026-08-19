@@ -150,16 +150,13 @@ public class TraversalExamples {
             .out("PURCHASED")
             .count();
 
-        // --- 7. Domain Key <-> Dense ID Mapping ---
+        // --- 7. Domain Key <-> Dense ID Mapping (Read-Only from Snapshot) ---
         var userDomain = snap.domain("User");
-        userDomain.registerKey("usr_alice", 0)
-                  .registerKey("usr_bob", 1)
-                  .registerKey("usr_charlie", 2);
 
-        // Key -> Dense ID (0 ... N_d - 1)
+        // External Business Key -> Internal Dense ID (0 ... N_d - 1)
         long aliceDenseId = userDomain.toDenseId("usr_alice"); // 0L
 
-        // Dense ID -> Key String
+        // Internal Dense ID -> External Business Key String
         String aliceKey = userDomain.toKey(0); // "usr_alice"
 
         // Traversal initiated directly from external Business Key

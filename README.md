@@ -88,11 +88,10 @@ ImpulseBitSet reachable = snap.domain("User").from(42)
     .repeatUntilStable(step -> step.out("knows"))
     .toBitSet();
 
-// 5. Domain Key <-> Dense ID Mapping
+// 5. Domain Key <-> Dense ID Mapping (Read-Only)
 var userDomain = snap.domain("User");
-userDomain.registerKey("usr_alice", 0).registerKey("usr_bob", 1);
 long denseId = userDomain.toDenseId("usr_alice"); // 0L
-List<String> friendKeys = userDomain.fromKey("usr_alice").out("knows").toKeyList(); // ["usr_bob"]
+List<String> friendKeys = userDomain.fromKey("usr_alice").out("knows").toKeyList(); // ["usr_bob", "usr_charlie"]
 ```
 
 ### 4. SQLite-Style Prepared Statements
