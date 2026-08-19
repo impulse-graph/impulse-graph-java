@@ -86,14 +86,6 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
         this.cscPresent = (rowOffsets != null && !rowOffsets.equals(MemorySegment.NULL) && columnTargets != null && !columnTargets.equals(MemorySegment.NULL));
     }
 
-    public boolean hasActiveOverlay() {
-        return false;
-    }
-
-    public Object getOverlay() {
-        return null;
-    }
-
     public boolean hasCsc() {
         return cscPresent && (cscRowOffsetsSegment != null && !cscRowOffsetsSegment.equals(MemorySegment.NULL)) && (cscColumnTargetsSegment != null && !cscColumnTargetsSegment.equals(MemorySegment.NULL));
     }

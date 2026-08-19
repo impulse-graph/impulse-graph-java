@@ -232,7 +232,11 @@ public final class ImpulseQueryCompiler {
             String op = step.op();
 
             if ("INPUT".equalsIgnoreCase(op)) {
-                instrList.add(new InstructionBuilderData(OP_INIT_INPUT_NODE, (byte) 0, inputReg, 0));
+                if (step.argType() == org.impulsegraph.api.ArgType.ROARING_BITSET || step.argType() == org.impulsegraph.api.ArgType.NODE_ARRAY) {
+                    instrList.add(new InstructionBuilderData(OP_INIT_INPUT_SET, (byte) 0, inputReg, 0));
+                } else {
+                    instrList.add(new InstructionBuilderData(OP_INIT_INPUT_NODE, (byte) 0, inputReg, 0));
+                }
             } else if ("FILTER_NODE".equalsIgnoreCase(op)) {
                 short srcReg = currentReg;
                 short dstReg = (short) (currentReg + 1);

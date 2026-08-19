@@ -25,11 +25,6 @@ public interface ImpulseGraphQuery<R> {
     R execute(ImpulseGraphSnapshot snapshot, Object input);
 
     /**
-     * Executes this query against a live {@link ImpulseGraph} with the specified input parameters.
-     */
-    R execute(ImpulseGraph liveGraph, Object input);
-
-    /**
      * Returns the list of pipeline AST step nodes.
      */
     java.util.List<ImpulseQueryBuilder.StepNode> getSteps();

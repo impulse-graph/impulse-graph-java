@@ -2,7 +2,6 @@ package org.impulsegraph.vm;
 
 import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.RelationSnapshot;
-import org.impulsegraph.api.mutation.GraphMutator;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -84,6 +83,10 @@ public final class VmHandlers {
     // --- Instruction Handlers ---
 
     public static void handleInitInputNode(MemorySegment state, VmQueryContext ctx, Instruction instr, Object input) {
+        if (input instanceof ImpulseBitSet || input instanceof long[] || input instanceof int[] || input instanceof Iterable<?>) {
+            handleInitInputSet(state, ctx, instr, input);
+            return;
+        }
         long nodeId = 0;
         if (input instanceof Number n) {
             nodeId = n.longValue();
@@ -99,6 +102,10 @@ public final class VmHandlers {
             bs.or(inBs);
         } else if (input instanceof Number n) {
             bs.set(n.intValue());
+        } else if (input instanceof long[] arr) {
+            for (long val : arr) bs.set((int) val);
+        } else if (input instanceof int[] arr) {
+            for (int val : arr) bs.set(val);
         } else if (input instanceof Iterable<?> it) {
             for (Object elem : it) {
                 if (elem instanceof Number n) bs.set(n.intValue());
@@ -158,9 +165,6 @@ public final class VmHandlers {
 
     public static void executeCsrWalk(MemorySegment state, VmQueryContext ctx, int dstReg, int srcReg, int relId, byte flags, Object input) {
         RelationSnapshot rel = resolveRelation(ctx, relId);
-        final org.impulsegraph.api.mutation.GraphMutator mutator = (ctx.snapshot() != null) ? ctx.snapshot().getMutator() : null;
-        final boolean hasOverlay = mutator != null && mutator.getPendingBatchSize() + mutator.getCommittedBatchCount() > 0;
-
 
         byte srcType = getRegisterType(state, srcReg);
         long srcVal = getRegisterValue(state, srcReg);
@@ -175,7 +179,7 @@ public final class VmHandlers {
 
         if (rel != null) {
             if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
-                if (hasOverlay) executeFusedWalkScalar((int) srcVal, relId, rel, mutator, outBs); else rel.copyTargetsSimd((int) srcVal, outBs);
+                rel.copyTargetsSimd((int) srcVal, outBs);
             } else if (srcType == TYPE_BITSET_HANDLE) {
                 ImpulseBitSet inBs = ctx.getBitset((int) srcVal);
                 if (inBs != null) {
@@ -198,7 +202,7 @@ public final class VmHandlers {
                                 if (startV >= nodeCount) break;
                                 int endV = Math.min(startV + chunkSize, nodeCount);
                                 for (int u = inBs.nextSetBit(startV); u >= 0 && u < endV; u = inBs.nextSetBit(u + 1)) {
-                                    if (hasOverlay) executeFusedWalkScalar(u, relId, rel, mutator, localBs); else rel.copyTargetsSimd(u, localBs);
+                                    rel.copyTargetsSimd(u, localBs);
                                 }
                             }
                         });
@@ -208,7 +212,7 @@ public final class VmHandlers {
                         }
                     } else {
                         for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
-                            if (hasOverlay) executeFusedWalkScalar(u, relId, rel, mutator, outBs); else rel.copyTargetsSimd(u, outBs);
+                            rel.copyTargetsSimd(u, outBs);
                         }
                     }
                 }
@@ -217,35 +221,6 @@ public final class VmHandlers {
 
         setRegister(state, dstReg, outHandle, TYPE_BITSET_HANDLE);
         setFlag(state, FLAG_ZF, outBs.isEmpty());
-    }
-
-    private static void executeFusedWalkScalar(int srcId, int relId, RelationSnapshot rel, org.impulsegraph.api.mutation.GraphMutator mutator, ImpulseBitSet outBs) {
-        if (mutator != null && mutator.isNodeDeleted(0, srcId)) return;
-
-        if (srcId < rel.getNodeCount()) {
-            int start = rel.getRowOffsetsSegment().getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, srcId);
-            int end = rel.getRowOffsetsSegment().getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, srcId + 1);
-            org.impulsegraph.api.bitset.ImpulseBitSet tombstones = mutator != null ? mutator.getEdgeTombstoneBitSet(relId) : null;
-            
-            for (int i = start; i < end; i++) {
-                if (tombstones != null && tombstones.get(i)) continue;
-                int tgt = rel.getColumnTargetsSegment().getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, i);
-                if (mutator != null && mutator.isNodeDeleted(0, tgt)) continue;
-                if (mutator != null && mutator.isEdgeDeleted(relId, srcId, tgt)) continue;
-                outBs.set(tgt);
-            }
-        }
-        if (mutator != null) {
-            org.impulsegraph.api.mutation.RelationOverlay overlay = mutator.getCommittedEdgeAdditions().get(relId);
-            if (overlay != null) {
-                int[] additions = overlay.getForwardEdges(srcId);
-                for (int tgt : additions) {
-                    if (!mutator.isNodeDeleted(0, tgt) && !mutator.isEdgeDeleted(relId, srcId, tgt)) {
-                        outBs.set(tgt);
-                    }
-                }
-            }
-        }
     }
 
     public static void handleCsrWalk2Hop(MemorySegment state, VmQueryContext ctx, Instruction instr, Object input) {

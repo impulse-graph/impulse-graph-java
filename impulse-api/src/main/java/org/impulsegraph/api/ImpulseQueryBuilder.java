@@ -124,6 +124,13 @@ public class ImpulseQueryBuilder<R> {
     }
 
     /**
+     * Filter active candidate node set with an embedded CEL expression.
+     */
+    public ImpulseQueryBuilder<R> filter(String celExpr) {
+        return filterWithCel(celExpr);
+    }
+
+    /**
      * Add a filtered CSR edge walk step over the relation name matching a specific label.
      *
      * @param relationName Name of edge relation
@@ -161,6 +168,10 @@ public class ImpulseQueryBuilder<R> {
         stepFn.apply(subBuilder);
         steps.add(new StepNode("REPEAT", null, null, null, count, subBuilder.steps));
         return this;
+    }
+
+    public ImpulseQueryBuilder<R> repeat(int count, Function<ImpulseQueryBuilder<R>, ImpulseQueryBuilder<R>> stepFn) {
+        return repeat(stepFn, count);
     }
 
     /**
@@ -342,6 +353,11 @@ public class ImpulseQueryBuilder<R> {
     }
 
     @SuppressWarnings("unchecked")
+    public ImpulseGraphQuery<org.impulsegraph.api.bitset.ImpulseBitSet> collectRoaringBitset() {
+        return (ImpulseGraphQuery<org.impulsegraph.api.bitset.ImpulseBitSet>) (ImpulseGraphQuery<?>) collect(ReturnType.ROARING_BITSET);
+    }
+
+    @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> collectArray() {
         return (ImpulseGraphQuery<T>) collect(ReturnType.NODE_ARRAY);
     }
@@ -446,42 +462,6 @@ public class ImpulseQueryBuilder<R> {
                                 graphObj = snapshot;
                             }
                         }
-                    }
-                    return (R) method.invoke(null, pipelineSteps, graphObj, input);
-                } catch (Exception ex) {
-                    return (R) input;
-                }
-            }
-        }
-
-        @Override
-        @SuppressWarnings("unchecked")
-        public R execute(ImpulseGraph liveGraph, Object input) {
-            try {
-                Class<?> evalCls = Class.forName("org.impulsegraph.vm.DefaultImpulseQueryEvaluator");
-                var method = evalCls.getMethod("evaluate", ImpulseGraphQuery.class, ImpulseGraph.class, Object.class);
-                return (R) method.invoke(null, this, liveGraph, input);
-            } catch (Exception e) {
-                try {
-                    Class<?> evalCls = Class.forName("org.impulsegraph.vm.DefaultImpulseQueryEvaluator");
-                    Class<?> graphCls = Class.forName("org.impulsegraph.api.ImpulseGraphSnapshot");
-                    var method = evalCls.getMethod("evaluatePipeline", List.class, graphCls, Object.class);
-                    Object graphObj = null;
-                    if (liveGraph != null) {
-                        try {
-                            Object baseSnapshot = liveGraph.getBaseSnapshot();
-                            if (baseSnapshot != null) {
-                                if (baseSnapshot.getClass().getName().endsWith("GraphSnapshot")) {
-                                    graphObj = baseSnapshot;
-                                } else {
-                                    try {
-                                        graphObj = baseSnapshot.getClass().getMethod("graph").invoke(baseSnapshot);
-                                    } catch (Exception ignored) {
-                                        graphObj = baseSnapshot;
-                                    }
-                                }
-                            }
-                        } catch (Exception ignored) {}
                     }
                     return (R) method.invoke(null, pipelineSteps, graphObj, input);
                 } catch (Exception ex) {

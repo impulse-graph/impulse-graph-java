@@ -544,13 +544,6 @@ public final class BinarySnapshotLoader {
 
             Map<String, String> metadata = parseMetadataFooter(segment, segSize);
             GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata);
-            if (!forceReadOnly) {
-                String mutableStr = metadata.get("impulse.graph.mutable");
-                if ("true".equalsIgnoreCase(mutableStr)) {
-                    org.impulsegraph.storage.mutation.OverlayMutator mutator = new org.impulsegraph.storage.mutation.OverlayMutator(graph, arena);
-                    graph.setMutator(mutator);
-                }
-            }
 
 
             
@@ -644,13 +637,6 @@ public final class BinarySnapshotLoader {
 
             Map<String, String> metadata = parseMetadataFooter(segment, segSize);
             GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata);
-            if (!forceReadOnly) {
-                String mutableStr = metadata.get("impulse.graph.mutable");
-                if ("true".equalsIgnoreCase(mutableStr)) {
-                    org.impulsegraph.storage.mutation.OverlayMutator mutator = new org.impulsegraph.storage.mutation.OverlayMutator(graph, arena);
-                    graph.setMutator(mutator);
-                }
-            }
 
 
             

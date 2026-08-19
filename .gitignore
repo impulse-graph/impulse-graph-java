@@ -12,3 +12,4 @@ target/
 Thumbs.db
 *.aot
 *.aotcache
+datasets/

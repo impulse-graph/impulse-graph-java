@@ -1,6 +1,5 @@
 package org.impulsegraph.vm;
 
-import org.impulsegraph.api.ImpulseGraph;
 import org.impulsegraph.api.ImpulseGraphQuery;
 import org.impulsegraph.api.ImpulseGraphQueryEvaluator;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
@@ -66,13 +65,6 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
         R result = (R) evaluatePipeline(query != null ? query.getSteps() : List.of(), graph, input);
         metrics.recordQueryExecution(System.nanoTime() - startNanos);
         return result;
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public <R> R evaluate(ImpulseGraphQuery<R> query, ImpulseGraph liveGraph, Object input) {
-        ImpulseGraphSnapshot graph = liveGraph != null ? liveGraph.getBaseSnapshot() : null;
-        return evaluate(query, graph, input);
     }
 
     public static Object evaluatePipeline(List<ImpulseQueryBuilder.StepNode> steps, ImpulseGraphSnapshot graph, Object input) {
