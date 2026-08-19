@@ -58,39 +58,19 @@ public class DefaultDomainView implements DomainView {
         return new DefaultTraversal<>(snapshot, domainName, bs);
     }
 
-    private final java.util.Map<String, Long> keyToIdMap = new java.util.concurrent.ConcurrentHashMap<>();
-    private final java.util.Map<Long, String> idToKeyMap = new java.util.concurrent.ConcurrentHashMap<>();
-
-    @Override
-    public DomainView registerKey(String key, long denseId) {
-        if (key != null) {
-            if (nodeCount > 0 && (denseId < 0 || denseId >= nodeCount)) {
-                throw new IllegalArgumentException("Dense node ID " + denseId + " is out of bounds for domain '"
-                        + domainName + "' (nodeCount = " + nodeCount + "). Dense IDs must be in range [0, " + (nodeCount - 1) + "].");
-            }
-            keyToIdMap.put(key, denseId);
-            idToKeyMap.put(denseId, key);
-        }
-        return this;
-    }
-
-    @Override
-    public DomainView registerKeys(java.util.Map<String, Long> keyMap) {
-        if (keyMap != null) {
-            for (var entry : keyMap.entrySet()) {
-                if (entry.getKey() != null && entry.getValue() != null) {
-                    registerKey(entry.getKey(), entry.getValue());
-                }
-            }
-        }
-        return this;
-    }
-
     @Override
     public long toDenseId(String key) {
         if (key == null) return -1;
-        Long mapped = keyToIdMap.get(key);
-        if (mapped != null) return mapped;
+
+        // Check if snapshot metadata contains key mapping
+        String metaKey = "domain." + domainName + ".key." + key;
+        String metaVal = snapshot.getMetadata(metaKey);
+        if (metaVal != null) {
+            try {
+                long val = Long.parseLong(metaVal);
+                if (val >= 0 && (nodeCount <= 0 || val < nodeCount)) return val;
+            } catch (NumberFormatException ignored) {}
+        }
 
         // Fallback 1: Parse direct numeric integer
         try {
@@ -112,8 +92,9 @@ public class DefaultDomainView implements DomainView {
 
     @Override
     public String toKey(long denseId) {
-        String mapped = idToKeyMap.get(denseId);
-        if (mapped != null) return mapped;
+        String metaKey = "domain." + domainName + ".id." + denseId;
+        String metaVal = snapshot.getMetadata(metaKey);
+        if (metaVal != null && !metaVal.isBlank()) return metaVal;
         return domainName + "_" + denseId;
     }
 

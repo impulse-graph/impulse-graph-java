@@ -61,23 +61,6 @@ public interface DomainView {
     String toKey(long denseId);
 
     /**
-     * Registers an external business key mapping to a dense ID in this domain.
-     *
-     * @param key External business key string
-     * @param denseId Dense node ID (0 ... N_d - 1)
-     * @return This DomainView instance for method chaining
-     */
-    DomainView registerKey(String key, long denseId);
-
-    /**
-     * Registers multiple external business key mappings to dense IDs in this domain.
-     *
-     * @param keyMap Map of external keys to dense node IDs
-     * @return This DomainView instance for method chaining
-     */
-    DomainView registerKeys(java.util.Map<String, Long> keyMap);
-
-    /**
      * Initializes frontier with a single external business key (e.g. "user_alice", "DB00001").
      */
     default Traversal<ImpulseBitSet> fromKey(String key) {

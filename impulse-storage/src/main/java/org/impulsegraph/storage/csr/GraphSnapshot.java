@@ -1,6 +1,7 @@
 package org.impulsegraph.storage.csr;
 
 import java.lang.foreign.Arena;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -139,12 +140,12 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
 
     @Override
     public String getMetadata(String key) {
-        return null;
+        return metadata.get(key);
     }
 
     @Override
     public Map<String, String> getMetadataMap() {
-        return Map.of();
+        return Collections.unmodifiableMap(metadata);
     }
 
     private final java.util.concurrent.atomic.LongAdder activeQueryCount = new java.util.concurrent.atomic.LongAdder();
