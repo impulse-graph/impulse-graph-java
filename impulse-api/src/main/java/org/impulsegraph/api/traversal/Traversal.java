@@ -30,6 +30,13 @@ public interface Traversal<T> {
     Traversal<T> out(String relation);
 
     /**
+     * Traverses outgoing edges along the given relation, filtering edges via a CEL predicate (e.g. "edge.timestamp >= 1700000000").
+     */
+    default Traversal<T> out(String relation, String edgePredicate) {
+        return out(relation).filter(edgePredicate);
+    }
+
+    /**
      * Traverses outgoing edges along the given relation, reducing converging paths via the given monoid.
      */
     Traversal<T> out(String relation, Reducer reducer);
@@ -38,6 +45,13 @@ public interface Traversal<T> {
      * Traverses incoming edges along the given relation (via CSC), defaulting to OR reduction.
      */
     Traversal<T> in(String relation);
+
+    /**
+     * Traverses incoming edges along the given relation, filtering edges via a CEL predicate.
+     */
+    default Traversal<T> in(String relation, String edgePredicate) {
+        return in(relation).filter(edgePredicate);
+    }
 
     /**
      * Traverses incoming edges along the given relation, reducing converging paths via the given monoid.

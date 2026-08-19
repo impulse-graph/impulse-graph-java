@@ -80,17 +80,22 @@ String key = userDomain.toKey(0); // "usr_alice"
 // 2. Single-Node Query: find friends of "usr_alice"
 List<String> friends = userDomain.fromKey("usr_alice").out("knows").toKeyList(); // ["usr_bob", "usr_charlie"]
 
-// 3. Multi-Node Starting Points
-Set<String> sharedFriends = userDomain.fromKeys("usr_alice", "usr_bob").out("knows").toKeySet();
+// 3. Union of Connections from Multiple Starting Nodes
+Set<String> allFriends = userDomain.fromKeys("usr_alice", "usr_bob").out("knows").toKeySet();
 
-// 4. Filtering Candidate Nodes
-long count = userDomain.fromKeys("usr_alice", "usr_bob")
-    .filter("node.age >= 21")
-    .out("PURCHASED")
-    .count();
+// 4. Mutual (Shared) Friends via BitSet Intersection
+ImpulseBitSet aliceFriends = userDomain.fromKey("usr_alice").out("knows").toBitSet();
+ImpulseBitSet bobFriends   = userDomain.fromKey("usr_bob").out("knows").toBitSet();
+aliceFriends.and(bobFriends); // in-place AND
+List<String> mutual = userDomain.from(aliceFriends).toKeyList();
 
-// 5. Transitive Reachability
-Set<Long> connected = userDomain.fromKey("usr_alice")
+// 5. Edge Attribute Filtering (e.g. Time Windows)
+Set<String> recent = userDomain.fromKey("usr_alice")
+    .out("TRANSACTED", "edge.timestamp >= 1700000000 && edge.timestamp <= 1710000000")
+    .toKeySet();
+
+// 6. Transitive Reachability (Network Expansion)
+Set<Long> fullNetwork = userDomain.fromKey("usr_alice")
     .repeatUntilStable(step -> step.out("knows"))
     .toSet();
 ```

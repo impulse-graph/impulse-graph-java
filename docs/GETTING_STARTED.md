@@ -136,23 +136,42 @@ public class TraversalExamples {
             .out("IN_CATEGORY")
             .toKeySet();
 
-        // --- 3. Traversing from Multiple Starting Nodes ---
-        // Walk outgoing connections from multiple users in a single pass
-        Set<String> sharedFriends = userDomain.fromKeys("usr_alice", "usr_bob")
+        // --- 3. Union of Connections from Multiple Starting Nodes ---
+        // Combines outgoing connections across multiple users (Union):
+        Set<String> allFriends = userDomain.fromKeys("usr_alice", "usr_bob")
             .out("knows")
             .toKeySet();
 
-        // --- 4. Filtering Candidate Nodes ---
-        // Filter nodes before following connections
+        // --- 4. Finding Mutual (Shared) Friends via BitSet Intersection ---
+        // Intersect friend BitSets to find friends shared by BOTH Alice and Bob:
+        ImpulseBitSet aliceFriends = userDomain.fromKey("usr_alice").out("knows").toBitSet();
+        ImpulseBitSet bobFriends   = userDomain.fromKey("usr_bob").out("knows").toBitSet();
+        aliceFriends.and(bobFriends); // in-place bitwise AND intersection
+
+        List<String> mutualFriends = userDomain.from(aliceFriends).toKeyList();
+
+        // --- 5. Filtering Candidate Nodes ---
+        // Filter nodes in the active domain before following connections:
         long adultPurchases = userDomain.fromKeys("usr_alice", "usr_bob")
             .filter("node.age >= 21")
             .out("PURCHASED")
             .count();
 
-        // --- 5. Transitive Reachability (Expanding Networks) ---
-        // Repeat step until no new nodes are reached
-        Set<Long> allConnectedUserIds = userDomain.fromKey("usr_alice")
+        // --- 6. Filtering Edge Attributes (e.g. Timestamps / Date Ranges) ---
+        // Filter edges during traversal (e.g. transactions within a specific timestamp window):
+        Set<String> recentMerchants = userDomain.fromKey("usr_alice")
+            .out("TRANSACTED", "edge.timestamp >= 1700000000 && edge.timestamp <= 1710000000")
+            .toKeySet();
+
+        // --- 7. Transitive Reachability (Expanding Networks) ---
+        // Repeat step until no new nodes are reached:
+        Set<Long> fullNetwork = userDomain.fromKey("usr_alice")
             .repeatUntilStable(step -> step.out("knows"))
+            .toSet();
+
+        // Or bounded expansion up to N steps:
+        Set<Long> upTo3Hops = userDomain.fromKey("usr_alice")
+            .repeat(3, step -> step.out("knows"))
             .toSet();
     }
 }
@@ -221,9 +240,12 @@ public class BuildSnapshotExample {
 
     public static void createSnapshot() throws Exception {
         try (Arena arena = Arena.ofShared()) {
-            // Define connections for relation "knows":
-            // Node 0 (Alice) -> [Node 1 (Bob), Node 2 (Charlie)]
-            // Node 1 (Bob)   -> [Node 2 (Charlie), Node 3 (Dave)]
+            // Define the Compressed Sparse Row (CSR) adjacency matrix:
+            // - offsets array: starting index in targets for each node's edges (length = nodeCount + 1)
+            // - targets array: destination node IDs for each edge (length = edgeCount)
+            //
+            // Node 0 (Alice)   -> [Node 1 (Bob), Node 2 (Charlie)]
+            // Node 1 (Bob)     -> [Node 2 (Charlie), Node 3 (Dave)]
             // Node 2 (Charlie) -> [Node 3 (Dave)]
             // Node 3 (Dave)    -> []
             MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 2, 4, 5, 5);
