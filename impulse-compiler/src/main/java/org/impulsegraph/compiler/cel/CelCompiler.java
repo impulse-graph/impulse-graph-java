@@ -25,7 +25,13 @@ public final class CelCompiler {
             case LITERAL_BOOL -> node.boolVal() ? "#t" : "#f";
             case LITERAL_STRING -> "\"" + node.strVal() + "\"";
             case IDENTIFIER, PARAMETER_REF -> node.text();
-            case MEMBER_ACCESS -> "(get-attr " + toImpScheme(node.children().get(0)) + " \"" + node.text() + "\")";
+            case MEMBER_ACCESS -> {
+                String member = node.text();
+                if (member.equals("id") || member.equals("_id")) {
+                    yield "(get-dense-id " + toImpScheme(node.children().get(0)) + ")";
+                }
+                yield "(get-attr " + toImpScheme(node.children().get(0)) + " \"" + member + "\")";
+            }
             case UNARY_OP -> {
                 String op = node.text();
                 if ("!".equals(op)) {

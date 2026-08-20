@@ -89,17 +89,24 @@ public final class BinarySnapshotLoader {
     public static class LoadedAttribute {
         private final String name;
         private final byte typeCode;
+        private final boolean isNullable;
         private final int dimension;
+        private final long validityOffset;
+        private final long validityBytes;
         private final long dataOffset;
         private final long dataBytes;
         private final long offsetsOffset;
         private final long offsetsBytes;
 
         public LoadedAttribute(String name, byte typeCode, int dimension,
+                               long validityOffset, long validityBytes,
                                long dataOffset, long dataBytes, long offsetsOffset, long offsetsBytes) {
             this.name = name;
-            this.typeCode = typeCode;
+            this.typeCode = (byte) (typeCode & 0x7F);
+            this.isNullable = (typeCode & 0x80) != 0;
             this.dimension = dimension;
+            this.validityOffset = validityOffset;
+            this.validityBytes = validityBytes;
             this.dataOffset = dataOffset;
             this.dataBytes = dataBytes;
             this.offsetsOffset = offsetsOffset;
@@ -108,7 +115,10 @@ public final class BinarySnapshotLoader {
 
         public String name() { return name; }
         public byte typeCode() { return typeCode; }
+        public boolean isNullable() { return isNullable; }
         public int dimension() { return dimension; }
+        public long validityOffset() { return validityOffset; }
+        public long validityBytes() { return validityBytes; }
         public long dataOffset() { return dataOffset; }
         public long dataBytes() { return dataBytes; }
         public long offsetsOffset() { return offsetsOffset; }
@@ -383,6 +393,8 @@ public final class BinarySnapshotLoader {
 
         int domainCount = Short.toUnsignedInt(buf.getShort(10));
         int relationCount = Short.toUnsignedInt(buf.getShort(12));
+        
+
 
         boolean isV09 = (ver == 9 || ver == 0x0009);
 
@@ -488,9 +500,29 @@ public final class BinarySnapshotLoader {
                     long dataBytes = buf.getLong();
                     long offsOff = buf.getLong();
                     long offsBytes = buf.getLong();
+                    
+                    boolean isNullable = (typeCode & 0x80) != 0;
+                    long validityOff = 0;
+                    long validityBytes = 0;
+                    
+                    if (isNullable) {
+                        // Validity bitmap is padded to 128 bytes
+                        long numBits = (edgeCount > 0) ? edgeCount : nodeCount;
+                        long rawBitmapBytes = ((numBits + 63) / 64) * 8;
+                        long paddedBitmapBytes = (rawBitmapBytes + 127) & ~127L;
+                        
+                        
+                        validityOff = dataOff;
+                        validityBytes = paddedBitmapBytes;
+                        
+                        // Shift data offset forward
+                        dataOff += paddedBitmapBytes;
+                        dataBytes -= paddedBitmapBytes;
+                        
+                    }
 
                     String attrName = getString.apply(attrNameOff, "");
-                    attributes.add(new LoadedAttribute(attrName, typeCode, dimension, dataOff, dataBytes, offsOff, offsBytes));
+                    attributes.add(new LoadedAttribute(attrName, typeCode, dimension, validityOff, validityBytes, dataOff, dataBytes, offsOff, offsBytes));
                 }
 
                 String relName = getString.apply(relNameOff, "rel_" + srcDomId + "_" + tgtDomId);
@@ -513,17 +545,28 @@ public final class BinarySnapshotLoader {
                         : MemorySegment.NULL;
 
                 List<MemorySegment> attrSegments = new ArrayList<>();
+                List<MemorySegment> validitySegments = new ArrayList<>();
                 for (LoadedAttribute attr : attributes) {
                     if (attr.dataOffset() > 0 && attr.dataOffset() + attr.dataBytes() <= segSize) {
                         attrSegments.add(segment.asSlice(attr.dataOffset(), attr.dataBytes()));
                     } else {
                         attrSegments.add(MemorySegment.NULL);
                     }
+                    if (attr.isNullable() && attr.validityOffset() > 0 && attr.validityOffset() + attr.validityBytes() <= segSize) {
+                        validitySegments.add(segment.asSlice(attr.validityOffset(), attr.validityBytes()));
+                    } else {
+                        validitySegments.add(MemorySegment.NULL);
+                    }
                 }
 
                 RelationSnapshot relSnap = new RelationSnapshot(
-                        arena, (int) nodeCount, (int) edgeCount, offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg, attrSegments, nodeIdWidth, edgeIndexWidth
+                        arena, (int) nodeCount, (int) edgeCount, offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg, attrSegments, validitySegments, nodeIdWidth, edgeIndexWidth
                 );
+                java.util.List<String> names = new java.util.ArrayList<>();
+                for (LoadedAttribute attr : attributes) {
+                    names.add(attr.name());
+                }
+                relSnap.setAttributeNames(names);
                 relationSnapshots.put(relName, relSnap);
                 relIdToSnapshot.put(relId, relSnap);
                 relationSnapshots.putIfAbsent("rel_" + srcDomId + "_" + tgtDomId, relSnap);

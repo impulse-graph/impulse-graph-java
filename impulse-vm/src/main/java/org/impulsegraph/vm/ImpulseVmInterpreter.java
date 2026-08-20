@@ -6,6 +6,8 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import org.impulsegraph.api.bitset.ImpulseBitSet;
 import org.impulsegraph.api.bitset.OffHeapBitSet;
+import java.util.logging.Logger;
+import java.util.logging.Level;
 
 import static org.impulsegraph.vm.VmRegisterType.*;
 import static org.impulsegraph.vm.VmStateLayout.*;
@@ -15,21 +17,31 @@ import static org.impulsegraph.vm.VmStateLayout.*;
  * Executes native bytecodes lock-free and zero-allocation over off-heap memory segments.
  */
 public final class ImpulseVmInterpreter {
+    private static final Logger LOG = Logger.getLogger(ImpulseVmInterpreter.class.getName());
+    public static final boolean DEBUG_MODE = Boolean.getBoolean("impulse.vm.debug");
 
     private ImpulseVmInterpreter() {}
 
     public static Object execute(MemorySegment programSeg, long instructionCount, ImpulseGraphSnapshot snapshot, Object input, Arena arena) {
+        return execute(programSeg, instructionCount, snapshot, input, arena, null);
+    }
+
+    public static Object execute(MemorySegment programSeg, long instructionCount, ImpulseGraphSnapshot snapshot, Object input, Arena arena, java.util.List<String> stringPool) {
         if (programSeg == null || instructionCount <= 0) {
             return new OffHeapBitSet(arena, 1000);
         }
 
         try (VmQueryContext ctx = new VmQueryContext(snapshot, arena)) {
+            ctx.setStringPool(stringPool);
             MemorySegment state = ctx.allocateStateSegment();
             Object finalResult = null;
 
             long pc = 0;
             while (pc >= 0 && pc < instructionCount) {
                 VmHandlers.Instruction instr = VmHandlers.decodeInstruction(programSeg, pc);
+                if (DEBUG_MODE) {
+                    LOG.info("EXEC: pc=" + pc + ", op=" + String.format("0x%02X", instr.opcode()));
+                }
 
                 switch (instr.opcode()) {
                     case OP_NOP -> pc++;
@@ -243,13 +255,36 @@ public final class ImpulseVmInterpreter {
                         pc++;
                     }
 
-                    case OP_VECTOR_MUL_ATTR -> {
-                        VmHandlers.handleVectorMulAttr(state, ctx, instr);
+                    case OP_VECTOR_LOAD_ATTR -> {
+                        if (DEBUG_MODE) LOG.info("BEFORE handleVectorLoadAttr pc=" + pc);
+                        try {
+                            VmHandlers.handleVectorLoadAttr(state, ctx, instr);
+                        } catch (Throwable t) {
+                            if (DEBUG_MODE) LOG.log(Level.SEVERE, "Exception inside OP_VECTOR_LOAD_ATTR!", t);
+                            throw t;
+                        }
+                        if (DEBUG_MODE) LOG.info("AFTER handleVectorLoadAttr pc=" + pc);
                         pc++;
                     }
 
                     case OP_VECTOR_REDUCE_SUM, OP_REDUCE -> {
                         finalResult = VmHandlers.handleVectorReduceSum(state, ctx, instr);
+                        pc++;
+                    }
+                    case OP_VECTOR_REDUCE_MAX -> {
+                        finalResult = VmHandlers.handleVectorReduceMax(state, ctx, instr);
+                        pc++;
+                    }
+                    case OP_VECTOR_REDUCE_MIN -> {
+                        finalResult = VmHandlers.handleVectorReduceMin(state, ctx, instr);
+                        pc++;
+                    }
+                    case OP_VECTOR_REDUCE_ARGMAX -> {
+                        finalResult = VmHandlers.handleVectorReduceArgMax(state, ctx, instr);
+                        pc++;
+                    }
+                    case OP_VECTOR_REDUCE_ARGMIN -> {
+                        finalResult = VmHandlers.handleVectorReduceArgMin(state, ctx, instr);
                         pc++;
                     }
 
@@ -335,7 +370,7 @@ public final class ImpulseVmInterpreter {
 
                     case OP_RESERVED_0A, OP_RESERVED_0B, OP_RESERVED_0C, OP_RESERVED_0D, OP_RESERVED_0F,
                          OP_RESERVED_28, OP_RESERVED_29, OP_RESERVED_2B, OP_RESERVED_2C,
-                         OP_RESERVED_3A, OP_RESERVED_3B, OP_RESERVED_3C, OP_RESERVED_3D, OP_RESERVED_3E, OP_RESERVED_3F,
+                         OP_RESERVED_3E, OP_RESERVED_3F,
                          OP_RESERVED_4C, OP_RESERVED_4D, OP_RESERVED_4E, OP_RESERVED_4F,
                          OP_RESERVED_59,
                          OP_RESERVED_5D, OP_RESERVED_5E, OP_RESERVED_5F,

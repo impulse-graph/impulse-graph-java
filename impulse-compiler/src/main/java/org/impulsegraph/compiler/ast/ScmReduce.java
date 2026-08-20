@@ -12,7 +12,9 @@ public record ScmReduce(Op op) implements ImpScmNode {
         FIRST,
         COUNT,
         MIN,
-        MAX
+        MAX,
+        ARGMIN,
+        ARGMAX
     }
 
     public ScmReduce {
@@ -22,6 +24,8 @@ public record ScmReduce(Op op) implements ImpScmNode {
     public static ScmReduce sum() { return new ScmReduce(Op.SUM); }
     public static ScmReduce first() { return new ScmReduce(Op.FIRST); }
     public static ScmReduce count() { return new ScmReduce(Op.COUNT); }
+    public static ScmReduce argmin() { return new ScmReduce(Op.ARGMIN); }
+    public static ScmReduce argmax() { return new ScmReduce(Op.ARGMAX); }
 
     @Override
     public String toScmString() {

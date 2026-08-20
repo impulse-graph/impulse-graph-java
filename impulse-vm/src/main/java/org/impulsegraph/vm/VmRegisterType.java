@@ -100,17 +100,17 @@ public final class VmRegisterType {
     public static final byte OP_SET_INTERSECT          = (byte) 0x31;
     public static final byte OP_SET_DIFFERENCE         = (byte) 0x32;
     public static final byte OP_SET_CARDINALITY        = (byte) 0x33;
-    public static final byte OP_VECTOR_MUL_ATTR        = (byte) 0x34;
+    public static final byte OP_VECTOR_LOAD_ATTR        = (byte) 0x34;
     public static final byte OP_VECTOR_REDUCE_SUM      = (byte) 0x35;
     public static final byte OP_VECTOR_DIV             = (byte) 0x36;
     public static final byte OP_VECTOR_STR_CONCAT      = (byte) 0x37;
     public static final byte OP_FLOAT_VECTOR_SCALE     = (byte) 0x38;
     public static final byte OP_L1_NORM_DIFF           = (byte) 0x39;
 
-    public static final byte OP_RESERVED_3A            = (byte) 0x3A;
-    public static final byte OP_RESERVED_3B            = (byte) 0x3B;
-    public static final byte OP_RESERVED_3C            = (byte) 0x3C;
-    public static final byte OP_RESERVED_3D            = (byte) 0x3D;
+    public static final byte OP_VECTOR_REDUCE_MAX      = (byte) 0x3A;
+    public static final byte OP_VECTOR_REDUCE_MIN      = (byte) 0x3B;
+    public static final byte OP_VECTOR_REDUCE_ARGMAX   = (byte) 0x3C;
+    public static final byte OP_VECTOR_REDUCE_ARGMIN   = (byte) 0x3D;
     public static final byte OP_RESERVED_3E            = (byte) 0x3E;
     public static final byte OP_RESERVED_3F            = (byte) 0x3F;
 

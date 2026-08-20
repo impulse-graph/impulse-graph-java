@@ -45,16 +45,30 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
     }
 
     private final java.util.List<MemorySegment> attributeSegments = new java.util.ArrayList<>();
+    private final java.util.List<MemorySegment> validitySegments = new java.util.ArrayList<>();
+    private final java.util.List<String> attributeNames = new java.util.ArrayList<>();
 
     public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment, java.util.List<MemorySegment> attributeSegments) {
-        this(arena, nodeCount, edgeCount, rowOffsetsSegment, columnTargetsSegment, MemorySegment.NULL, MemorySegment.NULL, attributeSegments, (byte) 4, (byte) 4);
+        this(arena, nodeCount, edgeCount, rowOffsetsSegment, columnTargetsSegment, MemorySegment.NULL, MemorySegment.NULL, attributeSegments, java.util.Collections.emptyList(), (byte) 4, (byte) 4);
     }
 
     public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment) {
         this(arena, nodeCount, edgeCount, rowOffsetsSegment, columnTargetsSegment, java.util.Collections.emptyList());
     }
 
-    public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment, MemorySegment cscRowOffsetsSegment, MemorySegment cscColumnTargetsSegment, java.util.List<MemorySegment> attributeSegments, byte nodeIdWidth, byte edgeIndexWidth) {
+    public void setAttributeNames(java.util.List<String> names) {
+        this.attributeNames.clear();
+        if (names != null) this.attributeNames.addAll(names);
+    }
+
+    public int findAttributeIndex(String name) {
+        for (int i = 0; i < attributeNames.size(); i++) {
+            if (attributeNames.get(i).equalsIgnoreCase(name)) return i;
+        }
+        return -1;
+    }
+
+    public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment, MemorySegment cscRowOffsetsSegment, MemorySegment cscColumnTargetsSegment, java.util.List<MemorySegment> attributeSegments, java.util.List<MemorySegment> validitySegments, byte nodeIdWidth, byte edgeIndexWidth) {
         this.arena = Objects.requireNonNull(arena, "arena must not be null");
         this.nodeCount = nodeCount;
         this.edgeCount = edgeCount;
@@ -70,10 +84,13 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
         if (attributeSegments != null) {
             this.attributeSegments.addAll(attributeSegments);
         }
+        if (validitySegments != null) {
+            this.validitySegments.addAll(validitySegments);
+        }
     }
 
     public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment, MemorySegment cscRowOffsetsSegment, MemorySegment cscColumnTargetsSegment) {
-        this(arena, nodeCount, edgeCount, rowOffsetsSegment, columnTargetsSegment, cscRowOffsetsSegment, cscColumnTargetsSegment, java.util.Collections.emptyList(), (byte) 4, (byte) 4);
+        this(arena, nodeCount, edgeCount, rowOffsetsSegment, columnTargetsSegment, cscRowOffsetsSegment, cscColumnTargetsSegment, java.util.Collections.emptyList(), java.util.Collections.emptyList(), (byte) 4, (byte) 4);
     }
 
     private boolean cscPresent = false;
@@ -164,6 +181,10 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 
     public java.util.List<MemorySegment> getAttributeSegments() {
         return attributeSegments;
+    }
+
+    public java.util.List<MemorySegment> getValiditySegments() {
+        return validitySegments;
     }
 
     public int getNodeCount() {

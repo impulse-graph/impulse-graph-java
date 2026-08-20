@@ -98,6 +98,22 @@ public class ImpulseQueryBuilder<R> {
     }
 
     /**
+     * Walk forward along a specific edge relation, applying state projections.
+     */
+    public ImpulseQueryBuilder<R> walkEdgeWithState(String relationName, String stateProjections) {
+        steps.add(new StepNode("WALK_EDGE_STATE", relationName + "||" + stateProjections, null, null, 0, List.of()));
+        return this;
+    }
+
+    /**
+     * Apply in-domain state projections on the active frontier.
+     */
+    public ImpulseQueryBuilder<R> projectState(String projectionExpr) {
+        steps.add(new StepNode("PROJECT_STATE", projectionExpr, null, null, 0, List.of()));
+        return this;
+    }
+
+    /**
      * Add a filtered CSR edge walk step with an embedded CEL expression.
      *
      * @param relationName Name of edge relation (e.g. "Branch", "in_section")
@@ -245,6 +261,30 @@ public class ImpulseQueryBuilder<R> {
     public <T> ImpulseGraphQuery<T> reduceSum() {
         steps.add(new StepNode("REDUCE_SUM", null, null, ReturnType.COUNT, 0, List.of()));
         return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class, parameters);
+    }
+
+    /**
+     * Terminal step: argmax reduction over projected values (returns Node ID).
+     *
+     * @param <T> Expected scalar result type (Integer)
+     * @return Immutable compiled query object
+     */
+    @SuppressWarnings("unchecked")
+    public <T> ImpulseGraphQuery<T> reduceArgMax() {
+        steps.add(new StepNode("REDUCE_ARGMAX", null, null, ReturnType.COUNT, 0, List.of()));
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Integer.class, parameters);
+    }
+
+    /**
+     * Terminal step: argmin reduction over projected values (returns Node ID).
+     *
+     * @param <T> Expected scalar result type (Integer)
+     * @return Immutable compiled query object
+     */
+    @SuppressWarnings("unchecked")
+    public <T> ImpulseGraphQuery<T> reduceArgMin() {
+        steps.add(new StepNode("REDUCE_ARGMIN", null, null, ReturnType.COUNT, 0, List.of()));
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Integer.class, parameters);
     }
 
     /**
@@ -444,29 +484,17 @@ public class ImpulseQueryBuilder<R> {
         public R execute(ImpulseGraphSnapshot snapshot, Object input) {
             try {
                 Class<?> evalCls = Class.forName("org.impulsegraph.vm.DefaultImpulseQueryEvaluator");
+                var instanceMethod = evalCls.getMethod("getInstance");
+                Object evaluator = instanceMethod.invoke(null);
                 var method = evalCls.getMethod("evaluate", ImpulseGraphQuery.class, ImpulseGraphSnapshot.class, Object.class);
-                return (R) method.invoke(null, this, snapshot, input);
-            } catch (Exception e) {
-                try {
-                    Class<?> evalCls = Class.forName("org.impulsegraph.vm.DefaultImpulseQueryEvaluator");
-                    Class<?> graphCls = Class.forName("org.impulsegraph.api.ImpulseGraphSnapshot");
-                    var method = evalCls.getMethod("evaluatePipeline", List.class, graphCls, Object.class);
-                    Object graphObj = null;
-                    if (snapshot != null) {
-                        if (snapshot.getClass().getName().endsWith("GraphSnapshot")) {
-                            graphObj = snapshot;
-                        } else {
-                            try {
-                                graphObj = snapshot.getClass().getMethod("graph").invoke(snapshot);
-                            } catch (Exception ignored) {
-                                graphObj = snapshot;
-                            }
-                        }
-                    }
-                    return (R) method.invoke(null, pipelineSteps, graphObj, input);
-                } catch (Exception ex) {
-                    return (R) input;
+                return (R) method.invoke(evaluator, this, snapshot, input);
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                if (e.getCause() instanceof RuntimeException) {
+                    throw (RuntimeException) e.getCause();
                 }
+                throw new RuntimeException("Query execution failed", e.getCause());
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to invoke VM evaluator", e);
             }
         }
 

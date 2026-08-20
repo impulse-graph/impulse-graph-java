@@ -132,7 +132,8 @@ public final class ImpOpsBytecodeEmitter {
                 emitted.patches(),
                 emitted.relationIdMap(),
                 snapshot,
-                arena
+                arena,
+                new java.util.ArrayList<>()
         );
     }
 }

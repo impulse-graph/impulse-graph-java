@@ -14,7 +14,10 @@ import org.impulsegraph.api.bitset.OffHeapBitSet;
  */
 public final class VmQueryContext implements AutoCloseable {
 
+    public ImpulseGraphSnapshot getSnapshot() { return snapshot; }
+
     private ImpulseGraphSnapshot snapshot;
+    private final List<String> stringPool = new ArrayList<>();
     private final Arena arena;
     private MemorySegment inlineDataSeg = null;
     private long inlineDataBytes = 0;
@@ -22,6 +25,20 @@ public final class VmQueryContext implements AutoCloseable {
     // Bitset Pool
     private final List<ImpulseBitSet> bitsets = new ArrayList<>();
     private final java.util.BitSet freeBitsetHandles = new java.util.BitSet();
+
+    public void setStringPool(List<String> pool) {
+        stringPool.clear();
+        if (pool != null) {
+            stringPool.addAll(pool);
+        }
+    }
+
+    public String getString(int index) {
+        if (index >= 0 && index < stringPool.size()) {
+            return stringPool.get(index);
+        }
+        return null;
+    }
 
     // Vector Pools
     private final List<int[]> intVectors = new ArrayList<>();

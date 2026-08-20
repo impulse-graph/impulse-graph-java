@@ -44,7 +44,7 @@ public class DefaultTraversal<T> implements Traversal<T> {
 
     @Override
     public Traversal<T> project(String projectionExpr) {
-        // State projection placeholder
+        builder.projectState(projectionExpr);
         return this;
     }
 
@@ -56,6 +56,12 @@ public class DefaultTraversal<T> implements Traversal<T> {
     @Override
     public Traversal<T> out(String relation, Reducer reducer) {
         builder.walkEdge(relation);
+        return this;
+    }
+
+    @Override
+    public Traversal<T> outWithState(String relation, String stateProjections) {
+        builder.walkEdgeWithState(relation, stateProjections);
         return this;
     }
 

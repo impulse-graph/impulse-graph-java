@@ -57,6 +57,7 @@ public interface ImpulseGraphQuery<R> {
             var method = compilerCls.getMethod("disassembleQuery", ImpulseGraphQuery.class, ImpulseGraphSnapshot.class);
             return (String) method.invoke(null, this, snapshot);
         } catch (Exception e) {
+            e.printStackTrace();
             return exportAst();
         }
     }

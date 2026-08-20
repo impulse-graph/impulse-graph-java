@@ -62,7 +62,7 @@ public class ImpulseQueryCompilerTest {
             RelationSnapshot relU2g = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 12, 2, u2gOffsets, u2gTargets);
 
             MemorySegment g2rOffsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2); // node 10: target 100 (0..1), node 11: target 101 (1..2)
-            MemorySegment g2rTargets = arena.allocateFrom(ValueLayout.JAVA_INT, 100, 101);
+            MemorySegment g2rTargets = arena.allocateFrom(ValueLayout.JAVA_INT, 12, 13);
             RelationSnapshot relG2r = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 13, 2, g2rOffsets, g2rTargets);
 
             Map<String, RelationSnapshot> mapA = new LinkedHashMap<>();
@@ -82,8 +82,8 @@ public class ImpulseQueryCompilerTest {
             ImpulseBitSet result = (ImpulseBitSet) resultObj;
 
             assertEquals(2, result.cardinality(), "Must reach 2 target roles");
-            assertTrue(result.get(100), "Must reach Role 100");
-            assertTrue(result.get(101), "Must reach Role 101");
+            assertTrue(result.get(12), "Must reach Role 12");
+            assertTrue(result.get(13), "Must reach Role 13");
         }
     }
 

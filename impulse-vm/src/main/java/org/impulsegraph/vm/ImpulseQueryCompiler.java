@@ -60,13 +60,14 @@ public final class ImpulseQueryCompiler {
         private final List<RelationInstructionPatch> patches;
         private final Arena arena;
         private final java.util.concurrent.atomic.AtomicReference<QueryBindingState> bindingState;
+        private final java.util.List<String> stringPool;
 
-        public CompiledQuery(MemorySegment programSeg, long instructionCount, List<RelationInstructionPatch> patches,
-                             Map<String, Integer> relationIdMap, ImpulseGraphSnapshot initialSnapshot, Arena arena) {
+        public CompiledQuery(MemorySegment programSeg, long instructionCount, List<RelationInstructionPatch> patches, Map<String, Integer> relationIdMap, ImpulseGraphSnapshot initialSnapshot, Arena arena, java.util.List<String> stringPool) {
+            this.stringPool = stringPool;
             Objects.requireNonNull(programSeg, "programSeg must not be null");
             this.patches = List.copyOf(patches);
             this.arena = arena;
-            MethodHandle mh = ImpulseMethodHandleCompiler.compile(programSeg, instructionCount);
+            MethodHandle mh = ImpulseMethodHandleCompiler.compile(programSeg, instructionCount, this.stringPool);
             this.bindingState = new java.util.concurrent.atomic.AtomicReference<>(
                     new QueryBindingState(initialSnapshot, mh, programSeg, instructionCount, new HashMap<>(relationIdMap))
             );
@@ -133,7 +134,7 @@ public final class ImpulseQueryCompiler {
             }
 
             // 4. Compile new MethodHandle and perform Atomic Swap
-            MethodHandle newMh = ImpulseMethodHandleCompiler.compile(newProgSeg, currentState.instructionCount());
+            MethodHandle newMh = ImpulseMethodHandleCompiler.compile(newProgSeg, currentState.instructionCount(), this.stringPool);
             QueryBindingState newState = new QueryBindingState(
                     newSnapshot, newMh, newProgSeg, currentState.instructionCount(), newRelationIdMap
             );
@@ -159,9 +160,9 @@ public final class ImpulseQueryCompiler {
                 if (state.methodHandle() != null) {
                     return state.methodHandle().invoke(targetSnapshot, input, executionArena);
                 }
-                return ImpulseVmInterpreter.execute(state.programSeg(), state.instructionCount(), targetSnapshot, input, executionArena);
+                return ImpulseVmInterpreter.execute(state.programSeg(), state.instructionCount(), targetSnapshot, input, executionArena, this.stringPool);
             } catch (Throwable e) {
-                return ImpulseVmInterpreter.execute(state.programSeg(), state.instructionCount(), targetSnapshot, input, executionArena);
+                return ImpulseVmInterpreter.execute(state.programSeg(), state.instructionCount(), targetSnapshot, input, executionArena, this.stringPool);
             } finally {
                 if (targetSnapshot != null) {
                     targetSnapshot.exitQuery();
@@ -222,6 +223,7 @@ public final class ImpulseQueryCompiler {
         List<InstructionBuilderData> instrList = new ArrayList<>();
         List<RelationInstructionPatch> patches = new ArrayList<>();
         Map<String, Integer> relationIdMap = new HashMap<>();
+        java.util.List<String> stringPool = new java.util.ArrayList<>();
 
         short currentReg = 0;
         short inputReg = 0;
@@ -243,15 +245,21 @@ public final class ImpulseQueryCompiler {
                 currentReg = dstReg;
                 int payload = ((srcReg & 0xFFFF) << 16);
                 instrList.add(new InstructionBuilderData(OP_NODE_FILTER, (byte) 0, dstReg, payload));
-            } else if ("PROJECT_EXPRESSION".equalsIgnoreCase(op)) {
+                        } else if ("PROJECT_EXPRESSION".equalsIgnoreCase(op)) {
                 short srcReg = currentReg;
                 short dstReg = (short) (currentReg + 1);
                 currentReg = dstReg;
-                int payload = ((srcReg & 0xFFFF) << 16);
-                instrList.add(new InstructionBuilderData(OP_VECTOR_MUL_ATTR, (byte) 0, dstReg, payload));
+                String attrName = step.relation().split(":")[0];
+                if (!stringPool.contains(attrName)) {
+                    stringPool.add(attrName);
+                }
+                int nameIdx = stringPool.indexOf(attrName);
+                int payload = ((srcReg & 0xFFFF) << 16) | (nameIdx & 0xFFFF);
+                instrList.add(new InstructionBuilderData(OP_VECTOR_LOAD_ATTR, (byte) 0, dstReg, payload));
             } else if (op != null && op.startsWith("REDUCE")) {
                 short dstReg = currentReg;
                 byte opcode = "REDUCE_FIRST".equalsIgnoreCase(op) ? OP_REDUCE : OP_VECTOR_REDUCE_SUM;
+                if ("REDUCE_ARGMAX".equalsIgnoreCase(op)) opcode = OP_VECTOR_REDUCE_ARGMAX;
                 instrList.add(new InstructionBuilderData(opcode, (byte) 0, dstReg, 0));
             } else if ("ISLAND_DETECT".equalsIgnoreCase(op)) {
                 short dstReg = (short) (currentReg + 1);
@@ -326,7 +334,7 @@ public final class ImpulseQueryCompiler {
             INSTR_PAYLOAD_HANDLE.set(programSeg, off, data.payload);
         }
 
-        return new CompiledQuery(programSeg, count, patches, relationIdMap, snapshot, arena);
+        return new CompiledQuery(programSeg, count, patches, relationIdMap, snapshot, arena, stringPool);
     }
 
     private static short compileSubSteps(List<StepNode> subSteps, ImpulseGraphSnapshot snapshot,
@@ -440,7 +448,7 @@ public final class ImpulseQueryCompiler {
             case OP_REBAC_CHECK -> "OP_REBAC_CHECK";
             case OP_MOTIF_MATCH_3 -> "OP_MOTIF_MATCH_3";
             case OP_NODE_FILTER -> "OP_NODE_FILTER";
-            case OP_VECTOR_MUL_ATTR -> "OP_VECTOR_MUL_ATTR";
+            case OP_VECTOR_LOAD_ATTR -> "OP_VECTOR_LOAD_ATTR";
             case OP_VECTOR_REDUCE_SUM -> "OP_VECTOR_REDUCE_SUM";
             case OP_REDUCE -> "OP_REDUCE";
             case OP_COLLECT_BITSET -> "OP_COLLECT_BITSET";

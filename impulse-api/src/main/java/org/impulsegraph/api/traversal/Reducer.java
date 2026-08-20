@@ -10,6 +10,11 @@ public enum Reducer {
     OR,
 
     /**
+     * Universal Match / Boolean Intersection (Bitwise AND).
+     */
+    AND,
+
+    /**
      * Tropical / Min-Plus semiring reduction for shortest paths.
      */
     MIN,
@@ -25,12 +30,27 @@ public enum Reducer {
     SUM,
 
     /**
+     * Path Multiplicity / Vectorized histogram generation.
+     */
+    COUNT,
+
+    /**
      * Arithmetic mean reduction.
      */
     AVG,
 
     /**
-     * Arbitrary first-arrival selection.
+     * Arbitrary Witness selection (Masked Vector Scatter). Short-circuits heavily.
      */
-    FIRST
+    ANY,
+
+    /**
+     * Lexicographic Min-Witness (Vector Co-Scatter). Requires a parameterized field.
+     */
+    ARGMIN,
+
+    /**
+     * Lexicographic Max-Witness (Vector Co-Scatter). Requires a parameterized field.
+     */
+    ARGMAX
 }

@@ -42,6 +42,18 @@ public interface Traversal<T> {
     Traversal<T> out(String relation, Reducer reducer);
 
     /**
+     * Traverses outgoing edges, applying state projections and reducers to converging paths.
+     */
+    Traversal<T> outWithState(String relation, String stateProjections);
+
+    /**
+     * Traverses outgoing edges, applying a filter and state projections.
+     */
+    default Traversal<T> outWithState(String relation, String edgePredicate, String stateProjections) {
+        return filter(edgePredicate).outWithState(relation, stateProjections);
+    }
+
+    /**
      * Traverses incoming edges along the given relation (via CSC), defaulting to OR reduction.
      */
     Traversal<T> in(String relation);

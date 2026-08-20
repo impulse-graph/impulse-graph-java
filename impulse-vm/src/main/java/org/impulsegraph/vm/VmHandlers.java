@@ -9,6 +9,8 @@ import java.lang.foreign.ValueLayout;
 import org.impulsegraph.api.bitset.ImpulseBitSet;
 import org.impulsegraph.api.bitset.OffHeapBitSet;
 import java.util.HashMap;
+import java.util.logging.Logger;
+import java.util.logging.Level;
 import java.util.Map;
 
 import static org.impulsegraph.vm.VmRegisterType.*;
@@ -19,6 +21,7 @@ import static org.impulsegraph.vm.VmStateLayout.*;
  * Provides static execution methods operating zero-copy on off-heap FFM MemorySegments and VmQueryContext.
  */
 public final class VmHandlers {
+    private static final Logger LOG = Logger.getLogger(VmHandlers.class.getName());
 
     public static final int PARALLEL_FRONTIER_THRESHOLD = 524_288; // 512k Frontier Threshold
     public static final byte FLAG_HALT_ON_EMPTY = 0x01;
@@ -1126,6 +1129,130 @@ public final class VmHandlers {
         setRegister(state, srcReg, Double.doubleToRawLongBits(totalSum), TYPE_FLOAT);
         setFlag(state, FLAG_ZF, totalSum == 0.0);
         return totalSum;
+    }
+
+    public static void handleVectorLoadAttr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        try {
+            int payload = instr.payload();
+            int nameIdx = payload & 0xFFFF;
+            int srcReg = (payload >> 16) & 0xFFFF;
+            int dstReg = instr.dstReg();
+
+            String attrName = ctx.getString(nameIdx);
+            if (ImpulseVmInterpreter.DEBUG_MODE) {
+                LOG.info("handleVectorLoadAttr: srcReg=" + srcReg + ", nameIdx=" + nameIdx + ", attrName=" + attrName);
+            }
+            
+            for (org.impulsegraph.api.RelationSnapshot rel : ctx.getSnapshot().getAllRelationSnapshots().values()) {
+                if (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot csrRel) {
+                    int attrIdx = csrRel.findAttributeIndex(attrName);
+                    if (attrIdx >= 0) {
+                        long count = rel.getEdgeCount() > 0 ? rel.getEdgeCount() : rel.getNodeCount();
+                        int handle = ctx.acquireFloatVector((int) count);
+                        float[] vec = ctx.getFloatVector(handle);
+                        java.lang.foreign.MemorySegment dataSeg = csrRel.getAttributeSegments().get(attrIdx);
+                        java.lang.foreign.MemorySegment validSeg = null;
+                        if (csrRel.getValiditySegments() != null && csrRel.getValiditySegments().size() > attrIdx) {
+                            validSeg = csrRel.getValiditySegments().get(attrIdx);
+                        }
+                        for (int i = 0; i < count; i++) {
+                            boolean isNull = false;
+                            if (validSeg != null && validSeg.byteSize() > 0) {
+                                long byteOff = i / 8;
+                                int bitOff = i % 8;
+                                byte b = validSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE, byteOff);
+                                if ((b & (1 << bitOff)) == 0) {
+                                    isNull = true;
+                                }
+                            }
+                            vec[i] = isNull ? Float.NaN : dataSeg.get(java.lang.foreign.ValueLayout.JAVA_FLOAT, i * 4L);
+                        }
+                        setRegister(state, dstReg, handle, TYPE_FLOAT_VECTOR);
+                        return;
+                    }
+                }
+            }
+            throw new RuntimeException("Attribute not found: " + attrName);
+        } catch (Throwable t) {
+            if (ImpulseVmInterpreter.DEBUG_MODE) {
+                LOG.log(Level.SEVERE, "Crash in handleVectorLoadAttr", t);
+            }
+            throw t;
+        }
+    }
+
+    public static Object handleVectorReduceMax(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int srcReg = instr.dstReg();
+        byte type = getRegisterType(state, srcReg);
+        double maxVal = Double.NEGATIVE_INFINITY;
+        if (type == TYPE_FLOAT_VECTOR) {
+            float[] vec = ctx.getFloatVector((int) getRegisterValue(state, srcReg));
+            if (vec != null) {
+                for (float v : vec) {
+                    if (!Float.isNaN(v) && v > maxVal) { maxVal = v; }
+                }
+            }
+        }
+        setRegister(state, srcReg, Double.doubleToRawLongBits(maxVal), TYPE_FLOAT);
+        return maxVal;
+    }
+
+    public static Object handleVectorReduceMin(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int srcReg = instr.dstReg();
+        byte type = getRegisterType(state, srcReg);
+        double minVal = Double.POSITIVE_INFINITY;
+        if (type == TYPE_FLOAT_VECTOR) {
+            float[] vec = ctx.getFloatVector((int) getRegisterValue(state, srcReg));
+            if (vec != null) {
+                for (float v : vec) {
+                    if (!Float.isNaN(v) && v < minVal) { minVal = v; }
+                }
+            }
+        }
+        setRegister(state, srcReg, Double.doubleToRawLongBits(minVal), TYPE_FLOAT);
+        return minVal;
+    }
+
+    public static Object handleVectorReduceArgMax(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int srcReg = instr.dstReg();
+        byte type = getRegisterType(state, srcReg);
+        double maxVal = Double.NEGATIVE_INFINITY;
+        int argMax = -1;
+        if (type == TYPE_FLOAT_VECTOR) {
+            float[] vec = ctx.getFloatVector((int) getRegisterValue(state, srcReg));
+            if (vec != null) {
+                for (int i = 0; i < vec.length; i++) {
+                    float v = vec[i];
+                    if (!Float.isNaN(v) && v > maxVal) {
+                        maxVal = v;
+                        argMax = i;
+                    }
+                }
+            }
+        }
+        setRegister(state, srcReg, argMax, TYPE_NODE_ID);
+        return argMax;
+    }
+
+    public static Object handleVectorReduceArgMin(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int srcReg = instr.dstReg();
+        byte type = getRegisterType(state, srcReg);
+        double minVal = Double.POSITIVE_INFINITY;
+        int argMin = -1;
+        if (type == TYPE_FLOAT_VECTOR) {
+            float[] vec = ctx.getFloatVector((int) getRegisterValue(state, srcReg));
+            if (vec != null) {
+                for (int i = 0; i < vec.length; i++) {
+                    float v = vec[i];
+                    if (!Float.isNaN(v) && v < minVal) {
+                        minVal = v;
+                        argMin = i;
+                    }
+                }
+            }
+        }
+        setRegister(state, srcReg, argMin, TYPE_NODE_ID);
+        return argMin;
     }
 
     public static void handleLoadIndirect(MemorySegment state, VmQueryContext ctx, Instruction instr) {
