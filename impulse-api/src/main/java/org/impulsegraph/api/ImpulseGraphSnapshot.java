@@ -6,7 +6,7 @@ import java.util.Set;
 
 /**
  * Read-only binary snapshot interface for querying immutable graph snapshots.
- * Backed by memory-mapped off-heap files conforming to C-ABI Binary Snapshot Spec v2.4.
+ * Backed by memory-mapped off-heap files conforming to C-ABI Binary Snapshot Spec v0.9.0.
  */
 public interface ImpulseGraphSnapshot extends AutoCloseable {
 
@@ -18,12 +18,12 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
     /**
      * Major spec version.
      */
-    short SPEC_VERSION_MAJOR = 2;
+    short SPEC_VERSION_MAJOR = 0;
 
     /**
      * Minor spec version.
      */
-    short SPEC_VERSION_MINOR = 4;
+    short SPEC_VERSION_MINOR = 9;
 
     /**
      * Returns the total count of relations stored in this snapshot.
@@ -60,11 +60,6 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
      */
     Map<String, RelationSnapshot> getAllRelationSnapshots();
     org.impulsegraph.api.stats.GraphStatistics getGraphStatistics();
-
-    /**
-     * Returns the graph mutator if one is attached, or null.
-     */
-    org.impulsegraph.api.mutation.GraphMutator getMutator();
 
     void enterQuery();
     void exitQuery();
@@ -118,6 +113,58 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
     default void drainAndClose(long timeout, java.util.concurrent.TimeUnit unit) throws InterruptedException {
         awaitDrained(timeout, unit);
         close();
+    }
+
+    /**
+     * Binds an explicit domain anchor context for initiating traversals.
+     */
+    default org.impulsegraph.api.traversal.DomainView domain(String domainName) {
+        try {
+            Class<?> cls = Class.forName("org.impulsegraph.vm.traversal.DefaultDomainView");
+            long nodeCount = getNodeCount(domainName);
+            if (nodeCount <= 0 && !getAllRelationSnapshots().isEmpty()) {
+                var first = getAllRelationSnapshots().values().iterator().next();
+                if (first != null) nodeCount = first.getNodeCount();
+            }
+            try {
+                var m = cls.getMethod("getOrCreate", ImpulseGraphSnapshot.class, String.class, int.class, long.class);
+                return (org.impulsegraph.api.traversal.DomainView) m.invoke(null, this, domainName, 0, nodeCount);
+            } catch (NoSuchMethodException e) {
+                return (org.impulsegraph.api.traversal.DomainView) cls.getConstructor(
+                        ImpulseGraphSnapshot.class, String.class, int.class, long.class
+                ).newInstance(this, domainName, 0, nodeCount);
+            }
+        } catch (Exception e) {
+            throw new UnsupportedOperationException("Failed to construct DomainView: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Traverses from a single scalar seed node ID on domain 0 (or default single domain).
+     */
+    default org.impulsegraph.api.traversal.Traversal<org.impulsegraph.api.bitset.ImpulseBitSet> traverse(long seed) {
+        return domain("default").from(seed);
+    }
+
+    /**
+     * Traverses from batch seed node IDs on domain 0 (or default single domain).
+     */
+    default org.impulsegraph.api.traversal.Traversal<org.impulsegraph.api.bitset.ImpulseBitSet> traverse(long... seeds) {
+        return domain("default").from(seeds);
+    }
+
+    /**
+     * Prepares a parameterized graph query statement for repeated execution.
+     */
+    default org.impulsegraph.api.statement.ImpulseStatement prepare(String query) {
+        try {
+            Class<?> cls = Class.forName("org.impulsegraph.vm.statement.ImpulseStatementImpl");
+            return (org.impulsegraph.api.statement.ImpulseStatement) cls.getConstructor(
+                    ImpulseGraphSnapshot.class, String.class
+            ).newInstance(this, query);
+        } catch (Exception e) {
+            throw new UnsupportedOperationException("Failed to prepare statement: " + e.getMessage(), e);
+        }
     }
 
     @Override

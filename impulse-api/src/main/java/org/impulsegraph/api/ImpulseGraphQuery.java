@@ -1,12 +1,14 @@
 package org.impulsegraph.api;
 
+import org.impulsegraph.compiler.ast.ImpScmNode;
+
 import java.util.Map;
 
 /**
  * Strongly-typed, serializable representation of a graph query (e.g. reachability,
  * transitive closure, set algebra, neighborhood extraction).
  *
- * <p>Queries are pure, immutable AST values with no reference to any graph instance.</p>
+ * <p>Queries are pure, immutable ImpScheme AST values with no reference to any graph instance.</p>
  *
  * @param <R> Return type of the query result (e.g. RoaringBitmap, long[], Boolean, Long)
  */
@@ -25,14 +27,9 @@ public interface ImpulseGraphQuery<R> {
     R execute(ImpulseGraphSnapshot snapshot, Object input);
 
     /**
-     * Executes this query against a live {@link ImpulseGraph} with the specified input parameters.
+     * Returns the underlying ImpScheme S-Expression AST program representing this query.
      */
-    R execute(ImpulseGraph liveGraph, Object input);
-
-    /**
-     * Returns the list of pipeline AST step nodes.
-     */
-    java.util.List<ImpulseQueryBuilder.StepNode> getSteps();
+    ImpScmNode getAst();
 
     /**
      * Returns the string name or structural operation description of this query root node.
@@ -47,10 +44,11 @@ public interface ImpulseGraphQuery<R> {
     }
 
     /**
-     * Returns a human-readable text tree representation of the query AST.
+     * Returns a human-readable ImpScheme S-expression text representation of the query AST.
      */
     default String exportAst() {
-        return ImpulseQueryBuilder.exportAst(getSteps());
+        ImpScmNode ast = getAst();
+        return ast != null ? ast.toScmString() : "()";
     }
 
     /**
@@ -58,11 +56,17 @@ public interface ImpulseGraphQuery<R> {
      */
     default String disassemble(ImpulseGraphSnapshot snapshot) {
         try {
-            Class<?> compilerCls = Class.forName("org.impulsegraph.vm.ImpulseQueryCompiler");
-            var method = compilerCls.getMethod("disassembleQuery", ImpulseGraphQuery.class, ImpulseGraphSnapshot.class);
+            Class<?> explainerCls = Class.forName("org.impulsegraph.compiler.explain.QueryExplainer");
+            var method = explainerCls.getMethod("explainAssembly", ImpulseGraphQuery.class, ImpulseGraphSnapshot.class);
             return (String) method.invoke(null, this, snapshot);
         } catch (Exception e) {
-            return exportAst();
+            try {
+                Class<?> evalCls = Class.forName("org.impulsegraph.vm.DefaultImpulseQueryEvaluator");
+                var method = evalCls.getMethod("disassembleQuery", ImpulseGraphQuery.class, ImpulseGraphSnapshot.class);
+                return (String) method.invoke(null, this, snapshot);
+            } catch (Exception ex) {
+                return exportAst();
+            }
         }
     }
 }

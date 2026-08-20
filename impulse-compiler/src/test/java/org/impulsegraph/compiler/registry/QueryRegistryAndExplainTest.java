@@ -8,8 +8,7 @@ import org.impulsegraph.compiler.ast.ScmProgram;
 import org.impulsegraph.compiler.ast.ScmWalk;
 import org.impulsegraph.compiler.explain.QueryExplainer;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
-import org.impulsegraph.api.RelationSnapshot;
-import org.impulsegraph.vm.ImpulseQueryCompiler.CompiledQuery;
+import org.impulsegraph.vm.CompiledQuery;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

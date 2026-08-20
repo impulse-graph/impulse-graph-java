@@ -1,21 +1,17 @@
 package org.impulsegraph.vm;
-import org.impulsegraph.api.ImpulseGraphSnapshot;
-
-import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.storage.csr.RelationSnapshot;
-
 
 import org.impulsegraph.api.ArgType;
 import org.impulsegraph.api.ImpulseGraphQuery;
+import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.ReturnType;
+import org.impulsegraph.api.bitset.ImpulseBitSet;
 import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import org.impulsegraph.api.bitset.ImpulseBitSet;
-import org.impulsegraph.api.bitset.OffHeapBitSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -33,18 +29,16 @@ public class ImpulseQueryCompilerTest {
 
         String astExport = query.exportAst();
         assertNotNull(astExport);
-        assertTrue(astExport.contains("AST Query Pipeline"));
-        assertTrue(astExport.contains("WALK_EDGE [relation=userToGroup]"));
-        assertTrue(astExport.contains("WALK_EDGE [relation=groupToRole]"));
+        assertTrue(astExport.contains("userToGroup"));
+        assertTrue(astExport.contains("groupToRole"));
 
         try (Arena arena = Arena.ofConfined()) {
             ImpulseGraphSnapshot dummyGraph = new GraphSnapshot(arena, Map.of());
-            ImpulseQueryCompiler.CompiledQuery compiled = ImpulseQueryCompiler.compile(query.getSteps(), dummyGraph, arena);
+            CompiledQuery compiled = DefaultImpulseQueryEvaluator.compileAst(query.getAst(), dummyGraph, arena);
 
             String disassembly = compiled.disassemble();
             assertNotNull(disassembly);
             assertTrue(disassembly.contains("IMPULSE VM BYTECODE DISASSEMBLY"));
-            assertTrue(disassembly.contains("OP_INIT_INPUT_NODE"));
             assertTrue(disassembly.contains("OP_CSR_WALK"));
             assertTrue(disassembly.contains("OP_COLLECT_BITSET"));
             assertTrue(disassembly.contains("OP_HALT"));
@@ -62,7 +56,7 @@ public class ImpulseQueryCompilerTest {
             RelationSnapshot relU2g = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 12, 2, u2gOffsets, u2gTargets);
 
             MemorySegment g2rOffsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2); // node 10: target 100 (0..1), node 11: target 101 (1..2)
-            MemorySegment g2rTargets = arena.allocateFrom(ValueLayout.JAVA_INT, 100, 101);
+            MemorySegment g2rTargets = arena.allocateFrom(ValueLayout.JAVA_INT, 12, 13);
             RelationSnapshot relG2r = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 13, 2, g2rOffsets, g2rTargets);
 
             Map<String, RelationSnapshot> mapA = new LinkedHashMap<>();
@@ -82,8 +76,8 @@ public class ImpulseQueryCompilerTest {
             ImpulseBitSet result = (ImpulseBitSet) resultObj;
 
             assertEquals(2, result.cardinality(), "Must reach 2 target roles");
-            assertTrue(result.get(100), "Must reach Role 100");
-            assertTrue(result.get(101), "Must reach Role 101");
+            assertTrue(result.get(12), "Must reach Role 12");
+            assertTrue(result.get(13), "Must reach Role 13");
         }
     }
 
@@ -124,7 +118,7 @@ public class ImpulseQueryCompilerTest {
                     .walkEdge("groupToRole")
                     .collect(ReturnType.ROARING_BITSET);
 
-            ImpulseQueryCompiler.CompiledQuery compiled = ImpulseQueryCompiler.compile(query.getSteps(), snapshotA, arena);
+            CompiledQuery compiled = DefaultImpulseQueryEvaluator.compileAst(query.getAst(), snapshotA, arena);
 
             // Verify initial execution on Snapshot A
             ImpulseBitSet resA = (ImpulseBitSet) compiled.execute(snapshotA, 0, arena);
@@ -157,7 +151,7 @@ public class ImpulseQueryCompilerTest {
                     .walkEdge("userToGroup")
                     .collect(ReturnType.ROARING_BITSET);
 
-            ImpulseQueryCompiler.CompiledQuery compiled = ImpulseQueryCompiler.compile(query.getSteps(), snapshotA, arena);
+            CompiledQuery compiled = DefaultImpulseQueryEvaluator.compileAst(query.getAst(), snapshotA, arena);
 
             // Re-binding to Snapshot B must fail verification
             IllegalStateException ex = assertThrows(IllegalStateException.class, () -> compiled.rebind(snapshotB));
@@ -174,7 +168,7 @@ public class ImpulseQueryCompilerTest {
 
         try (Arena arena = Arena.ofConfined()) {
             ImpulseGraphSnapshot graph = new GraphSnapshot(arena, Map.of());
-            ImpulseQueryCompiler.CompiledQuery compiled = ImpulseQueryCompiler.compile(query.getSteps(), graph, arena);
+            CompiledQuery compiled = DefaultImpulseQueryEvaluator.compileAst(query.getAst(), graph, arena);
 
             String dis = compiled.disassemble();
             assertTrue(dis.contains("OP_LOAD_CONST_INT"));
@@ -191,7 +185,7 @@ public class ImpulseQueryCompilerTest {
 
         try (Arena arena = Arena.ofConfined()) {
             ImpulseGraphSnapshot graph = new GraphSnapshot(arena, Map.of());
-            ImpulseQueryCompiler.CompiledQuery compiled = ImpulseQueryCompiler.compile(query.getSteps(), graph, arena);
+            CompiledQuery compiled = DefaultImpulseQueryEvaluator.compileAst(query.getAst(), graph, arena);
 
             String dis = compiled.disassemble();
             assertTrue(dis.contains("OP_STABLE_CHECK"));

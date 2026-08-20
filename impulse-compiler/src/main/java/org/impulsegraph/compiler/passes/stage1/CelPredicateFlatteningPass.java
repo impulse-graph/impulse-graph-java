@@ -31,7 +31,7 @@ public final class CelPredicateFlatteningPass implements CompilerPass {
 
     private ImpScmNode flattenNode(ImpScmNode node) {
         if (node instanceof ScmCelExpr cel) {
-            CelAstNode celAst = cel.celAst();
+            CelAstNode celAst = (CelAstNode) cel.celAst();
             if (celAst == null) {
                 celAst = CelParser.parse(cel.rawText());
             }

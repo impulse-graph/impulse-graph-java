@@ -72,6 +72,26 @@ public class SchemaCodeGenerator {
             sb.append("    }\n\n");
         }
 
+        // Generate attribute filter methods
+        if (entity.attributes() != null) {
+            for (Map.Entry<String, String> attr : entity.attributes().entrySet()) {
+                String attrName = attr.getKey();
+                String attrType = attr.getValue();
+                String javaType = switch (attrType.toUpperCase()) {
+                    case "DOUBLE", "FLOAT64" -> "double";
+                    case "FLOAT", "FLOAT32" -> "float";
+                    case "INT", "INT32" -> "int";
+                    case "LONG", "INT64" -> "long";
+                    default -> "Object";
+                };
+                String filterMethod = "filter" + capitalize(attrName);
+                sb.append("    public ").append(className).append("<R> ").append(filterMethod).append("(String op, ").append(javaType).append(" val) {\n");
+                sb.append("        this.builder.filter(\"node.").append(attrName).append(" \" + op + \" \" + val);\n");
+                sb.append("        return this;\n");
+                sb.append("    }\n\n");
+            }
+        }
+
         sb.append("}\n");
         return sb.toString();
     }

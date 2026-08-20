@@ -22,7 +22,7 @@ public final class ImpulseMethodHandleCompiler {
             INTERPRETER_EXECUTE_MH = LOOKUP.findStatic(
                     ImpulseVmInterpreter.class,
                     "execute",
-                    MethodType.methodType(Object.class, MemorySegment.class, long.class, ImpulseGraphSnapshot.class, Object.class, Arena.class)
+                    MethodType.methodType(Object.class, MemorySegment.class, long.class, ImpulseGraphSnapshot.class, Object.class, Arena.class, java.util.List.class)
             );
         } catch (ReflectiveOperationException e) {
             throw new ExceptionInInitializerError(e);
@@ -37,10 +37,25 @@ public final class ImpulseMethodHandleCompiler {
      * executes the pre-bound bytecode program.
      */
     public static MethodHandle compile(MemorySegment programSeg, long instructionCount) {
+        return compile(programSeg, instructionCount, null);
+    }
+
+    public static MethodHandle compile(MemorySegment programSeg, long instructionCount, java.util.List<String> stringPool) {
+        if (Boolean.getBoolean("impulse.compiler.disable_jit")) {
+            return null;
+        }
         if (programSeg == null || instructionCount <= 0) {
             throw new IllegalArgumentException("Invalid program segment or zero instruction count");
         }
-        // Bind programSeg and instructionCount arguments (first two parameters)
-        return MethodHandles.insertArguments(INTERPRETER_EXECUTE_MH, 0, programSeg, instructionCount);
+        
+        // Method type is: (MemorySegment, long, ImpulseGraphSnapshot, Object, Arena, List)
+        // insertArguments at pos 0 with (programSeg, instructionCount) -> (ImpulseGraphSnapshot, Object, Arena, List)
+        MethodHandle mh = MethodHandles.insertArguments(INTERPRETER_EXECUTE_MH, 0, programSeg, instructionCount);
+        
+        // bindTo binds the first reference argument. Our remaining arguments are:
+        // (ImpulseGraphSnapshot, Object, Arena, List)
+        // So bindTo would bind the snapshot! We do NOT want that.
+        // We want to bind the LAST argument (List).
+        return MethodHandles.insertArguments(mh, 3, stringPool);
     }
 }

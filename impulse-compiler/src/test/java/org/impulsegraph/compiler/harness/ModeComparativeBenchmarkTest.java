@@ -26,7 +26,8 @@ import org.impulsegraph.compiler.trace.PassTracer;
 import org.impulsegraph.vm.DefaultImpulseQueryEvaluator;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.RelationSnapshot;
-import org.impulsegraph.vm.ImpulseQueryCompiler;
+import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
+import org.impulsegraph.vm.CompiledQuery;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -130,7 +131,7 @@ public class ModeComparativeBenchmarkTest {
                     .walkEdge("Branch")
                     .collectBitSet();
 
-            ImpulseQueryCompiler.CompiledQuery preparedPlan = ImpulseQueryCompiler.compile(query.getSteps(), snapshot, arena);
+            CompiledQuery preparedPlan = ImpOpsBytecodeEmitter.compileToExecutable(query.getAst(), snapshot, arena);
             assertNotNull(preparedPlan);
 
             // Warmup Mode B

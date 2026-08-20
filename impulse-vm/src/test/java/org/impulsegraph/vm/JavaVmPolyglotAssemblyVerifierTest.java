@@ -313,7 +313,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x31 -> { VmHandlers.handleSetIntersect(state, ctx, instr); pc++; }
                             case 0x32 -> { VmHandlers.handleSetDifference(state, ctx, instr); pc++; }
                             case 0x33 -> { VmHandlers.handleSetCardinality(state, ctx, instr); pc++; }
-                            case 0x34 -> { VmHandlers.handleVectorMulAttr(state, ctx, instr); pc++; }
+                            case 0x34 -> { VmHandlers.handleVectorLoadAttr(state, ctx, instr); pc++; }
                             case 0x35 -> { VmHandlers.handleVectorReduceSum(state, ctx, instr); pc++; }
                             case 0x36 -> { VmHandlers.handleVectorDiv(state, ctx, instr); pc++; }
                             case 0x37 -> { VmHandlers.handleVectorStrConcat(state, ctx, instr); pc++; }

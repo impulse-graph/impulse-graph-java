@@ -49,11 +49,28 @@ public final class DefaultSnapshotBuilder {
 
     public DefaultSnapshotBuilder withDomain(int domainId, String name, byte keyType, long nodeCount) {
         customDomains.add(new DomainEntry(domainId, name, keyType, nodeCount));
+        withMetadata("domain." + name + ".nodeCount", String.valueOf(nodeCount));
         return this;
     }
 
     public DefaultSnapshotBuilder withRelationDomain(String relName, int srcDomainId, int tgtDomainId) {
         customRelationDomains.put(relName, new int[]{srcDomainId, tgtDomainId});
+        return this;
+    }
+
+    public DefaultSnapshotBuilder withDomainKey(String domainName, String key, long denseId) {
+        withMetadata("domain." + domainName + ".key." + key, String.valueOf(denseId));
+        withMetadata("domain." + domainName + ".id." + denseId, key);
+        return this;
+    }
+
+    public DefaultSnapshotBuilder withDomainKeys(String domainName, List<String> keys) {
+        if (keys != null) {
+            for (int i = 0; i < keys.size(); i++) {
+                String key = keys.get(i);
+                withDomainKey(domainName, key, i);
+            }
+        }
         return this;
     }
 
@@ -350,11 +367,18 @@ public final class DefaultSnapshotBuilder {
             align4kOut(finalOut);
             int footerStart = finalOut.size();
 
+            Map<String, String> mergedMetadata = new HashMap<>(this.metadata);
+            if (loaded != null && loaded.getMetadataMap() != null) {
+                for (var e : loaded.getMetadataMap().entrySet()) {
+                    mergedMetadata.putIfAbsent(e.getKey(), e.getValue());
+                }
+            }
+
             ByteBuffer metaBuf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
-            metaBuf.putInt(metadata.size());
+            metaBuf.putInt(mergedMetadata.size());
             finalOut.write(metaBuf.array());
 
-            for (Map.Entry<String, String> kv : metadata.entrySet()) {
+            for (Map.Entry<String, String> kv : mergedMetadata.entrySet()) {
                 byte[] kb = kv.getKey().getBytes(StandardCharsets.UTF_8);
                 ByteBuffer kBuf = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
                 kBuf.putShort((short) kb.length);

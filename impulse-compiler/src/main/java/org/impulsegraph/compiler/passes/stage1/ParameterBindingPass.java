@@ -43,7 +43,7 @@ public final class ParameterBindingPass implements CompilerPass {
         }
 
         if (node instanceof ScmCelExpr celExpr) {
-            CelAstNode cel = celExpr.celAst();
+            CelAstNode cel = (CelAstNode) celExpr.celAst();
             if (cel != null) {
                 CelAstNode boundCel = bindCel(cel, params);
                 return new ScmCelExpr(celExpr.rawText(), boundCel);

@@ -64,6 +64,6 @@ public class TypedQueryBuilder<E, R> {
     }
 
     public String exportAst() {
-        return ImpulseQueryBuilder.exportAst(builder.getSteps());
+        return ImpulseQueryBuilder.exportAst(new org.impulsegraph.compiler.ast.ScmProgram(builder.getSteps()));
     }
 }

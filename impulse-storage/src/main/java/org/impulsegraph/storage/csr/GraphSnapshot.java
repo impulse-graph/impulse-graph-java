@@ -1,10 +1,10 @@
 package org.impulsegraph.storage.csr;
 
 import java.lang.foreign.Arena;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
-import org.impulsegraph.storage.mutation.DualColumnarOverlay;
 
 /**
  * High-performance off-heap multi-relation graph container holding relation snapshots across domain types.
@@ -13,10 +13,8 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
 
     private final Arena arena;
     private final Map<String, RelationSnapshot> relationMap = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>());
-    private final Map<RelationSnapshot, DualColumnarOverlay> overlays = new ConcurrentHashMap<>();
     private final org.impulsegraph.api.stats.GraphStatistics graphStats = new org.impulsegraph.api.stats.GraphStatistics();
     private final Map<String, String> metadata = new ConcurrentHashMap<>();
-    private org.impulsegraph.storage.mutation.OverlayMutator mutator;
 
     public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots) {
         this(arena, snapshots, Map.of());
@@ -89,19 +87,6 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
         return java.util.Collections.unmodifiableMap((java.util.Map) relationMap);
     }
 
-    public DualColumnarOverlay getOverlay(RelationSnapshot snapshot) {
-        if (snapshot == null) return null;
-        return overlays.computeIfAbsent(snapshot, k -> new DualColumnarOverlay(arena));
-    }
-
-    public org.impulsegraph.storage.mutation.OverlayMutator getMutator() {
-        return mutator;
-    }
-
-    public void setMutator(org.impulsegraph.storage.mutation.OverlayMutator mutator) {
-        this.mutator = mutator;
-    }
-
     public long getOffHeapMemorySizeBytes() {
         long total = 0;
         for (RelationSnapshot snapshot : relationMap.values()) {
@@ -133,6 +118,14 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
 
     @Override
     public long getNodeCount(String domainName) {
+        if (domainName != null) {
+            String meta = metadata.get("domain." + domainName + ".nodeCount");
+            if (meta != null) {
+                try {
+                    return Long.parseLong(meta);
+                } catch (NumberFormatException ignored) {}
+            }
+        }
         return 0;
     }
 
@@ -155,12 +148,12 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
 
     @Override
     public String getMetadata(String key) {
-        return null;
+        return metadata.get(key);
     }
 
     @Override
     public Map<String, String> getMetadataMap() {
-        return Map.of();
+        return Collections.unmodifiableMap(metadata);
     }
 
     private final java.util.concurrent.atomic.LongAdder activeQueryCount = new java.util.concurrent.atomic.LongAdder();

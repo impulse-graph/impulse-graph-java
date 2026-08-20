@@ -2,7 +2,6 @@ package org.impulsegraph.vm;
 
 import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.RelationSnapshot;
-import org.impulsegraph.api.mutation.GraphMutator;
 import java.util.Map;
 
 public class MockImpulseGraphSnapshot implements ImpulseGraphSnapshot {
@@ -28,5 +27,4 @@ public class MockImpulseGraphSnapshot implements ImpulseGraphSnapshot {
     @Override public long getEdgeCount(String relationName) { return 0; }
     @Override public org.impulsegraph.api.stats.GraphStatistics getGraphStatistics() { return null; }
     @Override public java.util.Map<String, String> getMetadataMap() { return java.util.Collections.emptyMap(); }
-    @Override public GraphMutator getMutator() { return null; }
 }

@@ -83,7 +83,7 @@ public class GeneratedQueryBuilderTest {
             RelationSnapshot u2g = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 2, 1, u2gOffsets, u2gTargets);
 
             MemorySegment g2rOffsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1);
-            MemorySegment g2rTargets = arena.allocateFrom(ValueLayout.JAVA_INT, 100);
+            MemorySegment g2rTargets = arena.allocateFrom(ValueLayout.JAVA_INT, 5);
             RelationSnapshot g2r = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 12, 1, g2rOffsets, g2rTargets);
 
             ImpulseGraphSnapshot graph = new GraphSnapshot(arena, Map.of("userToGroup", u2g, "groupToRole", g2r));
@@ -95,7 +95,7 @@ public class GeneratedQueryBuilderTest {
 
             ImpulseBitSet roleIds = query.execute(graph, 0);
             assertNotNull(roleIds);
-            assertTrue(roleIds.get(100), "Strongly-typed query MUST reach Role ID 100 via impulse-vm execution engine");
+            assertTrue(roleIds.get(5), "Strongly-typed query MUST reach Role ID 5 via impulse-vm execution engine");
 
             String astTree = query.exportAst();
             assertTrue(astTree.contains("userToGroup"));

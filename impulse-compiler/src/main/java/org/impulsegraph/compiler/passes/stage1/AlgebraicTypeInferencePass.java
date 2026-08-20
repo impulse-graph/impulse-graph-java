@@ -47,7 +47,7 @@ public final class AlgebraicTypeInferencePass implements CompilerPass {
         }
 
         if (node instanceof ScmCelExpr celExpr) {
-            CelAstNode rawCel = celExpr.celAst();
+            CelAstNode rawCel = (CelAstNode) celExpr.celAst();
             if (rawCel != null) {
                 CelAstNode annotatedCel = inferCel(rawCel, stats);
                 return new ScmCelExpr(celExpr.rawText(), annotatedCel);

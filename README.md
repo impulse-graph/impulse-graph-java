@@ -1,117 +1,125 @@
 # Impulse Graph Engine — Java 25 FFM Core (`impulse-graph-java`)
 
-> [!WARNING]
-> **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
-
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-A high-performance, off-heap **Java 25 FFM** execution engine and multi-module ecosystem for the **Impulse Graph Engine**. 
+A high-performance, zero-copy, off-heap **Java 25 FFM** graph engine and Virtual Machine interpreter for the **Impulse Graph Engine**.
 
-It fills a critical gap in the JVM ecosystem by acting as the **"Apache Arrow for Graph Analytics"**, pairing an immutable `.imps` C-ABI binary snapshot format with a pure Java 25 register-based Virtual Machine (`ImpulseVM`).
+It acts as the **"Apache Arrow for Graph Analytics"** on the JVM, pairing an immutable `.imps` C-ABI binary snapshot format with a pure Java 25 register-based Virtual Machine (`ImpulseVM`).
 
 ---
 
-## 🚀 Architecture & Data Flow
+## 🚀 Key Architectural Properties
 
-```text
-  Application Code (Spring Boot, gRPC, JVM Services)
-                          │
-         ┌────────────────┼────────────────┐
-  Java Fluent API + CEL (Primary)      Scripting (ImpK, ImpLog, Cypher)
-         └────────────────┼────────────────┘
-                          │ AST
-           Impulse Compiler (Java 25 CBO JIT)
-                          │ Optimized impOps (.impb)
-     impulse-vm (Java 25 Compute Plane & MethodHandles)
-                          │ Zero-copy vector reads
-         ┌────────────────┴────────────────┐
-     impulse-storage (Zero-Dependency Data Plane)
-   .imps Snapshot (mmap)         OverlayMutator (Off-Heap)
-   (Read-Only Base)              (Lock-Free Delta Blocks)
+- **Zero Garbage Collection (GC) Overhead**: Memory-maps `.imps` v0.9.0 binary snapshot files off-heap via `java.lang.foreign.MemorySegment`.
+- **Zero External Runtime Dependencies**: All core modules maintain **strictly 0 third-party runtime dependencies** (`java.base`, `jdk.incubator.vector`, FFM).
+- **SIMD Vector API Acceleration**: Vectorizes graph traversal steps across unrolled AVX-512 and ARM Neon registers using `jdk.incubator.vector`.
+- **Per-Domain Dense ID Independence ($0 \dots N_d-1$)**: Strict per-domain ID spaces with explicit domain anchoring.
+- **Kleisli Frontier Traversal Pipeline**: Monadic frontier propagation $\langle D, S \rangle \xrightarrow{R} \langle D', S' \rangle$ with monoidic path reduction (`OR`, `MIN`, `MAX`, `SUM`).
+
+---
+
+## 📦 Modular Architecture
+
+| Module | Scope & Role | Dependencies |
+| :--- | :--- | :--- |
+| **`impulse-spec`** | Binary snapshot layout constants (Page 0, 128-byte hardware alignment, Section 2 string offsets). | **0** |
+| **`impulse-api`** | High-level contracts: `ImpulseGraphSnapshot`, `DomainView`, `Traversal`, `ImpulseStatement`, `RowReader`. | **0** |
+| **`impulse-storage`** | Off-heap snapshot loader (`BinarySnapshotLoader`), `GraphSnapshot`, `RelationSnapshot`, CSR/CSC/COO accessors, snapshot builder. | **0** |
+| **`impulse-compiler`** | ImpScheme S-Expression AST, CEL optimizer, 7-stage optimization passes, `impOps` bytecode emitter. | **0** |
+| **`impulse-vm`** | Register VM (`R0`..`R63`), Java 25 Vector API AVX-512 SIMD handlers (`VmHandlers`), `MethodHandle` JIT combinators, and Statement runner. | **0** |
+
+---
+
+## ⚡ Quickstart
+
+### 1. Prerequisites & Maven Coordinates
+Java 25 with preview features and Vector API enabled:
+```xml
+<dependencies>
+    <dependency>
+        <groupId>org.impulsegraph</groupId>
+        <artifactId>impulse-api</artifactId>
+        <version>0.9.0-SNAPSHOT</version>
+    </dependency>
+    <dependency>
+        <groupId>org.impulsegraph</groupId>
+        <artifactId>impulse-storage</artifactId>
+        <version>0.9.0-SNAPSHOT</version>
+    </dependency>
+    <dependency>
+        <groupId>org.impulsegraph</groupId>
+        <artifactId>impulse-vm</artifactId>
+        <version>0.9.0-SNAPSHOT</version>
+    </dependency>
+</dependencies>
 ```
 
----
+JVM Runtime Flag:
+```bash
+--enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED
+```
 
-## 🧠 How It Works
-
-### Pure Java 25 Off-Heap Execution
-Memory-maps `.imps` v0.9.0 binary snapshot files off-heap via `java.lang.foreign.MemorySegment` with **zero Garbage Collection (GC) pauses**. Avoids native `dlopen` execution blocks and prevents C++ `SIGSEGV` process crashes.
-
-### Zero Third-Party Dependencies
-`impulse-core` and `impulse-api` maintain **strictly 0 external dependencies**. No Guava, no Netty, no Log4j. This guarantees zero CVE supply-chain bloat and maximum enterprise container security.
-
-### Continuous HTAP & Mutation Overlays
-While `.imps` snapshots are fully immutable on disk, the `impulse-storage` module provides an `HtapLifecycleManager` to orchestrate lock-free HTAP workloads:
-- **Pluggable Delta Sources:** Pull continuous streams of `GraphMutation`s from Kafka, RocksDB, or REST APIs.
-- **Off-Heap Overlays:** Mutators write to an L1 delta cache (`OverlayMutator`) while queries execute over `AtomicReference` states without acquiring read locks.
-- **Pluggable Compaction Policies:** Time-based or Delta-threshold policies trigger background compaction per-relation.
-- **Blue/Green Swap:** Compaction seamlessly merges the base mmap snapshot and millions of in-memory delta edges into a new `.imps` file on disk while queries sustain tens of millions of QPS.
-
-### ImpulseVM & JDK Vector API Acceleration
-Dynamically generates AVX-512 and ARM Neon SIMD assembly instructions at JVM JIT compile time via `jdk.incubator.vector`. Bytecode opcodes (`impOps`) are compiled dynamically via `MethodHandle` combinators, letting the HotSpot C2 compiler aggressively inline and vectorize the inner graph loops.
-
----
-
-## ⚡ Empirical Performance
-
-**Continuous HTAP Blue/Green Compaction Stress Test (1 CPU Core, 15.7M Edges):**
-
-| Metric | Empirical Value |
-| :--- | :--- |
-| **Max Concurrent Query Throughput** | **47.5 Million QPS** |
-| **Off-Heap Edge Ingestion Rate** | **221,000 Edges / sec** |
-| **Query Latency during Disk Compaction** | **Zero Stalls (Lock-Free)** |
-| **Snapshot Load Time (Mmap)** | **< 1 ms** |
-
----
-
-## 📦 Artifact Partitioning Matrix
-
-| Artifact / Module | Size | Native Binaries? | Third-Party Deps | Purpose & Description |
-| :--- | :--- | :--- | :--- | :--- |
-| **`impulse-api`** | ~50 KB | ❌ None | **0** | Lightweight public interfaces, `DeltaSource`, `GraphMutation`, and JMX `ImpulseEngineMXBean`. |
-| **`impulse-storage`** | ~200 KB | ❌ None | **0** | Zero-dependency Data Plane: Binary `mmap` `.imps` loading, YAML Manifest tablespaces, and `HtapLifecycleManager`. |
-| **`impulse-vm`** | ~150 KB | ❌ None | **0** | Zero-dependency Compute Plane: Pure Java 25 off-heap HTAP engine and `ImpulseVM` bytecode interpreter. |
-| **`impulse-compiler`** | ~200 KB | ❌ None | **0** | Cypher & ImpScheme AST query planner, Stage 1/2 Optimizer, and `impOps` emitter. |
-| **`impulse-spec`** | ~100 KB | ❌ None | **0** | Binary Snapshot v0.9.0 header encoders, decoders, and structural spec definitions. |
-| **`impulse-kotlin`** | ~200 KB | ❌ None | Kotlin Stdlib | Idiomatic Kotlin extensions, coroutines support, and flow streams. |
-| **`impulse-scala`** | ~250 KB | ❌ None | Scala 3 Library | Scala 3 type-safe GraphBLAS matrix math API wrappers. |
-
----
-
-## 🔄 Execution Modes
-
-Because ImpulseVM dynamic JIT compilation is so incredibly fast (< 3 µs per query via `MethodHandles`), **Ahead-of-Time (AOT) compilation plugins have been retired.** All query parsing and optimization now happens entirely at runtime via our embedded Cost-Based Optimizer (CBO).
-
-### Mode 1: Java Fluent API + CEL (Primary API)
-The primary interface for developers using Impulse Graph in a JVM application is the `ImpulseQueryBuilder`. It supports pure Java fluent traversals interspersed with Common Expression Language (CEL) predicates:
-
+### 2. Loading a Snapshot
 ```java
-import org.impulsegraph.api.ImpulseQueryBuilder;
-import org.impulsegraph.api.ArgType;
-
-var query = new ImpulseQueryBuilder<BitSet>()
-    .input("User", ArgType.SINGLE_LONG)
-    .walkEdge("FOLLOWS")
-    .filterWithCel("age > 30")
-    .walkEdgeWithCel("PURCHASED", "amount > 100.00")
-    .build();
-
-// Evaluates natively via the ImpulseVM vector engine
-var bitset = evaluator.evaluate(query, graph, userId);
+try (Arena arena = Arena.ofShared()) {
+    var loaded = BinarySnapshotLoader.loadSnapshot(Path.of("hetionet.imps"), arena);
+    ImpulseGraphSnapshot snap = loaded.getGraph();
+    
+    // Ready for sub-microsecond queries
+}
 ```
 
-### Mode 2: Dynamic Scripting (ImpK, ImpLog, Cypher)
-For complex analytical workloads, external rule engines, or ad-hoc web consoles, developers can dynamically compile string scripts directly to bytecode at runtime. The compiler supports three frontend domain-specific languages:
-1. **Cypher**: Standard declarative graph pattern matching (`MATCH (n)-[:KNOWS]->(m) RETURN m`). Includes full mutation CRUD DML support via the `OverlayMutator`.
-2. **ImpK (GraphBLAS)**: Explicit matrix-vector math for PageRank, connected components, and SIMD array operations.
-3. **ImpLog (Datalog)**: Declarative logic programming for ReBAC (Zanzibar) authorization and recursive transitive closures.
-## 🛠️ Prerequisites & Build Instructions
+### 3. Querying the Graph (Fluent Traversal API)
+```java
+var userDomain = snap.domain("User");
 
-* **JDK 25** (with `--enable-preview` and `--add-modules jdk.incubator.vector`)
-* **Maven 3.9+**
+// 1. Domain Key <-> Internal ID Resolution
+long denseId = userDomain.toDenseId("usr_alice"); // 0L
+String key = userDomain.toKey(0); // "usr_alice"
 
-### Building and Running Tests
+// 2. Single-Node Query: find friends of "usr_alice"
+List<String> friends = userDomain.fromKey("usr_alice").out("knows").toKeyList(); // ["usr_bob", "usr_charlie"]
+
+// 3. Union of Connections from Multiple Starting Nodes
+Set<String> allFriends = userDomain.fromKeys("usr_alice", "usr_bob").out("knows").toKeySet();
+
+// 4. Mutual (Shared) Friends via BitSet Intersection
+ImpulseBitSet aliceFriends = userDomain.fromKey("usr_alice").out("knows").toBitSet();
+ImpulseBitSet bobFriends   = userDomain.fromKey("usr_bob").out("knows").toBitSet();
+aliceFriends.and(bobFriends); // in-place AND
+List<String> mutual = userDomain.from(aliceFriends).toKeyList();
+
+// 5. Edge Attribute Filtering (e.g. Time Windows)
+Set<String> recent = userDomain.fromKey("usr_alice")
+    .out("TRANSACTED", "edge.timestamp >= 1700000000 && edge.timestamp <= 1710000000")
+    .toKeySet();
+```
+
+### 4. Parameterized Cypher Queries (`ImpulseStatement`)
+```java
+// OpenCypher query with automatic set deduplication
+try (ImpulseStatement stmt = snap.prepare("MATCH (u:User)-[:knows]->(f:User) WHERE u.id = $id RETURN f")) {
+    stmt.bindNode("$id", 0);
+    try (RowReader rows = stmt.execute()) {
+        while (rows.next()) {
+            System.out.println("Friend Node ID: " + rows.getNodeId(0));
+        }
+    }
+}
+```
+
+---
+
+## 📚 Documentation
+
+- [**Quickstart Guide**](docs/GETTING_STARTED.md) — Loading snapshots, basic traversals, filtering, and prepared statements.
+- [**Advanced Querying Guide**](docs/ADVANCED_QUERYING.md) — Fixed-point loops (`repeatUntilStable`), monoidic reductions, state projections, and BitSet algebra.
+- [**Compiler Architecture**](docs/COMPILER_ARCHITECTURE.md) — IR passes, optimization pipeline, and bytecode generation.
+
+---
+
+## 🛠️ Build & Test Instructions
+
 ```bash
 mvn clean test
 ```
