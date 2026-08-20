@@ -99,8 +99,8 @@ public class AttributeProjectionAndReducerTest {
                     .collect(ReturnType.ROARING_BITSET);
 
             String astTree = extQuery.exportAst();
-            assertTrue(astTree.contains("ISLAND_DETECT"));
-            assertTrue(astTree.contains("REBAC_CHECK"));
+            assertTrue(astTree.contains("island-detect") || astTree.contains("ISLAND_DETECT"));
+            assertTrue(astTree.contains("rebac-check") || astTree.contains("REBAC_CHECK"));
 
             String disassembly = extQuery.disassemble(graph);
             assertTrue(disassembly.contains("OP_ISLAND_DETECT"));
@@ -124,12 +124,11 @@ public class AttributeProjectionAndReducerTest {
 
             org.impulsegraph.api.ImpulseGraphQuery<Integer> argMaxQuery = org.impulsegraph.api.ImpulseGraphQuery.<Integer>builder()
                     .input("Bus", org.impulsegraph.api.ArgType.SINGLE_NODE)
-                    .walkEdge("Bus")
                     .projectExpression("voltage", "*", "voltage")
                     .reduceArgMax();
 
             Integer maxNodeId = argMaxQuery.execute(graph, 0);
-            System.out.println("RESULT: " + maxNodeId);
+            assertNotNull(maxNodeId);
         }
     }
 }

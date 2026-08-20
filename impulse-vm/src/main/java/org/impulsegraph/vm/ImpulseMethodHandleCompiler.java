@@ -41,6 +41,9 @@ public final class ImpulseMethodHandleCompiler {
     }
 
     public static MethodHandle compile(MemorySegment programSeg, long instructionCount, java.util.List<String> stringPool) {
+        if (Boolean.getBoolean("impulse.compiler.disable_jit")) {
+            return null;
+        }
         if (programSeg == null || instructionCount <= 0) {
             throw new IllegalArgumentException("Invalid program segment or zero instruction count");
         }

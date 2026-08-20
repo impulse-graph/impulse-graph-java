@@ -79,7 +79,7 @@ public class BlueGreenDrainAndUnloadTest {
                 .collect(ReturnType.ROARING_BITSET);
 
         Arena queryCompilerArena = Arena.ofShared();
-        ImpulseQueryCompiler.CompiledQuery compiled = ImpulseQueryCompiler.compile(query.getSteps(), snapshotA, queryCompilerArena);
+        CompiledQuery compiled = DefaultImpulseQueryEvaluator.compileAst(query.getAst(), snapshotA, queryCompilerArena);
 
         int numThreads = 8;
         ExecutorService executor = Executors.newFixedThreadPool(numThreads);

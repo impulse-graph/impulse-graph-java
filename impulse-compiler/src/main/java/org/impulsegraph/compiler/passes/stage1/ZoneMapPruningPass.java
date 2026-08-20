@@ -48,7 +48,7 @@ public final class ZoneMapPruningPass implements CompilerPass {
         }
 
         if (node instanceof ScmCelExpr celExpr) {
-            CelAstNode cel = celExpr.celAst();
+            CelAstNode cel = (CelAstNode) celExpr.celAst();
             if (cel != null) {
                 CelAstNode prunedCel = pruneCel(cel);
                 if (prunedCel.signature() != null && prunedCel.signature().isConstantKnown()) {

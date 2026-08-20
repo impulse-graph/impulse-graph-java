@@ -9,8 +9,8 @@ import org.impulsegraph.api.bitset.ImpulseBitSet;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
-import org.impulsegraph.api.RelationSnapshot;
-import org.impulsegraph.vm.ImpulseQueryCompiler;
+import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
+import org.impulsegraph.vm.CompiledQuery;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -86,7 +86,7 @@ public class EndToEndQueryAblationBenchmarkTest {
                     .walkEdge("GpPW")
                     .collectBitSet();
 
-            ImpulseQueryCompiler.CompiledQuery compiled = ImpulseQueryCompiler.compile(query.getSteps(), graph, arena);
+            CompiledQuery compiled = ImpOpsBytecodeEmitter.compileToExecutable(query.getAst(), graph, arena);
             assertNotNull(compiled);
 
             // Warmup JIT

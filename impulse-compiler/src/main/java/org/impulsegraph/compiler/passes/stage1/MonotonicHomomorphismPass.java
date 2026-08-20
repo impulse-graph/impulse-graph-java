@@ -41,7 +41,7 @@ public final class MonotonicHomomorphismPass implements CompilerPass {
         }
 
         if (node instanceof ScmCelExpr celExpr) {
-            CelAstNode cel = celExpr.celAst();
+            CelAstNode cel = (CelAstNode) celExpr.celAst();
             if (cel != null) {
                 CelAstNode optCel = optimizeCel(cel);
                 return new ScmCelExpr(celExpr.rawText(), optCel);

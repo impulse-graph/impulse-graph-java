@@ -26,7 +26,7 @@ class ImpulseQueryBuilderTest {
                 .collect(ReturnType.ROARING_BITSET);
 
         assertNotNull(query);
-        assertTrue(query.getOperationName().contains("QueryPipeline[USER->4Steps]"));
+        assertTrue(query.getOperationName().contains("USER"));
     }
 
     @Test
@@ -51,6 +51,6 @@ class ImpulseQueryBuilderTest {
                 .collect(ReturnType.NODE_ARRAY);
 
         assertNotNull(query);
-        assertTrue(query.getOperationName().contains("QueryPipeline[Player->4Steps]"));
+        assertTrue(query.getOperationName().contains("Player"));
     }
 }

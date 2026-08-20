@@ -1,6 +1,8 @@
 package org.impulsegraph.compiler.cel;
 
 import java.util.Objects;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Lowers a CEL AST into canonical ImpScheme (.impscm) S-expressions.
@@ -8,7 +10,28 @@ import java.util.Objects;
  */
 public final class CelCompiler {
 
+    private static final Logger LOG = Logger.getLogger(CelCompiler.class.getName());
+    public static final boolean DEBUG_MODE = Boolean.getBoolean("impulse.compiler.debug");
+
     private CelCompiler() {}
+
+    /**
+     * Compiles a raw CEL source string into canonical ImpScheme S-expression text with debug tracing.
+     */
+    public static String compileToImpScheme(String celSource) {
+        if (celSource == null || celSource.isBlank()) {
+            return "()";
+        }
+        CelAstNode ast = CelParser.parse(celSource);
+        if (DEBUG_MODE) {
+            LOG.info(() -> "[CelCompiler] Parsed AST: " + ast);
+        }
+        String scm = toImpScheme(ast);
+        if (DEBUG_MODE) {
+            LOG.info(() -> "[CelCompiler] Emitted ImpScheme: " + scm);
+        }
+        return scm;
+    }
 
     public static String toImpScheme(CelAstNode node) {
         if (node == null) return "()";

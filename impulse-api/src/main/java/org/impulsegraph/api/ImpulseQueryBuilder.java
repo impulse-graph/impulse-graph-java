@@ -1,34 +1,24 @@
 package org.impulsegraph.api;
 
+import org.impulsegraph.compiler.ast.*;
+
 import java.util.*;
 import java.util.function.Function;
 
 /**
  * Fluent builder for constructing immutable {@link ImpulseGraphQuery} AST pipelines.
  *
- * <p>Supports CSR forward edge traversals, attribute filtering, CEL predicate evaluation,
- * compile-time parameter binding, set operations, fixed and convergent loop iterations,
- * GraphBLAS matrix-vector operations, and extended domain opcodes.</p>
+ * <p>Constructs canonical ImpScheme (.impscm) AST programs ({@link ScmProgram}) containing
+ * CSR/CSC walks, SIMD vector filtering, CEL predicate evaluation, compile-time parameter binding,
+ * set operations, fixed and convergent loop iterations, and domain reductions.</p>
  *
  * @param <R> Expected return type of the query pipeline result.
  */
 public class ImpulseQueryBuilder<R> {
 
-    /**
-     * Represents an individual AST step node within a query execution pipeline.
-     *
-     * @param op Opcode operation name (e.g. "INPUT", "WALK_EDGE", "WALK_EDGE_CEL", "REPEAT")
-     * @param relation Target relation name or composite filter expression
-     * @param argType Expected input parameter argument type
-     * @param returnType Final expected return type of the terminal step
-     * @param repeatCount Loop iteration count for fixed REPEAT steps
-     * @param subSteps List of nested sub-step nodes for loop bodies
-     */
-    public record StepNode(String op, String relation, ArgType argType, ReturnType returnType, int repeatCount, List<StepNode> subSteps) {}
-
     private String entityType;
     private ArgType inputArgType;
-    private final List<StepNode> steps = new ArrayList<>();
+    private final List<ImpScmNode> steps = new ArrayList<>();
     private final Map<String, Object> parameters = new HashMap<>();
     private ReturnType finalReturnType;
 
@@ -47,7 +37,6 @@ public class ImpulseQueryBuilder<R> {
     public ImpulseQueryBuilder<R> input(String entityType, ArgType argType) {
         this.entityType = Objects.requireNonNull(entityType, "entityType must not be null");
         this.inputArgType = Objects.requireNonNull(argType, "argType must not be null");
-        steps.add(new StepNode("INPUT", null, argType, null, 0, List.of()));
         return this;
     }
 
@@ -93,7 +82,7 @@ public class ImpulseQueryBuilder<R> {
      */
     public ImpulseQueryBuilder<R> walkEdge(String relationName) {
         Objects.requireNonNull(relationName, "relationName must not be null");
-        steps.add(new StepNode("WALK_EDGE", relationName, null, null, 0, List.of()));
+        steps.add(ScmWalk.forward(relationName));
         return this;
     }
 
@@ -101,7 +90,12 @@ public class ImpulseQueryBuilder<R> {
      * Walk forward along a specific edge relation, applying state projections.
      */
     public ImpulseQueryBuilder<R> walkEdgeWithState(String relationName, String stateProjections) {
-        steps.add(new StepNode("WALK_EDGE_STATE", relationName + "||" + stateProjections, null, null, 0, List.of()));
+        Objects.requireNonNull(relationName, "relationName must not be null");
+        steps.add(new ScmList(List.of(
+                new ScmSymbol("walk-edge-state"),
+                new ScmSymbol(relationName),
+                ScmLiteral.ofStr(stateProjections != null ? stateProjections : "")
+        )));
         return this;
     }
 
@@ -109,7 +103,10 @@ public class ImpulseQueryBuilder<R> {
      * Apply in-domain state projections on the active frontier.
      */
     public ImpulseQueryBuilder<R> projectState(String projectionExpr) {
-        steps.add(new StepNode("PROJECT_STATE", projectionExpr, null, null, 0, List.of()));
+        steps.add(new ScmList(List.of(
+                new ScmSymbol("project-state"),
+                ScmLiteral.ofStr(projectionExpr != null ? projectionExpr : "")
+        )));
         return this;
     }
 
@@ -123,7 +120,7 @@ public class ImpulseQueryBuilder<R> {
     public ImpulseQueryBuilder<R> walkEdgeWithCel(String relationName, String celExpr) {
         Objects.requireNonNull(relationName, "relationName must not be null");
         Objects.requireNonNull(celExpr, "celExpr must not be null");
-        steps.add(new StepNode("WALK_EDGE_CEL", relationName + ":" + celExpr, null, null, 0, List.of()));
+        steps.add(ScmWalk.forward(relationName, new ScmCelExpr(celExpr)));
         return this;
     }
 
@@ -135,7 +132,7 @@ public class ImpulseQueryBuilder<R> {
      */
     public ImpulseQueryBuilder<R> filterWithCel(String celExpr) {
         Objects.requireNonNull(celExpr, "celExpr must not be null");
-        steps.add(new StepNode("FILTER_CEL", celExpr, null, null, 0, List.of()));
+        steps.add(new ScmCelExpr(celExpr));
         return this;
     }
 
@@ -155,7 +152,7 @@ public class ImpulseQueryBuilder<R> {
      */
     public ImpulseQueryBuilder<R> walkEdgeFiltered(String relationName, String filterLabel) {
         Objects.requireNonNull(relationName, "relationName must not be null");
-        steps.add(new StepNode("WALK_EDGE_FILTERED", relationName + ":" + filterLabel, null, null, 0, List.of()));
+        steps.add(ScmWalk.forward(relationName, new ScmSymbol(filterLabel)));
         return this;
     }
 
@@ -167,7 +164,7 @@ public class ImpulseQueryBuilder<R> {
      */
     public ImpulseQueryBuilder<R> walkTarget(String relationName) {
         Objects.requireNonNull(relationName, "relationName must not be null");
-        steps.add(new StepNode("WALK_TARGET", relationName, null, null, 0, List.of()));
+        steps.add(ScmWalk.forward(relationName));
         return this;
     }
 
@@ -182,7 +179,11 @@ public class ImpulseQueryBuilder<R> {
         ImpulseQueryBuilder<R> subBuilder = new ImpulseQueryBuilder<>();
         subBuilder.bindParameters(this.parameters);
         stepFn.apply(subBuilder);
-        steps.add(new StepNode("REPEAT", null, null, null, count, subBuilder.steps));
+        steps.add(new ScmList(List.of(
+                new ScmSymbol("repeat"),
+                ScmLiteral.ofInt(count),
+                new ScmProgram(subBuilder.steps)
+        )));
         return this;
     }
 
@@ -200,7 +201,10 @@ public class ImpulseQueryBuilder<R> {
         ImpulseQueryBuilder<R> subBuilder = new ImpulseQueryBuilder<>();
         subBuilder.bindParameters(this.parameters);
         stepFn.apply(subBuilder);
-        steps.add(new StepNode("REPEAT_UNTIL_STABLE", null, null, null, 0, subBuilder.steps));
+        steps.add(new ScmList(List.of(
+                new ScmSymbol("repeat-until-stable"),
+                new ScmProgram(subBuilder.steps)
+        )));
         return this;
     }
 
@@ -216,7 +220,12 @@ public class ImpulseQueryBuilder<R> {
     public ImpulseQueryBuilder<R> walkEdgeFilteredAttribute(String relationName, String attributeName, String op, double value) {
         Objects.requireNonNull(relationName, "relationName must not be null");
         Objects.requireNonNull(attributeName, "attributeName must not be null");
-        steps.add(new StepNode("WALK_EDGE_FILTERED", relationName + ":" + attributeName + ":" + op + ":" + value, null, null, 0, List.of()));
+        steps.add(ScmWalk.forward(relationName, new ScmList(List.of(
+                new ScmSymbol("filter-attr"),
+                new ScmSymbol(attributeName),
+                new ScmSymbol(op),
+                ScmLiteral.ofFloat(value)
+        ))));
         return this;
     }
 
@@ -231,7 +240,12 @@ public class ImpulseQueryBuilder<R> {
     public ImpulseQueryBuilder<R> filterNodeAttribute(String attributeName, String op, double value) {
         Objects.requireNonNull(attributeName, "attributeName must not be null");
         Objects.requireNonNull(op, "op must not be null");
-        steps.add(new StepNode("FILTER_NODE", attributeName + ":" + op + ":" + value, null, null, 0, List.of()));
+        steps.add(new ScmVectorFilter(new ScmList(List.of(
+                new ScmSymbol("filter-node"),
+                new ScmSymbol(attributeName),
+                new ScmSymbol(op),
+                ScmLiteral.ofFloat(value)
+        ))));
         return this;
     }
 
@@ -247,7 +261,12 @@ public class ImpulseQueryBuilder<R> {
         Objects.requireNonNull(nodeAttribute, "nodeAttribute must not be null");
         Objects.requireNonNull(operator, "operator must not be null");
         Objects.requireNonNull(edgeAttribute, "edgeAttribute must not be null");
-        steps.add(new StepNode("PROJECT_EXPRESSION", nodeAttribute + ":" + operator + ":" + edgeAttribute, null, null, 0, List.of()));
+        steps.add(new ScmList(List.of(
+                new ScmSymbol("project-expression"),
+                new ScmSymbol(nodeAttribute),
+                new ScmSymbol(operator),
+                new ScmSymbol(edgeAttribute)
+        )));
         return this;
     }
 
@@ -259,8 +278,8 @@ public class ImpulseQueryBuilder<R> {
      */
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> reduceSum() {
-        steps.add(new StepNode("REDUCE_SUM", null, null, ReturnType.COUNT, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class, parameters);
+        steps.add(ScmReduce.sum());
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ScmProgram(steps), (Class<T>) Double.class, parameters);
     }
 
     /**
@@ -271,8 +290,8 @@ public class ImpulseQueryBuilder<R> {
      */
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> reduceArgMax() {
-        steps.add(new StepNode("REDUCE_ARGMAX", null, null, ReturnType.COUNT, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Integer.class, parameters);
+        steps.add(ScmReduce.argmax());
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ScmProgram(steps), (Class<T>) Integer.class, parameters);
     }
 
     /**
@@ -283,8 +302,8 @@ public class ImpulseQueryBuilder<R> {
      */
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> reduceArgMin() {
-        steps.add(new StepNode("REDUCE_ARGMIN", null, null, ReturnType.COUNT, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Integer.class, parameters);
+        steps.add(ScmReduce.argmin());
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ScmProgram(steps), (Class<T>) Integer.class, parameters);
     }
 
     /**
@@ -295,8 +314,8 @@ public class ImpulseQueryBuilder<R> {
      */
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> reduceMax() {
-        steps.add(new StepNode("REDUCE_MAX", null, null, ReturnType.COUNT, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class, parameters);
+        steps.add(new ScmReduce(ScmReduce.Op.MAX));
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ScmProgram(steps), (Class<T>) Double.class, parameters);
     }
 
     /**
@@ -307,8 +326,8 @@ public class ImpulseQueryBuilder<R> {
      */
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> reduceMin() {
-        steps.add(new StepNode("REDUCE_MIN", null, null, ReturnType.COUNT, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class, parameters);
+        steps.add(new ScmReduce(ScmReduce.Op.MIN));
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ScmProgram(steps), (Class<T>) Double.class, parameters);
     }
 
     /**
@@ -319,8 +338,8 @@ public class ImpulseQueryBuilder<R> {
      */
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> reduceAvg() {
-        steps.add(new StepNode("REDUCE_AVG", null, null, ReturnType.COUNT, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Double.class, parameters);
+        steps.add(new ScmReduce(ScmReduce.Op.COUNT));
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ScmProgram(steps), (Class<T>) Double.class, parameters);
     }
 
     /**
@@ -331,13 +350,12 @@ public class ImpulseQueryBuilder<R> {
      */
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> reduceFirst() {
-        steps.add(new StepNode("REDUCE_FIRST", null, null, ReturnType.COUNT, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Object.class, parameters);
+        steps.add(ScmReduce.first());
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ScmProgram(steps), (Class<T>) Object.class, parameters);
     }
 
     /**
      * Access point for domain-specific extended opcodes (Powergrid island detection, ReBAC, motifs).
-     * Keeps core query builder API clean and tight.
      *
      * @return ExtendedOps wrapper object
      */
@@ -358,17 +376,24 @@ public class ImpulseQueryBuilder<R> {
         }
 
         public ImpulseQueryBuilder<R> islandDetect(int src1Reg, int src2Reg) {
-            builder.steps.add(new StepNode("ISLAND_DETECT", "src1=" + src1Reg + ",src2=" + src2Reg, null, null, 0, List.of()));
+            builder.steps.add(new ScmList(List.of(
+                    new ScmSymbol("island-detect"),
+                    ScmLiteral.ofInt(src1Reg),
+                    ScmLiteral.ofInt(src2Reg)
+            )));
             return builder;
         }
 
         public ImpulseQueryBuilder<R> rebacCheck(String permission) {
-            builder.steps.add(new StepNode("REBAC_CHECK", permission, null, null, 0, List.of()));
+            builder.steps.add(new ScmList(List.of(
+                    new ScmSymbol("rebac-check"),
+                    ScmLiteral.ofStr(permission)
+            )));
             return builder;
         }
 
         public ImpulseQueryBuilder<R> motifMatch3() {
-            builder.steps.add(new StepNode("MOTIF_MATCH_3", null, null, null, 0, List.of()));
+            builder.steps.add(new ScmList(List.of(new ScmSymbol("motif-match-3"))));
             return builder;
         }
     }
@@ -383,8 +408,13 @@ public class ImpulseQueryBuilder<R> {
     @SuppressWarnings("unchecked")
     public <T> ImpulseGraphQuery<T> collect(ReturnType returnType) {
         this.finalReturnType = Objects.requireNonNull(returnType, "returnType must not be null");
-        steps.add(new StepNode("COLLECT", null, null, returnType, 0, List.of()));
-        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ArrayList<>(steps), (Class<T>) Object.class, parameters);
+        ScmCollect collectNode = (returnType == ReturnType.NODE_ARRAY)
+                ? ScmCollect.vector()
+                : (returnType == ReturnType.COUNT)
+                ? ScmCollect.scalar()
+                : ScmCollect.bitset();
+        steps.add(collectNode);
+        return new DefaultImpulseGraphQuery<>(entityType, inputArgType, new ScmProgram(steps), (Class<T>) Object.class, parameters);
     }
 
     @SuppressWarnings("unchecked")
@@ -415,63 +445,35 @@ public class ImpulseQueryBuilder<R> {
         return inputArgType;
     }
 
-    public List<StepNode> getSteps() {
+    public List<ImpScmNode> getSteps() {
         return List.copyOf(steps);
     }
 
     /**
-     * Format AST steps pipeline into a human-readable text tree representation.
-     *
-     * @param steps List of AST step nodes
-     * @return Formatted AST tree string
+     * Format AST steps pipeline into a human-readable ImpScheme S-expression text representation.
      */
-    public static String exportAst(List<StepNode> steps) {
-        if (steps == null || steps.isEmpty()) {
-            return "AST: (empty)";
-        }
-        StringBuilder sb = new StringBuilder();
-        sb.append("AST Query Pipeline [").append(steps.size()).append(" steps]:\n");
-        formatStepList(steps, sb, 0);
-        return sb.toString();
-    }
-
-    private static void formatStepList(List<StepNode> steps, StringBuilder sb, int indentLevel) {
-        String indent = "  ".repeat(indentLevel);
-        for (int i = 0; i < steps.size(); i++) {
-            StepNode step = steps.get(i);
-            sb.append(indent).append("├── Step ").append(i).append(": ").append(step.op());
-            if (step.relation() != null) {
-                sb.append(" [relation=").append(step.relation()).append("]");
-            }
-            if (step.argType() != null) {
-                sb.append(" [argType=").append(step.argType()).append("]");
-            }
-            if (step.returnType() != null) {
-                sb.append(" [returnType=").append(step.returnType()).append("]");
-            }
-            if (step.repeatCount() > 0) {
-                sb.append(" [repeatCount=").append(step.repeatCount()).append("]");
-            }
-            sb.append("\n");
-            if (step.subSteps() != null && !step.subSteps().isEmpty()) {
-                formatStepList(step.subSteps(), sb, indentLevel + 1);
-            }
-        }
+    public static String exportAst(ImpScmNode ast) {
+        return ast != null ? ast.toScmString() : "()";
     }
 
     private static class DefaultImpulseGraphQuery<R> implements ImpulseGraphQuery<R> {
         private final String entityType;
         private final ArgType inputArgType;
-        private final List<StepNode> pipelineSteps;
+        private final ScmProgram ast;
         private final Class<R> resultType;
         private final Map<String, Object> parameters;
 
-        public DefaultImpulseGraphQuery(String entityType, ArgType inputArgType, List<StepNode> pipelineSteps, Class<R> resultType, Map<String, Object> parameters) {
+        public DefaultImpulseGraphQuery(String entityType, ArgType inputArgType, ScmProgram ast, Class<R> resultType, Map<String, Object> parameters) {
             this.entityType = entityType;
             this.inputArgType = inputArgType;
-            this.pipelineSteps = List.copyOf(pipelineSteps);
+            this.ast = ast;
             this.resultType = resultType;
             this.parameters = parameters != null ? Map.copyOf(parameters) : Map.of();
+        }
+
+        @Override
+        public ImpScmNode getAst() {
+            return ast;
         }
 
         @Override
@@ -499,13 +501,8 @@ public class ImpulseQueryBuilder<R> {
         }
 
         @Override
-        public List<StepNode> getSteps() {
-            return pipelineSteps;
-        }
-
-        @Override
         public String getOperationName() {
-            return "QueryPipeline[" + entityType + "->" + pipelineSteps.size() + "Steps]";
+            return "QueryPipeline[" + entityType + "->" + (ast != null ? ast.steps().size() : 0) + "Steps]";
         }
     }
 }

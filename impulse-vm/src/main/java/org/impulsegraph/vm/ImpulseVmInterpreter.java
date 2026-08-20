@@ -246,12 +246,12 @@ public final class ImpulseVmInterpreter {
                     }
 
                     case OP_NODE_FILTER -> {
-                        VmHandlers.handleNodeFilter(state, ctx, instr);
+                        VmHandlers.handleNodeFilter(state, ctx, instr, input);
                         pc++;
                     }
 
                     case OP_CSR_WALK_FILTERED -> {
-                        VmHandlers.handleCsrWalk(state, ctx, instr);
+                        VmHandlers.handleCsrWalk(state, ctx, instr, input);
                         pc++;
                     }
 
@@ -306,7 +306,7 @@ public final class ImpulseVmInterpreter {
                     }
 
                     case OP_COLLECT_BITSET -> {
-                        finalResult = VmHandlers.handleCollectBitset(state, ctx, instr);
+                        finalResult = VmHandlers.handleCollectBitset(state, ctx, instr, input);
                         pc++;
                     }
 

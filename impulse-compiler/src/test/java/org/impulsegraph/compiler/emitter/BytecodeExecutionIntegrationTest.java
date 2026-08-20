@@ -12,7 +12,7 @@ import org.impulsegraph.compiler.registry.QueryObject;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.RelationSnapshot;
-import org.impulsegraph.vm.ImpulseQueryCompiler.CompiledQuery;
+import org.impulsegraph.vm.CompiledQuery;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

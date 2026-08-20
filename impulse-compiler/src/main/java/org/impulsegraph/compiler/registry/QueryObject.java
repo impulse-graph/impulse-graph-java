@@ -2,7 +2,7 @@ package org.impulsegraph.compiler.registry;
 
 import org.impulsegraph.compiler.ast.ImpScmNode;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
-import org.impulsegraph.vm.ImpulseQueryCompiler.CompiledQuery;
+import org.impulsegraph.vm.CompiledQuery;
 
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;

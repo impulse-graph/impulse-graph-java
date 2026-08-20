@@ -10,7 +10,7 @@ import org.impulsegraph.compiler.passes.stage2.*;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
-import org.impulsegraph.vm.ImpulseQueryCompiler.CompiledQuery;
+import org.impulsegraph.vm.CompiledQuery;
 
 import java.lang.foreign.Arena;
 import java.util.Objects;

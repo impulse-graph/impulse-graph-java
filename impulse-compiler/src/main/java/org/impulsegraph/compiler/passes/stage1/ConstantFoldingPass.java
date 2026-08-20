@@ -33,7 +33,7 @@ public final class ConstantFoldingPass implements CompilerPass {
     private ImpScmNode foldNode(ImpScmNode node) {
         if (node instanceof ScmCelExpr cel) {
             if (cel.celAst() != null) {
-                CelAstNode optimized = CelAstOptimizer.optimize(cel.celAst());
+                CelAstNode optimized = CelAstOptimizer.optimize((CelAstNode) cel.celAst());
                 return new ScmCelExpr(cel.rawText(), optimized);
             }
             return cel;

@@ -3,23 +3,20 @@ package org.impulsegraph.vm;
 import org.impulsegraph.api.ImpulseGraphQuery;
 import org.impulsegraph.api.ImpulseGraphQueryEvaluator;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
-import org.impulsegraph.api.RelationSnapshot;
-import org.impulsegraph.api.ImpulseQueryBuilder;
-import org.impulsegraph.api.ReturnType;
+import org.impulsegraph.compiler.ast.ImpScmNode;
 
-import java.util.Arrays;
-import org.impulsegraph.api.bitset.ImpulseBitSet;
-import org.impulsegraph.api.bitset.OffHeapBitSet;
-import java.util.Collection;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
+import java.lang.foreign.Arena;
+import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * High-performance query evaluator caching compiled bytecode execution plans and executing
+ * zero-copy over memory-mapped graph snapshots.
+ */
 public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator {
 
     private static final DefaultImpulseQueryEvaluator INSTANCE = new DefaultImpulseQueryEvaluator();
-    private static final java.util.concurrent.ConcurrentHashMap<ImpulseGraphQuery<?>, org.impulsegraph.vm.ImpulseQueryCompiler.CompiledQuery> COMPILED_QUERY_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final java.lang.foreign.Arena COMPILER_ARENA = java.lang.foreign.Arena.ofAuto();
+    private static final ConcurrentHashMap<ImpulseGraphQuery<?>, CompiledQuery> COMPILED_QUERY_CACHE = new ConcurrentHashMap<>();
+    private static final Arena COMPILER_ARENA = Arena.ofAuto();
 
     public static DefaultImpulseQueryEvaluator getInstance() {
         return INSTANCE;
@@ -45,10 +42,10 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
             metrics.setActiveQueries(graph.getActiveQueryCount());
         }
 
-        if (graph != null && query != null && query.getSteps() != null && !query.getSteps().isEmpty()) {
-            org.impulsegraph.vm.ImpulseQueryCompiler.CompiledQuery compiled = COMPILED_QUERY_CACHE.computeIfAbsent(query, q -> {
+        if (graph != null && query != null && query.getAst() != null) {
+            CompiledQuery compiled = COMPILED_QUERY_CACHE.computeIfAbsent(query, q -> {
                 metrics.recordCacheMiss();
-                return org.impulsegraph.vm.ImpulseQueryCompiler.compile(q.getSteps(), graph, COMPILER_ARENA);
+                return compileAst(q.getAst(), graph, COMPILER_ARENA);
             });
 
             if (compiled != null) {
@@ -59,5 +56,17 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
             }
         }
         throw new UnsupportedOperationException("Empty query or unable to compile pipeline");
+    }
+
+    public static CompiledQuery compileAst(ImpScmNode ast, ImpulseGraphSnapshot snapshot, Arena arena) {
+        return org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter.compileToExecutable(ast, snapshot, arena);
+    }
+
+    public static String disassembleQuery(ImpulseGraphQuery<?> query, ImpulseGraphSnapshot snapshot) {
+        if (query == null || query.getAst() == null) return "()";
+        try (Arena arena = Arena.ofConfined()) {
+            CompiledQuery compiled = compileAst(query.getAst(), snapshot, arena);
+            return compiled.disassemble();
+        }
     }
 }

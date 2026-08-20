@@ -45,4 +45,5 @@ public sealed interface ScmLiteral extends ImpScmNode permits
     static ScmFloat ofFloat(double value) { return new ScmFloat(value); }
     static ScmBool ofBool(boolean value) { return new ScmBool(value); }
     static ScmString ofString(String value) { return new ScmString(value); }
+    static ScmString ofStr(String value) { return new ScmString(value); }
 }
