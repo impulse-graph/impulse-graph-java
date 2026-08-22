@@ -33,4 +33,10 @@ public interface RelationSnapshot {
     java.util.List<MemorySegment> getAttributeSegments();
     void setCscSegments(MemorySegment rowOffsets, MemorySegment colTargets);
     org.impulsegraph.api.stats.RelationStatistics getStatistics();
+    long readEdgeIndex(MemorySegment segment, long nodeId);
+    int readNodeId(MemorySegment segment, long index);
+    int readSrcNodeId(MemorySegment segment, long index);
+    byte getSrcNodeIdWidth();
+    byte getNodeIdWidth();
+    byte getEdgeIndexWidth();
 }

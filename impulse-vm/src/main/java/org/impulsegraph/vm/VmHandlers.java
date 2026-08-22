@@ -275,10 +275,10 @@ public final class VmHandlers {
             if ((flags & FLAG_INPUT_SEED) != 0 && input instanceof Number n) {
                 int seed = n.intValue();
                 if (seed >= 0 && seed < rel1.getNodeCount()) {
-                    int start1 = r1Offsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, seed);
-                    int end1 = r1Offsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, seed + 1);
-                    for (int i = start1; i < end1; i++) {
-                        int hop1Target = r1Targets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+                    long start1 = rel1.readEdgeIndex(r1Offsets, seed);
+                    long end1 = rel1.readEdgeIndex(r1Offsets, seed + 1);
+                    for (long i = start1; i < end1; i++) {
+                        int hop1Target = rel1.readNodeId(r1Targets, i);
                         rel2.copyTargetsSimd(hop1Target, outBs);
                     }
                 }
@@ -288,10 +288,10 @@ public final class VmHandlers {
                 if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
                     int seed = (int) srcVal;
                     if (seed >= 0 && seed < rel1.getNodeCount()) {
-                        int start1 = r1Offsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, seed);
-                        int end1 = r1Offsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, seed + 1);
-                        for (int i = start1; i < end1; i++) {
-                            int hop1Target = r1Targets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+                        long start1 = rel1.readEdgeIndex(r1Offsets, seed);
+                        long end1 = rel1.readEdgeIndex(r1Offsets, seed + 1);
+                        for (long i = start1; i < end1; i++) {
+                            int hop1Target = rel1.readNodeId(r1Targets, i);
                             rel2.copyTargetsSimd(hop1Target, outBs);
                         }
                     }
@@ -300,10 +300,10 @@ public final class VmHandlers {
                     if (inBs != null) {
                         for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
                             if (u < rel1.getNodeCount()) {
-                                int start1 = r1Offsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
-                                int end1 = r1Offsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
-                                for (int i = start1; i < end1; i++) {
-                                    int hop1Target = r1Targets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+                                long start1 = rel1.readEdgeIndex(r1Offsets, u);
+                                long end1 = rel1.readEdgeIndex(r1Offsets, u + 1);
+                                for (long i = start1; i < end1; i++) {
+                                    int hop1Target = rel1.readNodeId(r1Targets, i);
                                     rel2.copyTargetsSimd(hop1Target, outBs);
                                 }
                             }
@@ -318,9 +318,7 @@ public final class VmHandlers {
     }
 
     public static void handleLoadConstStrPrefix(MemorySegment state, Instruction instr) {
-        long val = Integer.toUnsignedLong(instr.payload());
-        setRegister(state, instr.dstReg(), val, TYPE_INT64);
-        setFlag(state, FLAG_ZF, val == 0);
+        setRegister(state, instr.dstReg(), instr.payload(), TYPE_INT64);
     }
 
     public static void handleCscWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -332,6 +330,11 @@ public final class VmHandlers {
         int unvisitedReg = (instr.payload() >> 16) & 0xFF;
         int relId = (instr.payload() >> 24) & 0xFF;
 
+        if (relId == 0 && (instr.payload() >> 24) == 0 && getRegisterType(state, unvisitedReg) != TYPE_BITSET_HANDLE) {
+            relId = (instr.payload() >> 16) & 0xFFFF;
+            unvisitedReg = 0;
+        }
+
         RelationSnapshot rel = resolveRelation(ctx, relId);
         if (rel == null || !rel.hasCsc()) {
             throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
@@ -341,18 +344,19 @@ public final class VmHandlers {
         ImpulseBitSet outBs = ctx.getBitset(outHandle);
 
         if (unvisitedReg != 0) {
-            // Bottom-Up Pull Mode (Frontier = frontierReg, Unvisited = unvisitedReg)
+            // GraphBLAS Bottom-Up BFS mode
             ImpulseBitSet frontierBs = ctx.getBitset((int) getRegisterValue(state, frontierReg));
             ImpulseBitSet unvisitedBs = ctx.getBitset((int) getRegisterValue(state, unvisitedReg));
 
-            if (frontierBs != null && unvisitedBs != null) {
+            if (frontierBs != null && unvisitedBs != null && rel.hasCsc()) {
                 MemorySegment cscRowOff = rel.getCscRowOffsetsSegment();
                 MemorySegment cscColIdx = rel.getCscColumnTargetsSegment();
                 int nodeCount = rel.getNodeCount();
 
                 int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
-                int unvisitedCount = (int) unvisitedBs.cardinality();
-                if (unvisitedCount >= 10_000 && nodeCount >= 10_000) {
+                long unvisitedCard = unvisitedBs.cardinality();
+
+                if (unvisitedCard >= 2_000) {
                     if (numThreads > 1) {
                         java.util.concurrent.atomic.AtomicInteger nextChunk = new java.util.concurrent.atomic.AtomicInteger(0);
                         final int chunkSize = 1024;
@@ -363,10 +367,10 @@ public final class VmHandlers {
                                 if (startV >= nodeCount) break;
                                 int endV = Math.min(startV + chunkSize, nodeCount);
                                 for (int v = unvisitedBs.nextSetBit(startV); v >= 0 && v < endV; v = unvisitedBs.nextSetBit(v + 1)) {
-                                    int start = cscRowOff.getAtIndex(ValueLayout.JAVA_INT, v);
-                                    int end = cscRowOff.getAtIndex(ValueLayout.JAVA_INT, v + 1);
-                                    for (int i = start; i < end; i++) {
-                                        int target = cscColIdx.getAtIndex(ValueLayout.JAVA_INT, i);
+                                    long start = rel.readEdgeIndex(cscRowOff, v);
+                                    long end = rel.readEdgeIndex(cscRowOff, v + 1);
+                                    for (long i = start; i < end; i++) {
+                                        int target = rel.readSrcNodeId(cscColIdx, i);
                                         if (frontierBs.get(target)) {
                                             outBs.set(v);
                                             break;
@@ -381,10 +385,10 @@ public final class VmHandlers {
                         for (int startV = 0; startV < nodeCount; startV += chunkSize) {
                             int endV = Math.min(startV + chunkSize, nodeCount);
                             for (int v = unvisitedBs.nextSetBit(startV); v >= 0 && v < endV; v = unvisitedBs.nextSetBit(v + 1)) {
-                                int start = cscRowOff.getAtIndex(ValueLayout.JAVA_INT, v);
-                                int end = cscRowOff.getAtIndex(ValueLayout.JAVA_INT, v + 1);
-                                for (int i = start; i < end; i++) {
-                                    int target = cscColIdx.getAtIndex(ValueLayout.JAVA_INT, i);
+                                long start = rel.readEdgeIndex(cscRowOff, v);
+                                long end = rel.readEdgeIndex(cscRowOff, v + 1);
+                                for (long i = start; i < end; i++) {
+                                    int target = rel.readSrcNodeId(cscColIdx, i);
                                     if (frontierBs.get(target)) {
                                         outBs.set(v);
                                         break;
@@ -395,10 +399,10 @@ public final class VmHandlers {
                     }
                 } else {
                     for (int v = unvisitedBs.nextSetBit(0); v >= 0; v = unvisitedBs.nextSetBit(v + 1)) {
-                        int start = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v);
-                        int end = cscRowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v + 1);
-                        for (int idx = start; idx < end; idx++) {
-                            int u = cscColIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+                        long start = rel.readEdgeIndex(cscRowOff, v);
+                        long end = rel.readEdgeIndex(cscRowOff, v + 1);
+                        for (long idx = start; idx < end; idx++) {
+                            int u = rel.readSrcNodeId(cscColIdx, idx);
                             if (frontierBs.get(u)) {
                                 outBs.set(v);
                                 break;

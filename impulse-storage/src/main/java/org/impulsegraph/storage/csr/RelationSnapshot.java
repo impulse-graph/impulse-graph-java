@@ -20,6 +20,7 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
     private final MemorySegment columnTargetsSegment;
     private final int[] rowOffsetsData;
     private final int[] columnIndicesData;
+    private final byte srcNodeIdWidth;
     private final byte nodeIdWidth;
     private final byte edgeIndexWidth;
 
@@ -29,6 +30,7 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
         this.edgeCount = edgeCount;
         this.rowOffsetsData = Objects.requireNonNull(rowOffsetsData, "rowOffsetsData must not be null");
         this.columnIndicesData = Objects.requireNonNull(columnIndicesData, "columnIndicesData must not be null");
+        this.srcNodeIdWidth = 4;
         this.nodeIdWidth = 4;
         this.edgeIndexWidth = 4;
 
@@ -69,6 +71,10 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
     }
 
     public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment, MemorySegment cscRowOffsetsSegment, MemorySegment cscColumnTargetsSegment, java.util.List<MemorySegment> attributeSegments, java.util.List<MemorySegment> validitySegments, byte nodeIdWidth, byte edgeIndexWidth) {
+        this(arena, nodeCount, edgeCount, rowOffsetsSegment, columnTargetsSegment, cscRowOffsetsSegment, cscColumnTargetsSegment, attributeSegments, validitySegments, nodeIdWidth, nodeIdWidth, edgeIndexWidth);
+    }
+
+    public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment, MemorySegment cscRowOffsetsSegment, MemorySegment cscColumnTargetsSegment, java.util.List<MemorySegment> attributeSegments, java.util.List<MemorySegment> validitySegments, byte srcNodeIdWidth, byte dstNodeIdWidth, byte edgeIndexWidth) {
         this.arena = Objects.requireNonNull(arena, "arena must not be null");
         this.nodeCount = nodeCount;
         this.edgeCount = edgeCount;
@@ -77,7 +83,8 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
         this.cscRowOffsetsSegment = cscRowOffsetsSegment != null ? cscRowOffsetsSegment : MemorySegment.NULL;
         this.cscColumnTargetsSegment = cscColumnTargetsSegment != null ? cscColumnTargetsSegment : MemorySegment.NULL;
         this.cscPresent = !this.cscRowOffsetsSegment.equals(MemorySegment.NULL) && !this.cscColumnTargetsSegment.equals(MemorySegment.NULL);
-        this.nodeIdWidth = nodeIdWidth;
+        this.srcNodeIdWidth = srcNodeIdWidth;
+        this.nodeIdWidth = dstNodeIdWidth;
         this.edgeIndexWidth = edgeIndexWidth;
         this.rowOffsetsData = null;
         this.columnIndicesData = null;
@@ -90,7 +97,19 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
     }
 
     public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment, MemorySegment columnTargetsSegment, MemorySegment cscRowOffsetsSegment, MemorySegment cscColumnTargetsSegment) {
-        this(arena, nodeCount, edgeCount, rowOffsetsSegment, columnTargetsSegment, cscRowOffsetsSegment, cscColumnTargetsSegment, java.util.Collections.emptyList(), java.util.Collections.emptyList(), (byte) 4, (byte) 4);
+        this(arena, nodeCount, edgeCount, rowOffsetsSegment, columnTargetsSegment, cscRowOffsetsSegment, cscColumnTargetsSegment, java.util.Collections.emptyList(), java.util.Collections.emptyList(), (byte) 4, (byte) 4, (byte) 4);
+    }
+
+    public byte getSrcNodeIdWidth() {
+        return srcNodeIdWidth;
+    }
+
+    public byte getNodeIdWidth() {
+        return nodeIdWidth;
+    }
+
+    public byte getEdgeIndexWidth() {
+        return edgeIndexWidth;
     }
 
     private boolean cscPresent = false;
@@ -196,7 +215,7 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
     }
 
     
-    private long readEdgeIndex(MemorySegment segment, int nodeId) {
+    public long readEdgeIndex(MemorySegment segment, long nodeId) {
         if (edgeIndexWidth == 8) {
             return segment.getAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, nodeId);
         } else {
@@ -204,10 +223,18 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
         }
     }
 
-    private int readNodeId(MemorySegment segment, long index) {
-        if (nodeIdWidth == 2) {
+    public int readNodeId(MemorySegment segment, long index) {
+        return readNodeId(segment, index, nodeIdWidth);
+    }
+
+    public int readSrcNodeId(MemorySegment segment, long index) {
+        return readNodeId(segment, index, srcNodeIdWidth);
+    }
+
+    public static int readNodeId(MemorySegment segment, long index, byte width) {
+        if (width == 2) {
             return Short.toUnsignedInt(segment.getAtIndex(ValueLayout.JAVA_SHORT_UNALIGNED, index));
-        } else if (nodeIdWidth == 8) {
+        } else if (width == 8) {
             return (int) segment.getAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, index);
         } else {
             return segment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, index);
@@ -294,11 +321,11 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
         int len = (int) (end - start);
         if (len <= 0) return new int[0];
         int[] targets = new int[len];
-        if (nodeIdWidth == 4) {
+        if (srcNodeIdWidth == 4) {
             MemorySegment.copy(cscColumnTargetsSegment, ValueLayout.JAVA_INT_UNALIGNED, start * 4, targets, 0, len);
         } else {
             for (int i = 0; i < len; i++) {
-                targets[i] = readNodeId(cscColumnTargetsSegment, start + i);
+                targets[i] = readSrcNodeId(cscColumnTargetsSegment, start + i);
             }
         }
         return targets;
@@ -399,7 +426,7 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
         if (count <= 0) return;
 
         for (int i = 0; i < count; i++) {
-            outBs.set(readNodeId(cscColumnTargetsSegment, start + i));
+            outBs.set(readSrcNodeId(cscColumnTargetsSegment, start + i));
         }
     }
 

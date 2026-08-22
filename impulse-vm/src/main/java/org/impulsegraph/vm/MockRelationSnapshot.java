@@ -42,4 +42,16 @@ public class MockRelationSnapshot implements RelationSnapshot {
         this.cscColTargets = colTargets;
     }
     @Override public org.impulsegraph.api.stats.RelationStatistics getStatistics() { return null; }
+    @Override public long readEdgeIndex(MemorySegment segment, long nodeId) {
+        return Integer.toUnsignedLong(segment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (int) nodeId));
+    }
+    @Override public int readNodeId(MemorySegment segment, long index) {
+        return segment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (int) index);
+    }
+    @Override public int readSrcNodeId(MemorySegment segment, long index) {
+        return segment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (int) index);
+    }
+    @Override public byte getSrcNodeIdWidth() { return 4; }
+    @Override public byte getNodeIdWidth() { return 4; }
+    @Override public byte getEdgeIndexWidth() { return 4; }
 }
