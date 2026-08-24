@@ -30,13 +30,43 @@ public class MockRelationSnapshot implements RelationSnapshot {
     @Override public boolean hasCsc() { return cscRowOffsets != null; }
     @Override public boolean hasCsr() { return rowOffsets != null; }
     @Override public int getNodeCount() { return nodeCount; }
-    @Override public int getDegree(int nodeId) { return 0; }
-    @Override public int getInDegree(int nodeId) { return 0; }
+    @Override
+    public int getDegree(int nodeId) {
+        if (rowOffsets == null || nodeId < 0 || nodeId >= nodeCount) return 0;
+        int start = rowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) nodeId);
+        int end = rowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) (nodeId + 1));
+        return Math.max(0, end - start);
+    }
+    @Override
+    public int getInDegree(int nodeId) {
+        if (cscRowOffsets == null || nodeId < 0 || nodeId >= nodeCount) return 0;
+        int start = cscRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) nodeId);
+        int end = cscRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) (nodeId + 1));
+        return Math.max(0, end - start);
+    }
     @Override public int[] getTargets(int nodeId) { return new int[0]; }
-    @Override public void copyTargetsSimd(int nodeId, ImpulseBitSet frontier) {}
-    @Override public void copyInTargetsSimd(int nodeId, ImpulseBitSet frontier) {}
+    @Override
+    public void copyTargetsSimd(int nodeId, ImpulseBitSet frontier) {
+        if (rowOffsets == null || colTargets == null || nodeId < 0 || nodeId >= nodeCount) return;
+        int start = rowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) nodeId);
+        int end = rowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) (nodeId + 1));
+        for (int i = start; i < end; i++) {
+            int target = colTargets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) i);
+            frontier.set(target);
+        }
+    }
+    @Override
+    public void copyInTargetsSimd(int nodeId, ImpulseBitSet frontier) {
+        if (cscRowOffsets == null || cscColTargets == null || nodeId < 0 || nodeId >= nodeCount) return;
+        int start = cscRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) nodeId);
+        int end = cscRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) (nodeId + 1));
+        for (int i = start; i < end; i++) {
+            int target = cscColTargets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) i);
+            frontier.set(target);
+        }
+    }
     @Override public void copyTargetsSimdFilteredFloat(int nodeId, MemorySegment attrSegment, float threshold, byte cmpOp, ImpulseBitSet outBs) {}
-    @Override public java.util.List<MemorySegment> getAttributeSegments() { return null; }
+    @Override public java.util.List<MemorySegment> getAttributeSegments() { return java.util.List.of(); }
     @Override public void setCscSegments(MemorySegment rowOffsets, MemorySegment colTargets) {
         this.cscRowOffsets = rowOffsets;
         this.cscColTargets = colTargets;

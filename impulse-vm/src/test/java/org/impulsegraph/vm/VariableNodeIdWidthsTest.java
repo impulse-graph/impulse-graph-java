@@ -109,8 +109,8 @@ public class VariableNodeIdWidthsTest {
                     csrTargetsSeg,
                     cscOffsetsSeg,
                     cscTargetsSeg,
-                    Collections.emptyList(),
-                    Collections.emptyList(),
+                    java.util.Collections.<MemorySegment>emptyList(),
+                    java.util.Collections.<MemorySegment>emptyList(),
                     srcWidth,
                     dstWidth,
                     edgeIdxWidth
