@@ -40,6 +40,7 @@ public final class VmRegisterType {
     public static final byte TYPE_FLOAT_VECTOR    = 0x0C;
     public static final byte TYPE_DOUBLE_VECTOR   = 0x0D;
     public static final byte TYPE_UINT64_VECTOR   = 0x0E;
+    public static final byte TYPE_FRONTIER_STATE  = 0x0F;
 
     // Opcodes Definitions
     public static final byte OP_HALT                   = (byte) 0x00;
@@ -58,7 +59,7 @@ public final class VmRegisterType {
     public static final byte OP_RESERVED_0C            = (byte) 0x0C;
     public static final byte OP_RESERVED_0D            = (byte) 0x0D;
     public static final byte OP_CSR_WALK_2HOP          = (byte) 0x0E;
-    public static final byte OP_RESERVED_0F            = (byte) 0x0F;
+    public static final byte OP_CSR_WALK_STATE         = (byte) 0x0F;
 
     public static final byte OP_CSR_WALK               = (byte) 0x10;
     public static final byte OP_CSR_WALK_FILTERED      = (byte) 0x11;
@@ -107,10 +108,14 @@ public final class VmRegisterType {
     public static final byte OP_FLOAT_VECTOR_SCALE     = (byte) 0x38;
     public static final byte OP_L1_NORM_DIFF           = (byte) 0x39;
 
+    public static final byte OP_PROJECT_STATE          = (byte) 0x3A;
     public static final byte OP_VECTOR_REDUCE_MAX      = (byte) 0x3A;
     public static final byte OP_VECTOR_REDUCE_MIN      = (byte) 0x3B;
     public static final byte OP_VECTOR_REDUCE_ARGMAX   = (byte) 0x3C;
+    public static final byte OP_VECTOR_TIME_VALID_AT   = (byte) 0x3D;
     public static final byte OP_VECTOR_REDUCE_ARGMIN   = (byte) 0x3D;
+    public static final byte OP_RESERVED_3B            = (byte) 0x3B;
+    public static final byte OP_RESERVED_3C            = (byte) 0x3C;
     public static final byte OP_RESERVED_3E            = (byte) 0x3E;
     public static final byte OP_RESERVED_3F            = (byte) 0x3F;
 
@@ -188,27 +193,29 @@ public final class VmRegisterType {
     public static final byte OP_RESERVED_7D            = (byte) 0x7D;
     public static final byte OP_RESERVED_7E            = (byte) 0x7E;
     public static final byte OP_RESERVED_7F            = (byte) 0x7F;
-    public static final byte OP_RESERVED_80            = (byte) 0x80;
-    public static final byte OP_RESERVED_81            = (byte) 0x81;
-    public static final byte OP_RESERVED_82            = (byte) 0x82;
-    public static final byte OP_RESERVED_83            = (byte) 0x83;
-    public static final byte OP_RESERVED_84            = (byte) 0x84;
-    public static final byte OP_RESERVED_85            = (byte) 0x85;
-    public static final byte OP_RESERVED_86            = (byte) 0x86;
-    public static final byte OP_RESERVED_87            = (byte) 0x87;
-    public static final byte OP_RESERVED_88            = (byte) 0x88;
-    public static final byte OP_RESERVED_89            = (byte) 0x89;
-    public static final byte OP_RESERVED_8A            = (byte) 0x8A;
-    public static final byte OP_RESERVED_8B            = (byte) 0x8B;
-    public static final byte OP_RESERVED_8C            = (byte) 0x8C;
-    public static final byte OP_RESERVED_8D            = (byte) 0x8D;
-    public static final byte OP_RESERVED_8E            = (byte) 0x8E;
-    public static final byte OP_RESERVED_8F            = (byte) 0x8F;
+    public static final byte OP_LOAD_COLUMN_VECTOR     = (byte) 0x80;
+    public static final byte OP_GATHER_NODE_ATTR       = (byte) 0x81;
+    public static final byte OP_GATHER_EDGE_ATTR       = (byte) 0x82;
+    public static final byte OP_BRIN_ZONE_SKIP         = (byte) 0x83;
+    public static final byte OP_CSR_WALK_DIRECT_STORE  = (byte) 0x84;
+    public static final byte OP_CSR_WALK_DENSE_STREAM  = (byte) 0x85;
+    public static final byte OP_COO_WALK               = (byte) 0x86;
+    public static final byte OP_CSC_WALK_DIRECT_STORE  = (byte) 0x87;
+    public static final byte OP_FIXPOINT_KLEENE_STAR   = (byte) 0x88;
+    public static final byte OP_SWAP_REG               = (byte) 0x89;
+    public static final byte OP_FRONTIER_DIFF          = (byte) 0x8A;
+    public static final byte OP_COO_WALK_FILTERED      = (byte) 0x8B;
+    public static final byte OP_COO_WALK_REDUCE        = (byte) 0x8C;
+    public static final byte OP_COO_WALK_DIRECT_STORE  = (byte) 0x8D;
+    public static final byte OP_DENSE_WALK             = (byte) 0x8E;
+    public static final byte OP_DENSE_WALK_BITMATRIX   = (byte) 0x8F;
 
     public static final byte OP_COLLECT_BITSET         = (byte) 0x90;
     public static final byte OP_COLLECT_ARRAY          = (byte) 0x91;
     public static final byte OP_MAP_DENSE_TO_KEYS      = (byte) 0x92;
     public static final byte OP_COLLECT_VALUE_MAP      = (byte) 0x93;
+    public static final byte OP_DENSE_WALK_REDUCE      = (byte) 0x94;
+    public static final byte OP_DENSE_WALK_DIRECT_STORE= (byte) 0x95;
 
     // GraphBLAS Semiring IDs
     public static final int SEMIRING_PLUS_TIMES       = 0;

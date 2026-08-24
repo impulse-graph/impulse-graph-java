@@ -28,10 +28,11 @@ This document outlines the detailed engineering task checklist required to bring
 - [ ] Add zero-dependency exception hierarchy (`ImpulseException`, `ImpulseVMException`, `SnapshotCorruptedException`).
 - [ ] Ensure 0 third-party transitive dependencies on build classpath.
 
-### 2. `impulse-core` (Off-Heap Engine, Vector API & CEL Compiler)
-- [ ] Complete off-heap zero-copy snapshot loader (`MemorySegment` mmap) matching Spec v0.9.0 Page 0 alignment and 128-byte hardware bounds.
-- [ ] Implement self-contained zero-dependency **Google CEL (Common Expression Language)** Pratt parser (~300 LOC in pure Java) with built-in Datetime/Duration and 42 analytical vector math extensions.
-- [ ] Implement Level 2 **`MethodHandle` JIT Combinators** (`MethodHandles.foldArguments()`, `filterArguments()`, `VectorOperators` bindings) for unrolling `impOps` into straight-line AVX-512 native HotSpot execution.
+### 2. `impulse-core` & `impulse-vm` (Off-Heap Engine, Vector API & CEL Compiler)
+- [x] Complete off-heap zero-copy snapshot loader (`MemorySegment` mmap) matching Spec v0.9.0 Page 0 alignment and 128-byte hardware bounds.
+- [x] Implement self-contained zero-dependency **Google CEL (Common Expression Language)** Pratt parser with analytical vector math extensions.
+- [x] Implement Level 2 **`MethodHandle` JIT Combinators** (`MethodHandles.foldArguments()`, `filterArguments()`, `VectorOperators` bindings) for unrolling `impOps` into HotSpot native execution.
+- [x] **Configurable Primitive Node ID Widths (16, 32, 64-bit)**: Support for per-domain variable ID widths (`uint16_t`, `uint32_t`, `uint64_t`) and edge offset widths.
 - [ ] **Ultra-Low-Latency Intra-Opcode Parallel Engine (`ImpulseCarrierThreadPool`)**:
   - Replace heavy `ForkJoinPool` with pre-allocated, pre-warmed static carrier platform threads.
   - Implement deterministic range slicing over `MemorySegment` off-heap buffers with 0 heap object allocations per query.

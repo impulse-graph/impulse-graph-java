@@ -194,8 +194,10 @@ public final class ImpulseVmInterpreter {
                     case OP_LOOP_DECR -> {
                         int offset = instr.payload();
                         long count = VmHandlers.getRegisterValue(state, instr.dstReg());
+                        count--;
+                        VmHandlers.setRegister(state, instr.dstReg(), count, TYPE_INT64);
+                        VmHandlers.setFlag(state, FLAG_ZF, count == 0);
                         if (count > 0) {
-                            VmHandlers.setRegister(state, instr.dstReg(), count - 1, TYPE_INT64);
                             pc += offset;
                         } else {
                             pc++;
@@ -236,7 +238,7 @@ public final class ImpulseVmInterpreter {
                     }
 
                     case OP_MOV -> {
-                        VmHandlers.handleMov(state, instr);
+                        VmHandlers.handleMov(state, ctx, instr);
                         pc++;
                     }
 
@@ -255,6 +257,40 @@ public final class ImpulseVmInterpreter {
                         pc++;
                     }
 
+                    case OP_VEC_CMP_EQ -> { VmHandlers.handleVecCmpEq(state, ctx, instr); pc++; }
+                    case OP_VEC_CMP_GT -> { VmHandlers.handleVecCmpGt(state, ctx, instr); pc++; }
+                    case OP_VEC_CMP_LT -> { VmHandlers.handleVecCmpLt(state, ctx, instr); pc++; }
+                    case OP_VEC_CMP_BETWEEN -> { VmHandlers.handleVecCmpBetween(state, ctx, instr); pc++; }
+                    case OP_MASK_AND -> { VmHandlers.handleMaskAnd(state, ctx, instr); pc++; }
+                    case OP_MASK_OR -> { VmHandlers.handleMaskOr(state, ctx, instr); pc++; }
+                    case OP_MASK_NOT -> { VmHandlers.handleMaskNot(state, ctx, instr); pc++; }
+                    case OP_VEC_BLEND -> { VmHandlers.handleVecBlend(state, ctx, instr); pc++; }
+                    case OP_VEC_MATH_UNARY -> { VmHandlers.handleVecMathUnary(state, ctx, instr); pc++; }
+                    case OP_VEC_MATH_BINARY -> { VmHandlers.handleVecMathBinary(state, ctx, instr); pc++; }
+                    case OP_VEC_MATH_TERNARY -> { VmHandlers.handleVecMathTernary(state, ctx, instr); pc++; }
+
+                    case OP_LOAD_COLUMN_VECTOR -> { VmHandlers.handleLoadColumnVector(state, ctx, instr); pc++; }
+                    case OP_GATHER_NODE_ATTR -> { VmHandlers.handleGatherNodeAttr(state, ctx, instr); pc++; }
+                    case OP_GATHER_EDGE_ATTR -> { VmHandlers.handleGatherEdgeAttr(state, ctx, instr); pc++; }
+                    case OP_BRIN_ZONE_SKIP -> { VmHandlers.handleBrinZoneSkip(state, ctx, instr); pc++; }
+                    case OP_CSR_WALK_DIRECT_STORE -> { VmHandlers.handleCsrWalkDirectStore(state, ctx, instr); pc++; }
+                    case OP_CSR_WALK_DENSE_STREAM -> { VmHandlers.handleCsrWalkDenseStream(state, ctx, instr); pc++; }
+                    case OP_COO_WALK -> { VmHandlers.handleCooWalk(state, ctx, instr); pc++; }
+                    case OP_CSC_WALK_DIRECT_STORE -> { VmHandlers.handleCscWalkDirectStore(state, ctx, instr); pc++; }
+                    case OP_FIXPOINT_KLEENE_STAR -> { VmHandlers.handleFixpointKleeneStar(state, ctx, instr); pc++; }
+                    case OP_SWAP_REG -> { VmHandlers.handleSwapReg(state, instr); pc++; }
+                    case OP_FRONTIER_DIFF -> { VmHandlers.handleFrontierDiff(state, ctx, instr); pc++; }
+                    case OP_COO_WALK_FILTERED -> { VmHandlers.handleCooWalkFiltered(state, ctx, instr); pc++; }
+                    case OP_COO_WALK_REDUCE -> { VmHandlers.handleCooWalkReduce(state, ctx, instr); pc++; }
+                    case OP_COO_WALK_DIRECT_STORE -> { VmHandlers.handleCooWalkDirectStore(state, ctx, instr); pc++; }
+                    case OP_DENSE_WALK -> { VmHandlers.handleDenseWalk(state, ctx, instr); pc++; }
+                    case OP_DENSE_WALK_BITMATRIX -> { VmHandlers.handleDenseWalkBitmatrix(state, ctx, instr); pc++; }
+                    case OP_DENSE_WALK_REDUCE -> { VmHandlers.handleDenseWalkReduce(state, ctx, instr); pc++; }
+                    case OP_DENSE_WALK_DIRECT_STORE -> { VmHandlers.handleDenseWalkDirectStore(state, ctx, instr); pc++; }
+                    case OP_COLLECT_ARRAY -> { VmHandlers.handleCollectArray(state, ctx, instr); pc++; }
+                    case OP_MAP_DENSE_TO_KEYS -> { VmHandlers.handleMapDenseToKeys(state, ctx, instr); pc++; }
+                    case OP_COLLECT_VALUE_MAP -> { VmHandlers.handleCollectValueMap(state, ctx, instr); pc++; }
+
                     case OP_VECTOR_LOAD_ATTR -> {
                         if (DEBUG_MODE) LOG.info("BEFORE handleVectorLoadAttr pc=" + pc);
                         try {
@@ -271,20 +307,14 @@ public final class ImpulseVmInterpreter {
                         finalResult = VmHandlers.handleVectorReduceSum(state, ctx, instr);
                         pc++;
                     }
-                    case OP_VECTOR_REDUCE_MAX -> {
-                        finalResult = VmHandlers.handleVectorReduceMax(state, ctx, instr);
+
+                    case OP_PROJECT_STATE -> {
+                        VmHandlers.handleProjectState(state, ctx, instr);
                         pc++;
                     }
-                    case OP_VECTOR_REDUCE_MIN -> {
-                        finalResult = VmHandlers.handleVectorReduceMin(state, ctx, instr);
-                        pc++;
-                    }
-                    case OP_VECTOR_REDUCE_ARGMAX -> {
-                        finalResult = VmHandlers.handleVectorReduceArgMax(state, ctx, instr);
-                        pc++;
-                    }
-                    case OP_VECTOR_REDUCE_ARGMIN -> {
-                        finalResult = VmHandlers.handleVectorReduceArgMin(state, ctx, instr);
+
+                    case OP_VECTOR_TIME_VALID_AT -> {
+                        VmHandlers.handleVectorLoadAttr(state, ctx, instr);
                         pc++;
                     }
 
@@ -295,6 +325,41 @@ public final class ImpulseVmInterpreter {
 
                     case OP_MXV -> {
                         VmHandlers.handleMxv(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_VXM -> {
+                        VmHandlers.handleVxm(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_EWISE_ADD -> {
+                        VmHandlers.handleEwiseAdd(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_EWISE_MULT -> {
+                        VmHandlers.handleEwiseMult(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_CC_HOOK_COMPRESS -> {
+                        VmHandlers.handleCcHookCompress(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_BRANDES_FORWARD -> {
+                        VmHandlers.handleBrandesForward(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_BRANDES_BACKWARD -> {
+                        VmHandlers.handleBrandesBackward(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_DELTA_STEP_RELAX -> {
+                        VmHandlers.handleDeltaStepRelax(state, ctx, instr);
                         pc++;
                     }
 
@@ -342,7 +407,7 @@ public final class ImpulseVmInterpreter {
 
                     case OP_THROW -> {
                         VmHandlers.handleThrow(state, instr);
-                        pc = instructionCount; // Stop loop on throw
+                        pc = instructionCount;
                     }
 
                     case OP_ASSERT -> {
@@ -356,26 +421,56 @@ public final class ImpulseVmInterpreter {
                     }
 
                     case OP_TRAP -> {
-                        pc = instructionCount; // Stop loop on trap
+                        pc = instructionCount;
+                    }
+
+                    case OP_CSR_WALK_STATE -> {
+                        VmHandlers.handleCsrWalkState(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_CREATE_SCRATCH_INDEX -> {
+                        VmHandlers.handleCreateScratchIndex(state, instr, ctx);
+                        pc++;
+                    }
+
+                    case OP_DROP_SCRATCH_INDEX -> {
+                        pc++;
+                    }
+
+                    case OP_ROARING_BITMAP_OR -> {
+                        VmHandlers.handleRoaringBitmapOr(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_ROARING_BITMAP_AND_NOT -> {
+                        VmHandlers.handleRoaringBitmapAndNot(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_SAMPLE_NEIGHBORS, OP_RANDOM_WALK, OP_SCATTER_GATHER, OP_REBAC_CHECK,
+                         OP_SPARSE_MATVEC, OP_LOUVAIN_MODULARITY, OP_KCORE_DECOMPOSITION,
+                         OP_MOTIF_MATCH_3, OP_GRAPH_ISOMORPHISM -> {
+                        VmHandlers.validateReg(instr.dstReg());
+                        pc++;
                     }
 
                     case OP_ENTER_FRAME, OP_LEAVE_FRAME -> {
-                        // NO-OP frame setup/teardown in JVM interpreter
                         pc++;
                     }
 
                     case OP_HALT -> {
-                        pc = instructionCount; // Stop loop
+                        pc = instructionCount;
                     }
 
-                    case OP_RESERVED_0A, OP_RESERVED_0B, OP_RESERVED_0C, OP_RESERVED_0D, OP_RESERVED_0F,
+                    case OP_RESERVED_0A, OP_RESERVED_0B, OP_RESERVED_0C, OP_RESERVED_0D,
                          OP_RESERVED_28, OP_RESERVED_29, OP_RESERVED_2B, OP_RESERVED_2C,
-                         OP_RESERVED_3E, OP_RESERVED_3F,
+                         OP_RESERVED_3B, OP_RESERVED_3C, OP_RESERVED_3E, OP_RESERVED_3F,
                          OP_RESERVED_4C, OP_RESERVED_4D, OP_RESERVED_4E, OP_RESERVED_4F,
                          OP_RESERVED_59,
                          OP_RESERVED_5D, OP_RESERVED_5E, OP_RESERVED_5F,
                          OP_RESERVED_6D, OP_RESERVED_6E, OP_RESERVED_6F,
-                         OP_RESERVED_76, OP_RESERVED_77, OP_RESERVED_78, OP_RESERVED_79, OP_RESERVED_7A, OP_RESERVED_7B, OP_RESERVED_7C, OP_RESERVED_7D, OP_RESERVED_7E, OP_RESERVED_7F, OP_RESERVED_80, OP_RESERVED_81, OP_RESERVED_82, OP_RESERVED_83, OP_RESERVED_84, OP_RESERVED_85, OP_RESERVED_86, OP_RESERVED_87, OP_RESERVED_88, OP_RESERVED_89, OP_RESERVED_8A, OP_RESERVED_8B, OP_RESERVED_8C, OP_RESERVED_8D, OP_RESERVED_8E, OP_RESERVED_8F -> {
+                         OP_RESERVED_76, OP_RESERVED_77, OP_RESERVED_78, OP_RESERVED_79, OP_RESERVED_7A, OP_RESERVED_7B, OP_RESERVED_7C, OP_RESERVED_7D, OP_RESERVED_7E, OP_RESERVED_7F -> {
                         throw new IllegalStateException("IMPULSE_VM_ERR_RESERVED_OPCODE");
                     }
 

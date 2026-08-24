@@ -1,18 +1,20 @@
-# Impulse Graph Engine — Java 25 FFM Core (`impulse-graph-java`)
+# Impulse Graph Engine — Java 21+ FFM Core (`impulse-graph-java`)
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-A high-performance, zero-copy, off-heap **Java 25 FFM** graph engine and Virtual Machine interpreter for the **Impulse Graph Engine**.
+A high-performance, zero-copy, off-heap **Java 21 LTS+** graph engine and Virtual Machine interpreter for the **Impulse Graph Engine**.
 
-It acts as the **"Apache Arrow for Graph Analytics"** on the JVM, pairing an immutable `.imps` C-ABI binary snapshot format with a pure Java 25 register-based Virtual Machine (`ImpulseVM`).
+It acts as the **"Apache Arrow for Graph Analytics"** on the JVM, pairing an immutable `.imps` C-ABI binary snapshot format with a pure Java 21+ register-based Virtual Machine (`ImpulseVM`).
 
 ---
 
 ## 🚀 Key Architectural Properties
 
 - **Zero Garbage Collection (GC) Overhead**: Memory-maps `.imps` v0.9.0 binary snapshot files off-heap via `java.lang.foreign.MemorySegment`.
+- **Java 21 LTS Baseline & Forward Compatibility**: Compiles against Java 21 LTS baseline (`<maven.compiler.release>21</maven.compiler.release>`) with 100% forward compatibility for Java 22, 23, 24, and 25+ runtimes.
 - **Zero External Runtime Dependencies**: All core modules maintain **strictly 0 third-party runtime dependencies** (`java.base`, `jdk.incubator.vector`, FFM).
 - **SIMD Vector API Acceleration**: Vectorizes graph traversal steps across unrolled AVX-512 and ARM Neon registers using `jdk.incubator.vector`.
+- **Configurable Primitive Node ID Widths**: Independent per-domain physical integer addressing widths (`uint16_t`, `uint32_t`, `uint64_t`) optimizing cache line density and memory bandwidth.
 - **Per-Domain Dense ID Independence ($0 \dots N_d-1$)**: Strict per-domain ID spaces with explicit domain anchoring.
 - **Kleisli Frontier Traversal Pipeline**: Monadic frontier propagation $\langle D, S \rangle \xrightarrow{R} \langle D', S' \rangle$ with monoidic path reduction (`OR`, `MIN`, `MAX`, `SUM`).
 
@@ -26,14 +28,14 @@ It acts as the **"Apache Arrow for Graph Analytics"** on the JVM, pairing an imm
 | **`impulse-api`** | High-level contracts: `ImpulseGraphSnapshot`, `DomainView`, `Traversal`, `ImpulseStatement`, `RowReader`. | **0** |
 | **`impulse-storage`** | Off-heap snapshot loader (`BinarySnapshotLoader`), `GraphSnapshot`, `RelationSnapshot`, CSR/CSC/COO accessors, snapshot builder. | **0** |
 | **`impulse-compiler`** | ImpScheme S-Expression AST, CEL optimizer, 7-stage optimization passes, `impOps` bytecode emitter. | **0** |
-| **`impulse-vm`** | Register VM (`R0`..`R63`), Java 25 Vector API AVX-512 SIMD handlers (`VmHandlers`), `MethodHandle` JIT combinators, and Statement runner. | **0** |
+| **`impulse-vm`** | Register VM (`R0`..`R63`), Java Vector API AVX-512 SIMD handlers (`VmHandlers`), `MethodHandle` JIT combinators, and Statement runner. | **0** |
 
 ---
 
 ## ⚡ Quickstart
 
 ### 1. Prerequisites & Maven Coordinates
-Java 25 with preview features and Vector API enabled:
+Java 21 LTS or newer with preview features and Vector API enabled:
 ```xml
 <dependencies>
     <dependency>
@@ -112,9 +114,12 @@ try (ImpulseStatement stmt = snap.prepare("MATCH (u:User)-[:knows]->(f:User) WHE
 
 ## 📚 Documentation
 
-- [**Quickstart Guide**](docs/GETTING_STARTED.md) — Loading snapshots, basic traversals, filtering, and prepared statements.
+- [**Quickstart Guide**](docs/GETTING_STARTED.md) — Loading snapshots, basic traversals, filtering, variable node ID width configuration, and prepared statements.
 - [**Advanced Querying Guide**](docs/ADVANCED_QUERYING.md) — Fixed-point loops (`repeatUntilStable`), monoidic reductions, state projections, and BitSet algebra.
-- [**Compiler Architecture**](docs/COMPILER_ARCHITECTURE.md) — IR passes, optimization pipeline, and bytecode generation.
+- [**openCypher Dialect Reference**](docs/OPENCYPHER_REFERENCE.md) — Supported Cypher grammar (`MATCH`, `WHERE`, `RETURN`), edge attribute filtering, and frontier set semantics.
+- [**Memory & Performance Tuning Guide**](docs/MEMORY_TUNING_GUIDE.md) — FFM `Arena` lifecycle management, zero-GC mechanics, primitive ID width selection, and Vector API JVM tuning flags.
+- [**Compiler Architecture**](docs/COMPILER_ARCHITECTURE.md) — IR passes, optimization pipeline, `ImpAsm` disassembly inspection, and bytecode generation.
+- [**Ingestion & Live Mutation Architecture**](docs/ingestion-strategies.md) — Single-Writer Multi-Reader (SWMR) off-heap Lego block taxonomy and streaming ingestion.
 
 ---
 

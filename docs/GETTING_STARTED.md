@@ -43,7 +43,7 @@ Add the core engine modules to your `pom.xml`:
 ```
 
 ### 1.2 Required JVM Arguments
-Configure your runtime and build plugins with standard Java 25 preview and vector access flags:
+Configure your runtime and build plugins with standard Java 21 LTS preview and vector access flags:
 
 ```bash
 --enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED
@@ -247,9 +247,11 @@ public class BuildSnapshotExample {
             RelationSnapshot knowsRel = new RelationSnapshot(arena, 4, 5, offsets, targets);
             GraphSnapshot graph = new GraphSnapshot(arena, Map.of("knows", knowsRel));
 
-            // Build snapshot with domain metadata and business keys
+            // Build snapshot with domain metadata, business keys, and primitive ID widths:
+            // - nodeKeyType: (byte) 1 (String UUID/Key)
+            // - nodeIdWidth: 2 (16-bit uint16), 4 (32-bit uint32), or 8 (64-bit uint64)
             byte[] snapshotBytes = new DefaultSnapshotBuilder()
-                    .withDomain(0, "User", (byte) 1, 4)
+                    .withDomain(0, "User", (byte) 1, 4) // 4 bytes = 32-bit node ID width
                     .withDomainKeys("User", List.of("usr_alice", "usr_bob", "usr_charlie", "usr_dave"))
                     .build(new BinarySnapshotLoader.DefaultLoadedSnapshot(
                             BinarySnapshotLoader.SNAPSHOT_MAGIC, (short) 9, graph, Map.of(), Map.of(), Map.of(), Map.of()
@@ -261,6 +263,12 @@ public class BuildSnapshotExample {
     }
 }
 ```
+
+### 5.1 Configuring Primitive Node ID Widths (16, 32, 64-Bit)
+Each domain independently configures its physical primitive integer width based on cardinality:
+* `2` bytes (`uint16_t`): Up to 65,536 nodes — optimal for compact entity catalogs (32 nodes / 64B cache line).
+* `4` bytes (`uint32_t`): Up to 4,294,967,296 nodes — standard enterprise default (16 nodes / 64B cache line).
+* `8` bytes (`uint64_t`): Hyperscale domains (8 nodes / 64B cache line).
 
 ---
 

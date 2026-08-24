@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
 
-**Impulse Graph Engine — Java 25 FFM Core Specification**  
+**Impulse Graph Engine — Java 21+ FFM Core Specification**  
 *Document Version: 1.0.0 | Target Spec: Impulse Binary Snapshot Format v0.9.0 / v0.9.1*
 
 ---

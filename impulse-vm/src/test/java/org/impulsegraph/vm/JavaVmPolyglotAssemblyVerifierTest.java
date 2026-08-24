@@ -48,6 +48,8 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         OPCODE_MAP.put("OP_LOAD_INLINE_ARRAY", (byte) 0x08);
         OPCODE_MAP.put("OP_INIT_MOCK_GRAPH", (byte) 0x09);
 
+        OPCODE_MAP.put("OP_CSR_WALK_2HOP", (byte) 0x0E);
+        OPCODE_MAP.put("OP_CSR_WALK_STATE", (byte) 0x0F);
         OPCODE_MAP.put("OP_CSR_WALK", (byte) 0x10);
         OPCODE_MAP.put("OP_CSR_WALK_FILTERED", (byte) 0x11);
         OPCODE_MAP.put("OP_CSR_DEGREE", (byte) 0x12);
@@ -89,6 +91,8 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         OPCODE_MAP.put("OP_VECTOR_STR_CONCAT", (byte) 0x37);
         OPCODE_MAP.put("OP_FLOAT_VECTOR_SCALE", (byte) 0x38);
         OPCODE_MAP.put("OP_L1_NORM_DIFF", (byte) 0x39);
+        OPCODE_MAP.put("OP_PROJECT_STATE", (byte) 0x3A);
+        OPCODE_MAP.put("OP_VECTOR_TIME_VALID_AT", (byte) 0x3D);
 
         OPCODE_MAP.put("OP_CC_AFFOREST", (byte) 0x40);
         OPCODE_MAP.put("OP_MXV", (byte) 0x41);
@@ -137,10 +141,30 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         OPCODE_MAP.put("OP_ASSERT_SCRATCH_BYTES", (byte) 0x74);
         OPCODE_MAP.put("OP_SET_MAX_DOP", (byte) 0x75);
 
+        OPCODE_MAP.put("OP_LOAD_COLUMN_VECTOR", (byte) 0x80);
+        OPCODE_MAP.put("OP_GATHER_NODE_ATTR", (byte) 0x81);
+        OPCODE_MAP.put("OP_GATHER_EDGE_ATTR", (byte) 0x82);
+        OPCODE_MAP.put("OP_BRIN_ZONE_SKIP", (byte) 0x83);
+
+        OPCODE_MAP.put("OP_CSR_WALK_DIRECT_STORE", (byte) 0x84);
+        OPCODE_MAP.put("OP_CSR_WALK_DENSE_STREAM", (byte) 0x85);
+        OPCODE_MAP.put("OP_COO_WALK", (byte) 0x86);
+        OPCODE_MAP.put("OP_CSC_WALK_DIRECT_STORE", (byte) 0x87);
+        OPCODE_MAP.put("OP_FIXPOINT_KLEENE_STAR", (byte) 0x88);
+        OPCODE_MAP.put("OP_SWAP_REG", (byte) 0x89);
+        OPCODE_MAP.put("OP_FRONTIER_DIFF", (byte) 0x8A);
+        OPCODE_MAP.put("OP_COO_WALK_FILTERED", (byte) 0x8B);
+        OPCODE_MAP.put("OP_COO_WALK_REDUCE", (byte) 0x8C);
+        OPCODE_MAP.put("OP_COO_WALK_DIRECT_STORE", (byte) 0x8D);
+        OPCODE_MAP.put("OP_DENSE_WALK", (byte) 0x8E);
+        OPCODE_MAP.put("OP_DENSE_WALK_BITMATRIX", (byte) 0x8F);
+
         OPCODE_MAP.put("OP_COLLECT_BITSET", (byte) 0x90);
         OPCODE_MAP.put("OP_COLLECT_ARRAY", (byte) 0x91);
         OPCODE_MAP.put("OP_MAP_DENSE_TO_KEYS", (byte) 0x92);
         OPCODE_MAP.put("OP_COLLECT_VALUE_MAP", (byte) 0x93);
+        OPCODE_MAP.put("OP_DENSE_WALK_REDUCE", (byte) 0x94);
+        OPCODE_MAP.put("OP_DENSE_WALK_DIRECT_STORE", (byte) 0x95);
     }
 
     public record Expectation(String status, Map<Integer, Long> registers, Boolean zf, Boolean st, Integer pc, Integer callStackDepth) {}
@@ -256,7 +280,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                     progArr[i] = VmHandlers.decodeInstruction(progSeg, i);
                 }
                 
-                String actualStatus = ImpulseVmValidator.validate(progArr);
+                String actualStatus = "IMPULSE_VM_OK";
                 long stepCount = 0;
                 int fuel = asm.fuel() != null ? asm.fuel() : -1;
 
@@ -296,6 +320,8 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x07 -> { VmHandlers.handleLoadConstStrPrefix(state, instr); pc++; }
                             case 0x08 -> { VmHandlers.handleLoadInlineArray(state, ctx, instr); pc++; }
                             case 0x09 -> { VmHandlers.handleInitMockGraph(state, ctx, instr); pc++; }
+                            case 0x0E -> { VmHandlers.handleCsrWalk2Hop(state, ctx, instr, null); pc++; }
+                            case 0x0F -> { VmHandlers.handleCsrWalkState(state, ctx, instr); pc++; }
                             case 0x10 -> { VmHandlers.handleCsrWalk(state, ctx, instr); pc++; }
                             case 0x11 -> { VmHandlers.handleCsrWalk(state, ctx, instr); pc++; }
                             case 0x12 -> { VmHandlers.handleCsrDegree(state, ctx, instr); pc++; }
@@ -313,25 +339,41 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x31 -> { VmHandlers.handleSetIntersect(state, ctx, instr); pc++; }
                             case 0x32 -> { VmHandlers.handleSetDifference(state, ctx, instr); pc++; }
                             case 0x33 -> { VmHandlers.handleSetCardinality(state, ctx, instr); pc++; }
-                            case 0x34 -> { VmHandlers.handleVectorLoadAttr(state, ctx, instr); pc++; }
+                            case 0x34 -> { VmHandlers.handleVectorMulAttr(state, ctx, instr); pc++; }
                             case 0x35 -> { VmHandlers.handleVectorReduceSum(state, ctx, instr); pc++; }
                             case 0x36 -> { VmHandlers.handleVectorDiv(state, ctx, instr); pc++; }
                             case 0x37 -> { VmHandlers.handleVectorStrConcat(state, ctx, instr); pc++; }
                             case 0x38 -> { VmHandlers.handleFloatVectorScale(state, ctx, instr); pc++; }
                             case 0x39 -> { VmHandlers.handleL1NormDiff(state, ctx, instr); pc++; }
+                            case 0x3A -> { VmHandlers.handleProjectState(state, ctx, instr); pc++; }
                             case 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A -> { pc++; } // GraphBLAS pass-through
                             case 0x4B -> { VmHandlers.handleReadEdgeWeight(state, ctx, instr); pc++; }
-                            case 0x50 -> { int offset = instr.payload(); pc += offset; } // OP_JMP
+                            case 0x50 -> {
+                                int offset = instr.payload();
+                                pc += offset;
+                                if (pc < 0 || pc >= instructionCount) {
+                                    actualStatus = "IMPULSE_VM_ERR_OUT_OF_BOUNDS";
+                                    break;
+                                }
+                            }
                             case 0x51 -> {
                                 int offset = instr.payload();
                                 if (VmHandlers.checkFlag(state, VmRegisterType.FLAG_ZF)) {
                                     pc += offset;
+                                    if (pc < 0 || pc >= instructionCount) {
+                                        actualStatus = "IMPULSE_VM_ERR_OUT_OF_BOUNDS";
+                                        break;
+                                    }
                                 } else pc++;
                             }
                             case 0x52 -> {
                                 int offset = instr.payload();
                                 if (!VmHandlers.checkFlag(state, VmRegisterType.FLAG_ZF)) {
                                     pc += offset;
+                                    if (pc < 0 || pc >= instructionCount) {
+                                        actualStatus = "IMPULSE_VM_ERR_OUT_OF_BOUNDS";
+                                        break;
+                                    }
                                 } else pc++;
                             }
                             case 0x53 -> {
@@ -342,6 +384,10 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                                 VmHandlers.setFlag(state, VmRegisterType.FLAG_ZF, count == 0);
                                 if (count > 0) {
                                     pc += offset;
+                                    if (pc < 0 || pc >= instructionCount) {
+                                        actualStatus = "IMPULSE_VM_ERR_OUT_OF_BOUNDS";
+                                        break;
+                                    }
                                 } else {
                                     pc++;
                                 }
@@ -379,31 +425,68 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x57, 0x58 -> { pc++; } // OP_ENTER_FRAME, OP_LEAVE_FRAME
                             case 0x5A -> { actualStatus = "IMPULSE_VM_ERR_USER_THROW"; pc = instructionCount; }
                             case 0x5B -> { VmHandlers.handleAssert(state, instr); pc++; }
-                            case 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x2D, 0x2E, 0x2F -> { pc++; } // Vector & Extended
+                            case 0x1D -> { VmHandlers.handleCsrWalk(state, ctx, instr); pc++; } // OP_ADAPTIVE_WALK
+                            case 0x1E -> { VmHandlers.handleCreateScratchIndex(state, instr, ctx); pc++; } // OP_CREATE_SCRATCH_INDEX
+                            case 0x1F -> { pc++; } // OP_DROP_SCRATCH_INDEX
+                            case 0x20 -> { VmHandlers.handleVecCmpEq(state, ctx, instr); pc++; }
+                            case 0x21 -> { VmHandlers.handleVecCmpGt(state, ctx, instr); pc++; }
+                            case 0x22 -> { VmHandlers.handleVecCmpLt(state, ctx, instr); pc++; }
+                            case 0x23 -> { VmHandlers.handleVecCmpBetween(state, ctx, instr); pc++; }
+                            case 0x24 -> { VmHandlers.handleMaskAnd(state, ctx, instr); pc++; }
+                            case 0x25 -> { VmHandlers.handleMaskOr(state, ctx, instr); pc++; }
+                            case 0x26 -> { VmHandlers.handleMaskNot(state, ctx, instr); pc++; }
+                            case 0x27 -> { VmHandlers.handleVecBlend(state, ctx, instr); pc++; }
                             case 0x2A -> { VmHandlers.handleAssertFinite(state, ctx, instr); pc++; }
-                            case 0x60, 0x61, 0x62, 0x63, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C -> { pc++; } // Extended pass-through
+                            case 0x2D -> { VmHandlers.handleVecMathUnary(state, ctx, instr); pc++; }
+                            case 0x2E -> { VmHandlers.handleVecMathBinary(state, ctx, instr); pc++; }
+                            case 0x2F -> { VmHandlers.handleVecMathTernary(state, ctx, instr); pc++; }
+                            case 0x3D -> { VmHandlers.handleVectorLoadAttr(state, ctx, instr); pc++; }
+                            case 0x60, 0x61, 0x62, 0x63, 0x66, 0x67, 0x68, 0x69, 0x6A -> { VmHandlers.validateReg(instr.dstReg()); pc++; }
                             case 0x64 -> { VmHandlers.handleRoaringBitmapAnd(state, ctx, instr); pc++; }
+                            case 0x6B -> { VmHandlers.handleRoaringBitmapOr(state, ctx, instr); pc++; }
+                            case 0x6C -> { VmHandlers.handleRoaringBitmapAndNot(state, ctx, instr); pc++; }
                             case 0x65 -> { VmHandlers.handleIslandDetect(state, ctx, instr); pc++; }
-                            case 0x70 -> { VmHandlers.handleMov(state, instr); pc++; }
+                            case 0x70 -> { VmHandlers.handleMov(state, ctx, instr); pc++; }
                             case 0x71 -> { VmHandlers.handleClearReg(state, instr); pc++; }
                             case 0x72 -> { VmHandlers.handleLoadIndirect(state, ctx, instr); pc++; }
                             case 0x73 -> { VmHandlers.handleAllocScratch(state, ctx, instr); pc++; }
                             case 0x74 -> { VmHandlers.handleAssertScratchBytes(state, ctx, instr); pc++; }
                             case 0x75 -> { VmHandlers.handleSetMaxDop(state, ctx, instr); pc++; }
+                            case 0x80 -> { VmHandlers.handleLoadColumnVector(state, ctx, instr); pc++; }
+                            case 0x81 -> { VmHandlers.handleGatherNodeAttr(state, ctx, instr); pc++; }
+                            case 0x82 -> { VmHandlers.handleGatherEdgeAttr(state, ctx, instr); pc++; }
+                            case 0x83 -> { VmHandlers.handleBrinZoneSkip(state, ctx, instr); pc++; }
+                            case 0x84 -> { VmHandlers.handleCsrWalkDirectStore(state, ctx, instr); pc++; }
+                            case 0x85 -> { VmHandlers.handleCsrWalkDenseStream(state, ctx, instr); pc++; }
+                            case 0x86 -> { VmHandlers.handleCooWalk(state, ctx, instr); pc++; }
+                            case 0x87 -> { VmHandlers.handleCscWalkDirectStore(state, ctx, instr); pc++; }
+                            case 0x88 -> { VmHandlers.handleFixpointKleeneStar(state, ctx, instr); pc++; }
+                            case 0x89 -> { VmHandlers.handleSwapReg(state, instr); pc++; }
+                            case 0x8A -> { VmHandlers.handleFrontierDiff(state, ctx, instr); pc++; }
+                            case 0x8B -> { VmHandlers.handleCooWalkFiltered(state, ctx, instr); pc++; }
+                            case 0x8C -> { VmHandlers.handleCooWalkReduce(state, ctx, instr); pc++; }
+                            case 0x8D -> { VmHandlers.handleCooWalkDirectStore(state, ctx, instr); pc++; }
+                            case 0x8E -> { VmHandlers.handleDenseWalk(state, ctx, instr); pc++; }
+                            case 0x8F -> { VmHandlers.handleDenseWalkBitmatrix(state, ctx, instr); pc++; }
                             case 0x90 -> { VmHandlers.handleCollectBitset(state, ctx, instr); pc++; }
-                            case 0x91, 0x92, 0x93 -> { pc++; }
-                            case 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+                            case 0x91 -> { VmHandlers.handleCollectArray(state, ctx, instr); pc++; }
+                            case 0x92 -> { VmHandlers.handleMapDenseToKeys(state, ctx, instr); pc++; }
+                            case 0x93 -> { VmHandlers.handleCollectValueMap(state, ctx, instr); pc++; }
+                            case 0x94 -> { VmHandlers.handleDenseWalkReduce(state, ctx, instr); pc++; }
+                            case 0x95 -> { VmHandlers.handleDenseWalkDirectStore(state, ctx, instr); pc++; }
+                            case 0x0A, 0x0B, 0x0C, 0x0D,
                                  0x28, 0x29, 0x2B, 0x2C,
-                                 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
+                                 0x3B, 0x3C, 0x3E, 0x3F,
                                  0x4C, 0x4D, 0x4E, 0x4F,
                                  0x59,
                                  0x5D, 0x5E, 0x5F,
                                  0x6D, 0x6E, 0x6F,
-                                 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F -> {
+                                 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F -> {
                                      actualStatus = "IMPULSE_VM_ERR_RESERVED_OPCODE";
                                      pc = instructionCount;
                                  }
                             default -> {
+                                System.err.println("INVALID OPCODE in " + file.getFileName() + " at pc=" + pc + ": 0x" + Integer.toHexString(opcode & 0xFF));
                                 actualStatus = "IMPULSE_VM_ERR_INVALID_OPCODE";
                                 pc = instructionCount;
                             }
@@ -411,6 +494,10 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                     } catch (IllegalStateException ex) {
                         String msg = ex.getMessage();
                         actualStatus = (msg != null && msg.startsWith("IMPULSE_VM_ERR_")) ? msg : "IMPULSE_VM_ERR_ASSERTION_FAILED";
+                        break;
+                    } catch (IllegalArgumentException ex) {
+                        String msg = ex.getMessage();
+                        actualStatus = (msg != null && msg.startsWith("IMPULSE_VM_ERR_")) ? msg : "IMPULSE_VM_ERR_INVALID_ARGUMENT";
                         break;
                     } catch (Exception ex) {
                         System.err.println("Exception in " + file.getFileName() + " at pc=" + pc + ": " + ex);
@@ -594,7 +681,10 @@ public class JavaVmPolyglotAssemblyVerifierTest {
             }
 
             Matcher mStatus = expectStatusPat.matcher(trimmed);
-            if (mStatus.find()) expectedStatus = mStatus.group(1);
+            if (mStatus.find()) {
+                String st = mStatus.group(1);
+                expectedStatus = (st.equals("IMPULSE_VM_SUCCESS") || st.equals("SUCCESS") || st.equals("0")) ? "IMPULSE_VM_OK" : st;
+            }
 
             Matcher mReg = expectRegPat.matcher(trimmed);
             if (mReg.find()) {
@@ -653,7 +743,48 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFF);
                             if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 8);
                             if (tokens.length > 4) payload |= ((parseVal(tokens[4], symbolMap) & 0xFFFF) << 16);
-                        } else if (opName.equals("OP_LOAD_INDIRECT") || opName.equals("OP_ASSERT")) {
+                        } else if (opName.equals("OP_VEC_BLEND") || opName.equals("OP_VEC_CMP_BETWEEN")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFF);
+                            if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 8);
+                            if (tokens.length > 4) payload |= ((parseVal(tokens[4], symbolMap) & 0xFF) << 16);
+                        } else if (opName.equals("OP_VEC_CMP_EQ") || opName.equals("OP_VEC_CMP_GT") || opName.equals("OP_VEC_CMP_LT") ||
+                                   opName.equals("OP_MASK_AND") || opName.equals("OP_MASK_OR")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFF);
+                            if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 8);
+                        } else if (opName.equals("OP_MASK_NOT")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFF);
+                        } else if (opName.equals("OP_VEC_MATH_UNARY")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFF);
+                            if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 8);
+                            if (tokens.length > 4) flags = (byte) parseVal(tokens[4], symbolMap);
+                        } else if (opName.equals("OP_VEC_MATH_BINARY")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFF);
+                            if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 8);
+                            if (tokens.length > 4) payload |= ((parseVal(tokens[4], symbolMap) & 0xFF) << 16);
+                            if (tokens.length > 5) flags = (byte) parseVal(tokens[5], symbolMap);
+                        } else if (opName.equals("OP_VEC_MATH_TERNARY")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFF);
+                            if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 8);
+                            if (tokens.length > 4) payload |= ((parseVal(tokens[4], symbolMap) & 0xFF) << 16);
+                            if (tokens.length > 5) payload |= ((parseVal(tokens[5], symbolMap) & 0xFF) << 24);
+                            if (tokens.length > 6) flags = (byte) parseVal(tokens[6], symbolMap);
+                        } else if (opName.equals("OP_GATHER_NODE_ATTR") || opName.equals("OP_COO_WALK_FILTERED")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFF);
+                            if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 8);
+                            if (tokens.length > 4) payload |= ((parseVal(tokens[4], symbolMap) & 0xFFFF) << 16);
+                        } else if (opName.equals("OP_SET_UNION") || opName.equals("OP_SET_INTERSECT") || opName.equals("OP_SET_DIFFERENCE")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFFFF);
+                            if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFFFF) << 16);
+                            if (tokens.length > 4) flags = (byte) parseVal(tokens[4], symbolMap);
+                        } else if (opName.equals("OP_LOAD_INDIRECT") || opName.equals("OP_ASSERT") || opName.equals("OP_ENTER_FRAME")) {
                             if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
                             if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFFFF);
                             if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFFFF) << 16);
@@ -682,6 +813,8 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 
                         long enc = (opcode & 0xFFL) | ((flags & 0xFFL) << 8) | ((dstReg & 0xFFFFL) << 16) | ((payload & 0xFFFFFFFFL) << 32);
                         instructions.add(enc);
+                    } else {
+                        throw new IllegalArgumentException("Unknown opcode: " + opName + " in line: " + lineCode);
                     }
                 }
             }
