@@ -169,7 +169,7 @@ public final class VmHandlers {
     public static void executeCsrWalk(MemorySegment state, VmQueryContext ctx, int dstReg, int srcReg, int relId, byte flags, Object input) {
         validateReg(dstReg);
         validateReg(srcReg);
-        if (relId < 0 || relId >= 16) {
+        if (relId < 0 || relId >= 65536) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
         RelationSnapshot rel = resolveRelation(ctx, relId);
@@ -269,7 +269,7 @@ public final class VmHandlers {
                                           int relId1, int relId2, byte flags, Object input) {
         validateReg(dstReg);
         validateReg(srcReg);
-        if (relId1 < 0 || relId1 >= 16 || relId2 < 0 || relId2 >= 16) {
+        if (relId1 < 0 || relId1 >= 65536 || relId2 < 0 || relId2 >= 65536) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
         RelationSnapshot rel1 = resolveRelation(ctx, relId1);
@@ -342,7 +342,7 @@ public final class VmHandlers {
 
         validateReg(instr.dstReg());
         validateReg(frontierReg);
-        if (relId < 0 || relId >= 16) {
+        if (relId < 0 || relId >= 65536) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
         RelationSnapshot rel = resolveRelation(ctx, relId);
@@ -738,7 +738,7 @@ public final class VmHandlers {
         int srcReg = instr.payload() & 0xFFFF;
         int relId = (instr.payload() >> 16) & 0xFFFF;
         validateReg(srcReg);
-        if (relId < 0 || relId >= 16) {
+        if (relId < 0 || relId >= 65536) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
         long u = getRegisterValue(state, srcReg);
