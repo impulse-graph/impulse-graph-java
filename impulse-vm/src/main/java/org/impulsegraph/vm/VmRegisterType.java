@@ -23,6 +23,8 @@ public final class VmRegisterType {
     public static final byte OP_FLAG_ACCUMULATE  = 0x02;
     public static final byte OP_FLAG_INVERT      = 0x04;
     public static final byte OP_FLAG_OFFHEAP     = 0x08;
+    public static final byte OP_FLAG_EXTENDED    = (byte) 0x80; // 128-bit Extended Instruction format
+    public static final byte OP_EXTENSION_PAYLOAD = (byte) 0xFF; // Tombstone marker for 2nd 64-bit word
 
     // Register Type Tags
     public static final byte TYPE_NULL           = 0x00;

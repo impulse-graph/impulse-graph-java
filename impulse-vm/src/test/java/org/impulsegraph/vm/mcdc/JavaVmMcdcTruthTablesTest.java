@@ -110,6 +110,27 @@ public class JavaVmMcdcTruthTablesTest {
             VmHandlers.Instruction dec2 = VmHandlers.decodeInstruction(prog, 2);
             assertEquals(OP_HALT, dec2.opcode());
 
+            // Verify 128-bit Extended Instruction (Section 3.2.1)
+            MemorySegment extProg = arena.allocate(16, 8);
+            // Word 1: [opcode=OP_CSR_WALK_PREDICATE (0x13), flags=0x80 (EXTENDED), dst=2, arg1=0, arg2=1]
+            extProg.set(ValueLayout.JAVA_BYTE, 0L, OP_CSR_WALK_PREDICATE);
+            extProg.set(ValueLayout.JAVA_BYTE, 1L, OP_FLAG_EXTENDED);
+            extProg.set(ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN), 2L, (short) 2);
+            extProg.set(ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN), 4L, (short) 0);
+            extProg.set(ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN), 6L, (short) 1);
+            // Word 2: [marker=0xFF, pad=0x00, arg3=40000 (uint16 relation ID), arg4=0, arg5=0]
+            extProg.set(ValueLayout.JAVA_BYTE, 8L, OP_EXTENSION_PAYLOAD);
+            extProg.set(ValueLayout.JAVA_BYTE, 9L, (byte) 0);
+            extProg.set(ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN), 10L, (short) 40000);
+
+            VmHandlers.ExtendedInstruction extDec = VmHandlers.decodeExtendedInstruction(extProg, 0);
+            assertEquals(OP_CSR_WALK_PREDICATE, extDec.opcode());
+            assertTrue((extDec.flags() & OP_FLAG_EXTENDED) != 0);
+            assertEquals(2, extDec.dstReg());
+            assertEquals(0, extDec.arg1());
+            assertEquals(1, extDec.arg2());
+            assertEquals(40000, extDec.arg3());
+
             // Interpreter null program handling
             ImpulseGraphSnapshot mockGraph = new MockImpulseGraphSnapshot(Map.of());
             Object resNull = ImpulseVmInterpreter.execute(null, 0, mockGraph, 0, arena);

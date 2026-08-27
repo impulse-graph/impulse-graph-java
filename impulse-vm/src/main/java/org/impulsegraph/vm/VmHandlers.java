@@ -34,6 +34,13 @@ public final class VmHandlers {
      */
     public record Instruction(byte opcode, byte flags, int dstReg, int payload) {}
 
+    /**
+     * 16-byte (128-bit) Extended Instruction format (Section 3.2.1).
+     * Word 1: [opcode: u8, flags: u8 (0x80), dst_reg: u16, arg1: u16, arg2: u16]
+     * Word 2: [marker: u8 (0xFF), padding: u8 (0x00), arg3: u16, arg4: u16, arg5: u16]
+     */
+    public record ExtendedInstruction(byte opcode, byte flags, int dstReg, int arg1, int arg2, int arg3, int arg4, int arg5, long extPayload) {}
+
     public static Instruction decodeInstruction(MemorySegment programSeg, long pc) {
         long offset = pc * INSTRUCTION_SIZE_BYTES;
         byte opcode = (byte) INSTR_OPCODE_HANDLE.get(programSeg, offset);
@@ -41,6 +48,27 @@ public final class VmHandlers {
         int dstReg = Short.toUnsignedInt((short) INSTR_DST_REG_HANDLE.get(programSeg, offset));
         int payload = (int) INSTR_PAYLOAD_HANDLE.get(programSeg, offset);
         return new Instruction(opcode, flags, dstReg, payload);
+    }
+
+    public static ExtendedInstruction decodeExtendedInstruction(MemorySegment programSeg, long pc) {
+        long offset1 = pc * INSTRUCTION_SIZE_BYTES;
+        long offset2 = (pc + 1) * INSTRUCTION_SIZE_BYTES;
+        byte opcode = (byte) INSTR_OPCODE_HANDLE.get(programSeg, offset1);
+        byte flags = (byte) INSTR_FLAGS_HANDLE.get(programSeg, offset1);
+        int dstReg = Short.toUnsignedInt((short) INSTR_DST_REG_HANDLE.get(programSeg, offset1));
+        int arg1 = Short.toUnsignedInt(programSeg.get(ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN), offset1 + 4L));
+        int arg2 = Short.toUnsignedInt(programSeg.get(ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN), offset1 + 6L));
+
+        byte extMarker = programSeg.get(ValueLayout.JAVA_BYTE, offset2);
+        if ((extMarker & 0xFF) != (VmRegisterType.OP_EXTENSION_PAYLOAD & 0xFF)) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_INSTRUCTION: missing 0xFF extension marker");
+        }
+        int arg3 = Short.toUnsignedInt(programSeg.get(ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN), offset2 + 2L));
+        int arg4 = Short.toUnsignedInt(programSeg.get(ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN), offset2 + 4L));
+        int arg5 = Short.toUnsignedInt(programSeg.get(ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN), offset2 + 6L));
+        long extPayload = programSeg.get(ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN), offset2);
+
+        return new ExtendedInstruction(opcode, flags, dstReg, arg1, arg2, arg3, arg4, arg5, extPayload);
     }
 
     // --- State Access Helpers ---
