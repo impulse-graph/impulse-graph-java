@@ -173,6 +173,9 @@ public final class VmHandlers {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
         RelationSnapshot rel = resolveRelation(ctx, relId);
+        if (rel == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+        }
 
         byte srcType = getRegisterType(state, srcReg);
         long srcVal = getRegisterValue(state, srcReg);
@@ -274,6 +277,9 @@ public final class VmHandlers {
         }
         RelationSnapshot rel1 = resolveRelation(ctx, relId1);
         RelationSnapshot rel2 = resolveRelation(ctx, relId2);
+        if (rel1 == null || rel2 == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+        }
 
         int outHandle = ctx.acquireBitset();
         ImpulseBitSet outBs = ctx.getBitset(outHandle);
@@ -346,7 +352,10 @@ public final class VmHandlers {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
         RelationSnapshot rel = resolveRelation(ctx, relId);
-        if (rel == null || !rel.hasCsc()) {
+        if (rel == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+        }
+        if (!rel.hasCsc()) {
             throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
         }
 
@@ -454,7 +463,7 @@ public final class VmHandlers {
 
         RelationSnapshot rel = resolveRelation(ctx, relId);
         if (rel == null) {
-            throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+            throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
 
         if (unvisitedReg != 0 && rel.hasCsc()) {
@@ -744,6 +753,9 @@ public final class VmHandlers {
         long u = getRegisterValue(state, srcReg);
 
         RelationSnapshot rel = resolveRelation(ctx, relId);
+        if (rel == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+        }
         long degree = 0;
         if (rel != null && u >= 0 && u < rel.getNodeCount()) {
             degree = rel.getDegree((int) u);

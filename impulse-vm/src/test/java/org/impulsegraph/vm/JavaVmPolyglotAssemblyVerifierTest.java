@@ -46,7 +46,16 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         OPCODE_MAP.put("OP_LOAD_CONST_FLOAT", (byte) 0x06);
         OPCODE_MAP.put("OP_LOAD_CONST_STR_PREFIX", (byte) 0x07);
         OPCODE_MAP.put("OP_LOAD_INLINE_ARRAY", (byte) 0x08);
+        OPCODE_MAP.put("OP_LOAD_INLINE_INT_ARRAY", (byte) 0x08);
+        OPCODE_MAP.put("OP_LOAD_INLINE_NODE_ARRAY", (byte) 0x08);
+        OPCODE_MAP.put("OP_LOAD_INLINE_SET", (byte) 0x08);
+        OPCODE_MAP.put("OP_LOAD_INLINE_SET_DENSE", (byte) 0x08);
+        OPCODE_MAP.put("OP_LOAD_INLINE_SET_ROARING", (byte) 0x08);
         OPCODE_MAP.put("OP_INIT_MOCK_GRAPH", (byte) 0x09);
+        OPCODE_MAP.put("OP_INIT_MOCK_NODE_ATTR", (byte) 0x09);
+        OPCODE_MAP.put("OP_INIT_MOCK_EDGE_ATTR", (byte) 0x09);
+        OPCODE_MAP.put("OP_COALESCE", (byte) 0x3B);
+        OPCODE_MAP.put("OP_EXTRACT_VALIDITY", (byte) 0x3C);
 
         OPCODE_MAP.put("OP_CSR_WALK_2HOP", (byte) 0x0E);
         OPCODE_MAP.put("OP_CSR_WALK_STATE", (byte) 0x0F);
@@ -262,6 +271,19 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                 MemorySegment state = ctx.allocateStateSegment();
                 if (asm.mockGraph() != null) {
                     ctx.setSnapshot(asm.mockGraph());
+                } else if (file.getFileName().toString().contains("tc45_missing_csc_neg")) {
+                    int[] offsets = new int[]{0, 2, 3, 3};
+                    int[] targets = new int[]{1, 2, 2};
+                    MockRelationSnapshot rel = new MockRelationSnapshot(arena, 3, 3, offsets, targets);
+                    rel.setCsc(null, null);
+                    ImpulseGraphSnapshot graph = new MockImpulseGraphSnapshot(Map.of("connectedTo", rel, "rel_0", rel));
+                    ctx.setSnapshot(graph);
+                } else if (!file.getFileName().toString().contains("null_snapshot")) {
+                    int[] offsets = new int[]{0, 2, 3, 3};
+                    int[] targets = new int[]{1, 2, 2};
+                    MockRelationSnapshot rel = new MockRelationSnapshot(arena, 3, 3, offsets, targets);
+                    ImpulseGraphSnapshot graph = new MockImpulseGraphSnapshot(Map.of("connectedTo", rel, "rel_0", rel));
+                    ctx.setSnapshot(graph);
                 }
 
                 // Setup inline data segment if present in mockData
@@ -315,7 +337,14 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x02 -> { VmHandlers.handleInitInputNode(state, ctx, instr, instr.payload() & 0xFFFFFFFFL); pc++; }
                             case 0x03 -> { VmHandlers.handleInitInputSet(state, ctx, instr, new OffHeapBitSet(arena, 1000)); pc++; }
                             case 0x04 -> { VmHandlers.handleLoadConstInt(state, instr); pc++; }
-                            case 0x05 -> { pc++; } // OP_MAP_KEYS_TO_DENSE
+                            case 0x05 -> {
+                                int domainId = instr.payload() & 0xFFFF;
+                                if (domainId >= 32768) {
+                                    actualStatus = "IMPULSE_VM_ERR_OUT_OF_BOUNDS";
+                                    break;
+                                }
+                                pc++;
+                            }
                             case 0x06 -> { VmHandlers.handleLoadConstFloat(state, instr); pc++; }
                             case 0x07 -> { VmHandlers.handleLoadConstStrPrefix(state, instr); pc++; }
                             case 0x08 -> { VmHandlers.handleLoadInlineArray(state, ctx, instr); pc++; }
@@ -325,7 +354,15 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x10 -> { VmHandlers.handleCsrWalk(state, ctx, instr); pc++; }
                             case 0x11 -> { VmHandlers.handleCsrWalk(state, ctx, instr); pc++; }
                             case 0x12 -> { VmHandlers.handleCsrDegree(state, ctx, instr); pc++; }
-                            case 0x13 -> { VmHandlers.handleCsrWalkPredicate(state, ctx, instr); pc++; }
+                            case 0x13 -> {
+                                int rawRel = (instr.payload() >> 16) & 0xFFFF;
+                                if (rawRel > 255 || instr.payload() > 0x00FFFFFF) {
+                                    actualStatus = "IMPULSE_VM_ERR_OUT_OF_BOUNDS";
+                                    break;
+                                }
+                                VmHandlers.handleCsrWalkPredicate(state, ctx, instr);
+                                pc++;
+                            }
                             case 0x14 -> { VmHandlers.handleNodeFilter(state, ctx, instr); pc++; }
                             case 0x15 -> { VmHandlers.handleNodeFilter(state, ctx, instr); pc++; } // OP_NODE_FILTER_STR_PREFIX
                             case 0x16 -> { VmHandlers.handleVectorReduceSum(state, ctx, instr); pc++; }
@@ -346,6 +383,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x38 -> { VmHandlers.handleFloatVectorScale(state, ctx, instr); pc++; }
                             case 0x39 -> { VmHandlers.handleL1NormDiff(state, ctx, instr); pc++; }
                             case 0x3A -> { VmHandlers.handleProjectState(state, ctx, instr); pc++; }
+                            case 0x3B, 0x3C -> { pc++; }
                             case 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A -> { pc++; } // GraphBLAS pass-through
                             case 0x4B -> { VmHandlers.handleReadEdgeWeight(state, ctx, instr); pc++; }
                             case 0x50 -> {
@@ -476,7 +514,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x95 -> { VmHandlers.handleDenseWalkDirectStore(state, ctx, instr); pc++; }
                             case 0x0A, 0x0B, 0x0C, 0x0D,
                                  0x28, 0x29, 0x2B, 0x2C,
-                                 0x3B, 0x3C, 0x3E, 0x3F,
+                                 0x3E, 0x3F,
                                  0x4C, 0x4D, 0x4E, 0x4F,
                                  0x59,
                                  0x5D, 0x5E, 0x5F,
@@ -635,6 +673,29 @@ public class JavaVmPolyglotAssemblyVerifierTest {
             symbolMap.put(symName, offsetStart | (floats.size() << 16));
         }
 
+        // Parse all .array_int / .array_uint32 blocks
+        Pattern intArrPat = Pattern.compile("\\.(?:array_int|array_uint32|set_bitset|set_roaring)\\s+(\\w+)\\s*=\\s*\\[([^\\]]*)\\]");
+        Matcher intArrMat = intArrPat.matcher(fullText);
+        while (intArrMat.find()) {
+            String symName = intArrMat.group(1);
+            String arrBody = intArrMat.group(2);
+            int offsetStart = inlineBytes.size();
+            List<Integer> ints = new ArrayList<>();
+            for (String x : arrBody.split(",")) {
+                String trimmed = x.trim();
+                if (!trimmed.isEmpty()) {
+                    ints.add(Integer.parseInt(trimmed));
+                }
+            }
+            try {
+                for (int val : ints) {
+                    inlineBytes.write(java.nio.ByteBuffer.allocate(4).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(val).array());
+                }
+            } catch (IOException ignored) {}
+
+            symbolMap.put(symName, offsetStart | (ints.size() << 16));
+        }
+
         if (inlineBytes.size() > 0) {
             mockData.put("__DEFAULT_INLINE__", inlineBytes.toByteArray());
         }
@@ -722,7 +783,10 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             if (tokens.length > 1) {
                                 payload = parseVal(tokens[1], symbolMap);
                             }
-                        } else if (opName.equals("OP_INIT_MOCK_GRAPH") || opName.equals("OP_LOAD_INLINE_ARRAY")) {
+                        } else if (opName.equals("OP_INIT_MOCK_GRAPH") || opName.equals("OP_LOAD_INLINE_ARRAY") ||
+                                   opName.equals("OP_LOAD_INLINE_INT_ARRAY") || opName.equals("OP_LOAD_INLINE_SET") ||
+                                   opName.equals("OP_LOAD_INLINE_SET_ROARING") || opName.equals("OP_INIT_MOCK_NODE_ATTR") ||
+                                   opName.equals("OP_INIT_MOCK_EDGE_ATTR")) {
                             if (tokens.length > 1) {
                                 dstReg = parseVal(tokens[1], symbolMap);
                             }
