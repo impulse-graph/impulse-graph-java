@@ -303,8 +303,13 @@ public final class ImpulseVmInterpreter {
                         pc++;
                     }
 
-                    case OP_VECTOR_REDUCE_SUM, OP_REDUCE -> {
+                    case OP_VECTOR_REDUCE_SUM -> {
                         finalResult = VmHandlers.handleVectorReduceSum(state, ctx, instr);
+                        pc++;
+                    }
+
+                    case OP_REDUCE -> {
+                        finalResult = VmHandlers.handleReduce(state, ctx, instr);
                         pc++;
                     }
 
@@ -465,7 +470,7 @@ public final class ImpulseVmInterpreter {
 
                     case OP_RESERVED_0A, OP_RESERVED_0B, OP_RESERVED_0C, OP_RESERVED_0D,
                          OP_RESERVED_28, OP_RESERVED_29, OP_RESERVED_2B, OP_RESERVED_2C,
-                         OP_RESERVED_3B, OP_RESERVED_3C, OP_RESERVED_3E, OP_RESERVED_3F,
+                         OP_RESERVED_3E, OP_RESERVED_3F,
                          OP_RESERVED_4C, OP_RESERVED_4D, OP_RESERVED_4E, OP_RESERVED_4F,
                          OP_RESERVED_59,
                          OP_RESERVED_5D, OP_RESERVED_5E, OP_RESERVED_5F,

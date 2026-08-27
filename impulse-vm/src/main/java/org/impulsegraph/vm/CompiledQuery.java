@@ -252,10 +252,6 @@ public final class CompiledQuery {
             case OP_NODE_FILTER -> "OP_NODE_FILTER";
             case OP_VECTOR_LOAD_ATTR -> "OP_VECTOR_LOAD_ATTR";
             case OP_VECTOR_REDUCE_SUM -> "OP_VECTOR_REDUCE_SUM";
-            case OP_VECTOR_REDUCE_MAX -> "OP_VECTOR_REDUCE_MAX";
-            case OP_VECTOR_REDUCE_MIN -> "OP_VECTOR_REDUCE_MIN";
-            case OP_VECTOR_REDUCE_ARGMAX -> "OP_VECTOR_REDUCE_ARGMAX";
-            case OP_VECTOR_REDUCE_ARGMIN -> "OP_VECTOR_REDUCE_ARGMIN";
             case OP_REDUCE -> "OP_REDUCE";
             case OP_COLLECT_BITSET -> "OP_COLLECT_BITSET";
             case OP_COLLECT_ARRAY -> "OP_COLLECT_ARRAY";

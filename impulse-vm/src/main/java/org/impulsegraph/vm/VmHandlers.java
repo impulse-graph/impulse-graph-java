@@ -1563,6 +1563,17 @@ public final class VmHandlers {
         return argMin;
     }
 
+    public static Object handleReduce(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int opId = (instr.payload() >> 16) & 0xFFFF;
+        return switch (opId) {
+            case 1 -> handleVectorReduceMin(state, ctx, instr);
+            case 2 -> handleVectorReduceMax(state, ctx, instr);
+            case 3 -> handleVectorReduceArgMin(state, ctx, instr);
+            case 4 -> handleVectorReduceArgMax(state, ctx, instr);
+            default -> handleVectorReduceSum(state, ctx, instr);
+        };
+    }
+
     public static void handleLoadIndirect(MemorySegment state, VmQueryContext ctx, Instruction instr) {
         int dst = instr.dstReg();
         int srcParam = instr.payload() & 0xFFFF;
