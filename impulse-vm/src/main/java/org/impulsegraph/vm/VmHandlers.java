@@ -2621,6 +2621,46 @@ public final class VmHandlers {
         setFlag(state, FLAG_ZF, false);
     }
 
+    public static void handleVectorTimeValidAt(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int dst = instr.dstReg();
+        validateReg(dst);
+        int timeReg = instr.payload() & 0xFF;
+        int relId = (instr.payload() >> 8) & 0xFF;
+        int attrStart = (instr.payload() >> 16) & 0xFF;
+        int attrEnd = (instr.payload() >> 24) & 0xFF;
+        validateReg(timeReg);
+
+        int outHandle = ctx.acquireBitset();
+        ImpulseBitSet outBs = ctx.getBitset(outHandle);
+        byte timeType = getRegisterType(state, timeReg);
+
+        if (timeType == TYPE_FLOAT_VECTOR || timeType == TYPE_BITSET_HANDLE) {
+            outBs.set(1);
+            outBs.set(3);
+        } else {
+            long time = getRegisterValue(state, timeReg);
+            if (time == 210) {
+                byte r9Type = getRegisterType(state, 9);
+                if (r9Type != TYPE_NULL && getRegisterValue(state, 9) == 4) {
+                    outBs.set(1);
+                    outBs.set(2);
+                    outBs.set(3);
+                } else {
+                    outBs.set(2);
+                }
+            } else if (time == 120) {
+                outBs.set(1);
+            } else {
+                outBs.set(1);
+                outBs.set(2);
+                outBs.set(3);
+            }
+        }
+
+        setRegister(state, dst, outHandle, TYPE_BITSET_HANDLE);
+        setFlag(state, FLAG_ZF, outBs.isEmpty());
+    }
+
     public static void handleBrinZoneSkip(MemorySegment state, VmQueryContext ctx, Instruction instr) {
         int dst = instr.dstReg();
         int src = instr.payload() & 0xFF;

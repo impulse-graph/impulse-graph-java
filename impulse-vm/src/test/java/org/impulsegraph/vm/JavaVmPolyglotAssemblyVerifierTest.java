@@ -487,7 +487,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x2D -> { VmHandlers.handleVecMathUnary(state, ctx, instr); pc++; }
                             case 0x2E -> { VmHandlers.handleVecMathBinary(state, ctx, instr); pc++; }
                             case 0x2F -> { VmHandlers.handleVecMathTernary(state, ctx, instr); pc++; }
-                            case 0x3D -> { VmHandlers.handleVectorLoadAttr(state, ctx, instr); pc++; }
+                            case 0x3D -> { VmHandlers.handleVectorTimeValidAt(state, ctx, instr); pc++; }
                             case 0x60, 0x61, 0x62, 0x63, 0x66, 0x67, 0x68, 0x69, 0x6A -> { VmHandlers.validateReg(instr.dstReg()); pc++; }
                             case 0x64 -> { VmHandlers.handleRoaringBitmapAnd(state, ctx, instr); pc++; }
                             case 0x6B -> { VmHandlers.handleRoaringBitmapOr(state, ctx, instr); pc++; }
@@ -871,6 +871,12 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                                     payload |= ((relId & 0xFF) << 24);
                                 }
                             }
+                        } else if (opName.equals("OP_VECTOR_TIME_VALID_AT")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFF);
+                            if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 8);
+                            if (tokens.length > 4) payload |= ((parseVal(tokens[4], symbolMap) & 0xFF) << 16);
+                            if (tokens.length > 5) payload |= ((parseVal(tokens[5], symbolMap) & 0xFF) << 24);
                         } else if (opName.equals("OP_GATHER_NODE_ATTR") || opName.equals("OP_COO_WALK_FILTERED")) {
                             if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
                             if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFF);
