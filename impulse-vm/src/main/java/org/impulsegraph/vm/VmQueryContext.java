@@ -57,6 +57,15 @@ public final class VmQueryContext implements AutoCloseable {
 
     // Multi-Threading (MT) & Degree of Parallelism (DoP) Control
     private int maxThreads = resolveDefaultMaxThreads();
+    private final Map<Integer, Object> mockAttributes = new HashMap<>();
+
+    public void setMockAttribute(int attrId, Object array) {
+        mockAttributes.put(attrId, array);
+    }
+
+    public Object getMockAttribute(int attrId) {
+        return mockAttributes.get(attrId);
+    }
 
     private static int resolveDefaultMaxThreads() {
         String envDop = System.getenv("IMPULSE_MAX_DOP");
@@ -205,6 +214,12 @@ public final class VmQueryContext implements AutoCloseable {
         return handle;
     }
 
+    public void setFloatVector(int handle, float[] vec) {
+        if (handle >= 0 && handle < floatVectors.size()) {
+            floatVectors.set(handle, vec);
+        }
+    }
+
     public int acquireFloatVector(int capacity) {
         return registerFloatVector(new float[capacity]);
     }
@@ -217,6 +232,12 @@ public final class VmQueryContext implements AutoCloseable {
         int handle = doubleVectors.size();
         doubleVectors.add(vec);
         return handle;
+    }
+
+    public void setDoubleVector(int handle, double[] vec) {
+        if (handle >= 0 && handle < doubleVectors.size()) {
+            doubleVectors.set(handle, vec);
+        }
     }
 
     public double[] getDoubleVector(int handle) {

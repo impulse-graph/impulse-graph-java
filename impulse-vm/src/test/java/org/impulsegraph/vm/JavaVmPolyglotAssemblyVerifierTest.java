@@ -46,14 +46,14 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         OPCODE_MAP.put("OP_LOAD_CONST_FLOAT", (byte) 0x06);
         OPCODE_MAP.put("OP_LOAD_CONST_STR_PREFIX", (byte) 0x07);
         OPCODE_MAP.put("OP_LOAD_INLINE_ARRAY", (byte) 0x08);
-        OPCODE_MAP.put("OP_LOAD_INLINE_INT_ARRAY", (byte) 0x08);
-        OPCODE_MAP.put("OP_LOAD_INLINE_NODE_ARRAY", (byte) 0x0A);
+        OPCODE_MAP.put("OP_INIT_MOCK_GRAPH", (byte) 0x09);
         OPCODE_MAP.put("OP_LOAD_INLINE_SET", (byte) 0x0A);
         OPCODE_MAP.put("OP_LOAD_INLINE_SET_DENSE", (byte) 0x0A);
         OPCODE_MAP.put("OP_LOAD_INLINE_SET_ROARING", (byte) 0x0A);
-        OPCODE_MAP.put("OP_INIT_MOCK_GRAPH", (byte) 0x09);
         OPCODE_MAP.put("OP_INIT_MOCK_NODE_ATTR", (byte) 0x0B);
         OPCODE_MAP.put("OP_INIT_MOCK_EDGE_ATTR", (byte) 0x0C);
+        OPCODE_MAP.put("OP_LOAD_INLINE_INT_ARRAY", (byte) 0x08);
+        OPCODE_MAP.put("OP_LOAD_INLINE_NODE_ARRAY", (byte) 0x0A);
         OPCODE_MAP.put("OP_COALESCE", (byte) 0x3B);
         OPCODE_MAP.put("OP_EXTRACT_VALIDITY", (byte) 0x3C);
 
@@ -344,6 +344,13 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                                     actualStatus = "IMPULSE_VM_ERR_OUT_OF_BOUNDS";
                                     break;
                                 }
+                                int hDst = ctx.acquireBitset();
+                                if (hDst < 0) {
+                                    actualStatus = "IMPULSE_VM_ERR_OUT_OF_BOUNDS";
+                                    break;
+                                }
+                                VmHandlers.setRegister(state, instr.dstReg(), hDst, VmRegisterType.TYPE_BITSET_HANDLE);
+                                VmHandlers.setFlag(state, VmRegisterType.FLAG_ZF, true);
                                 pc++;
                             }
                             case 0x06 -> { VmHandlers.handleLoadConstFloat(state, instr); pc++; }
@@ -800,6 +807,12 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             if (tokens.length > 1) {
                                 payload = parseVal(tokens[1], symbolMap);
                             }
+                        } else if (opName.equals("OP_LOAD_CONST_FLOAT")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) {
+                                float fVal = Float.parseFloat(tokens[2].trim());
+                                payload = Float.floatToRawIntBits(fVal);
+                            }
                         } else if (opName.equals("OP_INIT_MOCK_GRAPH") || opName.equals("OP_LOAD_INLINE_ARRAY") ||
                                    opName.equals("OP_LOAD_INLINE_INT_ARRAY") || opName.equals("OP_LOAD_INLINE_SET") ||
                                    opName.equals("OP_LOAD_INLINE_SET_DENSE") || opName.equals("OP_LOAD_INLINE_NODE_ARRAY") ||
@@ -892,7 +905,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFFFF);
                             if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFFFF) << 16);
                             if (tokens.length > 4) flags = (byte) parseVal(tokens[4], symbolMap);
-                        } else if (opName.equals("OP_ALLOC_SCRATCH") || opName.equals("OP_ASSERT_SCRATCH_BYTES") || opName.equals("OP_SET_MAX_DOP")) {
+                        } else if (opName.equals("OP_LOAD_CONST_INT") || opName.equals("OP_ALLOC_SCRATCH") || opName.equals("OP_ASSERT_SCRATCH_BYTES") || opName.equals("OP_SET_MAX_DOP")) {
                             if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
                             if (tokens.length > 2) payload = parseVal(tokens[2], symbolMap);
                         } else {
