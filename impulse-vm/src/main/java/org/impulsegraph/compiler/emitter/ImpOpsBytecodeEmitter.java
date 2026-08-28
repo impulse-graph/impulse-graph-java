@@ -113,14 +113,19 @@ public final class ImpOpsBytecodeEmitter {
                     instrList.add(new InstructionWord(OP_NODE_FILTER, flags, dstReg, payload));
                 } else if (step instanceof ScmReduce red) {
                     byte opcode = switch (red.op()) {
-                        case FIRST -> OP_REDUCE;
                         case SUM, COUNT -> OP_VECTOR_REDUCE_SUM;
-                        case MAX -> OP_VECTOR_REDUCE_MAX;
-                        case MIN -> OP_VECTOR_REDUCE_MIN;
-                        case ARGMAX -> OP_VECTOR_REDUCE_ARGMAX;
-                        case ARGMIN -> OP_VECTOR_REDUCE_ARGMIN;
+                        default -> OP_REDUCE;
                     };
-                    instrList.add(new InstructionWord(opcode, (byte) 0, srcReg, (srcReg << 16) | srcReg));
+                    int opId = switch (red.op()) {
+                        case SUM, COUNT -> 0;
+                        case MIN -> 1;
+                        case MAX -> 2;
+                        case ARGMIN -> 3;
+                        case ARGMAX -> 4;
+                        case FIRST -> 5;
+                    };
+                    int payload = (opId << 16) | (srcReg & 0xFFFF);
+                    instrList.add(new InstructionWord(opcode, (byte) 0, srcReg, payload));
                 } else if (step instanceof ScmCollect collect) {
                     byte flags = 0;
                     if (!firstStepEmitted) {

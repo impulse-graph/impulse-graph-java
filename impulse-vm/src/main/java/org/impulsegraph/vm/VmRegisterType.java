@@ -23,6 +23,8 @@ public final class VmRegisterType {
     public static final byte OP_FLAG_ACCUMULATE  = 0x02;
     public static final byte OP_FLAG_INVERT      = 0x04;
     public static final byte OP_FLAG_OFFHEAP     = 0x08;
+    public static final byte OP_FLAG_EXTENDED    = (byte) 0x80; // 128-bit Extended Instruction format
+    public static final byte OP_EXTENSION_PAYLOAD = (byte) 0xFF; // Tombstone marker for 2nd 64-bit word
 
     // Register Type Tags
     public static final byte TYPE_NULL           = 0x00;
@@ -109,13 +111,9 @@ public final class VmRegisterType {
     public static final byte OP_L1_NORM_DIFF           = (byte) 0x39;
 
     public static final byte OP_PROJECT_STATE          = (byte) 0x3A;
-    public static final byte OP_VECTOR_REDUCE_MAX      = (byte) 0x3A;
-    public static final byte OP_VECTOR_REDUCE_MIN      = (byte) 0x3B;
-    public static final byte OP_VECTOR_REDUCE_ARGMAX   = (byte) 0x3C;
-    public static final byte OP_VECTOR_TIME_VALID_AT   = (byte) 0x3D;
-    public static final byte OP_VECTOR_REDUCE_ARGMIN   = (byte) 0x3D;
     public static final byte OP_RESERVED_3B            = (byte) 0x3B;
     public static final byte OP_RESERVED_3C            = (byte) 0x3C;
+    public static final byte OP_VECTOR_TIME_VALID_AT   = (byte) 0x3D;
     public static final byte OP_RESERVED_3E            = (byte) 0x3E;
     public static final byte OP_RESERVED_3F            = (byte) 0x3F;
 

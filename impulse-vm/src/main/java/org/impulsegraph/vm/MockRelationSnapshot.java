@@ -20,6 +20,13 @@ public class MockRelationSnapshot implements RelationSnapshot {
         this.edgeCount = edgeCount;
         this.rowOffsets = arena.allocateFrom(ValueLayout.JAVA_INT, offsets);
         this.colTargets = arena.allocateFrom(ValueLayout.JAVA_INT, targets);
+        this.cscRowOffsets = this.rowOffsets;
+        this.cscColTargets = this.colTargets;
+    }
+
+    public void setCsc(MemorySegment cscRowOffsets, MemorySegment cscColTargets) {
+        this.cscRowOffsets = cscRowOffsets;
+        this.cscColTargets = cscColTargets;
     }
 
     @Override public long getEdgeCount() { return edgeCount; }
