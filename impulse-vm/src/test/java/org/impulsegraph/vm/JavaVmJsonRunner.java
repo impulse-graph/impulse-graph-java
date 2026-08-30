@@ -10,11 +10,13 @@ import org.impulsegraph.api.ImpulseGraphSnapshot;
 
 public class JavaVmJsonRunner {
     public static void main(String[] args) throws Exception {
-        if (args.length < 1) {
-            System.err.println("Usage: JavaVmJsonRunner <path-to-impas>");
+if (args.length < 1) {
+            System.err.println("Usage: JavaVmJsonRunner <path-to-impas> [path-to-impb] [path-to-impb-data]");
             System.exit(1);
         }
-        Path impasFile = Paths.get(args[0]);
+        java.nio.file.Path impasFile = java.nio.file.Paths.get(args[0]);
+        java.nio.file.Path impbFile = args.length > 1 ? java.nio.file.Paths.get(args[1]) : null;
+        java.nio.file.Path impbDataFile = args.length > 2 ? java.nio.file.Paths.get(args[2]) : null;
         JavaVmPolyglotAssemblyVerifierTest verifier = new JavaVmPolyglotAssemblyVerifierTest();
         
         // Use reflection to access parseImpasFile
@@ -24,11 +26,22 @@ public class JavaVmJsonRunner {
         
         // Core logic
 
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment progSeg = arena.allocate(asm.instructions().size() * 8L, 8);
-            for (int i = 0; i < asm.instructions().size(); i++) {
-                progSeg.set(ValueLayout.JAVA_LONG, i * 8L, asm.instructions().get(i));
+        try (java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofConfined()) {
+            java.lang.foreign.MemorySegment progSeg;
+            int instructionCount = 0;
+            if (impbFile != null && java.nio.file.Files.exists(impbFile)) {
+                byte[] bytes = java.nio.file.Files.readAllBytes(impbFile);
+                progSeg = arena.allocate(bytes.length, 8);
+                java.lang.foreign.MemorySegment.copy(bytes, 0, progSeg, java.lang.foreign.ValueLayout.JAVA_BYTE, 0, bytes.length);
+                instructionCount = bytes.length / 8;
+            } else {
+                instructionCount = asm.instructions().size();
+                progSeg = arena.allocate(instructionCount * 8L, 8);
+                for (int i = 0; i < instructionCount; i++) {
+                    progSeg.set(java.lang.foreign.ValueLayout.JAVA_LONG, i * 8L, asm.instructions().get(i));
+                }
             }
+
 
             try (VmQueryContext ctx = new VmQueryContext(null, arena)) {
                 MemorySegment state = ctx.allocateStateSegment();
@@ -50,15 +63,20 @@ public class JavaVmJsonRunner {
                 }
 
                 // Setup inline data segment if present in mockData
-                if (asm.mockData().containsKey("__DEFAULT_INLINE__")) {
+if (impbDataFile != null && java.nio.file.Files.exists(impbDataFile)) {
+                    byte[] raw = java.nio.file.Files.readAllBytes(impbDataFile);
+                    java.lang.foreign.MemorySegment inlineSeg = arena.allocate(raw.length, 64);
+                    java.lang.foreign.MemorySegment.copy(java.lang.foreign.MemorySegment.ofArray(raw), 0, inlineSeg, 0, raw.length);
+                    ctx.setInlineData(inlineSeg, raw.length);
+                } else if (asm.mockData().containsKey("__DEFAULT_INLINE__")) {
                     byte[] raw = asm.mockData().get("__DEFAULT_INLINE__");
-                    MemorySegment inlineSeg = arena.allocate(raw.length, 64);
-                    MemorySegment.copy(MemorySegment.ofArray(raw), 0, inlineSeg, 0, raw.length);
+                    java.lang.foreign.MemorySegment inlineSeg = arena.allocate(raw.length, 64);
+                    java.lang.foreign.MemorySegment.copy(java.lang.foreign.MemorySegment.ofArray(raw), 0, inlineSeg, 0, raw.length);
                     ctx.setInlineData(inlineSeg, raw.length);
                 }
 
                 long pc = 0;
-                long instructionCount = asm.instructions().size();
+                 
                 
                 VmHandlers.Instruction[] progArr = new VmHandlers.Instruction[(int) instructionCount];
                 for (int i = 0; i < instructionCount; i++) {
@@ -77,7 +95,18 @@ public class JavaVmJsonRunner {
                             break;
                         }
                     }
+                    
                     VmHandlers.Instruction instr = VmHandlers.decodeInstruction(progSeg, pc);
+                    boolean isExtended = (instr.flags() & VmRegisterType.OP_FLAG_EXTENDED) != 0;
+                    if (instr.opcode() == 0x10) {
+                        System.err.println("OP_CSR_WALK: flags=" + instr.flags() + " isExtended=" + isExtended);
+                    }
+                    if (isExtended) {
+
+                        VmHandlers.ExtendedInstruction ext = VmHandlers.decodeExtendedInstruction(progSeg, pc);
+                        instr = new VmHandlers.Instruction(instr.opcode(), instr.flags(), instr.dstReg(), (instr.payload() & 0xFFFF) | (ext.arg3() << 16));
+                    }
+
                     byte opcode = instr.opcode();
 
                     if (opcode == (byte) 0xFF) { // OP_HALT
@@ -94,8 +123,11 @@ public class JavaVmJsonRunner {
                         break;
                     }
 
+                    
+                    if (isExtended) pc++;
                     try {
                         switch (Byte.toUnsignedInt(opcode)) {
+
                             case 0x00 -> { break loop; }
                             case 0x01 -> pc++; // OP_NOP
                             case 0x02 -> {

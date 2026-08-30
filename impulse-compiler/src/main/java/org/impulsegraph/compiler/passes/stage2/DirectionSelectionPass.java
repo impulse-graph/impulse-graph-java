@@ -56,12 +56,15 @@ public final class DirectionSelectionPass implements CompilerPass {
                 }
             }
 
-            ImpScmNode optFilter = walk.filterPredicate() != null ? optimizeDirection(walk.filterPredicate(), snapshot) : null;
+            List<ImpScmNode> optFilterList = new ArrayList<>();
+            for (ImpScmNode step : walk.shaderSteps()) {
+                optFilterList.add(optimizeDirection(step, snapshot));
+            }
             List<ImpScmNode> optSubs = new ArrayList<>();
             for (ImpScmNode sub : walk.subSteps()) {
                 optSubs.add(optimizeDirection(sub, snapshot));
             }
-            return new ScmWalk(walk.relationName(), walk.relationId(), dir, optFilter, optSubs);
+            return new ScmWalk(walk.relationName(), walk.relationId(), dir, optFilterList, optSubs);
         }
 
         if (node instanceof ScmVectorFilter vf) {

@@ -155,6 +155,43 @@ public final class CelAstOptimizer {
             }
         }
 
+        // 6. Monotonic Function Inverse Pushdown (e.g. sqrt(x) < 25.0 -> x < 625.0)
+        if ((op.equals("<") || op.equals("<=") || op.equals(">") || op.equals(">=") || op.equals("==") || op.equals("!=")) 
+                && left.kind() == CelAstNode.Kind.FUNCTION_CALL 
+                && (right.kind() == CelAstNode.Kind.LITERAL_FLOAT || right.kind() == CelAstNode.Kind.LITERAL_INT)
+                && left.children().size() == 1) {
+            
+            double c = right.kind() == CelAstNode.Kind.LITERAL_FLOAT ? right.floatVal() : (double) right.intVal();
+            String func = left.text().toLowerCase();
+            CelAstNode innerArg = left.children().get(0);
+            
+            // Strictly Monotonically Increasing Functions
+            if (func.equals("sqrt") && c >= 0.0) {
+                return node.withChildren(List.of(innerArg, CelAstNode.makeFloat(c * c)));
+            } else if (func.equals("cbrt")) {
+                return node.withChildren(List.of(innerArg, CelAstNode.makeFloat(c * c * c)));
+            } else if (func.equals("log")) {
+                return node.withChildren(List.of(innerArg, CelAstNode.makeFloat(Math.exp(c))));
+            } else if (func.equals("log10")) {
+                return node.withChildren(List.of(innerArg, CelAstNode.makeFloat(Math.pow(10.0, c))));
+            } else if (func.equals("exp")) {
+                if (c > 0.0) {
+                    return node.withChildren(List.of(innerArg, CelAstNode.makeFloat(Math.log(c))));
+                } else {
+                    // e^x is always > 0. If c <= 0, then exp(x) < c is always false. exp(x) > c is always true.
+                    if (op.equals("<") || op.equals("<=") || op.equals("==")) return CelAstNode.makeBool(false);
+                    if (op.equals(">") || op.equals(">=") || op.equals("!=")) return CelAstNode.makeBool(true);
+                }
+            } else if (func.equals("exp10")) {
+                if (c > 0.0) {
+                    return node.withChildren(List.of(innerArg, CelAstNode.makeFloat(Math.log10(c))));
+                } else {
+                    if (op.equals("<") || op.equals("<=") || op.equals("==")) return CelAstNode.makeBool(false);
+                    if (op.equals(">") || op.equals(">=") || op.equals("!=")) return CelAstNode.makeBool(true);
+                }
+            }
+        }
+
         return node;
     }
 
@@ -173,71 +210,7 @@ public final class CelAstOptimizer {
     private static CelAstNode foldFunctionCall(CelAstNode node) {
         int funcId = CelMathFunctions.resolveMathFunc(node.text());
         if (funcId <= 0) return node;
-
-        if (node.children().size() == 1) {
-            CelAstNode arg = node.children().get(0);
-            if (arg.kind() == CelAstNode.Kind.LITERAL_FLOAT || arg.kind() == CelAstNode.Kind.LITERAL_INT) {
-                double val = arg.kind() == CelAstNode.Kind.LITERAL_FLOAT ? arg.floatVal() : (double) arg.intVal();
-                if (funcId == CelMathFunctions.MATH_FUNC_ISNAN) return CelAstNode.makeBool(Double.isNaN(val));
-                if (funcId == CelMathFunctions.MATH_FUNC_ISINF) return CelAstNode.makeBool(Double.isInfinite(val));
-                if (funcId == CelMathFunctions.MATH_FUNC_ISFINITE) return CelAstNode.makeBool(Double.isFinite(val));
-                double res = evalUnaryMath(funcId, val);
-                return CelAstNode.makeFloat(res);
-            }
-        } else if (node.children().size() == 2) {
-            CelAstNode arg1 = node.children().get(0);
-            CelAstNode arg2 = node.children().get(1);
-            if ((arg1.kind() == CelAstNode.Kind.LITERAL_FLOAT || arg1.kind() == CelAstNode.Kind.LITERAL_INT) &&
-                (arg2.kind() == CelAstNode.Kind.LITERAL_FLOAT || arg2.kind() == CelAstNode.Kind.LITERAL_INT)) {
-                double a = arg1.kind() == CelAstNode.Kind.LITERAL_FLOAT ? arg1.floatVal() : (double) arg1.intVal();
-                double b = arg2.kind() == CelAstNode.Kind.LITERAL_FLOAT ? arg2.floatVal() : (double) arg2.intVal();
-                double res = evalBinaryMath(funcId, a, b);
-                return CelAstNode.makeFloat(res);
-            }
-        }
-
         return node;
-    }
-
-    private static double evalUnaryMath(int funcId, double val) {
-        return switch (funcId) {
-            case CelMathFunctions.MATH_FUNC_ABS -> Math.abs(val);
-            case CelMathFunctions.MATH_FUNC_SQRT -> Math.sqrt(val);
-            case CelMathFunctions.MATH_FUNC_RSQRT -> 1.0 / Math.sqrt(val);
-            case CelMathFunctions.MATH_FUNC_CBRT -> Math.cbrt(val);
-            case CelMathFunctions.MATH_FUNC_EXP -> Math.exp(val);
-            case CelMathFunctions.MATH_FUNC_EXP2 -> Math.pow(2.0, val);
-            case CelMathFunctions.MATH_FUNC_EXPM1 -> Math.expm1(val);
-            case CelMathFunctions.MATH_FUNC_LOG -> Math.log(val);
-            case CelMathFunctions.MATH_FUNC_LOG2 -> Math.log(val) / Math.log(2.0);
-            case CelMathFunctions.MATH_FUNC_LOG10 -> Math.log10(val);
-            case CelMathFunctions.MATH_FUNC_LOG1P -> Math.log1p(val);
-            case CelMathFunctions.MATH_FUNC_SIN -> Math.sin(val);
-            case CelMathFunctions.MATH_FUNC_COS -> Math.cos(val);
-            case CelMathFunctions.MATH_FUNC_TAN -> Math.tan(val);
-            case CelMathFunctions.MATH_FUNC_ASIN -> Math.asin(val);
-            case CelMathFunctions.MATH_FUNC_ACOS -> Math.acos(val);
-            case CelMathFunctions.MATH_FUNC_ATAN -> Math.atan(val);
-            case CelMathFunctions.MATH_FUNC_SINH -> Math.sinh(val);
-            case CelMathFunctions.MATH_FUNC_COSH -> Math.cosh(val);
-            case CelMathFunctions.MATH_FUNC_TANH -> Math.tanh(val);
-            case CelMathFunctions.MATH_FUNC_FLOOR -> Math.floor(val);
-            case CelMathFunctions.MATH_FUNC_CEIL -> Math.ceil(val);
-            case CelMathFunctions.MATH_FUNC_ROUND -> Math.round(val);
-            case CelMathFunctions.MATH_FUNC_RELU -> Math.max(0.0, val);
-            case CelMathFunctions.MATH_FUNC_SIGMOID -> 1.0 / (1.0 + Math.exp(-val));
-            default -> val;
-        };
-    }
-
-    private static double evalBinaryMath(int funcId, double a, double b) {
-        return switch (funcId) {
-            case CelMathFunctions.MATH_FUNC_POW -> Math.pow(a, b);
-            case CelMathFunctions.MATH_FUNC_HYPOT -> Math.hypot(a, b);
-            case CelMathFunctions.MATH_FUNC_ATAN2 -> Math.atan2(a, b);
-            case CelMathFunctions.MATH_FUNC_SAFE_DIV -> b == 0.0 ? 0.0 : a / b;
-            default -> a;
-        };
     }
 
     private static boolean isZero(CelAstNode node) {

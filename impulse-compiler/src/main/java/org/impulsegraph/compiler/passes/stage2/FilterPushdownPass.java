@@ -34,14 +34,25 @@ public final class FilterPushdownPass implements CompilerPass {
             for (int i = 0; i < steps.size(); i++) {
                 ImpScmNode curr = steps.get(i);
 
-                if (curr instanceof ScmWalk walk && walk.filterPredicate() == null && i + 1 < steps.size()) {
-                    ImpScmNode next = steps.get(i + 1);
-                    if (next instanceof ScmVectorFilter vf) {
-                        // Fuse filter into walk step
-                        ScmWalk fused = new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), vf.predicate(), walk.subSteps());
-                        newSteps.add(fused);
-                        i++; // Skip the fused vector filter step
-                        continue;
+                if (curr instanceof ScmWalk walk) {
+                    List<ImpScmNode> shaderSteps = new ArrayList<>(walk.shaderSteps());
+                    
+                    // Consume subsequent vector filters and projections
+                    while (i + 1 < steps.size()) {
+                        ImpScmNode next = steps.get(i + 1);
+                        if (next instanceof ScmVectorFilter vf) {
+                            shaderSteps.add(vf.predicate());
+                            i++;
+                        } else if (next instanceof ScmList list && !list.elements().isEmpty() && list.elements().get(0) instanceof ScmSymbol sym && sym.name().equals("project-state")) {
+                            shaderSteps.add(next);
+                            i++;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    if (!shaderSteps.equals(walk.shaderSteps())) {
+                        curr = walk.withShaderSteps(shaderSteps);
                     }
                 }
 

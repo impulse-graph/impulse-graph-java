@@ -69,10 +69,10 @@ public final class KernelFusionPass implements CompilerPass {
 
     private static boolean canFuse(ScmWalk w1, ScmWalk w2, ImpulseGraphSnapshot snapshot) {
         // Both walks must be forward CSR without filter predicates or sub-steps
-        if (w1.direction() != ScmWalk.Direction.FORWARD_CSR || w1.filterPredicate() != null || !w1.subSteps().isEmpty()) {
+        if (w1.direction() != ScmWalk.Direction.FORWARD_CSR || !w1.shaderSteps().isEmpty() || !w1.subSteps().isEmpty()) {
             return false;
         }
-        if (w2.direction() != ScmWalk.Direction.FORWARD_CSR || w2.filterPredicate() != null || !w2.subSteps().isEmpty()) {
+        if (w2.direction() != ScmWalk.Direction.FORWARD_CSR || !w2.shaderSteps().isEmpty() || !w2.subSteps().isEmpty()) {
             return false;
         }
 

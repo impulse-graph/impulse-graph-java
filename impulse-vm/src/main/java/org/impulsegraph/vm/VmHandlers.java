@@ -2339,7 +2339,7 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
-        } else {
+        } else if (type1 == TYPE_FLOAT_VECTOR) {
             float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, src1));
             float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, src2));
             int len = (v1 != null) ? v1.length : ((v2 != null) ? v2.length : 1024);
@@ -2389,7 +2389,7 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
-        } else {
+        } else if (type == TYPE_FLOAT_VECTOR) {
             float[] v = ctx.getFloatVector((int) getRegisterValue(state, src));
             int len = (v != null) ? v.length : 1024;
             float[] out = new float[len];
@@ -2406,8 +2406,11 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
+        } else {
+            throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
         }
     }
+
 
     private static double applyMathUnary(int funcId, double v) {
         return switch (funcId) {
@@ -2482,7 +2485,7 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
-        } else {
+        } else if (type == TYPE_FLOAT_VECTOR) {
             float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, src1));
             float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, src2));
             int len = (v1 != null) ? v1.length : ((v2 != null) ? v2.length : 1024);
@@ -2501,6 +2504,8 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
+        } else {
+            throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
         }
     }
 
@@ -2559,7 +2564,7 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
-        } else {
+        } else if (type == TYPE_FLOAT_VECTOR) {
             float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, src1));
             float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, src2));
             float[] v3 = ctx.getFloatVector((int) getRegisterValue(state, src3));
@@ -2580,6 +2585,8 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
+        } else {
+            throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
         }
     }
 
@@ -3058,7 +3065,10 @@ public final class VmHandlers {
     }
 
     public static void handleStreamWalk(MemorySegment state, VmQueryContext ctx, Instruction instr, MemorySegment programSeg, long instructionCount) {
-                int graphHandle = instr.dstReg();
+        int outBsHandle = ctx.acquireBitset();
+        org.impulsegraph.api.bitset.ImpulseBitSet outBs = ctx.getBitset(outBsHandle);
+        setRegister(state, instr.dstReg(), outBsHandle, TYPE_BITSET_HANDLE);
+        
         int srcReg = instr.payload() & 0xFFFF;
         int relId = (instr.payload() >> 16) & 0xFFFF;
         int shaderPcStart = instr.flags() & 0xFF;
@@ -3225,6 +3235,25 @@ public final class VmHandlers {
                             s_regs[sDst] = res;
                         }
                         
+                        case VmRegisterType.OP_STREAM_YIELD -> {
+                            outBs.set(tgt);
+                        }
+                        case VmRegisterType.OP_STREAM_SCATTER_REDUCE -> {
+                            float val = s_regs[sDst];
+                            int attrId = sPayloadLow;
+                            int monoid = sPayloadHigh;
+                            float[] vec = ctx.getFloatVector(attrId);
+                            if (vec != null && tgt < vec.length) {
+                                float current = vec[tgt];
+                                float next = current;
+                                switch (monoid) {
+                                    case 0 -> next = current + val;
+                                    case 1 -> next = Math.max(current, val);
+                                    case 2 -> next = Math.min(current, val);
+                                }
+                                vec[tgt] = next;
+                            }
+                        }
                         case VmRegisterType.OP_STREAM_REDUCE -> {
                                                         float val = s_regs[sDst];
                             int globalReg = sPayloadLow;

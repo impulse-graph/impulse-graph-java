@@ -97,7 +97,7 @@ public final class ImpScmParser {
                             : "csc-walk".equals(name) ? ScmWalk.Direction.REVERSE_CSC : ScmWalk.Direction.AUTO;
                     String relName = "";
                     int relId = -1;
-                    ImpScmNode filter = null;
+                                        List<ImpScmNode> shaders = new ArrayList<>();
                     List<ImpScmNode> subSteps = new ArrayList<>();
 
                     for (int i = 1; i < elements.size(); i++) {
@@ -106,13 +106,17 @@ public final class ImpScmParser {
                             relName = s.value();
                         } else if (item instanceof ScmLiteral.ScmInt id && relId == -1 && relName.isEmpty()) {
                             relId = (int) id.value();
-                        } else if (item instanceof ScmVectorFilter vf && filter == null) {
-                            filter = vf;
+                        } else if (item instanceof ScmVectorFilter vf) {
+                            shaders.add(vf.predicate());
+                        } else if (item instanceof ScmList shList && !shList.elements().isEmpty() && shList.elements().get(0) instanceof ScmSymbol symShader && symShader.name().equals("shader")) {
+                            for (int j = 1; j < shList.elements().size(); j++) {
+                                shaders.add(shList.elements().get(j));
+                            }
                         } else {
                             subSteps.add(item);
                         }
                     }
-                    return new ScmWalk(relName, relId, dir, filter, subSteps);
+                    return new ScmWalk(relName, relId, dir, shaders, subSteps);
                 }
                 case "vector-filter" -> {
                     if (elements.size() > 1) {

@@ -215,7 +215,7 @@ public final class VmRegisterType {
     public static final byte OP_DENSE_WALK_REDUCE      = (byte) 0x94;
     public static final byte OP_DENSE_WALK_DIRECT_STORE= (byte) 0x95;
 
-    // Edge Stream Shader Opcodes (0xA0 - 0xBD)
+    // Edge Stream Shader Opcodes (0xA0 - 0xBF)
     public static final byte OP_COO_WALK_STREAM        = (byte) 0xA0;
     public static final byte OP_STREAM_FUNC_BEGIN      = (byte) 0xA1;
     public static final byte OP_STREAM_FUNC_END        = (byte) 0xA2;
@@ -246,6 +246,8 @@ public final class VmRegisterType {
     public static final byte OP_STREAM_LOAD_TGT_ID     = (byte) 0xBB;
     public static final byte OP_STREAM_LOAD_EDGE_ID    = (byte) 0xBC;
     public static final byte OP_STREAM_LOAD_CONST      = (byte) 0xBD;
+    public static final byte OP_STREAM_YIELD           = (byte) 0xBE;
+    public static final byte OP_STREAM_SCATTER_REDUCE  = (byte) 0xBF;
 
     // GraphBLAS Semiring IDs
     public static final int SEMIRING_PLUS_TIMES       = 0;

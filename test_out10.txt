@@ -1,0 +1,490 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] --------------------< org.impulsegraph:impulse-vm >---------------------
+[INFO] Building Impulse Graph Engine - Compute VM 0.9.0-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ impulse-vm ---
+[INFO] Deleting /Users/jesse/impulse/impulse-graph-java/impulse-vm/target
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ impulse-vm ---
+[INFO] skip non existing resourceDirectory /Users/jesse/impulse/impulse-graph-java/impulse-vm/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ impulse-vm ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 24 source files with javac [debug release 25] to target/classes
+[INFO] /Users/jesse/impulse/impulse-graph-java/impulse-vm/src/main/java/org/impulsegraph/vm/traversal/DefaultTraversal.java: /Users/jesse/impulse/impulse-graph-java/impulse-vm/src/main/java/org/impulsegraph/vm/traversal/DefaultTraversal.java uses unchecked or unsafe operations.
+[INFO] /Users/jesse/impulse/impulse-graph-java/impulse-vm/src/main/java/org/impulsegraph/vm/traversal/DefaultTraversal.java: Recompile with -Xlint:unchecked for details.
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ impulse-vm ---
+[INFO] skip non existing resourceDirectory /Users/jesse/impulse/impulse-graph-java/impulse-vm/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ impulse-vm ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 34 source files with javac [debug release 25] to target/test-classes
+[INFO] 
+[INFO] --- surefire:3.2.5:test (default-test) @ impulse-vm ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+WARNING: Using incubator modules: jdk.incubator.vector
+[INFO] Running org.impulsegraph.vm.JavaVmPolyglotAssemblyVerifierTest
+===============================================================
+ ImpulseVM Java Polyglot Assembly Test Suite Verifier         
+ Spec v0.9.0 / Spec v2.4                                       
+===============================================================
+[PASS] 01_scalars_and_data/tc00_vm_init_and_halt_pos.impas
+[PASS] 01_scalars_and_data/tc01_scalar_ops_pos.impas
+[PASS] 01_scalars_and_data/tc02_inline_data_pos.impas
+[PASS] 01_scalars_and_data/tc26_scratch_memory_pos.impas
+[PASS] 01_scalars_and_data/tc29_max_dop_control_pos.impas
+[PASS] 01_scalars_and_data/tc31_register_windowing_pos.impas
+[PASS] 01_scalars_and_data/tc35_recursive_factorial_pos.impas
+[PASS] 01_scalars_and_data/tc37_bytecode_type_validation_pos.impas
+[PASS] 01_scalars_and_data/tc39_type_validation_primitives_pos.impas
+[PASS] 01_scalars_and_data/tc40_type_validation_extended_pos.impas
+[PASS] 01_scalars_and_data/tc46_has_csr_csc_coo_pos.impas
+[PASS] 01_scalars_and_data/tc48_fp_finite_assertions_pos.impas
+[FAIL] 02_control_flow/bench01_tight_loop_1m.impas
+       -> Expected FLAG ZF=true, got false
+[PASS] 02_control_flow/bench02_mixed_alu_1m.impas
+[PASS] 02_control_flow/bench03_branch_predict_1m.impas
+[PASS] 02_control_flow/bench04_call_trampoline_100k.impas
+[PASS] 02_control_flow/tc03_control_flow_pos.impas
+[PASS] 02_control_flow/tc04_subroutine_pos.impas
+[PASS] 03_error_and_assert/tc05_throw_exception_neg.impas
+Crash in tc06_assert_failure_neg.impas at pc=1 (op 0x5b): java.lang.IllegalStateException: OP_ASSERT failed: expected 99, got 10
+[PASS] 03_error_and_assert/tc06_assert_failure_neg.impas
+[PASS] 03_error_and_assert/tc07_trap_signal_neg.impas
+INVALID REG in tc13_bounds_error_neg.impas at pc=0: opcode=0x70, dstReg=64
+[PASS] 03_error_and_assert/tc13_bounds_error_neg.impas
+[PASS] 03_error_and_assert/tc14_error_handling_suite2_neg.impas
+[PASS] 03_error_and_assert/tc15_trap_suite2_neg.impas
+Crash in tc27_scratch_memory_neg.impas at pc=0 (op 0x74): java.lang.IllegalStateException: OP_ASSERT_SCRATCH_BYTES failed: required 1073741824 bytes, available 536870912
+[PASS] 03_error_and_assert/tc27_scratch_memory_neg.impas
+[PASS] 03_error_and_assert/tc32_recursion_overflow_neg.impas
+[PASS] 03_error_and_assert/tc33_extra_return_neg.impas
+INVALID REG in tc38_type_mismatch_neg.impas at pc=0: opcode=0x4, dstReg=64
+[PASS] 03_error_and_assert/tc38_type_mismatch_neg.impas
+Crash in tc41_invalid_register_src_neg.impas at pc=1 (op 0x70): java.lang.IllegalArgumentException: IMPULSE_VM_ERR_INVALID_REGISTER
+[PASS] 03_error_and_assert/tc41_invalid_register_src_neg.impas
+INVALID REG in tc43_invalid_register_dst_neg.impas at pc=0: opcode=0x4, dstReg=128
+[PASS] 03_error_and_assert/tc43_invalid_register_dst_neg.impas
+INVALID REG in tc44_type_validation_suite2_neg.impas at pc=0: opcode=0x4, dstReg=70
+[PASS] 03_error_and_assert/tc44_type_validation_suite2_neg.impas
+Crash in tc45_missing_csc_neg.impas at pc=1 (op 0x18): java.lang.IllegalStateException: IMPULSE_VM_ERR_NULL_SNAPSHOT
+[PASS] 03_error_and_assert/tc45_missing_csc_neg.impas
+[PASS] 03_error_and_assert/tc46_infinite_loop_gas_exhausted_neg.impas
+Crash in tc48_fp_nan_trap_neg.impas at pc=1 (op 0x2a): java.lang.IllegalStateException: IMPULSE_VM_ERR_FLOATING_POINT
+[PASS] 03_error_and_assert/tc48_fp_nan_trap_neg.impas
+Crash in tc49_fp_inf_trap_neg.impas at pc=1 (op 0x2a): java.lang.IllegalStateException: IMPULSE_VM_ERR_FLOATING_POINT
+[PASS] 03_error_and_assert/tc49_fp_inf_trap_neg.impas
+INVALID REG in tc50_set_union_neg.impas at pc=2: opcode=0x30, dstReg=65
+[PASS] 03_error_and_assert/tc50_set_union_neg.impas
+INVALID REG in tc51_set_intersect_neg.impas at pc=2: opcode=0x31, dstReg=65
+[PASS] 03_error_and_assert/tc51_set_intersect_neg.impas
+INVALID REG in tc52_set_difference_neg.impas at pc=2: opcode=0x32, dstReg=65
+[PASS] 03_error_and_assert/tc52_set_difference_neg.impas
+INVALID REG in tc53_set_cardinality_neg.impas at pc=1: opcode=0x33, dstReg=65
+[PASS] 03_error_and_assert/tc53_set_cardinality_neg.impas
+INVALID REG in tc60_clear_reg_neg.impas at pc=0: opcode=0x71, dstReg=65
+[PASS] 03_error_and_assert/tc60_clear_reg_neg.impas
+INVALID REG in tc61_load_indirect_neg.impas at pc=0: opcode=0x72, dstReg=65
+[PASS] 03_error_and_assert/tc61_load_indirect_neg.impas
+INVALID REG in tc62_alloc_scratch_neg.impas at pc=0: opcode=0x73, dstReg=65
+[PASS] 03_error_and_assert/tc62_alloc_scratch_neg.impas
+INVALID REG in tc63_set_max_dop_neg.impas at pc=0: opcode=0x75, dstReg=65
+[PASS] 03_error_and_assert/tc63_set_max_dop_neg.impas
+[PASS] 03_error_and_assert/tc_jmp_oob_neg.impas
+[PASS] 03_error_and_assert/tc_jnz_oob_neg.impas
+[PASS] 03_error_and_assert/tc_jz_oob_neg.impas
+INVALID REG in tc_loop_decr_inv_reg_neg.impas at pc=0: opcode=0x53, dstReg=64
+[PASS] 03_error_and_assert/tc_loop_decr_inv_reg_neg.impas
+Crash in tc_stable_check_inv_reg_neg.impas at pc=0 (op 0x54): java.lang.IllegalArgumentException: IMPULSE_VM_ERR_INVALID_REGISTER
+[PASS] 03_error_and_assert/tc_stable_check_inv_reg_neg.impas
+[PASS] 04_graph_and_matrix/tc08_graphblas_mxv_pos.impas
+[PASS] 04_graph_and_matrix/tc09_traversals_pos.impas
+[PASS] 04_graph_and_matrix/tc18_relation_multiplicity_pos.impas
+[PASS] 04_graph_and_matrix/tc19_virtual_relations_pos.impas
+[PASS] 04_graph_and_matrix/tc20_multiplicity_reductions_pos.impas
+[PASS] 04_graph_and_matrix/tc21_multiplicity_projections_pos.impas
+[PASS] 04_graph_and_matrix/tc22_multiplicity_mn_pos.impas
+[PASS] 04_graph_and_matrix/tc23_multiplicity_m1_pos.impas
+[PASS] 04_graph_and_matrix/tc24_multiplicity_1m_pos.impas
+[PASS] 04_graph_and_matrix/tc25_multiplicity_11_pos.impas
+[PASS] 04_graph_and_matrix/tc26_csr_walk_state_pos.impas
+Crash in tc27_csr_walk_state_neg.impas at pc=2 (op 0x3a): java.lang.IllegalArgumentException: IMPULSE_VM_ERR_INVALID_REGISTER
+[PASS] 04_graph_and_matrix/tc27_csr_walk_state_neg.impas
+[PASS] 05_extended/pathological_attr_id_38k.impas
+[PASS] 05_extended/pathological_domain_id_35k.impas
+[PASS] 05_extended/pathological_rel_id_40k.impas
+INVALID REG in tc100_mxv_neg.impas at pc=0: opcode=0x41, dstReg=64
+[PASS] 05_extended/tc100_mxv_neg.impas
+[PASS] 05_extended/tc101_throw_skipped_pos.impas
+INVALID REG in tc101_vxm_neg.impas at pc=0: opcode=0x42, dstReg=64
+[PASS] 05_extended/tc101_vxm_neg.impas
+[PASS] 05_extended/tc102_enter_leave_frame_neg.impas
+INVALID REG in tc102_ewise_add_neg.impas at pc=0: opcode=0x43, dstReg=64
+[PASS] 05_extended/tc102_ewise_add_neg.impas
+INVALID REG in tc103_ewise_mult_neg.impas at pc=0: opcode=0x44, dstReg=64
+[PASS] 05_extended/tc103_ewise_mult_neg.impas
+INVALID REG in tc104_reduce_neg.impas at pc=0: opcode=0x45, dstReg=64
+[PASS] 05_extended/tc104_reduce_neg.impas
+[PASS] 05_extended/tc105_trap_skipped_pos.impas
+[PASS] 05_extended/tc10_extended_algorithms_pos.impas
+INVALID REG in tc110_sample_neighbors_neg.impas at pc=0: opcode=0x60, dstReg=64
+[PASS] 05_extended/tc110_sample_neighbors_neg.impas
+INVALID REG in tc111_random_walk_neg.impas at pc=0: opcode=0x61, dstReg=64
+[PASS] 05_extended/tc111_random_walk_neg.impas
+INVALID REG in tc112_scatter_gather_neg.impas at pc=0: opcode=0x62, dstReg=64
+[PASS] 05_extended/tc112_scatter_gather_neg.impas
+INVALID REG in tc113_rebac_check_neg.impas at pc=0: opcode=0x63, dstReg=64
+[PASS] 05_extended/tc113_rebac_check_neg.impas
+INVALID REG in tc114_island_detect_neg.impas at pc=0: opcode=0x65, dstReg=64
+[PASS] 05_extended/tc114_island_detect_neg.impas
+[PASS] 05_extended/tc115_csr_walk_2hop_pos.impas
+Crash in tc116_csr_walk_2hop_neg.impas at pc=1 (op 0xe): java.lang.IllegalStateException: IMPULSE_VM_ERR_OUT_OF_BOUNDS
+[PASS] 05_extended/tc116_csr_walk_2hop_neg.impas
+Crash in tc117_csr_walk_neg.impas at pc=1 (op 0x10): java.lang.IllegalStateException: IMPULSE_VM_ERR_OUT_OF_BOUNDS
+[PASS] 05_extended/tc117_csr_walk_neg.impas
+Crash in tc118_csr_walk_filtered_neg.impas at pc=1 (op 0x11): java.lang.IllegalStateException: IMPULSE_VM_ERR_OUT_OF_BOUNDS
+[PASS] 05_extended/tc118_csr_walk_filtered_neg.impas
+Crash in tc119_csr_degree_neg.impas at pc=1 (op 0x12): java.lang.IllegalStateException: IMPULSE_VM_ERR_OUT_OF_BOUNDS
+[PASS] 05_extended/tc119_csr_degree_neg.impas
+[PASS] 05_extended/tc11_vector_set_math_pos.impas
+INVALID REG in tc120_roaring_bitmap_and_neg.impas at pc=0: opcode=0x64, dstReg=64
+[PASS] 05_extended/tc120_roaring_bitmap_and_neg.impas
+INVALID REG in tc121_sparse_matvec_neg.impas at pc=0: opcode=0x66, dstReg=64
+[PASS] 05_extended/tc121_sparse_matvec_neg.impas
+INVALID REG in tc122_louvain_modularity_neg.impas at pc=0: opcode=0x67, dstReg=64
+[PASS] 05_extended/tc122_louvain_modularity_neg.impas
+INVALID REG in tc123_kcore_decomposition_neg.impas at pc=0: opcode=0x68, dstReg=64
+[PASS] 05_extended/tc123_kcore_decomposition_neg.impas
+INVALID REG in tc124_motif_match_3_neg.impas at pc=0: opcode=0x69, dstReg=64
+[PASS] 05_extended/tc124_motif_match_3_neg.impas
+INVALID REG in tc125_graph_isomorphism_neg.impas at pc=0: opcode=0x6a, dstReg=64
+[PASS] 05_extended/tc125_graph_isomorphism_neg.impas
+INVALID REG in tc126_roaring_bitmap_or_neg.impas at pc=0: opcode=0x6b, dstReg=64
+[PASS] 05_extended/tc126_roaring_bitmap_or_neg.impas
+INVALID REG in tc127_roaring_bitmap_and_not_neg.impas at pc=0: opcode=0x6c, dstReg=64
+[PASS] 05_extended/tc127_roaring_bitmap_and_not_neg.impas
+[PASS] 05_extended/tc12_all_opcodes_suite2_pos.impas
+[PASS] 05_extended/tc140_direct_store_dense_walks_pos1.impas
+[PASS] 05_extended/tc141_direct_store_dense_walks_pos2.impas
+Crash in tc142_direct_store_dense_walks_neg1.impas at pc=1 (op 0x84): java.lang.IllegalStateException: IMPULSE_VM_ERR_OUT_OF_BOUNDS
+[PASS] 05_extended/tc142_direct_store_dense_walks_neg1.impas
+Crash in tc143_direct_store_dense_walks_neg2.impas at pc=1 (op 0x84): java.lang.IllegalStateException: IMPULSE_VM_ERR_OUT_OF_BOUNDS
+[PASS] 05_extended/tc143_direct_store_dense_walks_neg2.impas
+[PASS] 05_extended/tc150_coo_walk_pos.impas
+INVALID REG in tc151_coo_walk_neg.impas at pc=0: opcode=0x86, dstReg=64
+[PASS] 05_extended/tc151_coo_walk_neg.impas
+[PASS] 05_extended/tc152_fixpoint_kleene_star_pos.impas
+INVALID REG in tc153_fixpoint_kleene_star_neg.impas at pc=0: opcode=0x88, dstReg=64
+[PASS] 05_extended/tc153_fixpoint_kleene_star_neg.impas
+[PASS] 05_extended/tc154_swap_reg_pos.impas
+INVALID REG in tc155_swap_reg_neg.impas at pc=0: opcode=0x89, dstReg=64
+[PASS] 05_extended/tc155_swap_reg_neg.impas
+[PASS] 05_extended/tc156_frontier_diff_pos.impas
+INVALID REG in tc157_frontier_diff_neg.impas at pc=0: opcode=0x8a, dstReg=64
+[PASS] 05_extended/tc157_frontier_diff_neg.impas
+[PASS] 05_extended/tc158_coo_walk_filtered_pos.impas
+INVALID REG in tc159_coo_walk_filtered_neg.impas at pc=0: opcode=0x8b, dstReg=64
+[PASS] 05_extended/tc159_coo_walk_filtered_neg.impas
+[PASS] 05_extended/tc160_coo_walk_reduce_pos.impas
+INVALID REG in tc161_coo_walk_reduce_neg.impas at pc=0: opcode=0x8c, dstReg=64
+[PASS] 05_extended/tc161_coo_walk_reduce_neg.impas
+[PASS] 05_extended/tc162_coo_walk_direct_store_pos.impas
+INVALID REG in tc163_coo_walk_direct_store_neg.impas at pc=0: opcode=0x8d, dstReg=64
+[PASS] 05_extended/tc163_coo_walk_direct_store_neg.impas
+[PASS] 05_extended/tc16_reserved_non_specialized_pos.impas
+[PASS] 05_extended/tc17_reserved_non_specialized_suite2_pos.impas
+[PASS] 05_extended/tc200_op_load_column_vector_pos.impas
+INVALID REG in tc201_op_load_column_vector_neg.impas at pc=0: opcode=0x80, dstReg=64
+[PASS] 05_extended/tc201_op_load_column_vector_neg.impas
+[PASS] 05_extended/tc202_op_load_column_vector_suite2_pos.impas
+[PASS] 05_extended/tc203_op_gather_node_attr_pos.impas
+INVALID REG in tc204_op_gather_node_attr_neg.impas at pc=0: opcode=0x81, dstReg=64
+[PASS] 05_extended/tc204_op_gather_node_attr_neg.impas
+[PASS] 05_extended/tc205_op_gather_node_attr_suite2_pos.impas
+[PASS] 05_extended/tc206_op_gather_edge_attr_pos.impas
+INVALID REG in tc207_op_gather_edge_attr_neg.impas at pc=0: opcode=0x82, dstReg=64
+[PASS] 05_extended/tc207_op_gather_edge_attr_neg.impas
+[PASS] 05_extended/tc208_op_gather_edge_attr_suite2_pos.impas
+[PASS] 05_extended/tc209_op_brin_zone_skip_pos.impas
+INVALID REG in tc210_op_brin_zone_skip_neg.impas at pc=0: opcode=0x83, dstReg=64
+[PASS] 05_extended/tc210_op_brin_zone_skip_neg.impas
+[PASS] 05_extended/tc211_op_brin_zone_skip_suite2_pos.impas
+[PASS] 05_extended/tc220_adaptive_walk_pos.impas
+Crash in tc221_adaptive_walk_neg.impas at pc=1 (op 0x1d): java.lang.IllegalStateException: IMPULSE_VM_ERR_OUT_OF_BOUNDS
+[PASS] 05_extended/tc221_adaptive_walk_neg.impas
+[PASS] 05_extended/tc222_scratch_index_pos.impas
+INVALID REG in tc223_scratch_index_neg.impas at pc=0: opcode=0x4, dstReg=100
+[PASS] 05_extended/tc223_scratch_index_neg.impas
+[PASS] 05_extended/tc224_temporal_validity_pos.impas
+INVALID REG in tc225_temporal_validity_neg.impas at pc=1: opcode=0x3d, dstReg=100
+[PASS] 05_extended/tc225_temporal_validity_neg.impas
+[PASS] 05_extended/tc226_all_remaining_opcodes_suite2_pos.impas
+[PASS] 05_extended/tc230_op_collect_bitset_pos.impas
+[PASS] 05_extended/tc231_op_collect_array_pos.impas
+[PASS] 05_extended/tc232_op_map_dense_to_keys_pos.impas
+[PASS] 05_extended/tc233_op_collect_value_map_pos.impas
+INVALID REG in tc240_csr_walk_dense_stream_neg.impas at pc=0: opcode=0x85, dstReg=64
+[PASS] 05_extended/tc240_csr_walk_dense_stream_neg.impas
+INVALID REG in tc241_csc_walk_direct_store_neg.impas at pc=0: opcode=0x87, dstReg=64
+[PASS] 05_extended/tc241_csc_walk_direct_store_neg.impas
+INVALID REG in tc242_dense_walk_neg.impas at pc=0: opcode=0x8e, dstReg=64
+[PASS] 05_extended/tc242_dense_walk_neg.impas
+INVALID REG in tc243_dense_walk_bitmatrix_neg.impas at pc=0: opcode=0x8f, dstReg=64
+[PASS] 05_extended/tc243_dense_walk_bitmatrix_neg.impas
+INVALID REG in tc244_dense_walk_reduce_neg.impas at pc=0: opcode=0x94, dstReg=64
+[PASS] 05_extended/tc244_dense_walk_reduce_neg.impas
+INVALID REG in tc245_dense_walk_direct_store_neg.impas at pc=0: opcode=0x95, dstReg=64
+[PASS] 05_extended/tc245_dense_walk_direct_store_neg.impas
+INVALID REG in tc246_csr_walk_direct_store_neg.impas at pc=0: opcode=0x84, dstReg=64
+[PASS] 05_extended/tc246_csr_walk_direct_store_neg.impas
+[PASS] 05_extended/tc28_scratch_suite2_pos.impas
+[PASS] 05_extended/tc30_max_dop_suite2_pos.impas
+[PASS] 05_extended/tc34_register_windowing_suite2_pos.impas
+[PASS] 05_extended/tc36_recursive_fibonacci_suite2_pos.impas
+[PASS] 05_extended/tc42_type_validation_suite2_pos.impas
+[PASS] 05_extended/tc47_has_topology_suite2_pos.impas
+[PASS] 05_extended/tc50_vec_cmp_pos.impas
+INVALID REG in tc51_vec_cmp_neg.impas at pc=0: opcode=0x20, dstReg=64
+[PASS] 05_extended/tc51_vec_cmp_neg.impas
+[PASS] 05_extended/tc52_vec_cmp_suite2_pos.impas
+INVALID REG in tc53_vec_cmp_suite2_neg.impas at pc=0: opcode=0x21, dstReg=64
+[PASS] 05_extended/tc53_vec_cmp_suite2_neg.impas
+INVALID REG in tc54_vec_cmp_lt_neg.impas at pc=0: opcode=0x22, dstReg=64
+[PASS] 05_extended/tc54_vec_cmp_lt_neg.impas
+INVALID REG in tc55_vec_cmp_between_neg.impas at pc=0: opcode=0x23, dstReg=64
+[PASS] 05_extended/tc55_vec_cmp_between_neg.impas
+INVALID REG in tc56_vec_cmp_gt_neg2.impas at pc=0: opcode=0x21, dstReg=65
+[PASS] 05_extended/tc56_vec_cmp_gt_neg2.impas
+INVALID REG in tc57_vec_cmp_lt_neg2.impas at pc=0: opcode=0x22, dstReg=65
+[PASS] 05_extended/tc57_vec_cmp_lt_neg2.impas
+INVALID REG in tc58_vec_cmp_between_neg2.impas at pc=0: opcode=0x23, dstReg=65
+[PASS] 05_extended/tc58_vec_cmp_between_neg2.impas
+[PASS] 05_extended/tc90_vec_math_pos.impas
+INVALID REG in tc91_vec_math_neg.impas at pc=0: opcode=0x2d, dstReg=99
+[PASS] 05_extended/tc91_vec_math_neg.impas
+INVALID REG in tc95_brandes_forward_neg.impas at pc=0: opcode=0x48, dstReg=64
+[PASS] 05_extended/tc95_brandes_forward_neg.impas
+INVALID REG in tc96_brandes_backward_neg.impas at pc=0: opcode=0x49, dstReg=64
+[PASS] 05_extended/tc96_brandes_backward_neg.impas
+INVALID REG in tc97_delta_step_relax_neg.impas at pc=0: opcode=0x4a, dstReg=64
+[PASS] 05_extended/tc97_delta_step_relax_neg.impas
+INVALID REG in tc98_read_edge_weight_neg.impas at pc=0: opcode=0x4b, dstReg=64
+[PASS] 05_extended/tc98_read_edge_weight_neg.impas
+INVALID REG in tc_cc_afforest_neg.impas at pc=0: opcode=0x40, dstReg=64
+[PASS] 05_extended/tc_cc_afforest_neg.impas
+INVALID REG in tc_cc_hook_compress_neg.impas at pc=0: opcode=0x46, dstReg=64
+[PASS] 05_extended/tc_cc_hook_compress_neg.impas
+INVALID REG in tc_coalesce_neg.impas at pc=2: opcode=0x3b, dstReg=99
+[PASS] 05_extended/tc_coalesce_neg.impas
+[PASS] 05_extended/tc_coalesce_pos.impas
+INVALID REG in tc_collect_array_neg.impas at pc=0: opcode=0x91, dstReg=64
+[PASS] 05_extended/tc_collect_array_neg.impas
+INVALID REG in tc_collect_bitset_neg.impas at pc=0: opcode=0x90, dstReg=64
+[PASS] 05_extended/tc_collect_bitset_neg.impas
+INVALID REG in tc_collect_value_map_neg.impas at pc=0: opcode=0x93, dstReg=64
+[PASS] 05_extended/tc_collect_value_map_neg.impas
+INVALID REG in tc_extract_validity_neg.impas at pc=1: opcode=0x3c, dstReg=99
+[PASS] 05_extended/tc_extract_validity_neg.impas
+[PASS] 05_extended/tc_extract_validity_pos.impas
+INVALID REG in tc_map_dense_to_keys_neg.impas at pc=0: opcode=0x92, dstReg=64
+[PASS] 05_extended/tc_map_dense_to_keys_neg.impas
+INVALID REG in tc_mask_blend_01_neg.impas at pc=0: opcode=0x24, dstReg=200
+[PASS] 05_extended/tc_mask_blend_01_neg.impas
+[PASS] 05_extended/tc_mask_blend_01_pos.impas
+INVALID REG in tc_mask_blend_02_neg.impas at pc=0: opcode=0x27, dstReg=200
+[PASS] 05_extended/tc_mask_blend_02_neg.impas
+[PASS] 05_extended/tc_mask_blend_02_pos.impas
+INVALID REG in tc_mask_blend_03_neg.impas at pc=0: opcode=0x24, dstReg=200
+[PASS] 05_extended/tc_mask_blend_03_neg.impas
+INVALID REG in tc_mask_blend_04_neg.impas at pc=0: opcode=0x25, dstReg=200
+[PASS] 05_extended/tc_mask_blend_04_neg.impas
+INVALID REG in tc_mask_blend_05_neg.impas at pc=0: opcode=0x26, dstReg=200
+[PASS] 05_extended/tc_mask_blend_05_neg.impas
+INVALID REG in tc_mask_blend_06_neg.impas at pc=0: opcode=0x27, dstReg=200
+[PASS] 05_extended/tc_mask_blend_06_neg.impas
+Crash in tc_mask_blend_07_neg.impas at pc=0 (op 0x24): java.lang.IllegalArgumentException: IMPULSE_VM_ERR_INVALID_REGISTER
+[PASS] 05_extended/tc_mask_blend_07_neg.impas
+Crash in tc_mask_blend_08_neg.impas at pc=0 (op 0x25): java.lang.IllegalArgumentException: IMPULSE_VM_ERR_INVALID_REGISTER
+[PASS] 05_extended/tc_mask_blend_08_neg.impas
+Crash in tc_mask_blend_09_neg.impas at pc=0 (op 0x26): java.lang.IllegalArgumentException: IMPULSE_VM_ERR_INVALID_REGISTER
+[PASS] 05_extended/tc_mask_blend_09_neg.impas
+Crash in tc_mask_blend_10_neg.impas at pc=0 (op 0x27): java.lang.IllegalArgumentException: IMPULSE_VM_ERR_INVALID_REGISTER
+[PASS] 05_extended/tc_mask_blend_10_neg.impas
+SET_CARD in tc_poly_node_filter_dense_pos.impas R5=1 (from R4)
+[PASS] 05_extended/tc_poly_node_filter_dense_pos.impas
+SET_CARD in tc_poly_node_filter_id_list_pos.impas R5=1 (from R4)
+[PASS] 05_extended/tc_poly_node_filter_id_list_pos.impas
+SET_CARD in tc_poly_node_filter_roaring_pos.impas R5=1 (from R4)
+[PASS] 05_extended/tc_poly_node_filter_roaring_pos.impas
+INVALID REG in tc_tc_sweep_batch_neg.impas at pc=0: opcode=0x47, dstReg=64
+[PASS] 05_extended/tc_tc_sweep_batch_neg.impas
+[FAIL] 05_extended/tc_walk_reduce_sum_pos.impas
+       -> Expected FLAG ZF=false, got true
+[PASS] 05_extended/tdd_01_set_union_3op_bug.impas
+[PASS] 05_extended/tdd_02_loop_decr_bug.impas
+[PASS] 05_extended/tdd_03_mxv_decoding_bug.impas
+[PASS] 05_extended/tdd_04_mov_shallow_copy_bug.impas
+[PASS] 05_extended/tdd_05_vec_blend_operands.impas
+[PASS] 05_extended/tdd_06_set_diff_aliasing.impas
+[PASS] 05_extended/tdd_07_fixpoint_kleene_star.impas
+[PASS] 05_extended/tdd_08_coo_walk_filtered.impas
+[PASS] 05_extended/tdd_09_brin_zone_skip_type.impas
+[PASS] 05_extended/tdd_10_dense_walk_reduce_type.impas
+[PASS] 05_extended/tdd_11_coo_walk_reduce_type.impas
+[PASS] 05_extended/tdd_12_vec_math_canonical_ids.impas
+[PASS] 05_extended/tdd_13_vector_time_valid_at.impas
+[PASS] 05_extended/tdd_14_vector_time_valid_at_nulls.impas
+[PASS] 05_extended/tdd_15_vector_time_valid_at_vector_ts.impas
+[PASS] 05_extended/tdd_16_vec_math_ops.impas
+[FAIL] 05_extended/tdd_17_kcore_decomposition.impas
+       -> Expected R2=1091567616, got 0
+[FAIL] 05_extended/tdd_18_edge_shader_basic.impas
+       -> Expected R4=1101004800, got 0
+[FAIL] 05_extended/tdd_19_csr_walk_stream.impas
+       -> Expected R4=1101004800, got 0
+[FAIL] 05_extended/tdd_20_csc_walk_stream.impas
+       -> Expected R4=1101004800, got 0
+TDD_21 INSTRUCTION COUNT = 0
+TDD_21 R5 = 0
+TDD_21 R4 = 0
+[FAIL] 05_extended/tdd_21_stream_math_and_edge.impas
+       -> Expected R5=1112014848, got 0
+[FAIL] 05_extended/tdd_22_stream_filter_cel.impas
+       -> Expected R5=1088421888, got 0
+[FAIL] 05_extended/tdd_23_stream_select_logic.impas
+       -> Expected R5=1077936128, got 0
+[FAIL] 05_extended/tdd_24_stream_ids.impas
+       -> Expected R5=1077936128, got 0
+[FAIL] 05_extended/tdd_25_math_catalog_coverage.impas
+       -> Expected R5=1125213798, got 0
+[PASS] 06_in_depth_coverage/cov_0x00_halt_multi.impas
+[PASS] 06_in_depth_coverage/cov_0x01_nop_chain.impas
+INVALID REG in cov_0x02_init_input_node_inv_reg_neg.impas at pc=0: opcode=0x2, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x02_init_input_node_inv_reg_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x02_init_input_node_pos.impas
+INVALID REG in cov_0x03_init_input_set_inv_reg_neg.impas at pc=0: opcode=0x3, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x03_init_input_set_inv_reg_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x03_init_input_set_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x04_load_const_int_edge_pos.impas
+INVALID REG in cov_0x04_load_const_int_inv_reg_neg.impas at pc=0: opcode=0x4, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x04_load_const_int_inv_reg_neg.impas
+INVALID REG in cov_0x05_map_keys_to_dense_inv_reg_neg.impas at pc=0: opcode=0x5, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x05_map_keys_to_dense_inv_reg_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x05_map_keys_to_dense_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x06_load_const_float_edge_pos.impas
+INVALID REG in cov_0x06_load_const_float_inv_reg_neg.impas at pc=0: opcode=0x6, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x06_load_const_float_inv_reg_neg.impas
+INVALID REG in cov_0x07_load_const_str_prefix_inv_reg_neg.impas at pc=0: opcode=0x7, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x07_load_const_str_prefix_inv_reg_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x07_load_const_str_prefix_pos.impas
+INVALID REG in cov_0x08_load_inline_array_inv_reg_neg.impas at pc=0: opcode=0x8, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x08_load_inline_array_inv_reg_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x08_load_inline_array_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x09_init_mock_graph_pos.impas
+INVALID REG in cov_0x0A_load_inline_set_inv_reg_neg.impas at pc=0: opcode=0xa, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x0A_load_inline_set_inv_reg_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x0A_load_inline_set_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x0B_init_mock_node_attr_pos.impas
+INVALID REG in cov_0x0E_csr_walk_2hop_inv_reg_neg.impas at pc=0: opcode=0xe, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x0E_csr_walk_2hop_inv_reg_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x0E_csr_walk_2hop_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x0F_csr_walk_state_pos.impas
+Crash in cov_0x10_csr_walk_oob_rel_neg.impas at pc=1 (op 0x10): java.lang.IllegalStateException: IMPULSE_VM_ERR_OUT_OF_BOUNDS
+[PASS] 06_in_depth_coverage/cov_0x10_csr_walk_oob_rel_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x10_csr_walk_type_null_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x11_csr_walk_filtered_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x12_csr_degree_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x13_csr_walk_predicate_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x14_node_filter_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x15_node_filter_str_prefix_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x16_csr_walk_reduce_sum_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x17_csr_walk_reduce_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x18_csc_walk_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x19_has_csr_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x1A_has_csc_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x1B_has_coo_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x1C_has_key_catalog_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x1D_adaptive_walk_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x1E_scratch_index_lifecycle_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x20_vec_cmp_eq_pos.impas
+INVALID REG in cov_0x20_vec_cmp_inv_reg_neg.impas at pc=0: opcode=0x20, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x20_vec_cmp_inv_reg_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x21_vec_cmp_gt_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x22_vec_cmp_lt_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x23_vec_cmp_between_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x24_mask_ops_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x27_vec_blend_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x2A_assert_finite_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x2D_vec_math_unary_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x2E_vec_math_binary_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x2F_vec_math_ternary_pos.impas
+INVALID REG in cov_0x30_set_ops_inv_reg_neg.impas at pc=0: opcode=0x30, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x30_set_ops_inv_reg_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x30_set_ops_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x34_vector_mul_attr_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x35_vector_reduce_sum_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x36_vector_div_scale_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x39_l1_norm_diff_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x3A_project_state_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x3B_coalesce_validity_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x3D_vector_time_valid_at_pos.impas
+INVALID REG in cov_0x40_cc_afforest_inv_reg_neg.impas at pc=0: opcode=0x40, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x40_cc_afforest_inv_reg_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x40_cc_afforest_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x41_mxv_vxm_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x43_ewise_ops_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x46_cc_hook_compress_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x47_tc_sweep_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x48_brandes_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x4A_delta_step_edge_weight_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x50_jmp_jz_jnz_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x53_loop_decr_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x54_stable_check_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x55_call_ret_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x5A_throw_neg.impas
+Crash in cov_0x5B_assert_neg.impas at pc=1 (op 0x5b): java.lang.IllegalStateException: OP_ASSERT failed: expected 999, got 0
+[PASS] 06_in_depth_coverage/cov_0x5B_assert_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x5C_trap_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x60_graph_algorithms_pos.impas
+INVALID REG in cov_0x60_sample_neighbors_inv_reg_neg.impas at pc=0: opcode=0x60, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x60_sample_neighbors_inv_reg_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x64_roaring_bitmap_ops_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x65_island_kcore_louvain_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x69_motif_isomorphism_pos.impas
+INVALID REG in cov_0x70_mov_inv_reg_neg.impas at pc=0: opcode=0x70, dstReg=64
+[PASS] 06_in_depth_coverage/cov_0x70_mov_inv_reg_neg.impas
+[PASS] 06_in_depth_coverage/cov_0x70_reg_mov_clear_indirect_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x73_scratch_dop_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x80_storage_specialized_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x84_walk_variants_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x88_fixpoint_swap_diff_pos.impas
+[PASS] 06_in_depth_coverage/cov_0x8C_coo_dense_walks_pos.impas
+[PASS] test_coo_walk_reduce.impas
+
+===============================================================
+ Java ImpulseVM Opcode Coverage & Multi-File Threshold Analysis 
+===============================================================
+Total Test Files Executed: 302 (Passed: 291, Failed: 11)
+Opcodes Covered in Java: 126 / 157 (80.3%)
+---------------------------------------------------------------
+Verification Suite Completed: 291 Passed, 11 Failed
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.334 s -- in org.impulsegraph.vm.JavaVmPolyglotAssemblyVerifierTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  1.523 s
+[INFO] Finished at: 2026-08-29T16:36:33-05:00
+[INFO] ------------------------------------------------------------------------

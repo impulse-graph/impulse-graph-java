@@ -39,8 +39,8 @@ public final class PreBindValidator implements CompilerPass {
             if (walk.relationName().isEmpty() && walk.relationId() < 0) {
                 throw new IllegalArgumentException("Pre-Bind Validation Error: Walk step missing relation specification");
             }
-            if (walk.filterPredicate() != null) {
-                validate(walk.filterPredicate());
+            if (!walk.shaderSteps().isEmpty()) {
+                for (ImpScmNode step : walk.shaderSteps()) { validate(step); }
             }
             for (ImpScmNode sub : walk.subSteps()) {
                 validate(sub);

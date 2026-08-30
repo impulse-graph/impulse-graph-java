@@ -45,8 +45,8 @@ public final class BindTimeValidator implements CompilerPass {
                             + relName + "' does not exist in target snapshot catalog.");
                 }
             }
-            if (walk.filterPredicate() != null) {
-                validateSnapshotBinding(walk.filterPredicate(), snapshot);
+            if (!walk.shaderSteps().isEmpty()) {
+                for (ImpScmNode step : walk.shaderSteps()) { validateSnapshotBinding(step, snapshot); }
             }
             for (ImpScmNode sub : walk.subSteps()) {
                 validateSnapshotBinding(sub, snapshot);

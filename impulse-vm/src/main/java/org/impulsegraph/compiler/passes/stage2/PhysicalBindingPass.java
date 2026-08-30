@@ -46,12 +46,15 @@ public final class PhysicalBindingPass implements CompilerPass {
                 relId = resolveRelationId(snapshot, walk.relationName());
             }
 
-            ImpScmNode boundFilter = walk.filterPredicate() != null ? bindNode(walk.filterPredicate(), snapshot) : null;
+            List<ImpScmNode> boundShaders = new ArrayList<>();
+            for (ImpScmNode step : walk.shaderSteps()) {
+                boundShaders.add(bindNode(step, snapshot));
+            }
             List<ImpScmNode> boundSubs = new ArrayList<>();
             for (ImpScmNode sub : walk.subSteps()) {
                 boundSubs.add(bindNode(sub, snapshot));
             }
-            return new ScmWalk(walk.relationName(), relId, walk.direction(), boundFilter, boundSubs);
+            return new ScmWalk(walk.relationName(), relId, walk.direction(), boundShaders, boundSubs);
         }
 
         if (node instanceof ScmWalk2Hop hop2) {

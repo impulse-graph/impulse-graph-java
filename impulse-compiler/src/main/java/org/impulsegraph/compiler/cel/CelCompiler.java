@@ -34,6 +34,10 @@ public final class CelCompiler {
     }
 
     public static String toImpScheme(CelAstNode node) {
+        return toImpScheme(node, false);
+    }
+
+    public static String toImpScheme(CelAstNode node, boolean streamMode) {
         if (node == null) return "()";
 
         return switch (node.kind()) {
@@ -51,43 +55,43 @@ public final class CelCompiler {
             case MEMBER_ACCESS -> {
                 String member = node.text();
                 if (member.equals("id") || member.equals("_id")) {
-                    yield "(get-dense-id " + toImpScheme(node.children().get(0)) + ")";
+                    yield (streamMode ? "(stream-load-id " : "(get-dense-id ") + toImpScheme(node.children().get(0), streamMode) + ")";
                 }
-                yield "(get-attr " + toImpScheme(node.children().get(0)) + " \"" + member + "\")";
+                yield (streamMode ? "(stream-load-attr " : "(get-attr ") + toImpScheme(node.children().get(0), streamMode) + " \"" + member + "\")";
             }
             case UNARY_OP -> {
                 String op = node.text();
                 if ("!".equals(op)) {
-                    yield "(mask-not " + toImpScheme(node.children().get(0)) + ")";
+                    yield (streamMode ? "(stream-logic-not " : "(mask-not ") + toImpScheme(node.children().get(0), streamMode) + ")";
                 }
                 if ("-".equals(op)) {
-                    yield "(- 0 " + toImpScheme(node.children().get(0)) + ")";
+                    yield (streamMode ? "(- 0 " : "(- 0 ") + toImpScheme(node.children().get(0), streamMode) + ")";
                 }
-                yield toImpScheme(node.children().get(0));
+                yield toImpScheme(node.children().get(0), streamMode);
             }
             case BINARY_OP -> {
                 String op = node.text();
-                String lhs = toImpScheme(node.children().get(0));
-                String rhs = toImpScheme(node.children().get(1));
+                String lhs = toImpScheme(node.children().get(0), streamMode);
+                String rhs = toImpScheme(node.children().get(1), streamMode);
                 yield switch (op) {
-                    case "&&" -> "(mask-and " + lhs + " " + rhs + ")";
-                    case "||" -> "(mask-or " + lhs + " " + rhs + ")";
-                    case ">" -> "(vec-cmp-gt " + lhs + " " + rhs + ")";
-                    case "<" -> "(vec-cmp-lt " + lhs + " " + rhs + ")";
-                    case ">=" -> "(vec-cmp-gte " + lhs + " " + rhs + ")";
-                    case "<=" -> "(<= " + lhs + " " + rhs + ")";
-                    case "==" -> "(vec-cmp-eq " + lhs + " " + rhs + ")";
-                    case "!=" -> "(mask-not (vec-cmp-eq " + lhs + " " + rhs + "))";
+                    case "&&" -> (streamMode ? "(stream-logic-and " : "(mask-and ") + lhs + " " + rhs + ")";
+                    case "||" -> (streamMode ? "(stream-logic-or " : "(mask-or ") + lhs + " " + rhs + ")";
+                    case ">" -> (streamMode ? "(stream-cmp-gt " : "(vec-cmp-gt ") + lhs + " " + rhs + ")";
+                    case "<" -> (streamMode ? "(stream-cmp-lt " : "(vec-cmp-lt ") + lhs + " " + rhs + ")";
+                    case ">=" -> (streamMode ? "(stream-cmp-gte " : "(vec-cmp-gte ") + lhs + " " + rhs + ")";
+                    case "<=" -> (streamMode ? "(<= " : "(<= ") + lhs + " " + rhs + ")";
+                    case "==" -> (streamMode ? "(stream-cmp-eq " : "(vec-cmp-eq ") + lhs + " " + rhs + ")";
+                    case "!=" -> streamMode ? "(stream-cmp-neq " + lhs + " " + rhs + ")" : "(mask-not (vec-cmp-eq " + lhs + " " + rhs + "))";
                     default -> "(" + op + " " + lhs + " " + rhs + ")";
                 };
             }
-            case TERNARY_OP -> "(vec-blend " + toImpScheme(node.children().get(0)) + " "
-                    + toImpScheme(node.children().get(1)) + " "
-                    + toImpScheme(node.children().get(2)) + ")";
+            case TERNARY_OP -> "(vec-blend " + toImpScheme(node.children().get(0), streamMode) + " "
+                    + toImpScheme(node.children().get(1), streamMode) + " "
+                    + toImpScheme(node.children().get(2), streamMode) + ")";
             case FUNCTION_CALL -> {
                 StringBuilder sb = new StringBuilder("(").append(node.text());
                 for (CelAstNode arg : node.children()) {
-                    sb.append(" ").append(toImpScheme(arg));
+                    sb.append(" ").append(toImpScheme(arg, streamMode));
                 }
                 sb.append(")");
                 yield sb.toString();
@@ -95,7 +99,7 @@ public final class CelCompiler {
             case LIST_LITERAL -> {
                 StringBuilder sb = new StringBuilder("(list");
                 for (CelAstNode elem : node.children()) {
-                    sb.append(" ").append(toImpScheme(elem));
+                    sb.append(" ").append(toImpScheme(elem, streamMode));
                 }
                 sb.append(")");
                 yield sb.toString();

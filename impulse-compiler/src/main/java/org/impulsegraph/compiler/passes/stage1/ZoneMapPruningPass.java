@@ -74,16 +74,13 @@ public final class ZoneMapPruningPass implements CompilerPass {
         }
 
         if (node instanceof ScmWalk walk) {
-            ImpScmNode filter = walk.filterPredicate();
-            if (filter != null) {
-                ImpScmNode prunedFilter = pruneScm(filter, stats);
-                // If filter is constant false, the walk produces empty set
-                if (isConstantFalse(prunedFilter)) {
-                    return null; // Pruned completely from execution pipeline!
-                }
-                // If filter is constant true, strip the filter completely (zero inner-loop overhead!)
-                if (isConstantTrue(prunedFilter)) {
-                    prunedFilter = null;
+            List<ImpScmNode> filter = walk.shaderSteps();
+            if (!filter.isEmpty()) {
+                List<ImpScmNode> prunedFilter = new ArrayList<>();
+                for (ImpScmNode f : filter) {
+                    ImpScmNode p = pruneScm(f, stats);
+                    if (isConstantFalse(p)) return null;
+                    if (!isConstantTrue(p) && p != null) prunedFilter.add(p);
                 }
                 List<ImpScmNode> subs = new ArrayList<>();
                 for (ImpScmNode sub : walk.subSteps()) {
