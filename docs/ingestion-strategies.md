@@ -1,38 +1,38 @@
-# Ingestion Strategies & Live Mutation Architecture
+# Ingestion & Snapshot Generation Architecture
 
-> [!WARNING]
-> **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
+> [!NOTE]
+> **Immutable Architecture**: Impulse Graph is an **immutable, zero-copy C-ABI binary snapshot engine (`.imps`)** designed for sub-microsecond SIMD vector traversals. Snapshots are strictly read-only.
 
 **Impulse Graph Engine — Java 21+ FFM Core Specification**  
-*Document Version: 1.0.0 | Target Spec: Impulse Binary Snapshot Format v0.9.0 / v0.9.1*
+*Document Version: 1.0.0 | Target Spec: Impulse Binary Snapshot Format v0.9.0*
 
 ---
 
 ## 1. Executive Architectural Summary
 
-Impulse Graph is fundamentally an **immutable zero-copy C-ABI binary snapshot engine (`.imps`)** optimized for sub-microsecond SIMD vector traversals. However, real-world enterprise workloads require continuous streaming ingestion (e.g. Kafka CDC event streams, Debezium database logs, IoT vehicle GPS telematics, and fine-grained authorization mutations).
+Impulse Graph represents graph state as **immutable, zero-copy `.imps` binary snapshots** mapped off-heap using Java 21+ Foreign Function & Memory (FFM) `Arena` and `MemorySegment`. 
 
-To bridge static immutable snapshots with real-time updates, Impulse Graph decouples the engine into a **Single-Writer Multi-Reader (SWMR)** architecture using **Java 25 Foreign Function & Memory (FFM) `MemorySegment`** off-heap arenas.
+To support continuous streaming data updates from upstream sources (Kafka, Debezium, batch ETL pipelines), the engine employs a **Blue-Green Atomic Snapshot Swap** pattern:
 
 ```
-                      The Complete Ingestion Architecture Lifecycle
-                      
- [ Live Kafka / CDC Stream ]
-              │
-              ▼ (1ns Append)
+                    Blue-Green Immutable Snapshot Generation Lifecycle
+                    
+ [ Upstream ETL / Kafka Stream ]
+               │
+               ▼ (Batch Ingestion / Aggregation)
  ┌───────────────────────────┐
- │ Tier 0: Live Off-Heap COO │ ──► Instant In-Place Updates (Speed/Status) & Tombstone BitFlips
+ │ Snapshot Builder Pipeline │ ──► Constructs clean off-heap CSR/CSC structures via SnapshotBuilder
  └───────────────────────────┘
-              │
-              ▼ (Every 1-5s via Single Ingestion Thread)
+               │
+               ▼ (Fast Serialization)
  ┌───────────────────────────┐
- │ Tier 1: In-Memory RCU     │ ──► Rebuilds modified RelationSnapshot in Arena.ofShared()
+ │ Immutable .imps Snapshot  │ ──► Serializes Page 0, Catalogs, ID Mappings, & CSR Offsets to NVMe / S3
+ └───────────────────────────┘
+               │
+               ▼ (Zero-Downtime Blue-Green Swap)
+ ┌───────────────────────────┐
+ │ Active Engine Runtime     │ ──► Atomic pointer swap to new GraphSnapshot in Arena.ofShared()
  └───────────────────────────┘     ⚡ Zero-Lock Atomic Pointer Swap (0ns) to active readers
-              │
-              ▼ (Every 1-4 hours or on pod scale-down)
- ┌───────────────────────────┐
- │ Tier 2: Background Flush  │ ──► Compacts Base + Delta into fresh .imps with committed Kafka Offset
- └───────────────────────────┘     Streams direct to AWS S3 / Local NVMe without GC pauses
 ```
 
 ---
@@ -65,8 +65,7 @@ Enterprise graph workloads vary wildly in cardinality, write frequency, and read
 ### 2.1 Storage Container Blocks
 1. **`FrozenMmapSegment`**: Zero-copy OS page cache mapped directly from `.imps`. Zero physical DRAM allocation.
 2. **`DenseOffHeapSegment`**: 100% contiguous, 128-byte aligned primitive arrays allocated in off-heap `Arena.ofShared()`. Delivers maximum AVX-512 / ARM NEON throughput.
-3. **`PagedAppendixSegment`**: Fixed-size unrolled chunk buffers (e.g. 16-slot blocks) dedicated per node for dynamic edge appends.
-4. **`SparseDeltaHashTable`**: Off-heap Robin Hood hash map overlay holding sparse, irregular point patches.
+3. **`SnapshotBuilder`**: High-performance staged off-heap builder for aggregating batch edges and compiling directly to `.imps`.
 
 ### 2.2 Deletion Strategy Blocks
 1. **`TombstoneBitSet`**: 1 bit per edge in off-heap memory. Filtered in 1 CPU cycle via AVX-512 `_mm512_andnot_si512` / `knot`.

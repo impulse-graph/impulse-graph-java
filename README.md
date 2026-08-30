@@ -119,14 +119,29 @@ try (ImpulseStatement stmt = snap.prepare("MATCH (u:User)-[:knows]->(f:User) WHE
 - [**openCypher Dialect Reference**](docs/OPENCYPHER_REFERENCE.md) — Supported Cypher grammar (`MATCH`, `WHERE`, `RETURN`), edge attribute filtering, and frontier set semantics.
 - [**Memory & Performance Tuning Guide**](docs/MEMORY_TUNING_GUIDE.md) — FFM `Arena` lifecycle management, zero-GC mechanics, primitive ID width selection, and Vector API JVM tuning flags.
 - [**Compiler Architecture**](docs/COMPILER_ARCHITECTURE.md) — IR passes, optimization pipeline, `ImpAsm` disassembly inspection, and bytecode generation.
-- [**Ingestion & Live Mutation Architecture**](docs/ingestion-strategies.md) — Single-Writer Multi-Reader (SWMR) off-heap Lego block taxonomy and streaming ingestion.
+- [**Code Samples & Walkthroughs**](samples/src/main/java/org/impulsegraph/samples) — Runnable Java 21+ code examples including traversals, SIMD filtering, parameterized statements, and snapshot creation.
+
+---
+
+## 💡 Code Samples
+
+Check the [`samples/`](samples/src/main/java/org/impulsegraph/samples) directory for complete, executable Java examples:
+
+1. **[`BasicTraversalSample.java`](samples/src/main/java/org/impulsegraph/samples/BasicTraversalSample.java)**: Snapshot loading, entity key resolution, single & multi-hop traversals, and bitset arithmetic.
+2. **[`SimdFilteredQuerySample.java`](samples/src/main/java/org/impulsegraph/samples/SimdFilteredQuerySample.java)**: SIMD vector-accelerated predicate filtering on edge & node attributes.
+3. **[`CompiledStatementSample.java`](samples/src/main/java/org/impulsegraph/samples/CompiledStatementSample.java)**: Parameterized openCypher queries with sub-microsecond warmed JIT execution.
+4. **[`SnapshotBuilderSample.java`](samples/src/main/java/org/impulsegraph/samples/SnapshotBuilderSample.java)**: Programmatic graph snapshot generation and binary serialization to `.imps`.
 
 ---
 
 ## 🛠️ Build & Test Instructions
 
 ```bash
+# Full clean reactor build and test run
 mvn clean test
+
+# Run individual sample or test suite
+mvn test -Dtest=TestVectorSuiteTest
 ```
 
 ---
@@ -134,3 +149,4 @@ mvn clean test
 ## 📄 License
 
 Apache License 2.0. See [LICENSE](LICENSE) for details.
+
