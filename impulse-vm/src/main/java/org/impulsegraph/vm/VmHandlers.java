@@ -195,8 +195,6 @@ public final class VmHandlers {
     }
 
     public static void executeCsrWalk(MemorySegment state, VmQueryContext ctx, int dstReg, int srcReg, int relId, byte flags, Object input) {
-        validateReg(dstReg);
-        validateReg(srcReg);
         if (relId < 0 || relId >= 65536) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
@@ -204,6 +202,8 @@ public final class VmHandlers {
         if (rel == null) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
+        validateReg(dstReg);
+        validateReg(srcReg);
 
         byte srcType = getRegisterType(state, srcReg);
         long srcVal = getRegisterValue(state, srcReg);
@@ -298,8 +298,6 @@ public final class VmHandlers {
 
     public static void executeCsrWalk2Hop(MemorySegment state, VmQueryContext ctx, int dstReg, int srcReg,
                                           int relId1, int relId2, byte flags, Object input) {
-        validateReg(dstReg);
-        validateReg(srcReg);
         if (relId1 < 0 || relId1 >= 65536 || relId2 < 0 || relId2 >= 65536) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
@@ -308,6 +306,8 @@ public final class VmHandlers {
         if (rel1 == null || rel2 == null) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
+        validateReg(dstReg);
+        validateReg(srcReg);
 
         int outHandle = ctx.acquireBitset();
         ImpulseBitSet outBs = ctx.getBitset(outHandle);
@@ -377,9 +377,6 @@ public final class VmHandlers {
             relId = (instr.payload() >> 16) & 0xFFFF;
             unvisitedReg = 0;
         }
-
-        validateReg(instr.dstReg());
-        validateReg(frontierReg);
         if (relId < 0 || relId >= 65536) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
@@ -387,11 +384,10 @@ public final class VmHandlers {
         if (rel == null) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
+
+        validateReg(instr.dstReg());
+        validateReg(frontierReg);
         if (!rel.hasCsc()) {
-            if (ctx.inlineDataSegment() != null) {
-                executeCsrWalk(state, ctx, instr.dstReg(), frontierReg, relId);
-                return;
-            }
             throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
         }
 
@@ -810,19 +806,21 @@ public final class VmHandlers {
     }
 
     public static void handleCsrDegree(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        validateReg(instr.dstReg());
         int srcReg = instr.payload() & 0xFFFF;
         int relId = (instr.payload() >> 16) & 0xFFFF;
-        validateReg(srcReg);
+        
         if (relId < 0 || relId >= 65536) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
-        long u = getRegisterValue(state, srcReg);
-
         RelationSnapshot rel = resolveRelation(ctx, relId);
         if (rel == null) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
+        
+        validateReg(instr.dstReg());
+        validateReg(srcReg);
+        
+        long u = getRegisterValue(state, srcReg);
         long degree = 0;
         if (rel != null && u >= 0 && u < rel.getNodeCount()) {
             degree = rel.getDegree((int) u);
@@ -833,7 +831,21 @@ public final class VmHandlers {
     }
 
     public static void handleCsrWalkPredicate(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        handleCsrWalk(state, ctx, instr);
+        int srcReg = instr.payload() & 0xFF;
+        int valReg = (instr.payload() >> 8) & 0xFF;
+        int relId = (instr.payload() >> 16) & 0xFF;
+        
+        if (instr.flags() != 0) {
+            valReg = (instr.payload() >> 8) & 0xFF;
+        }
+
+        validateReg(instr.dstReg());
+        validateReg(srcReg);
+        validateReg(valReg);
+
+        // For now, delegate to basic walk logic but pass correct srcReg
+        Instruction mappedInstr = new Instruction(instr.opcode(), instr.flags(), instr.dstReg(), (relId << 24) | srcReg);
+        handleCsrWalk(state, ctx, mappedInstr);
     }
 
     public static void handleVectorDiv(MemorySegment state, VmQueryContext ctx, Instruction instr) {
