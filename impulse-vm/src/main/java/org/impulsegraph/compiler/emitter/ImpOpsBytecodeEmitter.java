@@ -1,6 +1,7 @@
 package org.impulsegraph.compiler.emitter;
 
 import org.impulsegraph.compiler.ast.*;
+import static org.impulsegraph.vm.VmRegisterType.*;
 import org.impulsegraph.compiler.passes.stage2.RegisterAllocationPass;
 import org.impulsegraph.compiler.passes.stage2.RegisterAllocationPass.RegisterAssignment;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
@@ -15,7 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.impulsegraph.vm.VmRegisterType.*;
+import org.impulsegraph.vm.*;
 import static org.impulsegraph.vm.VmStateLayout.*;
 
 /**
@@ -72,8 +73,8 @@ public final class ImpOpsBytecodeEmitter {
                     long pc = instrList.size();
                     patches.add(new RelationInstructionPatch(pc, logicalRelName, srcReg, dstReg));
 
-                    byte opcode = walk.direction() == ScmWalk.Direction.REVERSE_CSC ? OP_CSC_WALK
-                            : walk.filterPredicate() != null ? OP_CSR_WALK_FILTERED : OP_CSR_WALK;
+                    boolean isStream = !walk.shaderSteps().isEmpty();
+                    byte opcode = (byte) (walk.direction() == ScmWalk.Direction.REVERSE_CSC ? (isStream ? OP_CSC_WALK_STREAM : OP_CSC_WALK) : (isStream ? OP_CSR_WALK_STREAM : OP_CSR_WALK));
 
                     byte flags = FLAG_HALT_ON_EMPTY;
                     if (!firstStepEmitted) {
@@ -82,7 +83,32 @@ public final class ImpOpsBytecodeEmitter {
                     }
 
                     int payload = ((relId & 0xFFFF) << 16) | (srcReg & 0xFFFF);
-                    instrList.add(new InstructionWord(opcode, flags, dstReg, payload));
+                    
+                    if (isStream) {
+                        // Store the index of the WALK_STREAM instruction so we can patch its shaderPcStart flag later
+                        int walkInstrIdx = instrList.size();
+                        instrList.add(new InstructionWord(opcode, flags, dstReg, payload));
+                        
+                        // Emit shader block
+                        instrList.add(new InstructionWord((byte)OP_STREAM_FUNC_BEGIN, (byte)0, (short)0, 0));
+                        int shaderPcStart = instrList.size();
+                        
+                        // Patch the WALK_STREAM instruction with the start PC of the shader
+                        InstructionWord walkInstr = instrList.get(walkInstrIdx);
+                        instrList.set(walkInstrIdx, new InstructionWord(walkInstr.opcode(), (byte) shaderPcStart, walkInstr.dstReg(), walkInstr.payload()));
+                        
+                        StreamRegisterAllocator sRegAlloc = new StreamRegisterAllocator();
+                        for (ImpScmNode shaderStep : walk.shaderSteps()) {
+                            emitStreamStep(shaderStep, instrList, sRegAlloc, snapshot);
+                        }
+                        
+                        // Emit Yield
+                        instrList.add(new InstructionWord((byte)OP_STREAM_YIELD, (byte)0, (short)0, 0));
+                        instrList.add(new InstructionWord((byte)OP_STREAM_FUNC_END, (byte)0, (short)0, 0));
+                        
+                    } else {
+                        instrList.add(new InstructionWord(opcode, flags, dstReg, payload));
+                    }
                 } else if (step instanceof ScmWalk2Hop hop2) {
                     int rel1Id = hop2.relation1Id();
                     int rel2Id = hop2.relation2Id();
@@ -263,4 +289,65 @@ public final class ImpOpsBytecodeEmitter {
                 emitted.stringPool()
         );
     }
+
+    private static class StreamRegisterAllocator {
+        private int nextReg = 1; // 0 is TGT_ID implicitly
+        public int allocate() {
+            if (nextReg >= 16) throw new RuntimeException("Stream register exhaustion");
+            return nextReg++;
+        }
+    }
+
+    private static void emitStreamStep(ImpScmNode node, List<InstructionWord> instrList, StreamRegisterAllocator alloc, ImpulseGraphSnapshot snapshot) {
+        if (node instanceof ScmStreamFilter filter) {
+            int reg = emitStreamExpr(filter.predicate(), instrList, alloc, snapshot);
+            instrList.add(new InstructionWord(OP_STREAM_FILTER, (byte)0, (short) reg, 0));
+        } else if (node instanceof ScmStreamProject project) {
+            int reg = emitStreamExpr(project.expr(), instrList, alloc, snapshot);
+            instrList.add(new InstructionWord(OP_STREAM_SCATTER_REDUCE, (byte)0, (short) reg, (5 & 0xFFFF) | ((0 & 0xFF) << 16)));
+        } else if (node instanceof ScmList list && !list.elements().isEmpty() && list.elements().get(0) instanceof ScmSymbol sym && sym.name().equals("project-state")) {
+        }
+    }
+    
+    private static int emitStreamExpr(ImpScmNode expr, List<InstructionWord> instrList, StreamRegisterAllocator alloc, ImpulseGraphSnapshot snapshot) {
+        if (expr instanceof ScmList list && !list.elements().isEmpty()) {
+            ImpScmNode head = list.elements().get(0);
+            if (head instanceof ScmSymbol sym) {
+                String op = sym.name();
+                if (op.equals("stream-cmp-gt") || op.equals("vec-cmp-gt")) {
+                    int lhs = emitStreamExpr(list.elements().get(1), instrList, alloc, snapshot);
+                    int rhs = emitStreamExpr(list.elements().get(2), instrList, alloc, snapshot);
+                    int dst = alloc.allocate();
+                    instrList.add(new InstructionWord(OP_STREAM_CMP_GT, (byte)0, (short) dst, (lhs & 0xFFFF) | ((rhs & 0xFFFF) << 16)));
+                    return dst;
+                } else if (op.equals("stream-load-attr") || op.equals("get-attr")) {
+                    String attr = ((ScmLiteral.ScmString) list.elements().get(2)).value();
+                    int dst = alloc.allocate();
+                    instrList.add(new InstructionWord(OP_STREAM_LOAD_TGT, (byte)0, (short) dst, 0));
+                    return dst;
+                } else if (op.equals("stream-logic-and") || op.equals("mask-and")) {
+                    int lhs = emitStreamExpr(list.elements().get(1), instrList, alloc, snapshot);
+                    int rhs = emitStreamExpr(list.elements().get(2), instrList, alloc, snapshot);
+                    int dst = alloc.allocate();
+                    instrList.add(new InstructionWord(OP_STREAM_LOGIC_AND, (byte)0, (short) dst, (lhs & 0xFFFF) | ((rhs & 0xFFFF) << 16)));
+                    return dst;
+                }
+            }
+        } else if (expr instanceof ScmLiteral lit) {
+            int dst = alloc.allocate();
+            int payload = 0;
+            if (lit instanceof ScmLiteral.ScmInt i) {
+                payload = Float.floatToRawIntBits((float) i.value());
+            } else if (lit instanceof ScmLiteral.ScmFloat f) {
+                payload = Float.floatToRawIntBits((float) f.value());
+            }
+            instrList.add(new InstructionWord((byte)OP_STREAM_LOAD_CONST, (byte)0, (short) dst, payload));
+            return dst;
+        }
+        
+        int dst = alloc.allocate();
+        instrList.add(new InstructionWord(OP_STREAM_LOAD_CONST, (byte)0, (short) dst, 0));
+        return dst;
+    }
+
 }

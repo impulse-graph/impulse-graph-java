@@ -56,12 +56,15 @@ public final class AlgebraicTypeInferencePass implements CompilerPass {
         }
 
         if (node instanceof ScmWalk walk) {
-            ImpScmNode optFilter = walk.filterPredicate() != null ? inferScm(walk.filterPredicate(), stats) : null;
+            List<ImpScmNode> optFilterList = new ArrayList<>();
+            for (ImpScmNode step : walk.shaderSteps()) {
+                optFilterList.add(inferScm(step, stats));
+            }
             List<ImpScmNode> optSubs = new ArrayList<>();
             for (ImpScmNode sub : walk.subSteps()) {
                 optSubs.add(inferScm(sub, stats));
             }
-            return new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), optFilter, optSubs);
+            return new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), optFilterList, optSubs);
         }
 
         if (node instanceof ScmVectorFilter vf) {

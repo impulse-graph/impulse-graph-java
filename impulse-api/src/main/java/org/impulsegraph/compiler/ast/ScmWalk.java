@@ -12,7 +12,7 @@ public record ScmWalk(
         String relationName,
         int relationId,
         Direction direction,
-        ImpScmNode filterPredicate,
+        List<ImpScmNode> shaderSteps,
         List<ImpScmNode> subSteps
 ) implements ImpScmNode {
 
@@ -22,48 +22,48 @@ public record ScmWalk(
         AUTO
     }
 
-    public ScmWalk(String relationName, int relationId, Direction direction, ImpScmNode filterPredicate, List<ImpScmNode> subSteps) {
+    public ScmWalk(String relationName, int relationId, Direction direction, List<ImpScmNode> shaderSteps, List<ImpScmNode> subSteps) {
         this.relationName = relationName != null ? relationName : "";
         this.relationId = relationId;
         this.direction = direction != null ? direction : Direction.AUTO;
-        this.filterPredicate = filterPredicate;
+        this.shaderSteps = shaderSteps != null ? Collections.unmodifiableList(new ArrayList<>(shaderSteps)) : List.of();
         this.subSteps = subSteps != null ? Collections.unmodifiableList(new ArrayList<>(subSteps)) : List.of();
     }
 
     public static ScmWalk forward(String relationName) {
-        return new ScmWalk(relationName, -1, Direction.FORWARD_CSR, null, List.of());
+        return new ScmWalk(relationName, -1, Direction.FORWARD_CSR, List.of(), List.of());
     }
 
     public static ScmWalk forward(String relationName, ImpScmNode filter) {
-        return new ScmWalk(relationName, -1, Direction.FORWARD_CSR, filter, List.of());
+        return new ScmWalk(relationName, -1, Direction.FORWARD_CSR, filter != null ? List.of(filter) : List.of(), List.of());
     }
 
     public static ScmWalk reverse(String relationName) {
-        return new ScmWalk(relationName, -1, Direction.REVERSE_CSC, null, List.of());
+        return new ScmWalk(relationName, -1, Direction.REVERSE_CSC, List.of(), List.of());
     }
 
     public static ScmWalk reverse(String relationName, ImpScmNode filter) {
-        return new ScmWalk(relationName, -1, Direction.REVERSE_CSC, filter, List.of());
+        return new ScmWalk(relationName, -1, Direction.REVERSE_CSC, filter != null ? List.of(filter) : List.of(), List.of());
     }
 
     public static ScmWalk auto(String relationName) {
-        return new ScmWalk(relationName, -1, Direction.AUTO, null, List.of());
+        return new ScmWalk(relationName, -1, Direction.AUTO, List.of(), List.of());
     }
 
     public ScmWalk withRelationId(int id) {
-        return new ScmWalk(relationName, id, direction, filterPredicate, subSteps);
+        return new ScmWalk(relationName, id, direction, shaderSteps, subSteps);
     }
 
     public ScmWalk withDirection(Direction newDir) {
-        return new ScmWalk(relationName, relationId, newDir, filterPredicate, subSteps);
+        return new ScmWalk(relationName, relationId, newDir, shaderSteps, subSteps);
     }
 
-    public ScmWalk withFilter(ImpScmNode filter) {
-        return new ScmWalk(relationName, relationId, direction, filter, subSteps);
+    public ScmWalk withShaderSteps(List<ImpScmNode> newShaderSteps) {
+        return new ScmWalk(relationName, relationId, direction, newShaderSteps, subSteps);
     }
 
     public ScmWalk withSubSteps(List<ImpScmNode> newSubSteps) {
-        return new ScmWalk(relationName, relationId, direction, filterPredicate, newSubSteps);
+        return new ScmWalk(relationName, relationId, direction, shaderSteps, newSubSteps);
     }
 
     @Override
@@ -81,8 +81,12 @@ public record ScmWalk(
             sb.append(" \"").append(relationName).append("\"");
         }
 
-        if (filterPredicate != null) {
-            sb.append(" ").append(filterPredicate.toScmString());
+        if (!shaderSteps.isEmpty()) {
+            sb.append(" (shader");
+            for (ImpScmNode step : shaderSteps) {
+                sb.append(" ").append(step.toScmString());
+            }
+            sb.append(")");
         }
 
         for (ImpScmNode sub : subSteps) {

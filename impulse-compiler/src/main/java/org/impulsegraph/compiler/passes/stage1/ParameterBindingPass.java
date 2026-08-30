@@ -52,12 +52,15 @@ public final class ParameterBindingPass implements CompilerPass {
         }
 
         if (node instanceof ScmWalk walk) {
-            ImpScmNode filter = walk.filterPredicate() != null ? bindScm(walk.filterPredicate(), params) : null;
+            List<ImpScmNode> filterList = new ArrayList<>();
+            for (ImpScmNode step : walk.shaderSteps()) {
+                filterList.add(bindScm(step, params));
+            }
             List<ImpScmNode> subs = new ArrayList<>();
             for (ImpScmNode sub : walk.subSteps()) {
                 subs.add(bindScm(sub, params));
             }
-            return new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), filter, subs);
+            return new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), filterList, subs);
         }
 
         if (node instanceof ScmVectorFilter vf) {

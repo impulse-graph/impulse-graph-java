@@ -48,12 +48,15 @@ public final class ConstantFoldingPass implements CompilerPass {
         }
 
         if (node instanceof ScmWalk walk) {
-            ImpScmNode foldFilter = walk.filterPredicate() != null ? foldNode(walk.filterPredicate()) : null;
+            List<ImpScmNode> foldFilterList = new ArrayList<>();
+            for (ImpScmNode step : walk.shaderSteps()) {
+                foldFilterList.add(foldNode(step));
+            }
             List<ImpScmNode> foldSubs = new ArrayList<>();
             for (ImpScmNode sub : walk.subSteps()) {
                 foldSubs.add(foldNode(sub));
             }
-            return new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), foldFilter, foldSubs);
+            return new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), foldFilterList, foldSubs);
         }
 
         if (node instanceof ScmVectorFilter vf) {

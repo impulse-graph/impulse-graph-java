@@ -10,18 +10,22 @@ import java.util.List;
  */
 public class ProjectionParser {
     
-    public static List<ProjectionAstNode> parse(String projectionString) {
+        public static List<ProjectionAstNode> parse(String projectionString) {
         List<ProjectionAstNode> nodes = new ArrayList<>();
         if (projectionString == null || projectionString.trim().isEmpty()) {
             return nodes;
         }
 
-        // Safe split by comma (ignoring commas inside parenthesis in CEL RHS)
         List<String> chunks = safeSplitByComma(projectionString);
+        java.util.Set<String> seenTargets = new java.util.HashSet<>();
+        
         for (String chunk : chunks) {
             String trimmed = chunk.trim();
             if (!trimmed.isEmpty()) {
                 ProjectionAstNode n = parseSingle(trimmed);
+                if (!seenTargets.add(n.targetStateField())) {
+                    throw new IllegalArgumentException("Duplicate state attribute in same projection step: " + n.targetStateField());
+                }
                 ProjectionValidator.validate(n);
                 nodes.add(n);
             }

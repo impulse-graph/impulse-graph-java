@@ -174,6 +174,36 @@ public class JavaVmPolyglotAssemblyVerifierTest {
         OPCODE_MAP.put("OP_COLLECT_VALUE_MAP", (byte) 0x93);
         OPCODE_MAP.put("OP_DENSE_WALK_REDUCE", (byte) 0x94);
         OPCODE_MAP.put("OP_DENSE_WALK_DIRECT_STORE", (byte) 0x95);
+        OPCODE_MAP.put("OP_COO_WALK_STREAM", (byte) 0xA0);
+        OPCODE_MAP.put("OP_STREAM_FUNC_BEGIN", (byte) 0xA1);
+        OPCODE_MAP.put("OP_STREAM_FUNC_END", (byte) 0xA2);
+        OPCODE_MAP.put("OP_STREAM_LOAD_SRC", (byte) 0xA3);
+        OPCODE_MAP.put("OP_STREAM_LOAD_EDGE", (byte) 0xA4);
+        OPCODE_MAP.put("OP_STREAM_MATH_ADD", (byte) 0xA5);
+        OPCODE_MAP.put("OP_STREAM_MATH_DIV", (byte) 0xA6);
+        OPCODE_MAP.put("OP_STREAM_FILTER", (byte) 0xA7);
+        OPCODE_MAP.put("OP_STREAM_REDUCE", (byte) 0xA8);
+        OPCODE_MAP.put("OP_CSR_WALK_STREAM", (byte) 0xA9);
+        OPCODE_MAP.put("OP_CSC_WALK_STREAM", (byte) 0xAA);
+        OPCODE_MAP.put("OP_STREAM_LOAD_TGT", (byte) 0xAB);
+        OPCODE_MAP.put("OP_STREAM_MATH_SUB", (byte) 0xAC);
+        OPCODE_MAP.put("OP_STREAM_MATH_MUL", (byte) 0xAD);
+        OPCODE_MAP.put("OP_STREAM_MATH_MOD", (byte) 0xAE);
+        OPCODE_MAP.put("OP_STREAM_MATH_UNARY", (byte) 0xAF);
+        OPCODE_MAP.put("OP_STREAM_CMP_EQ", (byte) 0xB0);
+        OPCODE_MAP.put("OP_STREAM_CMP_NEQ", (byte) 0xB1);
+        OPCODE_MAP.put("OP_STREAM_CMP_GT", (byte) 0xB2);
+        OPCODE_MAP.put("OP_STREAM_CMP_LT", (byte) 0xB3);
+        OPCODE_MAP.put("OP_STREAM_LOGIC_AND", (byte) 0xB4);
+        OPCODE_MAP.put("OP_STREAM_LOGIC_OR", (byte) 0xB5);
+        OPCODE_MAP.put("OP_STREAM_LOGIC_NOT", (byte) 0xB6);
+        OPCODE_MAP.put("OP_STREAM_SELECT", (byte) 0xB7);
+        OPCODE_MAP.put("OP_STREAM_REDUCE_ARGMIN", (byte) 0xB8);
+        OPCODE_MAP.put("OP_STREAM_REDUCE_ARGMAX", (byte) 0xB9);
+        OPCODE_MAP.put("OP_STREAM_LOAD_SRC_ID", (byte) 0xBA);
+        OPCODE_MAP.put("OP_STREAM_LOAD_TGT_ID", (byte) 0xBB);
+        OPCODE_MAP.put("OP_STREAM_LOAD_EDGE_ID", (byte) 0xBC);
+        OPCODE_MAP.put("OP_STREAM_LOAD_CONST", (byte) 0xBD);
     }
 
     public record Expectation(String status, Map<Integer, Long> registers, Boolean zf, Boolean st, Integer pc, Integer callStackDepth) {}
@@ -296,6 +326,8 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 
                 long pc = 0;
                 long instructionCount = asm.instructions().size();
+                if (file.getFileName().toString().contains("tdd_21")) {
+                                    }
                 
                 VmHandlers.Instruction[] progArr = new VmHandlers.Instruction[(int) instructionCount];
                 for (int i = 0; i < instructionCount; i++) {
@@ -358,7 +390,8 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x08 -> { VmHandlers.handleLoadInlineArray(state, ctx, instr); pc++; }
                             case 0x09 -> { VmHandlers.handleInitMockGraph(state, ctx, instr); pc++; }
                             case 0x0A -> { VmHandlers.handleLoadInlineSet(state, ctx, instr); pc++; }
-                            case 0x0B, 0x0C -> { pc++; }
+                            case 0x0B -> { VmHandlers.handleInitMockNodeAttr(state, ctx, instr); pc++; }
+                            case 0x0C -> { VmHandlers.handleInitMockNodeAttr(state, ctx, instr); pc++; }
                             case 0x0E -> { VmHandlers.handleCsrWalk2Hop(state, ctx, instr, null); pc++; }
                             case 0x0F -> { VmHandlers.handleCsrWalkState(state, ctx, instr); pc++; }
                             case 0x10 -> { VmHandlers.handleCsrWalk(state, ctx, instr); pc++; }
@@ -400,6 +433,10 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             case 0x3A -> { VmHandlers.handleProjectState(state, ctx, instr); pc++; }
                             case 0x3B -> { VmHandlers.handleCoalesce(state, ctx, instr); pc++; }
                             case 0x3C -> { VmHandlers.handleExtractValidity(state, ctx, instr); pc++; }
+                            case 0xA0, 0xA9, 0xAA -> { 
+                                VmHandlers.handleStreamWalk(state, ctx, instr, progSeg, instructionCount);
+                                pc++; 
+                            }
                             case 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A -> { pc++; } // GraphBLAS pass-through
                             case 0x4B -> { VmHandlers.handleReadEdgeWeight(state, ctx, instr); pc++; }
                             case 0x50 -> {
@@ -547,7 +584,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                         }
                     } catch (Throwable t) {
                         System.err.println("Crash in " + file.getFileName() + " at pc=" + pc + " (op 0x" + Integer.toHexString(opcode & 0xFF) + "): " + t);
-                        String msg = t.getMessage();
+                                                String msg = t.getMessage();
                         if (msg != null && msg.contains("IMPULSE_VM_ERR_")) {
                             int start = msg.indexOf("IMPULSE_VM_ERR_");
                             int end = msg.indexOf(':', start);
@@ -787,9 +824,11 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                 lineCode = lineCode.substring(0, commentIdx).trim();
             }
 
-            if (lineCode.contains(":")) {
-                String[] parts = lineCode.split(":", 2);
-                String codePart = parts[1].trim();
+            if (lineCode.startsWith("OP_") || lineCode.contains(":")) {
+                String codePart = lineCode;
+                if (lineCode.contains(":")) {
+                    codePart = lineCode.split(":", 2)[1].trim();
+                }
                 String[] tokens = codePart.split("[\\s,]+");
                 if (tokens.length > 0 && tokens[0].startsWith("OP_")) {
                     String opName = tokens[0].toUpperCase();
@@ -905,7 +944,15 @@ public class JavaVmPolyglotAssemblyVerifierTest {
                             if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFFFF);
                             if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFFFF) << 16);
                             if (tokens.length > 4) flags = (byte) parseVal(tokens[4], symbolMap);
-                        } else if (opName.equals("OP_LOAD_CONST_INT") || opName.equals("OP_ALLOC_SCRATCH") || opName.equals("OP_ASSERT_SCRATCH_BYTES") || opName.equals("OP_SET_MAX_DOP")) {
+                        } else if (opName.equals("OP_STREAM_LOAD_CONST")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload = parseVal(tokens[2], symbolMap);
+                        } else if (opName.startsWith("OP_STREAM_") && !opName.equals("OP_STREAM_FUNC_BEGIN") && !opName.equals("OP_STREAM_FUNC_END")) {
+                            if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
+                            if (tokens.length > 2) payload |= (parseVal(tokens[2], symbolMap) & 0xFFFF);
+                            if (tokens.length > 3) payload |= ((parseVal(tokens[3], symbolMap) & 0xFFFF) << 16);
+                            if (tokens.length > 4) flags = (byte) parseVal(tokens[4], symbolMap);
+                        } else if (opName.equals("OP_LOAD_CONST_INT") || opName.equals("OP_STREAM_LOAD_CONST") || opName.equals("OP_ALLOC_SCRATCH") || opName.equals("OP_ASSERT_SCRATCH_BYTES") || opName.equals("OP_SET_MAX_DOP")) {
                             if (tokens.length > 1) dstReg = parseVal(tokens[1], symbolMap);
                             if (tokens.length > 2) payload = parseVal(tokens[2], symbolMap);
                         } else {

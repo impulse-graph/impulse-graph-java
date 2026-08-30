@@ -9,6 +9,8 @@ public sealed interface ImpScmNode permits
         ScmWalk,
         ScmWalk2Hop,
         ScmVectorFilter,
+        ScmStreamFilter,
+        ScmStreamProject,
         ScmCelExpr,
         ScmReduce,
         ScmCollect,

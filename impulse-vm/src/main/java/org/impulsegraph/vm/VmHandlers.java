@@ -195,8 +195,6 @@ public final class VmHandlers {
     }
 
     public static void executeCsrWalk(MemorySegment state, VmQueryContext ctx, int dstReg, int srcReg, int relId, byte flags, Object input) {
-        validateReg(dstReg);
-        validateReg(srcReg);
         if (relId < 0 || relId >= 65536) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
@@ -204,6 +202,8 @@ public final class VmHandlers {
         if (rel == null) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
+        validateReg(dstReg);
+        validateReg(srcReg);
 
         byte srcType = getRegisterType(state, srcReg);
         long srcVal = getRegisterValue(state, srcReg);
@@ -298,8 +298,6 @@ public final class VmHandlers {
 
     public static void executeCsrWalk2Hop(MemorySegment state, VmQueryContext ctx, int dstReg, int srcReg,
                                           int relId1, int relId2, byte flags, Object input) {
-        validateReg(dstReg);
-        validateReg(srcReg);
         if (relId1 < 0 || relId1 >= 65536 || relId2 < 0 || relId2 >= 65536) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
@@ -308,6 +306,8 @@ public final class VmHandlers {
         if (rel1 == null || rel2 == null) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
+        validateReg(dstReg);
+        validateReg(srcReg);
 
         int outHandle = ctx.acquireBitset();
         ImpulseBitSet outBs = ctx.getBitset(outHandle);
@@ -377,9 +377,6 @@ public final class VmHandlers {
             relId = (instr.payload() >> 16) & 0xFFFF;
             unvisitedReg = 0;
         }
-
-        validateReg(instr.dstReg());
-        validateReg(frontierReg);
         if (relId < 0 || relId >= 65536) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
@@ -387,11 +384,10 @@ public final class VmHandlers {
         if (rel == null) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
+
+        validateReg(instr.dstReg());
+        validateReg(frontierReg);
         if (!rel.hasCsc()) {
-            if (ctx.inlineDataSegment() != null) {
-                executeCsrWalk(state, ctx, instr.dstReg(), frontierReg, relId);
-                return;
-            }
             throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
         }
 
@@ -810,19 +806,21 @@ public final class VmHandlers {
     }
 
     public static void handleCsrDegree(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        validateReg(instr.dstReg());
         int srcReg = instr.payload() & 0xFFFF;
         int relId = (instr.payload() >> 16) & 0xFFFF;
-        validateReg(srcReg);
+        
         if (relId < 0 || relId >= 65536) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
-        long u = getRegisterValue(state, srcReg);
-
         RelationSnapshot rel = resolveRelation(ctx, relId);
         if (rel == null) {
             throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
         }
+        
+        validateReg(instr.dstReg());
+        validateReg(srcReg);
+        
+        long u = getRegisterValue(state, srcReg);
         long degree = 0;
         if (rel != null && u >= 0 && u < rel.getNodeCount()) {
             degree = rel.getDegree((int) u);
@@ -833,7 +831,21 @@ public final class VmHandlers {
     }
 
     public static void handleCsrWalkPredicate(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-        handleCsrWalk(state, ctx, instr);
+        int srcReg = instr.payload() & 0xFF;
+        int valReg = (instr.payload() >> 8) & 0xFF;
+        int relId = (instr.payload() >> 16) & 0xFF;
+        
+        if (instr.flags() != 0) {
+            valReg = (instr.payload() >> 8) & 0xFF;
+        }
+
+        validateReg(instr.dstReg());
+        validateReg(srcReg);
+        validateReg(valReg);
+
+        // For now, delegate to basic walk logic but pass correct srcReg
+        Instruction mappedInstr = new Instruction(instr.opcode(), instr.flags(), instr.dstReg(), (relId << 24) | srcReg);
+        handleCsrWalk(state, ctx, mappedInstr);
     }
 
     public static void handleVectorDiv(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -1575,7 +1587,13 @@ public final class VmHandlers {
         double totalSum = 0.0;
         float fsum = 0.0f;
 
-        if (type == TYPE_FLOAT_VECTOR) {
+        if (type == TYPE_FLOAT) {
+            long raw = getRegisterValue(state, src);
+            float val = Float.intBitsToFloat((int)(raw & 0xFFFFFFFFL));
+            setRegister(state, dst, Float.floatToRawIntBits(val), TYPE_FLOAT);
+            setFlag(state, FLAG_ZF, val == 0.0f);
+            return (double) val;
+        } else if (type == TYPE_FLOAT_VECTOR) {
             int handle = (int) getRegisterValue(state, src);
             float[] vec = ctx.getFloatVector(handle);
             if (vec != null) {
@@ -1584,6 +1602,7 @@ public final class VmHandlers {
                 }
             }
             setRegister(state, dst, Float.floatToRawIntBits(fsum), TYPE_FLOAT);
+            setFlag(state, FLAG_ZF, fsum == 0.0f);
             return (double) fsum;
         } else if (type == TYPE_DOUBLE_VECTOR) {
             int handle = (int) getRegisterValue(state, src);
@@ -1594,6 +1613,7 @@ public final class VmHandlers {
                 }
             }
             setRegister(state, dst, Double.doubleToRawLongBits(totalSum), TYPE_DOUBLE);
+            setFlag(state, FLAG_ZF, totalSum == 0.0);
             return totalSum;
         } else if (type == TYPE_BITSET_HANDLE) {
             int handle = (int) getRegisterValue(state, src);
@@ -1602,9 +1622,11 @@ public final class VmHandlers {
                 totalSum = bs.cardinality();
             }
             setRegister(state, dst, Double.doubleToRawLongBits(totalSum), TYPE_DOUBLE);
+            setFlag(state, FLAG_ZF, totalSum == 0.0);
             return totalSum;
         }
         setRegister(state, dst, 0L, TYPE_FLOAT);
+        setFlag(state, FLAG_ZF, true);
         return 0.0;
     }
 
@@ -1863,6 +1885,14 @@ public final class VmHandlers {
         setFlag(state, FLAG_ZF, bs.isEmpty());
     }
 
+    public static void handleInitMockNodeAttr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+        int attrId = instr.dstReg();
+        int srcReg = instr.payload() & 0xFFFF;
+        int handle = (int) getRegisterValue(state, srcReg);
+        float[] arr = ctx.getFloatVector(handle);
+        ctx.setMockAttribute(attrId, arr);
+    }
+    
     public static void handleInitMockGraph(MemorySegment state, VmQueryContext ctx, Instruction instr) {
         MemorySegment inlineSeg = ctx.inlineDataSegment();
         if (inlineSeg == null) {
@@ -2321,7 +2351,7 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
-        } else {
+        } else if (type1 == TYPE_FLOAT_VECTOR) {
             float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, src1));
             float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, src2));
             int len = (v1 != null) ? v1.length : ((v2 != null) ? v2.length : 1024);
@@ -2371,7 +2401,7 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
-        } else {
+        } else if (type == TYPE_FLOAT_VECTOR) {
             float[] v = ctx.getFloatVector((int) getRegisterValue(state, src));
             int len = (v != null) ? v.length : 1024;
             float[] out = new float[len];
@@ -2388,8 +2418,11 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
+        } else {
+            throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
         }
     }
+
 
     private static double applyMathUnary(int funcId, double v) {
         return switch (funcId) {
@@ -2464,7 +2497,7 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
-        } else {
+        } else if (type == TYPE_FLOAT_VECTOR) {
             float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, src1));
             float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, src2));
             int len = (v1 != null) ? v1.length : ((v2 != null) ? v2.length : 1024);
@@ -2483,6 +2516,8 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
+        } else {
+            throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
         }
     }
 
@@ -2541,7 +2576,7 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
-        } else {
+        } else if (type == TYPE_FLOAT_VECTOR) {
             float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, src1));
             float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, src2));
             float[] v3 = ctx.getFloatVector((int) getRegisterValue(state, src3));
@@ -2562,6 +2597,8 @@ public final class VmHandlers {
                 setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
             }
             setFlag(state, FLAG_ZF, false);
+        } else {
+            throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
         }
     }
 
@@ -3037,5 +3074,252 @@ public final class VmHandlers {
             throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
         }
         setRegister(state, instr.dstReg(), getRegisterValue(state, src), TYPE_FRONTIER_STATE);
+    }
+
+    public static void handleStreamWalk(MemorySegment state, VmQueryContext ctx, Instruction instr, MemorySegment programSeg, long instructionCount) {
+        int outBsHandle = ctx.acquireBitset();
+        org.impulsegraph.api.bitset.ImpulseBitSet outBs = ctx.getBitset(outBsHandle);
+        setRegister(state, instr.dstReg(), outBsHandle, TYPE_BITSET_HANDLE);
+        
+        int srcReg = instr.payload() & 0xFFFF;
+        int relId = (instr.payload() >> 16) & 0xFFFF;
+        int shaderPcStart = instr.flags() & 0xFF;
+        
+        org.impulsegraph.api.RelationSnapshot rel = resolveRelation(ctx, relId);
+        if (rel == null) {
+            throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+        }
+        
+        long srcVal = getRegisterValue(state, srcReg);
+        byte srcType = getRegisterType(state, srcReg);
+        
+        int[] activeSources = null;
+        if (srcType == TYPE_NODE_ID) {
+            activeSources = new int[]{(int) srcVal};
+        } else if (srcType == TYPE_NODE_VECTOR) {
+            activeSources = ctx.getNodeVector((int) srcVal);
+        } else if (srcType == TYPE_BITSET_HANDLE) {
+            org.impulsegraph.api.bitset.ImpulseBitSet bs = ctx.getBitset((int) srcVal);
+            java.util.List<Integer> list = new java.util.ArrayList<>();
+            for (int i = 0; i < rel.getNodeCount(); i++) {
+                if (bs.get(i)) list.add(i);
+            }
+            activeSources = new int[list.size()];
+            for (int i = 0; i < list.size(); i++) activeSources[i] = list.get(i);
+        } else {
+            throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_REGISTER");
+        }
+        
+        boolean isCsc = (instr.opcode() == VmRegisterType.OP_CSC_WALK_STREAM || instr.opcode() == (byte) 0xAA);
+        java.lang.foreign.MemorySegment rowOff = isCsc ? rel.getCscRowOffsetsSegment() : rel.getRowOffsetsSegment();
+        java.lang.foreign.MemorySegment colIdx = isCsc ? rel.getCscColumnTargetsSegment() : rel.getColumnTargetsSegment();
+        if (rowOff == null) rowOff = rel.getRowOffsetsSegment();
+        if (colIdx == null) colIdx = rel.getColumnTargetsSegment();
+        
+        for (int u : activeSources) {
+            int nodeBound = isCsc ? (int) (rowOff.byteSize() / 4 - 1) : rel.getNodeCount();
+            if (u < 0 || u >= nodeBound) continue;
+            int eStart = rowOff.getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) u);
+            int eEnd = rowOff.getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) (u + 1));
+            
+            for (int eIdx = eStart; eIdx < eEnd; eIdx++) {
+                int neighbor = colIdx.getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) eIdx);
+                int actualSource = isCsc ? neighbor : u;
+                int actualTarget = isCsc ? u : neighbor;
+                outBs.set(actualTarget);
+                                
+                float[] s_regs = new float[16];
+                boolean abort = false;
+                
+                int mutPc = shaderPcStart;
+                while (mutPc < instructionCount) {
+                    Instruction sInst = decodeInstruction(programSeg, mutPc);
+                    byte op = sInst.opcode();
+                    if (op == VmRegisterType.OP_STREAM_FUNC_END) {
+                        break;
+                    }
+                    
+                    int sDst = sInst.dstReg();
+                    int sPayloadLow = sInst.payload() & 0xFFFF;
+                    int sPayloadHigh = (sInst.payload() >> 16) & 0xFFFF;
+                    
+                    switch (op) {
+                        case VmRegisterType.OP_STREAM_FUNC_BEGIN -> { }
+                        
+                        case VmRegisterType.OP_STREAM_LOAD_SRC -> {
+                            int attrId = sInst.payload() & 0xFFFF;
+                            Object obj = ctx.getMockAttribute(attrId);
+                            if (obj instanceof float[] farr) {
+                                s_regs[sDst] = (actualSource < farr.length) ? farr[actualSource] : 0.0f;
+                            } else if (obj instanceof int[] iarr) {
+                                s_regs[sDst] = (actualSource < iarr.length) ? Float.intBitsToFloat(iarr[actualSource]) : 0.0f;
+                            } else {
+                                float[] farr = ctx.getFloatVector((int) getRegisterValue(state, attrId));
+                                s_regs[sDst] = (farr != null && actualSource < farr.length) ? farr[actualSource] : 0.0f;
+                            }
+                        }
+                        case VmRegisterType.OP_STREAM_LOAD_TGT -> {
+                            int attrId = sInst.payload() & 0xFFFF;
+                            Object obj = ctx.getMockAttribute(attrId);
+                            if (obj instanceof float[] farr) {
+                                s_regs[sDst] = (actualTarget < farr.length) ? farr[actualTarget] : 0.0f;
+                            } else if (obj instanceof int[] iarr) {
+                                s_regs[sDst] = (actualTarget < iarr.length) ? Float.intBitsToFloat(iarr[actualTarget]) : 0.0f;
+                            } else {
+                                float[] farr = ctx.getFloatVector((int) getRegisterValue(state, attrId));
+                                s_regs[sDst] = (farr != null && actualTarget < farr.length) ? farr[actualTarget] : 0.0f;
+                            }
+                        }
+                        case VmRegisterType.OP_STREAM_LOAD_EDGE -> {
+                            int attrId = sInst.payload() & 0xFFFF;
+                            Object obj = ctx.getMockAttribute(attrId);
+                            if (obj instanceof float[] farr) {
+                                s_regs[sDst] = (eIdx < farr.length) ? farr[eIdx] : 0.0f;
+                            } else if (obj instanceof int[] iarr) {
+                                s_regs[sDst] = (eIdx < iarr.length) ? Float.intBitsToFloat(iarr[eIdx]) : 0.0f;
+                            } else {
+                                float[] farr = ctx.getFloatVector((int) getRegisterValue(state, attrId));
+                                s_regs[sDst] = (farr != null && eIdx < farr.length) ? farr[eIdx] : 0.0f;
+                            }
+                        }
+                        
+                        case VmRegisterType.OP_STREAM_LOAD_SRC_ID -> s_regs[sDst] = (float) actualSource;
+                        case VmRegisterType.OP_STREAM_LOAD_TGT_ID -> {
+                            s_regs[sDst] = (float) actualTarget;
+                        }
+                        case VmRegisterType.OP_STREAM_LOAD_EDGE_ID -> s_regs[sDst] = (float) eIdx;
+                        
+                        case VmRegisterType.OP_STREAM_LOAD_CONST -> {
+                            s_regs[sDst] = Float.intBitsToFloat(sInst.payload());
+                        }
+                        
+                        case VmRegisterType.OP_STREAM_MATH_ADD -> s_regs[sDst] = s_regs[sPayloadLow] + s_regs[sPayloadHigh];
+                        case VmRegisterType.OP_STREAM_MATH_SUB -> s_regs[sDst] = s_regs[sPayloadLow] - s_regs[sPayloadHigh];
+                        case VmRegisterType.OP_STREAM_MATH_MUL -> s_regs[sDst] = s_regs[sPayloadLow] * s_regs[sPayloadHigh];
+                        case VmRegisterType.OP_STREAM_MATH_DIV -> {
+                            float div = s_regs[sPayloadHigh];
+                            s_regs[sDst] = (div == 0.0f) ? 0.0f : (s_regs[sPayloadLow] / div);
+                        }
+                        case VmRegisterType.OP_STREAM_MATH_MOD -> {
+                            float mod = s_regs[sPayloadHigh];
+                            s_regs[sDst] = (mod == 0.0f) ? 0.0f : (s_regs[sPayloadLow] % mod);
+                        }
+                        
+                        case VmRegisterType.OP_STREAM_CMP_EQ -> s_regs[sDst] = (s_regs[sPayloadLow] == s_regs[sPayloadHigh]) ? 1.0f : 0.0f;
+                        case VmRegisterType.OP_STREAM_CMP_NEQ -> s_regs[sDst] = (s_regs[sPayloadLow] != s_regs[sPayloadHigh]) ? 1.0f : 0.0f;
+                        case VmRegisterType.OP_STREAM_CMP_GT -> s_regs[sDst] = (s_regs[sPayloadLow] > s_regs[sPayloadHigh]) ? 1.0f : 0.0f;
+                        case VmRegisterType.OP_STREAM_CMP_LT -> s_regs[sDst] = (s_regs[sPayloadLow] < s_regs[sPayloadHigh]) ? 1.0f : 0.0f;
+                        
+                        case VmRegisterType.OP_STREAM_LOGIC_AND -> s_regs[sDst] = (s_regs[sPayloadLow] != 0.0f && s_regs[sPayloadHigh] != 0.0f) ? 1.0f : 0.0f;
+                        case VmRegisterType.OP_STREAM_LOGIC_OR -> s_regs[sDst] = (s_regs[sPayloadLow] != 0.0f || s_regs[sPayloadHigh] != 0.0f) ? 1.0f : 0.0f;
+                        case VmRegisterType.OP_STREAM_LOGIC_NOT -> s_regs[sDst] = (s_regs[sPayloadLow] == 0.0f) ? 1.0f : 0.0f;
+                        
+                        case VmRegisterType.OP_STREAM_SELECT -> {
+                            s_regs[sDst] = (s_regs[sPayloadLow] != 0.0f) ? s_regs[sPayloadHigh] : s_regs[sDst];
+                        }
+                        
+                        case VmRegisterType.OP_STREAM_FILTER -> {
+                            if (s_regs[sDst] == 0.0f) {
+                                abort = true;
+                            }
+                        }
+                        
+                        case VmRegisterType.OP_STREAM_MATH_UNARY -> {
+                            float v = s_regs[sPayloadLow];
+                            float res = v;
+                            switch (sPayloadHigh) {
+                                case 0x01 -> res = Math.abs(v);
+                                case 0x02 -> res = (float) Math.sqrt(v);
+                                case 0x03 -> res = 1.0f / (float) Math.sqrt(v);
+                                case 0x04 -> res = Math.copySign((float) Math.pow(Math.abs(v), 1.0 / 3.0), v);
+                                case 0x08 -> res = (float) Math.exp(v);
+                                case 0x09 -> res = (float) Math.pow(2.0, v);
+                                case 0x0A -> res = (float) Math.pow(10.0, v);
+                                case 0x0B -> res = (float) Math.expm1(v);
+                                case 0x0C -> res = (float) Math.log(v);
+                                case 0x0D -> res = (float) (Math.log(v) / Math.log(2.0));
+                                case 0x0E -> res = (float) Math.log10(v);
+                                case 0x0F -> res = (float) Math.log1p(v);
+                                case 0x10 -> res = (float) Math.sin(v);
+                                case 0x11 -> res = (float) Math.cos(v);
+                                case 0x12 -> res = (float) Math.tan(v);
+                                case 0x13 -> res = (float) Math.asin(v);
+                                case 0x14 -> res = (float) Math.acos(v);
+                                case 0x15 -> res = (float) Math.atan(v);
+                                case 0x17 -> res = (Math.abs(v) < 1e-15f) ? 1.0f : (float)(Math.sin(v) / v);
+                                case 0x18 -> res = (float) Math.sinh(v);
+                                case 0x19 -> res = (float) Math.cosh(v);
+                                case 0x1A -> res = (float) Math.tanh(v);
+                                case 0x1E -> res = (float) Math.floor(v);
+                                case 0x1F -> res = (float) Math.ceil(v);
+                                case 0x21 -> res = (float) Math.floor(v + 0.5f);
+                                case 0x25 -> res = (v > 0.0f) ? v : 0.0f;
+                                case 0x26 -> res = (v > 0.0f) ? v : 0.01f * v;
+                                case 0x27 -> res = 1.0f / (1.0f + (float) Math.exp(-v));
+                                case 0x28 -> res = 0.5f * v * (1.0f + (float) Math.tanh(0.7978845608028654 * (v + 0.044715 * v * v * v)));
+                                case 0x29 -> res = v / (1.0f + (float) Math.exp(-v));
+                                case 0x2A -> res = (float) Math.log(1.0 + Math.exp(v));
+                                case 0x34 -> res = Float.isNaN(v) ? 1.0f : 0.0f;
+                                case 0x35 -> res = Float.isInfinite(v) ? 1.0f : 0.0f;
+                                case 0x36 -> res = Float.isFinite(v) ? 1.0f : 0.0f;
+                            }
+                            s_regs[sDst] = res;
+                        }
+                        
+                        case VmRegisterType.OP_STREAM_YIELD -> {
+                            outBs.set(actualTarget);
+                        }
+                        case VmRegisterType.OP_STREAM_SCATTER_REDUCE -> {
+                            float val = s_regs[sDst];
+                            int attrId = sPayloadLow;
+                            int monoid = sPayloadHigh;
+                            float[] vec = ctx.getFloatVector(attrId);
+                            if (vec != null && actualTarget < vec.length) {
+                                float current = vec[actualTarget];
+                                float next = current;
+                                switch (monoid) {
+                                    case 0 -> next = current + val;
+                                    case 1 -> next = Math.max(current, val);
+                                    case 2 -> next = Math.min(current, val);
+                                }
+                                vec[actualTarget] = next;
+                            }
+                        }
+                        case VmRegisterType.OP_STREAM_REDUCE -> {
+                            float val = s_regs[sDst];
+                            int globalReg = sPayloadLow;
+                            int monoid = sPayloadHigh;
+                            
+                            byte rType = getRegisterType(state, globalReg);
+                            int handle;
+                            float[] vec;
+                            if (rType == TYPE_FLOAT_VECTOR) {
+                                handle = (int) getRegisterValue(state, globalReg);
+                                vec = ctx.getFloatVector(handle);
+                            } else {
+                                int size = Math.max(rel.getNodeCount(), 65536);
+                                vec = new float[size];
+                                handle = ctx.registerFloatVector(vec);
+                                setRegister(state, globalReg, handle, TYPE_FLOAT_VECTOR);
+                            }
+                            if (vec != null && actualTarget < vec.length) {
+                                float current = vec[actualTarget];
+                                float next = current;
+                                switch (monoid) {
+                                    case 0 -> next = current + val;
+                                    case 1 -> next = Math.max(current, val);
+                                    case 2 -> next = Math.min(current, val);
+                                }
+                                vec[actualTarget] = next;
+                            }
+                        }
+                    }
+                    
+                    if (abort) break;
+                    
+                    mutPc++;
+                }
+            }
+        }
     }
 }

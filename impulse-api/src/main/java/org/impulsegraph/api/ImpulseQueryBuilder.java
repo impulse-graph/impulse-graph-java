@@ -103,10 +103,7 @@ public class ImpulseQueryBuilder<R> {
      * Apply in-domain state projections on the active frontier.
      */
     public ImpulseQueryBuilder<R> projectState(String projectionExpr) {
-        steps.add(new ScmList(List.of(
-                new ScmSymbol("project-state"),
-                ScmLiteral.ofStr(projectionExpr != null ? projectionExpr : "")
-        )));
+        steps.add(new org.impulsegraph.compiler.ast.ScmStreamProject(new ScmCelExpr(projectionExpr != null ? projectionExpr : "")));
         return this;
     }
 
@@ -132,7 +129,7 @@ public class ImpulseQueryBuilder<R> {
      */
     public ImpulseQueryBuilder<R> filterWithCel(String celExpr) {
         Objects.requireNonNull(celExpr, "celExpr must not be null");
-        steps.add(new ScmCelExpr(celExpr));
+        steps.add(new org.impulsegraph.compiler.ast.ScmStreamFilter(new ScmCelExpr(celExpr)));
         return this;
     }
 

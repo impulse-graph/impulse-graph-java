@@ -215,6 +215,40 @@ public final class VmRegisterType {
     public static final byte OP_DENSE_WALK_REDUCE      = (byte) 0x94;
     public static final byte OP_DENSE_WALK_DIRECT_STORE= (byte) 0x95;
 
+    // Edge Stream Shader Opcodes (0xA0 - 0xBF)
+    public static final byte OP_COO_WALK_STREAM        = (byte) 0xA0;
+    public static final byte OP_STREAM_FUNC_BEGIN      = (byte) 0xA1;
+    public static final byte OP_STREAM_FUNC_END        = (byte) 0xA2;
+    public static final byte OP_STREAM_LOAD_SRC        = (byte) 0xA3;
+    public static final byte OP_STREAM_LOAD_EDGE       = (byte) 0xA4;
+    public static final byte OP_STREAM_MATH_ADD        = (byte) 0xA5;
+    public static final byte OP_STREAM_MATH_DIV        = (byte) 0xA6;
+    public static final byte OP_STREAM_FILTER          = (byte) 0xA7;
+    public static final byte OP_STREAM_REDUCE          = (byte) 0xA8;
+    public static final byte OP_CSR_WALK_STREAM        = (byte) 0xA9;
+    public static final byte OP_CSC_WALK_STREAM        = (byte) 0xAA;
+    public static final byte OP_STREAM_LOAD_TGT        = (byte) 0xAB;
+    public static final byte OP_STREAM_MATH_SUB        = (byte) 0xAC;
+    public static final byte OP_STREAM_MATH_MUL        = (byte) 0xAD;
+    public static final byte OP_STREAM_MATH_MOD        = (byte) 0xAE;
+    public static final byte OP_STREAM_MATH_UNARY      = (byte) 0xAF;
+    public static final byte OP_STREAM_CMP_EQ          = (byte) 0xB0;
+    public static final byte OP_STREAM_CMP_NEQ         = (byte) 0xB1;
+    public static final byte OP_STREAM_CMP_GT          = (byte) 0xB2;
+    public static final byte OP_STREAM_CMP_LT          = (byte) 0xB3;
+    public static final byte OP_STREAM_LOGIC_AND       = (byte) 0xB4;
+    public static final byte OP_STREAM_LOGIC_OR        = (byte) 0xB5;
+    public static final byte OP_STREAM_LOGIC_NOT       = (byte) 0xB6;
+    public static final byte OP_STREAM_SELECT          = (byte) 0xB7;
+    public static final byte OP_STREAM_REDUCE_ARGMIN   = (byte) 0xB8;
+    public static final byte OP_STREAM_REDUCE_ARGMAX   = (byte) 0xB9;
+    public static final byte OP_STREAM_LOAD_SRC_ID     = (byte) 0xBA;
+    public static final byte OP_STREAM_LOAD_TGT_ID     = (byte) 0xBB;
+    public static final byte OP_STREAM_LOAD_EDGE_ID    = (byte) 0xBC;
+    public static final byte OP_STREAM_LOAD_CONST      = (byte) 0xBD;
+    public static final byte OP_STREAM_YIELD           = (byte) 0xBE;
+    public static final byte OP_STREAM_SCATTER_REDUCE  = (byte) 0xBF;
+
     // GraphBLAS Semiring IDs
     public static final int SEMIRING_PLUS_TIMES       = 0;
     public static final int SEMIRING_MIN_PLUS         = 1;

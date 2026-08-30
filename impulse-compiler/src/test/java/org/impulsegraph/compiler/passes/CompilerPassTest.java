@@ -91,7 +91,7 @@ public class CompilerPassTest {
             assertEquals(2, prog.steps().size());
             assertInstanceOf(ScmWalk.class, prog.steps().get(0));
             ScmWalk fusedWalk = (ScmWalk) prog.steps().get(0);
-            assertNotNull(fusedWalk.filterPredicate());
+            assertNotNull(fusedWalk.shaderSteps());
             assertEquals(0, fusedWalk.relationId()); // physically bound
         }
     }

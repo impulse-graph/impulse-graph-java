@@ -64,12 +64,12 @@ public final class VirtualRelationDecompositionPass implements CompilerPass {
                         }
 
                         // Build specialized constituent walk
-                        constituentWalks.add(new ScmWalk(cName, -1, dir, walk.filterPredicate(), List.of()));
+                        constituentWalks.add(new ScmWalk(cName, -1, dir, walk.shaderSteps(), List.of()));
                     }
                 }
 
                 if (!constituentWalks.isEmpty()) {
-                    return new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), walk.filterPredicate(), constituentWalks);
+                    return new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), walk.shaderSteps(), constituentWalks);
                 }
             }
         }

@@ -36,12 +36,15 @@ public final class AstNormalizationPass implements CompilerPass {
         }
 
         if (node instanceof ScmWalk walk) {
-            ImpScmNode normFilter = walk.filterPredicate() != null ? normalizeNode(walk.filterPredicate()) : null;
+            List<ImpScmNode> normFilterList = new ArrayList<>();
+            for (ImpScmNode step : walk.shaderSteps()) {
+                normFilterList.add(normalizeNode(step));
+            }
             List<ImpScmNode> normSubs = new ArrayList<>();
             for (ImpScmNode sub : walk.subSteps()) {
                 normSubs.add(normalizeNode(sub));
             }
-            return new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), normFilter, normSubs);
+            return new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), normFilterList, normSubs);
         }
 
         if (node instanceof ScmVectorFilter vf) {

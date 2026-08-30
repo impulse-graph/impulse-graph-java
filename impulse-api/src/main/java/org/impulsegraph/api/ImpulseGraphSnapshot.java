@@ -119,24 +119,13 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
      * Binds an explicit domain anchor context for initiating traversals.
      */
     default org.impulsegraph.api.traversal.DomainView domain(String domainName) {
-        try {
-            Class<?> cls = Class.forName("org.impulsegraph.vm.traversal.DefaultDomainView");
-            long nodeCount = getNodeCount(domainName);
-            if (nodeCount <= 0 && !getAllRelationSnapshots().isEmpty()) {
-                var first = getAllRelationSnapshots().values().iterator().next();
-                if (first != null) nodeCount = first.getNodeCount();
-            }
-            try {
-                var m = cls.getMethod("getOrCreate", ImpulseGraphSnapshot.class, String.class, int.class, long.class);
-                return (org.impulsegraph.api.traversal.DomainView) m.invoke(null, this, domainName, 0, nodeCount);
-            } catch (NoSuchMethodException e) {
-                return (org.impulsegraph.api.traversal.DomainView) cls.getConstructor(
-                        ImpulseGraphSnapshot.class, String.class, int.class, long.class
-                ).newInstance(this, domainName, 0, nodeCount);
-            }
-        } catch (Exception e) {
-            throw new UnsupportedOperationException("Failed to construct DomainView: " + e.getMessage(), e);
+        long nodeCount = getNodeCount(domainName);
+        if (nodeCount <= 0 && !getAllRelationSnapshots().isEmpty()) {
+            var first = getAllRelationSnapshots().values().iterator().next();
+            if (first != null) nodeCount = first.getNodeCount();
         }
+        return org.impulsegraph.api.spi.ImpulseEngineRegistry.getProvider()
+                .createDomainView(this, domainName, 0, nodeCount);
     }
 
     /**
@@ -157,14 +146,8 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
      * Prepares a parameterized graph query statement for repeated execution.
      */
     default org.impulsegraph.api.statement.ImpulseStatement prepare(String query) {
-        try {
-            Class<?> cls = Class.forName("org.impulsegraph.vm.statement.ImpulseStatementImpl");
-            return (org.impulsegraph.api.statement.ImpulseStatement) cls.getConstructor(
-                    ImpulseGraphSnapshot.class, String.class
-            ).newInstance(this, query);
-        } catch (Exception e) {
-            throw new UnsupportedOperationException("Failed to prepare statement: " + e.getMessage(), e);
-        }
+        return org.impulsegraph.api.spi.ImpulseEngineRegistry.getProvider()
+                .createStatement(this, query);
     }
 
     @Override
