@@ -102,9 +102,13 @@ if (impbDataFile != null && java.nio.file.Files.exists(impbDataFile)) {
                         System.err.println("OP_CSR_WALK: flags=" + instr.flags() + " isExtended=" + isExtended);
                     }
                     if (isExtended) {
-
-                        VmHandlers.ExtendedInstruction ext = VmHandlers.decodeExtendedInstruction(progSeg, pc);
-                        instr = new VmHandlers.Instruction(instr.opcode(), instr.flags(), instr.dstReg(), (instr.payload() & 0xFFFF) | (ext.arg3() << 16));
+                        try {
+                            VmHandlers.ExtendedInstruction ext = VmHandlers.decodeExtendedInstruction(progSeg, pc);
+                            instr = new VmHandlers.Instruction(instr.opcode(), instr.flags(), instr.dstReg(), (instr.payload() & 0xFFFF) | (ext.arg3() << 16));
+                        } catch (IllegalStateException e) {
+                            actualStatus = "IMPULSE_VM_ERR_INVALID_INSTRUCTION";
+                            break;
+                        }
                     }
 
                     byte opcode = instr.opcode();
