@@ -289,16 +289,9 @@ public final class ImpulseVmInterpreter {
                     case OP_DENSE_WALK_DIRECT_STORE -> { VmHandlers.handleDenseWalkDirectStore(state, ctx, instr); pc++; }
                     case OP_COO_WALK_STREAM, OP_CSR_WALK_STREAM, OP_CSC_WALK_STREAM -> {
                         VmHandlers.handleStreamWalk(state, ctx, instr, programSeg, instructionCount);
-                        long skipPc = pc + 1;
-                        while (skipPc < instructionCount) {
-                            VmHandlers.Instruction sInst = VmHandlers.decodeInstruction(programSeg, skipPc);
-                            if (sInst.opcode() == OP_STREAM_FUNC_END) {
-                                break;
-                            }
-                            skipPc++;
-                        }
-                        pc = skipPc + 1;
+                        pc++;
                     }
+                    case OP_STREAM_FUNC_BEGIN, OP_STREAM_FUNC_END -> { pc++; }
                     case OP_COLLECT_ARRAY -> { VmHandlers.handleCollectArray(state, ctx, instr); pc++; }
                     case OP_MAP_DENSE_TO_KEYS -> { VmHandlers.handleMapDenseToKeys(state, ctx, instr); pc++; }
                     case OP_COLLECT_VALUE_MAP -> { VmHandlers.handleCollectValueMap(state, ctx, instr); pc++; }

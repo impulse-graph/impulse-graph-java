@@ -358,6 +358,11 @@ if (impbDataFile != null && java.nio.file.Files.exists(impbDataFile)) {
                             case 0x93 -> { VmHandlers.handleCollectValueMap(state, ctx, instr); pc++; }
                             case 0x94 -> { VmHandlers.handleDenseWalkReduce(state, ctx, instr); pc++; }
                             case 0x95 -> { VmHandlers.handleDenseWalkDirectStore(state, ctx, instr); pc++; }
+                            case 0xA0, 0xA9, 0xAA -> {
+                                VmHandlers.handleStreamWalk(state, ctx, instr, progSeg, instructionCount);
+                                pc++;
+                            }
+                            case 0xA1, 0xA2 -> { pc++; }
                             case 0x28, 0x29, 0x2B, 0x2C,
                                  0x3E, 0x3F,
                                  0x4F,
