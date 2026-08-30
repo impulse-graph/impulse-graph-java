@@ -111,12 +111,12 @@ public class VmHandlersExtendedMcdcTest {
             try (VmQueryContext ctx = new VmQueryContext(graph, arena)) {
                 MemorySegment state = ctx.allocateStateSegment();
 
-                // 1. Math Unary with fallback allocation
+                // 1. Math Unary with fallback allocation (src=1, funcId=0)
                 VmHandlers.setRegister(state, 1, 999L, TYPE_FLOAT_VECTOR);
-                VmHandlers.handleVecMathUnary(state, ctx, makeInstr(OP_VEC_MATH_UNARY, (byte) 0, 2, (1 << 8)));
+                VmHandlers.handleVecMathUnary(state, ctx, makeInstr(OP_VEC_MATH_UNARY, (byte) 0, 2, 1));
                 assertEquals(TYPE_FLOAT_VECTOR, VmHandlers.getRegisterType(state, 2));
 
-                // 2. Math Binary with mismatched lengths
+                // 2. Math Binary with mismatched lengths (src1=1, src2=2, funcId=0)
                 float[] v1 = new float[]{1.0f, 2.0f};
                 float[] v2 = new float[]{1.0f};
                 int h1 = ctx.registerFloatVector(v1);
@@ -124,7 +124,7 @@ public class VmHandlersExtendedMcdcTest {
 
                 VmHandlers.setRegister(state, 1, h1, TYPE_FLOAT_VECTOR);
                 VmHandlers.setRegister(state, 2, h2, TYPE_FLOAT_VECTOR);
-                VmHandlers.handleVecMathBinary(state, ctx, makeInstr(OP_VEC_MATH_BINARY, (byte) 0, 3, (2 << 16) | (1 << 8)));
+                VmHandlers.handleVecMathBinary(state, ctx, makeInstr(OP_VEC_MATH_BINARY, (byte) 0, 3, 1 | (2 << 8)));
                 assertEquals(TYPE_FLOAT_VECTOR, VmHandlers.getRegisterType(state, 3));
 
                 // 3. Comparisons on null/missing vector produce empty bitset & set ZF

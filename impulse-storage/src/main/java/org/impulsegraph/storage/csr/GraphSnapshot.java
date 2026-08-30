@@ -83,8 +83,9 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
         return null;
     }
 
+    @Override
     public Map<String, org.impulsegraph.api.RelationSnapshot> getAllRelationSnapshots() {
-        return java.util.Collections.unmodifiableMap((java.util.Map) relationMap);
+        return Collections.unmodifiableMap(relationMap);
     }
 
     public long getOffHeapMemorySizeBytes() {

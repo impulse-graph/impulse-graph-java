@@ -291,7 +291,14 @@ public final class ImpulseVmInterpreter {
                         VmHandlers.handleStreamWalk(state, ctx, instr, programSeg, instructionCount);
                         pc++;
                     }
-                    case OP_STREAM_FUNC_BEGIN, OP_STREAM_FUNC_END -> { pc++; }
+                    case OP_STREAM_FUNC_BEGIN, OP_STREAM_FUNC_END,
+                         OP_STREAM_LOAD_SRC, OP_STREAM_LOAD_EDGE, OP_STREAM_LOAD_TGT,
+                         OP_STREAM_LOAD_SRC_ID, OP_STREAM_LOAD_TGT_ID, OP_STREAM_LOAD_EDGE_ID, OP_STREAM_LOAD_CONST,
+                         OP_STREAM_MATH_ADD, OP_STREAM_MATH_SUB, OP_STREAM_MATH_MUL, OP_STREAM_MATH_DIV, OP_STREAM_MATH_MOD, OP_STREAM_MATH_UNARY,
+                         OP_STREAM_CMP_EQ, OP_STREAM_CMP_NEQ, OP_STREAM_CMP_GT, OP_STREAM_CMP_LT,
+                         OP_STREAM_LOGIC_AND, OP_STREAM_LOGIC_OR, OP_STREAM_LOGIC_NOT, OP_STREAM_SELECT,
+                         OP_STREAM_REDUCE, OP_STREAM_REDUCE_ARGMIN, OP_STREAM_REDUCE_ARGMAX,
+                         OP_STREAM_YIELD, OP_STREAM_SCATTER_REDUCE -> { pc++; }
                     case OP_COLLECT_ARRAY -> { VmHandlers.handleCollectArray(state, ctx, instr); pc++; }
                     case OP_MAP_DENSE_TO_KEYS -> { VmHandlers.handleMapDenseToKeys(state, ctx, instr); pc++; }
                     case OP_COLLECT_VALUE_MAP -> { VmHandlers.handleCollectValueMap(state, ctx, instr); pc++; }

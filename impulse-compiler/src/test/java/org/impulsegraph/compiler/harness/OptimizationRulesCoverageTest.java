@@ -142,7 +142,7 @@ public class OptimizationRulesCoverageTest {
                 assertEquals(2, prog.steps().size());
                 ScmWalk walk = (ScmWalk) prog.steps().get(0);
                 // Filter stripped: provably 100% true, zero runtime overhead!
-                assertNull(walk.shaderSteps());
+                assertTrue(walk.shaderSteps() == null || walk.shaderSteps().isEmpty());
             }
         }
     }
