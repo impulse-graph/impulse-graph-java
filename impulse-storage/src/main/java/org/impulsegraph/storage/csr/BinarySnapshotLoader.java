@@ -587,6 +587,10 @@ public final class BinarySnapshotLoader {
             }
 
             Map<String, String> metadata = parseMetadataFooter(segment, segSize);
+            for (LoadedDomain dom : domainsById.values()) {
+                metadata.put("domain." + dom.name() + ".id", String.valueOf(dom.domainId()));
+                metadata.put("domain." + dom.domainId() + ".name", dom.name());
+            }
             GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata);
 
 
@@ -680,6 +684,10 @@ public final class BinarySnapshotLoader {
             }
 
             Map<String, String> metadata = parseMetadataFooter(segment, segSize);
+            for (LoadedDomain dom : domainsById.values()) {
+                metadata.put("domain." + dom.name() + ".id", String.valueOf(dom.domainId()));
+                metadata.put("domain." + dom.domainId() + ".name", dom.name());
+            }
             GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata);
 
 

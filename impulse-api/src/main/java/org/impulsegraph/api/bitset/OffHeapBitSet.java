@@ -159,4 +159,16 @@ public class OffHeapBitSet implements ImpulseBitSet {
             }
         }
     }
+
+    @Override
+    public void forEachSetBit(java.util.function.IntConsumer action) {
+        for (int u = 0; u < wordCount; u++) {
+            long word = segment.getAtIndex(ValueLayout.JAVA_LONG, u);
+            while (word != 0) {
+                int t = Long.numberOfTrailingZeros(word);
+                action.accept((u * 64) + t);
+                word &= ~(1L << t);
+            }
+        }
+    }
 }

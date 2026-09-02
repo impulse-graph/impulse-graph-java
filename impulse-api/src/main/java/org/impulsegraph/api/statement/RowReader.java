@@ -67,6 +67,32 @@ public interface RowReader extends AutoCloseable {
      */
     long rowCount();
 
+    /**
+     * Returns a sequential stream of rows for terminal consumption.
+     * <p><b>WARNING:</b> The RowReader instance is a mutable flyweight cursor.
+     * Do NOT collect the raw RowReader instances into a list or use parallel streams, as they will all
+     * reference the mutated state. Instead, map the row to an immutable record/DTO immediately within the stream pipeline.</p>
+     * <p>Filtering should ideally be done natively via the VM query instead of client-side stream filters.</p>
+     */
+    default java.util.stream.Stream<RowReader> stream() {
+        return java.util.stream.StreamSupport.stream(
+                java.util.Spliterators.spliteratorUnknownSize(
+                        new java.util.Iterator<RowReader>() {
+                            private boolean hasNext = RowReader.this.next();
+                            @Override
+                            public boolean hasNext() { return hasNext; }
+                            @Override
+                            public RowReader next() {
+                                if (!hasNext) throw new java.util.NoSuchElementException();
+                                RowReader current = RowReader.this;
+                                hasNext = RowReader.this.next();
+                                return current;
+                            }
+                        }, java.util.Spliterator.ORDERED | java.util.Spliterator.NONNULL
+                ), false
+        );
+    }
+
     @Override
     default void close() {}
 }

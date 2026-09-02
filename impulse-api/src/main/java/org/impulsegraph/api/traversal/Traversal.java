@@ -76,6 +76,27 @@ public interface Traversal<T> {
     Traversal<T> withParam(String key, Object value);
 
     /**
+     * Binds a named dynamic parameter array (primitive 64-bit node IDs) for CEL expressions.
+     */
+    default Traversal<T> withParam(String key, long[] value) {
+        return withParam(key, (Object) value);
+    }
+
+    /**
+     * Binds a named dynamic parameter array (primitive 32-bit node IDs) for CEL expressions.
+     */
+    default Traversal<T> withParam(String key, int[] value) {
+        return withParam(key, (Object) value);
+    }
+
+    /**
+     * Binds a named dynamic parameter list of strings for CEL expressions.
+     */
+    default Traversal<T> withParam(String key, java.util.List<String> value) {
+        return withParam(key, (Object) value);
+    }
+
+    /**
      * Fixed-point loop: repeats step until frontier set converges (Frontier_{t+1} == Frontier_t).
      */
     Traversal<T> repeatUntilStable(Function<Traversal<ImpulseBitSet>, Traversal<ImpulseBitSet>> step);

@@ -118,6 +118,25 @@ public class GraphSnapshot implements org.impulsegraph.api.ImpulseGraphSnapshot,
     }
 
     @Override
+    public java.util.Set<String> getDomainNames() {
+        return metadata.keySet().stream()
+                .filter(k -> k.startsWith("domain.") && k.endsWith(".id"))
+                .map(k -> k.substring(7, k.length() - 3))
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
+    @Override
+    public String getDomainName(int domainId) {
+        return metadata.get("domain." + domainId + ".name");
+    }
+
+    @Override
+    public org.impulsegraph.api.schema.GraphSchema getSchema(String domainName) {
+        // Schema extraction not fully implemented without manifest context, returning empty for now
+        // A complete implementation would parse the catalog attributes.
+        return new org.impulsegraph.api.schema.GraphSchema(java.util.List.of(), java.util.List.of());
+    }
+
     public long getNodeCount(String domainName) {
         if (domainName != null) {
             String meta = metadata.get("domain." + domainName + ".nodeCount");

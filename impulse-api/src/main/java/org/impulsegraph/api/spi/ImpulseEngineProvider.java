@@ -28,4 +28,15 @@ public interface ImpulseEngineProvider {
      * @return the compiled or prepared statement
      */
     ImpulseStatement createStatement(ImpulseGraphSnapshot snapshot, String query);
+
+    /**
+     * Loads a graph snapshot from a file path using the specified arena.
+     *
+     * @param path the file path
+     * @param arena the FFM arena for memory allocation
+     * @return the loaded snapshot
+     */
+    default ImpulseGraphSnapshot loadSnapshot(java.nio.file.Path path, java.lang.foreign.Arena arena) {
+        throw new UnsupportedOperationException("Not implemented by this engine provider");
+    }
 }

@@ -25,6 +25,18 @@ public class MockImpulseGraphSnapshot implements ImpulseGraphSnapshot {
     @Override public java.util.Set<String> getRelationNames() { return relations.keySet(); }
     @Override public long getNodeCount(String domainName) { return 0; }
     @Override public long getEdgeCount(String relationName) { return 0; }
-    @Override public org.impulsegraph.api.stats.GraphStatistics getGraphStatistics() { return null; }
+    @Override
+    public java.util.Set<String> getDomainNames() { return java.util.Collections.emptySet(); }
+
+    @Override
+    public String getDomainName(int domainId) { return null; }
+
+    @Override
+    public org.impulsegraph.api.schema.GraphSchema getSchema(String domainName) { return null; }
+
+    @Override
+    public org.impulsegraph.api.stats.GraphStatistics getGraphStatistics() {
+        return new org.impulsegraph.api.stats.GraphStatistics();
+    }
     @Override public java.util.Map<String, String> getMetadataMap() { return java.util.Collections.emptyMap(); }
 }

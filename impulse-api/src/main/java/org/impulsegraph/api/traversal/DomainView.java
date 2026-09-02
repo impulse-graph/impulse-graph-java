@@ -45,6 +45,50 @@ public interface DomainView {
     Traversal<ImpulseBitSet> from(ImpulseBitSet bitset);
 
     /**
+     * Initializes frontier with the first `n` nodes from this domain (0 ... n - 1).
+     */
+    default Traversal<ImpulseBitSet> first(int n) {
+        if (n <= 0) return from(new long[0]);
+        long limit = Math.min(n, nodeCount());
+        long[] ids = new long[(int) limit];
+        for (int i = 0; i < limit; i++) {
+            ids[i] = i;
+        }
+        return from(ids);
+    }
+
+    /**
+     * Initializes frontier with `n` random nodes uniformly sampled from this domain.
+     */
+    default Traversal<ImpulseBitSet> fromRandom(int n) {
+        if (n <= 0) return from(new long[0]);
+        long max = nodeCount();
+        if (n >= max) return all();
+        
+        long[] ids = new long[n];
+        java.util.concurrent.ThreadLocalRandom rnd = java.util.concurrent.ThreadLocalRandom.current();
+        if (n > max / 4) { // Dense sampling via shuffle
+            long[] all = new long[(int) max];
+            for (int i = 0; i < max; i++) all[i] = i;
+            for (int i = 0; i < n; i++) {
+                int swapIdx = i + rnd.nextInt((int) max - i);
+                long temp = all[i];
+                all[i] = all[swapIdx];
+                all[swapIdx] = temp;
+                ids[i] = all[i];
+            }
+        } else { // Sparse sampling via set
+            java.util.Set<Long> set = new java.util.HashSet<>(n);
+            while (set.size() < n) {
+                set.add(rnd.nextLong(max));
+            }
+            int idx = 0;
+            for (Long id : set) ids[idx++] = id;
+        }
+        return from(ids);
+    }
+
+    /**
      * Look up the dense node ID (0 ... N_d - 1) for an external business key (e.g. "DB00001", "user_alice").
      *
      * @param key External business key string

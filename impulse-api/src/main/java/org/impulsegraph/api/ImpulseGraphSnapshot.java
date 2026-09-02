@@ -59,6 +59,22 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
      * Returns a map of all relation snapshots.
      */
     Map<String, RelationSnapshot> getAllRelationSnapshots();
+
+    /**
+     * Returns the set of all domain names present in this snapshot.
+     */
+    Set<String> getDomainNames();
+
+    /**
+     * Looks up a domain name by its numeric identifier.
+     * @return the domain name, or null if not found
+     */
+    String getDomainName(int domainId);
+
+    /**
+     * Returns the schema/metadata for a given domain, or null if not present.
+     */
+    org.impulsegraph.api.schema.GraphSchema getSchema(String domainName);
     org.impulsegraph.api.stats.GraphStatistics getGraphStatistics();
 
     void enterQuery();
@@ -148,6 +164,15 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
     default org.impulsegraph.api.statement.ImpulseStatement prepare(String query) {
         return org.impulsegraph.api.spi.ImpulseEngineRegistry.getProvider()
                 .createStatement(this, query);
+    }
+
+    /**
+     * Convenience static method to load a snapshot from a file path using an automatic GC-managed Arena.
+     * WARNING: Intended for scripting and short-lived tools. Multi-GB snapshots in long-running processes
+     * should use explicitly managed Arenas to prevent virtual memory exhaustion.
+     */
+    static ImpulseGraphSnapshot load(java.nio.file.Path path) {
+        return org.impulsegraph.api.spi.ImpulseEngineRegistry.getProvider().loadSnapshot(path, java.lang.foreign.Arena.ofAuto());
     }
 
     @Override
