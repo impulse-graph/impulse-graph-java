@@ -75,29 +75,24 @@ public final class ImpAsmDisassembler {
 		return sb.toString();
 	}
 
+	private static final java.util.Map<Byte, String> OPCODE_NAMES = new java.util.HashMap<>();
+	static {
+		try {
+			for (java.lang.reflect.Field field : org.impulsegraph.vm.VmRegisterType.class.getDeclaredFields()) {
+				if (field.getName().startsWith("OP_") && field.getType() == byte.class) {
+					byte val = field.getByte(null);
+					// If multiple constants have the same value (like OP_ADAPTIVE_WALK and
+					// OP_DENSE_WALK_LEGACY),
+					// the first one processed wins. This is fine.
+					OPCODE_NAMES.putIfAbsent(val, field.getName());
+				}
+			}
+		} catch (Exception e) {
+			// Ignore reflection errors and fallback to hex
+		}
+	}
+
 	private static String getOpcodeName(byte opcode) {
-		return switch (opcode) {
-			case OP_HALT -> "OP_HALT";
-			case OP_NOP -> "OP_NOP";
-			case OP_INIT_INPUT_NODE -> "OP_INIT_INPUT_NODE";
-			case OP_INIT_INPUT_SET -> "OP_INIT_INPUT_SET";
-			case OP_LOAD_CONST_INT -> "OP_LOAD_CONST_INT";
-			case OP_LOAD_CONST_FLOAT -> "OP_LOAD_CONST_FLOAT";
-			case OP_CSR_WALK -> "OP_CSR_WALK";
-			case OP_CSR_WALK_2HOP -> "OP_CSR_WALK_2HOP";
-			case OP_CSR_WALK_FILTERED -> "OP_CSR_WALK_FILTERED";
-			case OP_CSC_WALK -> "OP_CSC_WALK";
-			case OP_NODE_FILTER -> "OP_NODE_FILTER";
-			case OP_VECTOR_LOAD_ATTR -> "OP_VECTOR_LOAD_ATTR";
-			case OP_VECTOR_REDUCE_SUM -> "OP_VECTOR_REDUCE_SUM";
-			case OP_REDUCE -> "OP_REDUCE";
-			case OP_COLLECT_BITSET -> "OP_COLLECT_BITSET";
-			case OP_JMP -> "OP_JMP";
-			case OP_JZ -> "OP_JZ";
-			case OP_JNZ -> "OP_JNZ";
-			case OP_LOOP_DECR -> "OP_LOOP_DECR";
-			case OP_STABLE_CHECK -> "OP_STABLE_CHECK";
-			default -> "OP_UNKNOWN_0x" + Integer.toHexString(opcode & 0xFF).toUpperCase();
-		};
+		return OPCODE_NAMES.getOrDefault(opcode, "OP_UNKNOWN_0x" + Integer.toHexString(opcode & 0xFF).toUpperCase());
 	}
 }
