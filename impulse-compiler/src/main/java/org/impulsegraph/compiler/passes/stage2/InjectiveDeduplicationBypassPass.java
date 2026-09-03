@@ -11,75 +11,79 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Stage 2 Pass: Injective Deduplication Bypass.
- * Injective paths (where all constituent relations have InDegree <= 1) preserve uniqueness.
- * Replaces expensive distinct deduplication passes with direct streaming collects.
+ * Stage 2 Pass: Injective Deduplication Bypass. Injective paths (where all
+ * constituent relations have InDegree <= 1) preserve uniqueness. Replaces
+ * expensive distinct deduplication passes with direct streaming collects.
  */
 public final class InjectiveDeduplicationBypassPass implements CompilerPass {
 
-    public static final InjectiveDeduplicationBypassPass INSTANCE = new InjectiveDeduplicationBypassPass();
+	public static final InjectiveDeduplicationBypassPass INSTANCE = new InjectiveDeduplicationBypassPass();
 
-    @Override
-    public String name() {
-        return "InjectiveDeduplicationBypassPass";
-    }
+	@Override
+	public String name() {
+		return "InjectiveDeduplicationBypassPass";
+	}
 
-    @Override
-    public ImpScmNode transform(ImpScmNode ast, CompilerContext context) {
-        if (ast == null) return null;
-        ImpulseGraphSnapshot snapshot = context.snapshot();
-        if (snapshot == null) return ast;
+	@Override
+	public ImpScmNode transform(ImpScmNode ast, CompilerContext context) {
+		if (ast == null)
+			return null;
+		ImpulseGraphSnapshot snapshot = context.snapshot();
+		if (snapshot == null)
+			return ast;
 
-        if (ast instanceof ScmProgram prog) {
-            boolean allInjective = true;
-            boolean hasWalk = false;
+		if (ast instanceof ScmProgram prog) {
+			boolean allInjective = true;
+			boolean hasWalk = false;
 
-            for (ImpScmNode step : prog.steps()) {
-                if (step instanceof ScmWalk walk) {
-                    hasWalk = true;
-                    RelationSnapshot rel = findRelation(snapshot, walk.relationName());
-                    if (rel != null) {
-                        RelationStatistics stats = rel.getStatistics();
-                        if (stats != null && !stats.isInjective()) {
-                            allInjective = false;
-                            break;
-                        }
-                    } else {
-                        allInjective = false;
-                        break;
-                    }
-                }
-            }
+			for (ImpScmNode step : prog.steps()) {
+				if (step instanceof ScmWalk walk) {
+					hasWalk = true;
+					RelationSnapshot rel = findRelation(snapshot, walk.relationName());
+					if (rel != null) {
+						RelationStatistics stats = rel.getStatistics();
+						if (stats != null && !stats.isInjective()) {
+							allInjective = false;
+							break;
+						}
+					} else {
+						allInjective = false;
+						break;
+					}
+				}
+			}
 
-            if (hasWalk && allInjective) {
-                // Injective path guaranteed: Rewrite distinct collection into direct bitset/vector collect
-                List<ImpScmNode> optSteps = new ArrayList<>();
-                for (ImpScmNode step : prog.steps()) {
-                    if (step instanceof ScmCollect collect && collect.format() == ScmCollect.Format.DISTINCT) {
-                        optSteps.add(ScmCollect.bitset()); // Bypass deduplication sort/bitset overhead!
-                    } else {
-                        optSteps.add(step);
-                    }
-                }
-                return new ScmProgram(optSteps);
-            }
-        }
+			if (hasWalk && allInjective) {
+				// Injective path guaranteed: Rewrite distinct collection into direct
+				// bitset/vector collect
+				List<ImpScmNode> optSteps = new ArrayList<>();
+				for (ImpScmNode step : prog.steps()) {
+					if (step instanceof ScmCollect collect && collect.format() == ScmCollect.Format.DISTINCT) {
+						optSteps.add(ScmCollect.bitset()); // Bypass deduplication sort/bitset overhead!
+					} else {
+						optSteps.add(step);
+					}
+				}
+				return new ScmProgram(optSteps);
+			}
+		}
 
-        return ast;
-    }
+		return ast;
+	}
 
-    private static RelationSnapshot findRelation(ImpulseGraphSnapshot snapshot, String relName) {
-        if (snapshot == null || relName == null) return null;
-        RelationSnapshot rel = snapshot.getRelationSnapshot(relName);
-        if (rel != null) return rel;
+	private static RelationSnapshot findRelation(ImpulseGraphSnapshot snapshot, String relName) {
+		if (snapshot == null || relName == null)
+			return null;
+		RelationSnapshot rel = snapshot.getRelationSnapshot(relName);
+		if (rel != null)
+			return rel;
 
-        for (var entry : snapshot.getAllRelationSnapshots().entrySet()) {
-            if (entry.getKey().equalsIgnoreCase(relName) ||
-                entry.getKey().endsWith("_" + relName) ||
-                entry.getKey().toLowerCase().endsWith(relName.toLowerCase())) {
-                return entry.getValue();
-            }
-        }
-        return null;
-    }
+		for (var entry : snapshot.getAllRelationSnapshots().entrySet()) {
+			if (entry.getKey().equalsIgnoreCase(relName) || entry.getKey().endsWith("_" + relName)
+					|| entry.getKey().toLowerCase().endsWith(relName.toLowerCase())) {
+				return entry.getValue();
+			}
+		}
+		return null;
+	}
 }

@@ -7,10 +7,12 @@ import org.impulsegraph.compiler.ast.ImpScmNode;
  */
 public final class ImpScmSerializer {
 
-    private ImpScmSerializer() {}
+	private ImpScmSerializer() {
+	}
 
-    public static String serialize(ImpScmNode node) {
-        if (node == null) return "()";
-        return node.toScmString();
-    }
+	public static String serialize(ImpScmNode node) {
+		if (node == null)
+			return "()";
+		return node.toScmString();
+	}
 }

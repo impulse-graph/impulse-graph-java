@@ -9,280 +9,297 @@ import org.impulsegraph.api.bitset.ImpulseBitSet;
 import org.impulsegraph.api.bitset.OffHeapBitSet;
 
 /**
- * Runtime Execution Context for Impulse VM.
- * Holds off-heap buffer pools, bitsets, vectors, value maps, and graph snapshot references.
+ * Runtime Execution Context for Impulse VM. Holds off-heap buffer pools,
+ * bitsets, vectors, value maps, and graph snapshot references.
  */
 public final class VmQueryContext implements AutoCloseable {
 
-    public ImpulseGraphSnapshot getSnapshot() { return snapshot; }
+	public ImpulseGraphSnapshot getSnapshot() {
+		return snapshot;
+	}
 
-    private ImpulseGraphSnapshot snapshot;
-    private final List<String> stringPool = new ArrayList<>();
-    private final Arena arena;
-    private MemorySegment inlineDataSeg = null;
-    private long inlineDataBytes = 0;
+	private ImpulseGraphSnapshot snapshot;
+	private final List<String> stringPool = new ArrayList<>();
+	private final Arena arena;
+	private MemorySegment inlineDataSeg = null;
+	private Object finalResult = null;
+	public Object getFinalResult() {
+		return finalResult;
+	}
+	public void setFinalResult(Object o) {
+		finalResult = o;
+	}
 
-    // Bitset Pool
-    private final List<ImpulseBitSet> bitsets = new ArrayList<>();
-    private final java.util.BitSet freeBitsetHandles = new java.util.BitSet();
+	private long inlineDataBytes = 0;
 
-    public void setStringPool(List<String> pool) {
-        stringPool.clear();
-        if (pool != null) {
-            stringPool.addAll(pool);
-        }
-    }
+	// Bitset Pool
+	private final List<ImpulseBitSet> bitsets = new ArrayList<>();
+	private final java.util.BitSet freeBitsetHandles = new java.util.BitSet();
 
-    public String getString(int index) {
-        if (index >= 0 && index < stringPool.size()) {
-            return stringPool.get(index);
-        }
-        return null;
-    }
+	public void setStringPool(List<String> pool) {
+		stringPool.clear();
+		if (pool != null) {
+			stringPool.addAll(pool);
+		}
+	}
 
-    // Vector Pools
-    private final List<int[]> intVectors = new ArrayList<>();
-    private final List<float[]> floatVectors = new ArrayList<>();
-    private final List<double[]> doubleVectors = new ArrayList<>();
-    private final List<long[]> longVectors = new ArrayList<>();
-    private final List<String[]> stringVectors = new ArrayList<>();
+	public String getString(int index) {
+		if (index >= 0 && index < stringPool.size()) {
+			return stringPool.get(index);
+		}
+		return null;
+	}
 
-    // Value Map Pool
-    private final List<Map<Integer, Object>> valueMaps = new ArrayList<>();
+	// Vector Pools
+	private final List<int[]> intVectors = new ArrayList<>();
+	private final List<float[]> floatVectors = new ArrayList<>();
+	private final List<double[]> doubleVectors = new ArrayList<>();
+	private final List<long[]> longVectors = new ArrayList<>();
+	private final List<String[]> stringVectors = new ArrayList<>();
 
-    // Scratch Memory Accounting (64 KB default baseline allocation)
-    public static final long DEFAULT_SCRATCH_BYTES = 64 * 1024L; // 64 KB default baseline
-    private long maxScratchCapacityBytes = 512 * 1024 * 1024L; // 512 MB default cap
-    private long allocatedScratchBytes = DEFAULT_SCRATCH_BYTES;
+	// Value Map Pool
+	private final List<Map<Integer, Object>> valueMaps = new ArrayList<>();
 
-    // Multi-Threading (MT) & Degree of Parallelism (DoP) Control
-    private int maxThreads = resolveDefaultMaxThreads();
-    private final Map<Integer, Object> mockAttributes = new HashMap<>();
+	// Scratch Memory Accounting (64 KB default baseline allocation)
+	public static final long DEFAULT_SCRATCH_BYTES = 64 * 1024L; // 64 KB default baseline
+	private long maxScratchCapacityBytes = 512 * 1024 * 1024L; // 512 MB default cap
+	private long allocatedScratchBytes = DEFAULT_SCRATCH_BYTES;
 
-    public void setMockAttribute(int attrId, Object array) {
-        mockAttributes.put(attrId, array);
-    }
+	// Multi-Threading (MT) & Degree of Parallelism (DoP) Control
+	private int maxThreads = resolveDefaultMaxThreads();
+	private final Map<Integer, Object> mockAttributes = new HashMap<>();
 
-    public Object getMockAttribute(int attrId) {
-        return mockAttributes.get(attrId);
-    }
+	public void setMockAttribute(int attrId, Object array) {
+		mockAttributes.put(attrId, array);
+	}
 
-    private static int resolveDefaultMaxThreads() {
-        String envDop = System.getenv("IMPULSE_MAX_DOP");
-        if (envDop == null) envDop = System.getenv("IMPULSE_MAX_THREADS");
-        if (envDop != null) {
-            try { return Math.max(1, Integer.parseInt(envDop.trim())); } catch (NumberFormatException ignored) {}
-        }
-        return Runtime.getRuntime().availableProcessors();
-    }
+	public Object getMockAttribute(int attrId) {
+		return mockAttributes.get(attrId);
+	}
 
-    public int getMaxThreads() {
-        return maxThreads;
-    }
+	private static int resolveDefaultMaxThreads() {
+		String envDop = System.getenv("IMPULSE_MAX_DOP");
+		if (envDop == null)
+			envDop = System.getenv("IMPULSE_MAX_THREADS");
+		if (envDop != null) {
+			try {
+				return Math.max(1, Integer.parseInt(envDop.trim()));
+			} catch (NumberFormatException ignored) {
+			}
+		}
+		return Runtime.getRuntime().availableProcessors();
+	}
 
-    public int getMaxDop() {
-        return maxThreads;
-    }
+	public int getMaxThreads() {
+		return maxThreads;
+	}
 
-    public void setMaxThreads(int maxThreads) {
-        this.maxThreads = Math.max(1, maxThreads);
-    }
+	public int getMaxDop() {
+		return maxThreads;
+	}
 
-    public void setMaxDop(int maxDop) {
-        setMaxThreads(maxDop);
-    }
+	public void setMaxThreads(int maxThreads) {
+		this.maxThreads = Math.max(1, maxThreads);
+	}
 
-    public long allocateScratch(long bytes) {
-        long aligned = (bytes + 63) & ~63L;
-        allocatedScratchBytes += aligned;
-        return allocatedScratchBytes;
-    }
+	public void setMaxDop(int maxDop) {
+		setMaxThreads(maxDop);
+	}
 
-    public long getAllocatedScratchBytes() {
-        return allocatedScratchBytes;
-    }
+	public long allocateScratch(long bytes) {
+		long aligned = (bytes + 63) & ~63L;
+		allocatedScratchBytes += aligned;
+		return allocatedScratchBytes;
+	}
 
-    public long getMaxScratchCapacityBytes() {
-        return maxScratchCapacityBytes;
-    }
+	public long getAllocatedScratchBytes() {
+		return allocatedScratchBytes;
+	}
 
-    public void setMaxScratchCapacityBytes(long bytes) {
-        this.maxScratchCapacityBytes = bytes;
-    }
+	public long getMaxScratchCapacityBytes() {
+		return maxScratchCapacityBytes;
+	}
 
-    public VmQueryContext(ImpulseGraphSnapshot snapshot, Arena arena) {
-        this.snapshot = snapshot;
-        this.arena = (arena != null) ? arena : Arena.ofShared();
-    }
+	public void setMaxScratchCapacityBytes(long bytes) {
+		this.maxScratchCapacityBytes = bytes;
+	}
 
-    public MemorySegment inlineDataSegment() {
-        return inlineDataSeg;
-    }
+	public VmQueryContext(ImpulseGraphSnapshot snapshot, Arena arena) {
+		this.snapshot = snapshot;
+		this.arena = (arena != null) ? arena : Arena.ofShared();
+	}
 
-    public long inlineDataBytes() {
-        return inlineDataBytes;
-    }
+	public MemorySegment inlineDataSegment() {
+		return inlineDataSeg;
+	}
 
-    public void setInlineData(MemorySegment segment, long bytes) {
-        this.inlineDataSeg = segment;
-        this.inlineDataBytes = bytes;
-    }
+	public long inlineDataBytes() {
+		return inlineDataBytes;
+	}
 
-    public ImpulseGraphSnapshot snapshot() {
-        return snapshot;
-    }
+	public void setInlineData(MemorySegment segment, long bytes) {
+		this.inlineDataSeg = segment;
+		this.inlineDataBytes = bytes;
+	}
 
-    public void setSnapshot(ImpulseGraphSnapshot snapshot) {
-        this.snapshot = snapshot;
-    }
+	public ImpulseGraphSnapshot snapshot() {
+		return snapshot;
+	}
 
-    public Arena arena() {
-        return arena;
-    }
+	public void setSnapshot(ImpulseGraphSnapshot snapshot) {
+		this.snapshot = snapshot;
+	}
 
-    /**
-     * Allocate a 640-byte off-heap MemorySegment representing impulse_vm_state_t.
-     */
-    public MemorySegment allocateStateSegment() {
-        MemorySegment state = arena.allocate(VmStateLayout.VM_STATE_LAYOUT);
-        state.fill((byte) 0);
-        return state;
-    }
+	public Arena arena() {
+		return arena;
+	}
 
-    // --- Bitset Management ---
+	/**
+	 * Allocate a 640-byte off-heap MemorySegment representing impulse_vm_state_t.
+	 */
+	public MemorySegment allocateStateSegment() {
+		MemorySegment state = arena.allocate(VmStateLayout.VM_STATE_LAYOUT);
+		state.fill((byte) 0);
+		return state;
+	}
 
-    private int getMaxNodeCount(ImpulseGraphSnapshot snap) {
-        if (snap == null || snap.getAllRelationSnapshots().isEmpty()) return 1024 * 1024;
-        int max = 0;
-        for (org.impulsegraph.api.RelationSnapshot rel : snap.getAllRelationSnapshots().values()) {
-            max = Math.max(max, rel.getNodeCount());
-        }
-        return max;
-    }
+	// --- Bitset Management ---
 
-    public int acquireBitset() {
-        int handle = freeBitsetHandles.nextSetBit(0);
-        if (handle >= 0) {
-            freeBitsetHandles.clear(handle);
-            ImpulseBitSet bs = bitsets.get(handle);
-            if (bs != null) bs.clear();
-            return handle;
-        }
-        int newHandle = bitsets.size();
-        bitsets.add(new OffHeapBitSet(arena, getMaxNodeCount(snapshot)));
-        return newHandle;
-    }
+	private int getMaxNodeCount(ImpulseGraphSnapshot snap) {
+		if (snap == null || snap.getAllRelationSnapshots().isEmpty())
+			return 1024 * 1024;
+		int max = 0;
+		for (org.impulsegraph.api.RelationSnapshot rel : snap.getAllRelationSnapshots().values()) {
+			max = Math.max(max, rel.getNodeCount());
+		}
+		return max;
+	}
 
-    public void releaseBitset(int handle) {
-        if (handle >= 0 && handle < bitsets.size()) {
-            ImpulseBitSet bs = bitsets.get(handle);
-            if (bs != null) bs.clear();
-            freeBitsetHandles.set(handle);
-        }
-    }
+	public int acquireBitset() {
+		int handle = freeBitsetHandles.nextSetBit(0);
+		if (handle >= 0) {
+			freeBitsetHandles.clear(handle);
+			ImpulseBitSet bs = bitsets.get(handle);
+			if (bs != null)
+				bs.clear();
+			return handle;
+		}
+		int newHandle = bitsets.size();
+		bitsets.add(new OffHeapBitSet(arena, getMaxNodeCount(snapshot)));
+		return newHandle;
+	}
 
-    public ImpulseBitSet getBitset(int handle) {
-        if (handle >= 0 && handle < bitsets.size()) {
-            return bitsets.get(handle);
-        }
-        return null;
-    }
+	public void releaseBitset(int handle) {
+		if (handle >= 0 && handle < bitsets.size()) {
+			ImpulseBitSet bs = bitsets.get(handle);
+			if (bs != null)
+				bs.clear();
+			freeBitsetHandles.set(handle);
+		}
+	}
 
-    // --- Vector Management ---
+	public ImpulseBitSet getBitset(int handle) {
+		if (handle >= 0 && handle < bitsets.size()) {
+			return bitsets.get(handle);
+		}
+		return null;
+	}
 
-    public int registerIntVector(int[] vec) {
-        int handle = intVectors.size();
-        intVectors.add(vec);
-        return handle;
-    }
+	// --- Vector Management ---
 
-    public int acquireNodeVector(int[] vec) {
-        return registerIntVector(vec);
-    }
+	public int registerIntVector(int[] vec) {
+		int handle = intVectors.size();
+		intVectors.add(vec);
+		return handle;
+	}
 
-    public int[] getIntVector(int handle) {
-        return (handle >= 0 && handle < intVectors.size()) ? intVectors.get(handle) : null;
-    }
+	public int acquireNodeVector(int[] vec) {
+		return registerIntVector(vec);
+	}
 
-    public int[] getNodeVector(int handle) {
-        return getIntVector(handle);
-    }
+	public int[] getIntVector(int handle) {
+		return (handle >= 0 && handle < intVectors.size()) ? intVectors.get(handle) : null;
+	}
 
-    public int registerFloatVector(float[] vec) {
-        int handle = floatVectors.size();
-        floatVectors.add(vec);
-        return handle;
-    }
+	public int[] getNodeVector(int handle) {
+		return getIntVector(handle);
+	}
 
-    public void setFloatVector(int handle, float[] vec) {
-        if (handle >= 0 && handle < floatVectors.size()) {
-            floatVectors.set(handle, vec);
-        }
-    }
+	public int registerFloatVector(float[] vec) {
+		int handle = floatVectors.size();
+		floatVectors.add(vec);
+		return handle;
+	}
 
-    public int acquireFloatVector(int capacity) {
-        return registerFloatVector(new float[capacity]);
-    }
+	public void setFloatVector(int handle, float[] vec) {
+		if (handle >= 0 && handle < floatVectors.size()) {
+			floatVectors.set(handle, vec);
+		}
+	}
 
-    public float[] getFloatVector(int handle) {
-        return (handle >= 0 && handle < floatVectors.size()) ? floatVectors.get(handle) : null;
-    }
+	public int acquireFloatVector(int capacity) {
+		return registerFloatVector(new float[capacity]);
+	}
 
-    public int registerDoubleVector(double[] vec) {
-        int handle = doubleVectors.size();
-        doubleVectors.add(vec);
-        return handle;
-    }
+	public float[] getFloatVector(int handle) {
+		return (handle >= 0 && handle < floatVectors.size()) ? floatVectors.get(handle) : null;
+	}
 
-    public void setDoubleVector(int handle, double[] vec) {
-        if (handle >= 0 && handle < doubleVectors.size()) {
-            doubleVectors.set(handle, vec);
-        }
-    }
+	public int registerDoubleVector(double[] vec) {
+		int handle = doubleVectors.size();
+		doubleVectors.add(vec);
+		return handle;
+	}
 
-    public double[] getDoubleVector(int handle) {
-        return (handle >= 0 && handle < doubleVectors.size()) ? doubleVectors.get(handle) : null;
-    }
+	public void setDoubleVector(int handle, double[] vec) {
+		if (handle >= 0 && handle < doubleVectors.size()) {
+			doubleVectors.set(handle, vec);
+		}
+	}
 
-    public int registerLongVector(long[] vec) {
-        int handle = longVectors.size();
-        longVectors.add(vec);
-        return handle;
-    }
+	public double[] getDoubleVector(int handle) {
+		return (handle >= 0 && handle < doubleVectors.size()) ? doubleVectors.get(handle) : null;
+	}
 
-    public long[] getLongVector(int handle) {
-        return (handle >= 0 && handle < longVectors.size()) ? longVectors.get(handle) : null;
-    }
+	public int registerLongVector(long[] vec) {
+		int handle = longVectors.size();
+		longVectors.add(vec);
+		return handle;
+	}
 
-    public int registerStringVector(String[] vec) {
-        int handle = stringVectors.size();
-        stringVectors.add(vec);
-        return handle;
-    }
+	public long[] getLongVector(int handle) {
+		return (handle >= 0 && handle < longVectors.size()) ? longVectors.get(handle) : null;
+	}
 
-    public String[] getStringVector(int handle) {
-        return (handle >= 0 && handle < stringVectors.size()) ? stringVectors.get(handle) : null;
-    }
+	public int registerStringVector(String[] vec) {
+		int handle = stringVectors.size();
+		stringVectors.add(vec);
+		return handle;
+	}
 
-    // --- Value Map Management ---
+	public String[] getStringVector(int handle) {
+		return (handle >= 0 && handle < stringVectors.size()) ? stringVectors.get(handle) : null;
+	}
 
-    public int registerValueMap(Map<Integer, Object> map) {
-        int handle = valueMaps.size();
-        valueMaps.add(map);
-        return handle;
-    }
+	// --- Value Map Management ---
 
-    public Map<Integer, Object> getValueMap(int handle) {
-        return (handle >= 0 && handle < valueMaps.size()) ? valueMaps.get(handle) : null;
-    }
+	public int registerValueMap(Map<Integer, Object> map) {
+		int handle = valueMaps.size();
+		valueMaps.add(map);
+		return handle;
+	}
 
-    @Override
-    public void close() {
-        bitsets.clear();
-        floatVectors.clear();
-        doubleVectors.clear();
-        longVectors.clear();
-        stringVectors.clear();
-        valueMaps.clear();
-    }
+	public Map<Integer, Object> getValueMap(int handle) {
+		return (handle >= 0 && handle < valueMaps.size()) ? valueMaps.get(handle) : null;
+	}
+
+	@Override
+	public void close() {
+		bitsets.clear();
+		floatVectors.clear();
+		doubleVectors.clear();
+		longVectors.clear();
+		stringVectors.clear();
+		valueMaps.clear();
+	}
 }

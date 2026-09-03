@@ -14,37 +14,38 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class BinarySnapshotLoaderRelationNameTest {
 
-    private static Path getRbacSnapshotPath() {
-        Path curr = Paths.get("").toAbsolutePath();
-        while (curr != null && !Files.exists(curr.resolve("datasets/rbac_snapshot.imps"))) {
-            curr = curr.getParent();
-        }
-        if (curr == null) {
-            return null;
-        }
-        return curr.resolve("datasets/rbac_snapshot.imps");
-    }
+	private static Path getRbacSnapshotPath() {
+		Path curr = Paths.get("").toAbsolutePath();
+		while (curr != null && !Files.exists(curr.resolve("datasets/rbac_snapshot.imps"))) {
+			curr = curr.getParent();
+		}
+		if (curr == null) {
+			return null;
+		}
+		return curr.resolve("datasets/rbac_snapshot.imps");
+	}
 
-    @Test
-    @DisplayName("BUG-JAVA-004: Relation Key Lookup (raw name 'userToGroup' vs prefixed 'rel_0_1')")
-    void testRelationNameNormalizationAndLookup() throws Exception {
-        Path snapshotPath = getRbacSnapshotPath();
-        assumeTrue(snapshotPath != null && Files.exists(snapshotPath), "datasets/rbac_snapshot.imps not found - skipping test");
+	@Test
+	@DisplayName("BUG-JAVA-004: Relation Key Lookup (raw name 'userToGroup' vs prefixed 'rel_0_1')")
+	void testRelationNameNormalizationAndLookup() throws Exception {
+		Path snapshotPath = getRbacSnapshotPath();
+		assumeTrue(snapshotPath != null && Files.exists(snapshotPath),
+				"datasets/rbac_snapshot.imps not found - skipping test");
 
-        byte[] snapshotBytes = Files.readAllBytes(snapshotPath);
-        try (Arena arena = Arena.ofShared()) {
-            BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(snapshotBytes, arena, true);
-            assertNotNull(loaded);
+		byte[] snapshotBytes = Files.readAllBytes(snapshotPath);
+		try (Arena arena = Arena.ofShared()) {
+			BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(snapshotBytes, arena, true);
+			assertNotNull(loaded);
 
-            GraphSnapshot graph = loaded.graph();
-            assertNotNull(graph, "GraphSnapshot MUST NOT be null");
+			GraphSnapshot graph = loaded.graph();
+			assertNotNull(graph, "GraphSnapshot MUST NOT be null");
 
-            RelationSnapshot rawLookup = graph.getRelationSnapshot("userToGroup");
-            RelationSnapshot prefixedLookup = graph.getRelationSnapshot("rel_0_1");
+			RelationSnapshot rawLookup = graph.getRelationSnapshot("userToGroup");
+			RelationSnapshot prefixedLookup = graph.getRelationSnapshot("rel_0_1");
 
-            assertNotNull(rawLookup, "Lookup with raw relation name 'userToGroup' MUST NOT return null");
-            assertNotNull(prefixedLookup, "Lookup with prefixed relation name 'rel_0_1' MUST NOT return null");
-            assertSame(rawLookup, prefixedLookup, "Both lookups MUST return the exact same RelationSnapshot instance");
-        }
-    }
+			assertNotNull(rawLookup, "Lookup with raw relation name 'userToGroup' MUST NOT return null");
+			assertNotNull(prefixedLookup, "Lookup with prefixed relation name 'rel_0_1' MUST NOT return null");
+			assertSame(rawLookup, prefixedLookup, "Both lookups MUST return the exact same RelationSnapshot instance");
+		}
+	}
 }

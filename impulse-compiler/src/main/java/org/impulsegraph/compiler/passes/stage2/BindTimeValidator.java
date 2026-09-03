@@ -7,67 +7,70 @@ import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.RelationSnapshot;
 
 /**
- * Stage 2 Pass: Bind-time physical schema validation.
- * Verifies that all logical relations, domain types, and property columns exist in the target snapshot.
+ * Stage 2 Pass: Bind-time physical schema validation. Verifies that all logical
+ * relations, domain types, and property columns exist in the target snapshot.
  */
 public final class BindTimeValidator implements CompilerPass {
 
-    public static final BindTimeValidator INSTANCE = new BindTimeValidator();
+	public static final BindTimeValidator INSTANCE = new BindTimeValidator();
 
-    @Override
-    public String name() {
-        return "BindTimeValidator";
-    }
+	@Override
+	public String name() {
+		return "BindTimeValidator";
+	}
 
-    @Override
-    public ImpScmNode transform(ImpScmNode ast, CompilerContext context) {
-        ImpulseGraphSnapshot snapshot = context.snapshot();
-        if (snapshot == null) {
-            // Snapshot not yet bound (e.g. dry-run or pre-bind stage)
-            return ast;
-        }
+	@Override
+	public ImpScmNode transform(ImpScmNode ast, CompilerContext context) {
+		ImpulseGraphSnapshot snapshot = context.snapshot();
+		if (snapshot == null) {
+			// Snapshot not yet bound (e.g. dry-run or pre-bind stage)
+			return ast;
+		}
 
-        validateSnapshotBinding(ast, snapshot);
-        return ast;
-    }
+		validateSnapshotBinding(ast, snapshot);
+		return ast;
+	}
 
-    private void validateSnapshotBinding(ImpScmNode node, ImpulseGraphSnapshot snapshot) {
-        if (node instanceof ScmProgram prog) {
-            for (ImpScmNode step : prog.steps()) {
-                validateSnapshotBinding(step, snapshot);
-            }
-        } else if (node instanceof ScmWalk walk) {
-            String relName = walk.relationName();
-            if (!relName.isEmpty() && walk.relationId() < 0) {
-                RelationSnapshot rel = findRelation(snapshot, relName);
-                if (rel == null) {
-                    throw new IllegalStateException("Bind-Time Validation Failed: Required relation '"
-                            + relName + "' does not exist in target snapshot catalog.");
-                }
-            }
-            if (!walk.shaderSteps().isEmpty()) {
-                for (ImpScmNode step : walk.shaderSteps()) { validateSnapshotBinding(step, snapshot); }
-            }
-            for (ImpScmNode sub : walk.subSteps()) {
-                validateSnapshotBinding(sub, snapshot);
-            }
-        } else if (node instanceof ScmVectorFilter vf) {
-            validateSnapshotBinding(vf.predicate(), snapshot);
-        }
-    }
+	private void validateSnapshotBinding(ImpScmNode node, ImpulseGraphSnapshot snapshot) {
+		if (node instanceof ScmProgram prog) {
+			for (ImpScmNode step : prog.steps()) {
+				validateSnapshotBinding(step, snapshot);
+			}
+		} else if (node instanceof ScmWalk walk) {
+			String relName = walk.relationName();
+			if (!relName.isEmpty() && walk.relationId() < 0) {
+				RelationSnapshot rel = findRelation(snapshot, relName);
+				if (rel == null) {
+					throw new IllegalStateException("Bind-Time Validation Failed: Required relation '" + relName
+							+ "' does not exist in target snapshot catalog.");
+				}
+			}
+			if (!walk.shaderSteps().isEmpty()) {
+				for (ImpScmNode step : walk.shaderSteps()) {
+					validateSnapshotBinding(step, snapshot);
+				}
+			}
+			for (ImpScmNode sub : walk.subSteps()) {
+				validateSnapshotBinding(sub, snapshot);
+			}
+		} else if (node instanceof ScmVectorFilter vf) {
+			validateSnapshotBinding(vf.predicate(), snapshot);
+		}
+	}
 
-    private static RelationSnapshot findRelation(ImpulseGraphSnapshot snapshot, String relName) {
-        if (snapshot == null || relName == null) return null;
-        RelationSnapshot rel = snapshot.getRelationSnapshot(relName);
-        if (rel != null) return rel;
+	private static RelationSnapshot findRelation(ImpulseGraphSnapshot snapshot, String relName) {
+		if (snapshot == null || relName == null)
+			return null;
+		RelationSnapshot rel = snapshot.getRelationSnapshot(relName);
+		if (rel != null)
+			return rel;
 
-        for (var entry : snapshot.getAllRelationSnapshots().entrySet()) {
-            if (entry.getKey().equalsIgnoreCase(relName) ||
-                entry.getKey().endsWith("_" + relName) ||
-                entry.getKey().toLowerCase().endsWith(relName.toLowerCase())) {
-                return entry.getValue();
-            }
-        }
-        return null;
-    }
+		for (var entry : snapshot.getAllRelationSnapshots().entrySet()) {
+			if (entry.getKey().equalsIgnoreCase(relName) || entry.getKey().endsWith("_" + relName)
+					|| entry.getKey().toLowerCase().endsWith(relName.toLowerCase())) {
+				return entry.getValue();
+			}
+		}
+		return null;
+	}
 }
