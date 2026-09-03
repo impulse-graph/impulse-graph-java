@@ -195,7 +195,7 @@ try (ImpulseStatement stmt = snap.prepare(cypher)) {
 
 > [!TIP]
 > **Ad-Hoc Query Compilation vs. Pre-Prepared Statements**:
-> Because the Impulse Graph query compiler evaluates in sub-microseconds (tens of nanoseconds for small ASTs), **it is generally recommended NOT to pre-prepare generic parameterized statements for analytical workloads**.
+> Because the complete Impulse Graph query compiler pipeline (AST generation $\rightarrow$ 7-stage Optimizer $\rightarrow$ Bytecode Emission $\rightarrow$ MethodHandle JIT Compilation) evaluates in **under 10 microseconds** (~10 µs), **it is generally recommended NOT to pre-prepare generic parameterized statements for analytical workloads**.
 > 
 > When queries are compiled directly with concrete values, the compiler performs aggressive **parameter-specific optimizations** that are impossible with generic placeholders:
 > - **Partition Elimination**: Entire snapshot partitions are skipped when filtering on known constant partition keys.
