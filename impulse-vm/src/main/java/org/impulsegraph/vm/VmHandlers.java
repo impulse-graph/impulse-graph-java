@@ -882,7 +882,7 @@ public final class VmHandlers {
 
 		// For now, delegate to basic walk logic but pass correct srcReg
 		Instruction mappedInstr = new Instruction(instr.opcode(), instr.flags(), instr.dstReg(),
-				(relId << 24) | srcReg);
+				(relId << 16) | srcReg);
 		handleCsrWalk(state, ctx, mappedInstr);
 	}
 

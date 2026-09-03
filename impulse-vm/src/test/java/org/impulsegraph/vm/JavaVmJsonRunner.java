@@ -720,6 +720,7 @@ public class JavaVmJsonRunner {
                         // JIT sets PC internally. If it exited cleanly, pc should be instructionCount
                         pc = instructionCount;
                     } catch (Throwable t) {
+                        t.printStackTrace();
                         String msg = t.getMessage();
                         if (msg != null && msg.contains("IMPULSE_VM_ERR_")) {
                             int start = msg.indexOf("IMPULSE_VM_ERR_");
