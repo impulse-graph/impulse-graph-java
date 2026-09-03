@@ -54,33 +54,36 @@ public final class ExternalSortStaging {
 		int[] rowOffsets = new int[srcNodeCount + 1];
 
 		try (FileChannel colChannel = FileChannel.open(colIdxPath, StandardOpenOption.WRITE)) {
-			ByteBuffer colBuf = ByteBuffer.allocate(64 * 1024).order(ByteOrder.LITTLE_ENDIAN);
+			ByteBuffer colBuf = ByteBuffer.allocateDirect(256 * 1024).order(ByteOrder.LITTLE_ENDIAN);
 			long edgesRead = 0;
 
 			while (reader.hasNext()) {
 				int count = reader.readNextChunk();
-				for (int i = 0; i < count; i++) {
-					long u = reader.currentSrc(i);
-					long v = reader.currentTgt(i);
+				reader.accumulateRowOffsets(rowOffsets, count, srcNodeCount);
 
-					if (u >= 0 && u < srcNodeCount) {
-						rowOffsets[(int) u + 1]++;
+				ByteBuffer tgtBuf = reader.currentTgtBuffer(count, tgtIdWidth);
+				if (tgtBuf != null) {
+					while (tgtBuf.hasRemaining()) {
+						colChannel.write(tgtBuf);
 					}
-
-					if (!colBuf.hasRemaining()) {
-						colBuf.flip();
-						colChannel.write(colBuf);
-						colBuf.clear();
+				} else {
+					for (int i = 0; i < count; i++) {
+						long v = reader.currentTgt(i);
+						if (!colBuf.hasRemaining()) {
+							colBuf.flip();
+							colChannel.write(colBuf);
+							colBuf.clear();
+						}
+						if (tgtIdWidth == 2) {
+							colBuf.putShort((short) v);
+						} else if (tgtIdWidth == 8) {
+							colBuf.putLong(v);
+						} else {
+							colBuf.putInt((int) v);
+						}
 					}
-					if (tgtIdWidth == 2) {
-						colBuf.putShort((short) v);
-					} else if (tgtIdWidth == 8) {
-						colBuf.putLong(v);
-					} else {
-						colBuf.putInt((int) v);
-					}
-					edgesRead++;
 				}
+				edgesRead += count;
 			}
 
 			if (colBuf.position() > 0) {
@@ -96,7 +99,7 @@ public final class ExternalSortStaging {
 
 		long rowOffBytes;
 		try (FileChannel rowChannel = FileChannel.open(rowOffPath, StandardOpenOption.WRITE)) {
-			ByteBuffer rowBuf = ByteBuffer.allocate(64 * 1024).order(ByteOrder.LITTLE_ENDIAN);
+			ByteBuffer rowBuf = ByteBuffer.allocateDirect(256 * 1024).order(ByteOrder.LITTLE_ENDIAN);
 			for (int offset : rowOffsets) {
 				if (!rowBuf.hasRemaining()) {
 					rowBuf.flip();
@@ -256,5 +259,18 @@ public final class ExternalSortStaging {
 		int readNextChunk();
 		long currentSrc(int index);
 		long currentTgt(int index);
+
+		default ByteBuffer currentTgtBuffer(int count, int tgtIdWidth) {
+			return null;
+		}
+
+		default void accumulateRowOffsets(int[] rowOffsets, int count, int srcNodeCount) {
+			for (int i = 0; i < count; i++) {
+				long u = currentSrc(i);
+				if (u >= 0 && u < srcNodeCount) {
+					rowOffsets[(int) u + 1]++;
+				}
+			}
+		}
 	}
 }

@@ -487,14 +487,23 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 		}
 
 		try (FileChannel fileChannel = FileChannel.open(file, StandardOpenOption.READ)) {
-			ByteBuffer buf = ByteBuffer.allocate(64 * 1024);
-			while (fileChannel.read(buf) > 0) {
-				buf.flip();
-				while (buf.hasRemaining()) {
-					channel.write(buf);
+			if (channel instanceof FileChannel fc) {
+				long size = fileChannel.size();
+				long transferred = 0;
+				while (transferred < size) {
+					transferred += fileChannel.transferTo(transferred, size - transferred, fc);
 				}
-				currentOffset += buf.position();
-				buf.clear();
+				currentOffset += size;
+			} else {
+				ByteBuffer buf = ByteBuffer.allocateDirect(256 * 1024);
+				while (fileChannel.read(buf) > 0) {
+					buf.flip();
+					while (buf.hasRemaining()) {
+						channel.write(buf);
+					}
+					currentOffset += buf.position();
+					buf.clear();
+				}
 			}
 		}
 		return currentOffset;
@@ -529,6 +538,11 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 		return crc & 0xFFFF;
 	}
 
+	private record StagedRel(int relId, int srcDomId, int tgtDomId, int tgtIdWidth, int edgeIndexWidth, long nodeCount,
+			long edgeCount, ExternalSortStaging.TopologyFiles csr, ExternalSortStaging.TopologyFiles csc,
+			boolean hasCsc) {
+	}
+
 	private static final class DigestWritableChannel implements WritableByteChannel {
 		private final WritableByteChannel delegate;
 		private final MessageDigest digest;
@@ -561,6 +575,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 	}
 
 	private static final class FfmEdgeStreamReader implements ExternalSortStaging.EdgeStreamReader, AutoCloseable {
+		private static final int CHUNK_LIMIT = 65536;
 		private final EdgeChunkIterator iterator;
 		private final int srcIdWidth;
 		private final int tgtIdWidth;
@@ -574,8 +589,8 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			this.srcIdWidth = srcIdWidth;
 			this.tgtIdWidth = tgtIdWidth;
 			this.arena = Arena.ofConfined();
-			this.srcSeg = arena.allocate((long) 8192 * srcIdWidth, 128);
-			this.tgtSeg = arena.allocate((long) 8192 * tgtIdWidth, 128);
+			this.srcSeg = arena.allocate((long) CHUNK_LIMIT * srcIdWidth, 128);
+			this.tgtSeg = arena.allocate((long) CHUNK_LIMIT * tgtIdWidth, 128);
 		}
 
 		@Override
@@ -597,7 +612,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 
 		@Override
 		public int readNextChunk() {
-			currentCount = iterator.nextChunk(srcSeg, tgtSeg, 8192);
+			currentCount = iterator.nextChunk(srcSeg, tgtSeg, CHUNK_LIMIT);
 			return currentCount;
 		}
 
@@ -620,6 +635,37 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				return tgtSeg.getAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, index);
 			} else {
 				return Integer.toUnsignedLong(tgtSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, index));
+			}
+		}
+
+		@Override
+		public ByteBuffer currentTgtBuffer(int count, int tgtIdWidth) {
+			return tgtSeg.asSlice(0, (long) count * tgtIdWidth).asByteBuffer();
+		}
+
+		@Override
+		public void accumulateRowOffsets(int[] rowOffsets, int count, int srcNodeCount) {
+			if (srcIdWidth == 4) {
+				for (int i = 0; i < count; i++) {
+					int u = srcSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+					if (u >= 0 && u < srcNodeCount) {
+						rowOffsets[u + 1]++;
+					}
+				}
+			} else if (srcIdWidth == 2) {
+				for (int i = 0; i < count; i++) {
+					int u = Short.toUnsignedInt(srcSeg.getAtIndex(ValueLayout.JAVA_SHORT_UNALIGNED, i));
+					if (u < srcNodeCount) {
+						rowOffsets[u + 1]++;
+					}
+				}
+			} else {
+				for (int i = 0; i < count; i++) {
+					long u = srcSeg.getAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, i);
+					if (u >= 0 && u < srcNodeCount) {
+						rowOffsets[(int) u + 1]++;
+					}
+				}
 			}
 		}
 	}
