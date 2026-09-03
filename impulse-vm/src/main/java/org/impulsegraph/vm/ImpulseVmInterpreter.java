@@ -109,6 +109,21 @@ public final class ImpulseVmInterpreter {
 						}
 					}
 
+					case OP_HAS_CSR -> {
+						VmHandlers.handleHasCsr(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_HAS_CSC -> {
+						VmHandlers.handleHasCsc(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_HAS_COO -> {
+						VmHandlers.handleHasCoo(state, ctx, instr);
+						pc++;
+					}
+
 					case OP_ADAPTIVE_WALK -> {
 						VmHandlers.handleAdaptiveWalk(state, ctx, instr);
 						pc++;
