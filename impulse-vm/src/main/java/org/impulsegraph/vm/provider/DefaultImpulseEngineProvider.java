@@ -22,4 +22,13 @@ public class DefaultImpulseEngineProvider implements ImpulseEngineProvider {
 	public ImpulseStatement createStatement(ImpulseGraphSnapshot snapshot, String query) {
 		return new ImpulseStatementImpl(snapshot, query);
 	}
+
+	@Override
+	public ImpulseGraphSnapshot loadSnapshot(java.nio.file.Path path, java.lang.foreign.Arena arena) {
+		try {
+			return org.impulsegraph.storage.csr.BinarySnapshotLoader.loadSnapshot(path, arena).graph();
+		} catch (java.io.IOException e) {
+			throw new java.io.UncheckedIOException(e);
+		}
+	}
 }
