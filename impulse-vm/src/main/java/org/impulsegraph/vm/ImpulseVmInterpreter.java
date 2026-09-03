@@ -74,6 +74,11 @@ public final class ImpulseVmInterpreter {
 						pc++;
 					}
 
+					case OP_MAP_KEYS_TO_DENSE -> {
+						VmHandlers.handleMapKeysToDense(state, ctx, instr);
+						pc++;
+					}
+
 					case OP_CSR_WALK -> {
 						VmHandlers.handleCsrWalk(state, ctx, instr, input);
 						if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0
