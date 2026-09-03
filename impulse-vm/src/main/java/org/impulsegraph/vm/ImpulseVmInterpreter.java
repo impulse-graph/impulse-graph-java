@@ -124,6 +124,11 @@ public final class ImpulseVmInterpreter {
 						pc++;
 					}
 
+					case OP_HAS_KEY_CATALOG -> {
+						VmHandlers.handleHasKeyCatalog(state, ctx, instr);
+						pc++;
+					}
+
 					case OP_ADAPTIVE_WALK -> {
 						VmHandlers.handleAdaptiveWalk(state, ctx, instr);
 						pc++;
@@ -136,6 +141,16 @@ public final class ImpulseVmInterpreter {
 
 					case OP_CSR_WALK_PREDICATE -> {
 						VmHandlers.handleCsrWalkPredicate(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_CSR_WALK_REDUCE_SUM -> {
+						VmHandlers.handleCsrWalkReduceSum(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_CSR_WALK_REDUCE -> {
+						VmHandlers.handleCsrWalkReduce(state, ctx, instr);
 						pc++;
 					}
 
