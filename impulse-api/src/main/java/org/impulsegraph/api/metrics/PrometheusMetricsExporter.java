@@ -21,10 +21,6 @@ public class PrometheusMetricsExporter implements ImpulseMetricsRegistry {
 	private final AtomicLong activeQueries = new AtomicLong(0);
 	private final AtomicLong offHeapMemoryBytes = new AtomicLong(0);
 
-	private final LongAdder totalMutationsIngested = new LongAdder();
-	private final LongAdder compactionCount = new LongAdder();
-	private final AtomicLong uncompactedEdgeCount = new AtomicLong(0);
-
 	@Override
 	public long getCacheHits() {
 		return cacheHits.sum();
@@ -33,21 +29,6 @@ public class PrometheusMetricsExporter implements ImpulseMetricsRegistry {
 	@Override
 	public long getCacheMisses() {
 		return cacheMisses.sum();
-	}
-
-	@Override
-	public long getTotalMutationsIngested() {
-		return totalMutationsIngested.sum();
-	}
-
-	@Override
-	public long getCompactionCount() {
-		return compactionCount.sum();
-	}
-
-	@Override
-	public long getUncompactedEdgeCount() {
-		return uncompactedEdgeCount.get();
 	}
 
 	// Histogram Buckets in Seconds: 50us, 100us, 500us, 1ms, 5ms, 10ms, 50ms, +Inf

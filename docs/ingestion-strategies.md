@@ -1,7 +1,12 @@
 # Ingestion & Snapshot Generation Architecture
 
+> [!WARNING]
+> **SCRAPPED ARCHITECTURE**: The live ingestion, mutation, and compaction strategies described in this document have been **SCRAPPED** from the engine.
+> Impulse Graph is now a strictly **read-only** execution engine. All data ingestion must occur out-of-band by writing entirely new `.imps` snapshots using the `SnapshotBuilder` or CLI tooling, followed by a zero-downtime pointer swap.
+>
+> This document remains solely for historical context.
+
 > [!NOTE]
-> **Immutable Architecture**: Impulse Graph is an **immutable, zero-copy C-ABI binary snapshot engine (`.imps`)** designed for sub-microsecond SIMD vector traversals. Snapshots are strictly read-only.
 
 **Impulse Graph Engine — Java 21+ FFM Core Specification**  
 *Document Version: 1.0.0 | Target Spec: Impulse Binary Snapshot Format v0.9.0*

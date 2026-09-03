@@ -24,15 +24,6 @@ public interface ImpulseMetricsRegistry {
 	default long getCacheMisses() {
 		return 0;
 	}
-	default long getTotalMutationsIngested() {
-		return 0;
-	}
-	default long getCompactionCount() {
-		return 0;
-	}
-	default long getUncompactedEdgeCount() {
-		return 0;
-	}
 
 	AtomicReference<ImpulseMetricsRegistry> INSTANCE_HOLDER = new AtomicReference<>(NoopMetricsRegistry.INSTANCE);
 

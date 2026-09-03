@@ -11,8 +11,4 @@ public interface ImpulseEngineMXBean {
 	long getOffHeapMemorySizeBytes();
 	int getRelationCount();
 	double getCacheHitRatio();
-	long getTotalMutationsIngested();
-	long getCompactionCount();
-	long getUncompactedEdgeCount();
-
 }

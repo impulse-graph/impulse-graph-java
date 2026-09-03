@@ -35,19 +35,4 @@ public class ImpulseEngineMBean implements ImpulseEngineMXBean {
 		long total = hits + misses;
 		return (total == 0) ? 1.0 : (double) hits / total;
 	}
-
-	@Override
-	public long getTotalMutationsIngested() {
-		return org.impulsegraph.api.metrics.ImpulseMetricsRegistry.getInstance().getTotalMutationsIngested();
-	}
-
-	@Override
-	public long getCompactionCount() {
-		return org.impulsegraph.api.metrics.ImpulseMetricsRegistry.getInstance().getCompactionCount();
-	}
-
-	@Override
-	public long getUncompactedEdgeCount() {
-		return org.impulsegraph.api.metrics.ImpulseMetricsRegistry.getInstance().getUncompactedEdgeCount();
-	}
 }
