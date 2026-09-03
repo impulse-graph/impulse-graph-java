@@ -290,7 +290,7 @@ public final class ImpulseVmInterpreter {
 						pc++;
 					}
 
-					case OP_NODE_FILTER -> {
+					case OP_NODE_FILTER, OP_NODE_FILTER_STR_PREFIX -> {
 						VmHandlers.handleNodeFilter(state, ctx, instr, input);
 						pc++;
 					}
