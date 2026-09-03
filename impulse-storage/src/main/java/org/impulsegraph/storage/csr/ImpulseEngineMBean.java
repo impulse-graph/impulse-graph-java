@@ -29,21 +29,25 @@ public class ImpulseEngineMBean implements ImpulseEngineMXBean {
 
 	@Override
 	public double getCacheHitRatio() {
-		return 1.0;
+		var metrics = org.impulsegraph.api.metrics.ImpulseMetricsRegistry.getInstance();
+		long hits = metrics.getCacheHits();
+		long misses = metrics.getCacheMisses();
+		long total = hits + misses;
+		return (total == 0) ? 1.0 : (double) hits / total;
 	}
 
 	@Override
 	public long getTotalMutationsIngested() {
-		return 0; // TODO: Wire to lifecycle manager
+		return org.impulsegraph.api.metrics.ImpulseMetricsRegistry.getInstance().getTotalMutationsIngested();
 	}
 
 	@Override
 	public long getCompactionCount() {
-		return 0; // TODO: Wire to lifecycle manager
+		return org.impulsegraph.api.metrics.ImpulseMetricsRegistry.getInstance().getCompactionCount();
 	}
 
 	@Override
 	public long getUncompactedEdgeCount() {
-		return 0; // TODO: Wire to lifecycle manager
+		return org.impulsegraph.api.metrics.ImpulseMetricsRegistry.getInstance().getUncompactedEdgeCount();
 	}
 }

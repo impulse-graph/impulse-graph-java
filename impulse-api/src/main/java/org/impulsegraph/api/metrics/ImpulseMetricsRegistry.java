@@ -18,6 +18,22 @@ public interface ImpulseMetricsRegistry {
 	void setOffHeapMemoryBytes(long bytes);
 	void setActiveQueries(long count);
 
+	default long getCacheHits() {
+		return 0;
+	}
+	default long getCacheMisses() {
+		return 0;
+	}
+	default long getTotalMutationsIngested() {
+		return 0;
+	}
+	default long getCompactionCount() {
+		return 0;
+	}
+	default long getUncompactedEdgeCount() {
+		return 0;
+	}
+
 	AtomicReference<ImpulseMetricsRegistry> INSTANCE_HOLDER = new AtomicReference<>(NoopMetricsRegistry.INSTANCE);
 
 	static ImpulseMetricsRegistry getInstance() {

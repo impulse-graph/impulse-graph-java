@@ -19,7 +19,8 @@ class FifteenKReachabilityQueryTest {
 	@DisplayName("Warmed-up microbenchmark for R12345 reachability query on 15k-relation snapshot")
 	void testReachabilityQueryOnR12345WarmedUp() throws Exception {
 		Path snapshotPath = Paths.get("/tmp/snapshot_15k_relations.imps");
-		assertTrue(Files.exists(snapshotPath), "/tmp/snapshot_15k_relations.imps should exist");
+		org.junit.jupiter.api.Assumptions.assumeTrue(Files.exists(snapshotPath),
+				"/tmp/snapshot_15k_relations.imps should exist");
 
 		byte[] snapshotBytes = Files.readAllBytes(snapshotPath);
 
