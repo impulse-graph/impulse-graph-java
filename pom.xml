@@ -18,6 +18,7 @@
         <module>impulse-storage</module>
         <module>impulse-compiler</module>
         <module>impulse-vm</module>
+        <module>impulse-builder</module>
         <module>samples</module>
     </modules>
 
