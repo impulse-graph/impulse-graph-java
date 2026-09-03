@@ -191,20 +191,23 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 
 				if (rds != null && edgeCount > 0) {
 					EdgeChunkIterator edgeIt = rds.getEdges();
-					ExternalSortStaging.EdgeStreamReader reader = new FfmEdgeStreamReader(edgeIt, srcIdWidth,
-							tgtIdWidth);
 					Path prefix = effectiveStagingDir.resolve("rel_" + relIdx);
 
-					csrFiles = staging.buildCsr(srcNodeCount, edgeCount, tgtIdWidth, edgeIndexWidth, prefix, reader);
-					stagedFilesToClean.add(csrFiles);
+					try (FfmEdgeStreamReader reader = new FfmEdgeStreamReader(edgeIt, srcIdWidth, tgtIdWidth)) {
+						csrFiles = staging.buildCsr(srcNodeCount, edgeCount, tgtIdWidth, edgeIndexWidth, prefix,
+								reader);
+						stagedFilesToClean.add(csrFiles);
+					}
 
 					if (includeCsc) {
-						if (rds.getTargetSortedEdges().isPresent()) {
-							EdgeChunkIterator cscEdgeIt = rds.getTargetSortedEdges().get();
-							ExternalSortStaging.EdgeStreamReader cscReader = new FfmEdgeStreamReader(cscEdgeIt,
-									tgtIdWidth, srcIdWidth);
-							cscFiles = staging.buildCsr(tgtNodeCount, edgeCount, srcIdWidth, edgeIndexWidth,
-									prefix.resolveSibling("csc_" + relIdx), cscReader);
+						var optCsc = rds.getTargetSortedEdges();
+						if (optCsc != null && optCsc.isPresent()) {
+							EdgeChunkIterator cscEdgeIt = optCsc.get();
+							try (FfmEdgeStreamReader cscReader = new FfmEdgeStreamReader(cscEdgeIt, tgtIdWidth,
+									srcIdWidth)) {
+								cscFiles = staging.buildCsr(tgtNodeCount, edgeCount, srcIdWidth, edgeIndexWidth,
+										prefix.resolveSibling("csc_" + relIdx), cscReader);
+							}
 						} else {
 							cscFiles = staging.buildCscFromCsr(tgtNodeCount, edgeCount, srcIdWidth, tgtIdWidth,
 									edgeIndexWidth, prefix, csrFiles.rowOffsetsFile(), csrFiles.columnTargetsFile(),
@@ -443,6 +446,13 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				}
 			}
 
+			// Pad footer so total file size satisfies 128-byte hardware alignment,
+			// with 16-byte trailer remaining strictly at EOF (segSize - 16).
+			int footerPadRem = (footerOut.size() + 16) % 128;
+			if (footerPadRem != 0) {
+				footerOut.write(new byte[128 - footerPadRem]);
+			}
+
 			// 16-byte Footer Trailer at EOF
 			long footerLen = footerOut.size() + 16;
 			ByteBuffer trailerBuf = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
@@ -550,7 +560,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 		}
 	}
 
-	private static final class FfmEdgeStreamReader implements ExternalSortStaging.EdgeStreamReader {
+	private static final class FfmEdgeStreamReader implements ExternalSortStaging.EdgeStreamReader, AutoCloseable {
 		private final EdgeChunkIterator iterator;
 		private final int srcIdWidth;
 		private final int tgtIdWidth;
@@ -566,6 +576,18 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			this.arena = Arena.ofConfined();
 			this.srcSeg = arena.allocate((long) 8192 * srcIdWidth, 128);
 			this.tgtSeg = arena.allocate((long) 8192 * tgtIdWidth, 128);
+		}
+
+		@Override
+		public void close() {
+			try {
+				if (iterator != null) {
+					iterator.close();
+				}
+			} catch (Exception ignored) {
+			} finally {
+				arena.close();
+			}
 		}
 
 		@Override

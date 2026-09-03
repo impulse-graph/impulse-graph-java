@@ -5,7 +5,7 @@ import java.lang.foreign.MemorySegment;
 /**
  * Zero-allocation chunk iterator for streaming graph edges.
  */
-public interface EdgeChunkIterator {
+public interface EdgeChunkIterator extends AutoCloseable {
 
 	/**
 	 * Returns true if more edges remain in this stream.
@@ -26,4 +26,8 @@ public interface EdgeChunkIterator {
 	 * @return count of edges actually populated
 	 */
 	int nextChunk(MemorySegment srcIds, MemorySegment tgtIds, int limit);
+
+	@Override
+	default void close() throws Exception {
+	}
 }
