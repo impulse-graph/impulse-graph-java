@@ -54,6 +54,102 @@ public class ShaderCompiler {
 		int payload = inst.payload();
 
 		switch (op) {
+
+			case VmRegisterType.OP_STREAM_LOAD_SRC :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "loadSrc",
+						MethodType.methodType(void.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow);
+			case VmRegisterType.OP_STREAM_LOAD_EDGE :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "loadEdge",
+						MethodType.methodType(void.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow);
+			case VmRegisterType.OP_STREAM_LOAD_TGT :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "loadTgt",
+						MethodType.methodType(void.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow);
+			case VmRegisterType.OP_STREAM_MATH_SUB :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "mathSub",
+						MethodType.methodType(void.class, int.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, sPayloadHigh);
+			case VmRegisterType.OP_STREAM_MATH_MUL :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "mathMul",
+						MethodType.methodType(void.class, int.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, sPayloadHigh);
+			case VmRegisterType.OP_STREAM_MATH_DIV :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "mathDiv",
+						MethodType.methodType(void.class, int.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, sPayloadHigh);
+			case VmRegisterType.OP_STREAM_CMP_NEQ :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "cmpNeq",
+						MethodType.methodType(void.class, int.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, sPayloadHigh);
+			case VmRegisterType.OP_STREAM_CMP_GT :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "cmpGt",
+						MethodType.methodType(void.class, int.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, sPayloadHigh);
+			case VmRegisterType.OP_STREAM_CMP_LT :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "cmpLt",
+						MethodType.methodType(void.class, int.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, sPayloadHigh);
+			case VmRegisterType.OP_STREAM_LOGIC_AND :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "logicAnd",
+						MethodType.methodType(void.class, int.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, sPayloadHigh);
+			case VmRegisterType.OP_STREAM_LOGIC_OR :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "logicOr",
+						MethodType.methodType(void.class, int.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, sPayloadHigh);
+			case VmRegisterType.OP_STREAM_SELECT :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "select",
+						MethodType.methodType(void.class, int.class, int.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, (sPayloadHigh & 0xFF), (sPayloadHigh >> 8));
+			case VmRegisterType.OP_STREAM_LOGIC_NOT :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "logicNot",
+						MethodType.methodType(void.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow);
+			case VmRegisterType.OP_STREAM_MATH_UNARY :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "mathUnary",
+						MethodType.methodType(void.class, int.class, int.class, int.class, VmQueryContext.class,
+								MemorySegment.class, int.class, int.class, int.class, float[].class,
+								ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, sPayloadHigh);
+			case VmRegisterType.OP_STREAM_LOAD_SRC_ID :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "loadSrcId",
+						MethodType.methodType(void.class, int.class, VmQueryContext.class, MemorySegment.class,
+								int.class, int.class, int.class, float[].class, ImpulseBitSet.class)),
+						0, sDst);
+			case VmRegisterType.OP_STREAM_LOAD_EDGE_ID :
+				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "loadEdgeId",
+						MethodType.methodType(void.class, int.class, VmQueryContext.class, MemorySegment.class,
+								int.class, int.class, int.class, float[].class, ImpulseBitSet.class)),
+						0, sDst);
+
 			case VmRegisterType.OP_STREAM_LOAD_TGT_ID :
 				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "loadTgtId",
 						MethodType.methodType(void.class, int.class, VmQueryContext.class, MemorySegment.class,
@@ -103,6 +199,6 @@ public class ShaderCompiler {
 												int.class, float[].class, ImpulseBitSet.class)),
 								0, sDst, sPayloadLow, sPayloadHigh);
 		}
-		throw new UnsupportedOperationException("Unsupported shader op: " + op);
+		return null;
 	}
 }

@@ -77,7 +77,7 @@ public class StreamShaderBenchmark {
 			// Cold Pass
 			CompiledQuery query = new CompiledQuery(prog, instructions.size(), java.util.List.of(),
 					new java.util.HashMap<>(), mockGraph, arena, null);
-			CompiledQuery query = new CompiledQuery(prog, instructions.size(), java.util.List.of(), new java.util.HashMap<>(), mockGraph, arena, null);
+			query = new CompiledQuery(prog, instructions.size(), java.util.List.of(), new java.util.HashMap<>(), mockGraph, arena, null);
             long t0 = System.nanoTime();
 			query.execute(mockGraph, null, arena);
 			long t1 = System.nanoTime();

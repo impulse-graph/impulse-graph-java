@@ -90,7 +90,10 @@ public class JavaVmJsonRunner {
 				long stepCount = 0;
 				int fuel = asm.fuel() != null ? asm.fuel() : -1;
 
-				loop : while (actualStatus.equals("IMPULSE_VM_OK") && pc >= 0 && pc < instructionCount
+				
+				if (fuel > 0) {
+				    // Fallback to strict step-by-step for gas exhaustion tests
+				    loop : while (actualStatus.equals("IMPULSE_VM_OK") && pc >= 0 && pc < instructionCount
 						&& stepCount++ < 2000000000) {
 					if (fuel > 0) {
 						fuel--;
@@ -710,6 +713,28 @@ public class JavaVmJsonRunner {
 						break;
 					}
 				}
+				} else {
+                    try {
+                        JitDriver driver = ImpulseMethodHandleCompiler.compileDriver(progSeg, instructionCount);
+                        driver.execute(ctx, state, 0L, instructionCount);
+                        // JIT sets PC internally. If it exited cleanly, pc should be instructionCount
+                        pc = instructionCount;
+                    } catch (Throwable t) {
+                        String msg = t.getMessage();
+                        if (msg != null && msg.contains("IMPULSE_VM_ERR_")) {
+                            int start = msg.indexOf("IMPULSE_VM_ERR_");
+                            int end = msg.indexOf(':', start);
+                            actualStatus = (end >= 0) ? msg.substring(start, end).trim() : msg.substring(start).trim();
+                        } else if (t.getCause() != null && t.getCause().getMessage() != null && t.getCause().getMessage().contains("IMPULSE_VM_ERR_")) {
+                            msg = t.getCause().getMessage();
+                            int start = msg.indexOf("IMPULSE_VM_ERR_");
+                            int end = msg.indexOf(':', start);
+                            actualStatus = (end >= 0) ? msg.substring(start, end).trim() : msg.substring(start).trim();
+                        } else {
+                            actualStatus = "IMPULSE_VM_ERR_ASSERTION_FAILED";
+                        }
+                    }
+                }
 
 				// JSON Output
 				System.out.print("{");

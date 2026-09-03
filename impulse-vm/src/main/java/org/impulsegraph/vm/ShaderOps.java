@@ -64,4 +64,121 @@ public class ShaderOps {
 			vec[tgt] = next;
 		}
 	}
+
+	
+	public static void loadSrc(int dst, int srcAttr, VmQueryContext ctx, MemorySegment state, int srcId, int tgtId,
+			int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		Object obj = ctx.getMockAttribute(srcAttr);
+		if (obj instanceof float[] farr) {
+			fRegs[dst] = (srcId < farr.length) ? farr[srcId] : 0.0f;
+		} else if (obj instanceof int[] iarr) {
+			fRegs[dst] = (srcId < iarr.length) ? Float.intBitsToFloat(iarr[srcId]) : 0.0f;
+		} else {
+			int handle = (int) VmHandlers.getRegisterValue(state, srcAttr);
+			float[] farr = ctx.getFloatVector(handle);
+			fRegs[dst] = (farr != null && srcId < farr.length) ? farr[srcId] : 0.0f;
+		}
+	}
+
+	public static void loadTgt(int dst, int tgtAttr, VmQueryContext ctx, MemorySegment state, int srcId, int tgtId,
+			int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		Object obj = ctx.getMockAttribute(tgtAttr);
+		if (obj instanceof float[] farr) {
+			fRegs[dst] = (tgtId < farr.length) ? farr[tgtId] : 0.0f;
+		} else if (obj instanceof int[] iarr) {
+			fRegs[dst] = (tgtId < iarr.length) ? Float.intBitsToFloat(iarr[tgtId]) : 0.0f;
+		} else {
+			int handle = (int) VmHandlers.getRegisterValue(state, tgtAttr);
+			float[] farr = ctx.getFloatVector(handle);
+			fRegs[dst] = (farr != null && tgtId < farr.length) ? farr[tgtId] : 0.0f;
+		}
+	}
+
+	public static void loadEdge(int dst, int edgeAttr, VmQueryContext ctx, MemorySegment state, int srcId, int tgtId,
+			int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		Object obj = ctx.getMockAttribute(edgeAttr);
+		if (obj instanceof float[] farr) {
+			fRegs[dst] = (edgeId >= 0 && edgeId < farr.length) ? farr[edgeId] : 0.0f;
+		} else if (obj instanceof int[] iarr) {
+			fRegs[dst] = (edgeId >= 0 && edgeId < iarr.length) ? Float.intBitsToFloat(iarr[edgeId]) : 0.0f;
+		} else {
+			int handle = (int) VmHandlers.getRegisterValue(state, edgeAttr);
+			float[] farr = ctx.getFloatVector(handle);
+			fRegs[dst] = (farr != null && edgeId >= 0 && edgeId < farr.length) ? farr[edgeId] : 0.0f;
+		}
+	}
+
+	public static void loadSrcId(int dst, VmQueryContext ctx, MemorySegment state, int srcId, int tgtId,
+			int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		fRegs[dst] = (float) srcId;
+	}
+
+	public static void loadEdgeId(int dst, VmQueryContext ctx, MemorySegment state, int srcId, int tgtId,
+			int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		fRegs[dst] = (float) edgeId;
+	}
+
+	public static void mathSub(int dst, int src1, int src2, VmQueryContext ctx, MemorySegment state, int srcId,
+			int tgtId, int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		fRegs[dst] = fRegs[src1] - fRegs[src2];
+	}
+
+	public static void mathMul(int dst, int src1, int src2, VmQueryContext ctx, MemorySegment state, int srcId,
+			int tgtId, int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		fRegs[dst] = fRegs[src1] * fRegs[src2];
+	}
+
+	public static void mathDiv(int dst, int src1, int src2, VmQueryContext ctx, MemorySegment state, int srcId,
+			int tgtId, int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		fRegs[dst] = (fRegs[src2] != 0.0f) ? (fRegs[src1] / fRegs[src2]) : 0.0f;
+	}
+
+	public static void cmpNeq(int dst, int src1, int src2, VmQueryContext ctx, MemorySegment state, int srcId,
+			int tgtId, int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		fRegs[dst] = (fRegs[src1] != fRegs[src2]) ? 1.0f : 0.0f;
+	}
+
+	public static void cmpGt(int dst, int src1, int src2, VmQueryContext ctx, MemorySegment state, int srcId,
+			int tgtId, int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		fRegs[dst] = (fRegs[src1] > fRegs[src2]) ? 1.0f : 0.0f;
+	}
+
+	public static void cmpLt(int dst, int src1, int src2, VmQueryContext ctx, MemorySegment state, int srcId,
+			int tgtId, int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		fRegs[dst] = (fRegs[src1] < fRegs[src2]) ? 1.0f : 0.0f;
+	}
+
+	public static void logicAnd(int dst, int src1, int src2, VmQueryContext ctx, MemorySegment state, int srcId,
+			int tgtId, int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		fRegs[dst] = (fRegs[src1] != 0.0f && fRegs[src2] != 0.0f) ? 1.0f : 0.0f;
+	}
+
+	public static void logicOr(int dst, int src1, int src2, VmQueryContext ctx, MemorySegment state, int srcId,
+			int tgtId, int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		fRegs[dst] = (fRegs[src1] != 0.0f || fRegs[src2] != 0.0f) ? 1.0f : 0.0f;
+	}
+
+	public static void logicNot(int dst, int src, VmQueryContext ctx, MemorySegment state, int srcId,
+			int tgtId, int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		fRegs[dst] = (fRegs[src] == 0.0f) ? 1.0f : 0.0f;
+	}
+	
+	public static void mathUnary(int dst, int src, int type, VmQueryContext ctx, MemorySegment state, int srcId,
+			int tgtId, int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		float v = fRegs[src];
+		fRegs[dst] = switch (type) {
+			case 1 -> Math.abs(v);
+			case 2 -> -v;
+			case 3 -> (float) Math.exp(v);
+			case 4 -> (float) Math.log(v);
+			case 5 -> (float) Math.sqrt(v);
+			default -> v;
+		};
+	}
+
+	public static void select(int dst, int cond, int trueVal, int falseVal, VmQueryContext ctx, MemorySegment state, int srcId,
+			int tgtId, int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		fRegs[dst] = (fRegs[cond] != 0.0f) ? fRegs[trueVal] : fRegs[falseVal];
+	}
+
 }

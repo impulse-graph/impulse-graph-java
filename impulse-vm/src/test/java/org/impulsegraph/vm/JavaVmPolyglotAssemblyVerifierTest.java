@@ -291,7 +291,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 	}
 
 	private TestResult executeTestVector(Path file, ParsedAssembly asm) {
-		try (Arena arena = Arena.ofConfined()) {
+		try (Arena arena = Arena.ofShared()) {
 			MemorySegment progSeg = arena.allocate(asm.instructions().size() * 8L, 8);
 			for (int i = 0; i < asm.instructions().size(); i++) {
 				progSeg.set(ValueLayout.JAVA_LONG, i * 8L, asm.instructions().get(i));
@@ -338,7 +338,9 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 				long stepCount = 0;
 				int fuel = asm.fuel() != null ? asm.fuel() : -1;
 
-				while (actualStatus.equals("IMPULSE_VM_OK") && pc >= 0 && pc < instructionCount
+				if (fuel > 0) {
+				    // Fallback to strict step-by-step for gas exhaustion tests
+				    while (actualStatus.equals("IMPULSE_VM_OK") && pc >= 0 && pc < instructionCount
 						&& stepCount++ < 100000) {
 					if (fuel > 0) {
 						fuel--;
@@ -859,6 +861,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 							}
 						}
 					} catch (Throwable t) {
+						t.printStackTrace();
 						System.err.println("Crash in " + file.getFileName() + " at pc=" + pc + " (op 0x"
 								+ Integer.toHexString(opcode & 0xFF) + "): " + t);
 						String msg = t.getMessage();
@@ -873,7 +876,31 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 					}
 				}
 
-				// Check Expectation
+				
+				} else {
+                    try {
+                        JitDriver driver = ImpulseMethodHandleCompiler.compileDriver(progSeg, instructionCount);
+                        driver.execute(ctx, state, 0L, instructionCount);
+                        pc = instructionCount;
+                    } catch (Throwable t) {
+						t.printStackTrace();
+                        String msg = t.getMessage();
+                        if (msg != null && msg.contains("IMPULSE_VM_ERR_")) {
+                            int start = msg.indexOf("IMPULSE_VM_ERR_");
+                            int end = msg.indexOf(':', start);
+                            actualStatus = (end >= 0) ? msg.substring(start, end).trim() : msg.substring(start).trim();
+                        } else if (t.getCause() != null && t.getCause().getMessage() != null && t.getCause().getMessage().contains("IMPULSE_VM_ERR_")) {
+                            msg = t.getCause().getMessage();
+                            int start = msg.indexOf("IMPULSE_VM_ERR_");
+                            int end = msg.indexOf(':', start);
+                            actualStatus = (end >= 0) ? msg.substring(start, end).trim() : msg.substring(start).trim();
+                        } else {
+                            actualStatus = "IMPULSE_VM_ERR_ASSERTION_FAILED";
+                        }
+                    }
+                }
+                
+                // Check Expectation
 				Expectation exp = asm.expectation();
 				if (exp != null) {
 					if (exp.status() != null && !exp.status().equals(actualStatus)) {

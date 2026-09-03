@@ -68,8 +68,12 @@ public class Twitter2010CcVmBenchmarkTest {
 			VmStateLayout.INSTR_DST_REG_HANDLE.set(prog, 1 * VmStateLayout.INSTRUCTION_SIZE_BYTES, (short) 0);
 			VmStateLayout.INSTR_PAYLOAD_HANDLE.set(prog, 1 * VmStateLayout.INSTRUCTION_SIZE_BYTES, 0);
 
+			
+            java.lang.invoke.MethodHandle mh = ImpulseMethodHandleCompiler.compile(prog, 2);
 			// Warm-up run
-			ImpulseVmInterpreter.execute(prog, 2, graph, 0, arena);
+			try {
+			    mh.invokeExact(graph, (Object) 0, arena);
+			} catch(Throwable t) { throw new RuntimeException(t); }
 
 			// 3 Measured Runs
 			double minCcTimeMs = Double.MAX_VALUE;
@@ -79,7 +83,10 @@ public class Twitter2010CcVmBenchmarkTest {
 
 			for (int r = 0; r < runs; r++) {
 				long t0Cc = System.nanoTime();
-				comp = (int[]) ImpulseVmInterpreter.execute(prog, 2, graph, 0, arena);
+				try {
+				    comp = (int[]) mh.invokeExact(graph, (Object) 0, arena);
+				} catch(Throwable t) { throw new RuntimeException(t); }
+
 				double tMs = (System.nanoTime() - t0Cc) / 1_000_000.0;
 				sumCcTimeMs += tMs;
 				if (tMs < minCcTimeMs)
