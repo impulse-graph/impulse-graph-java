@@ -8,12 +8,14 @@ import org.impulsegraph.compiler.ast.ImpScmNode;
 @FunctionalInterface
 public interface PassTraceListener {
 
-    void onPassComplete(String passName, ImpScmNode beforeAst, ImpScmNode afterAst, long durationNanos);
+	void onPassComplete(String passName, ImpScmNode beforeAst, ImpScmNode afterAst, long durationNanos);
 
-    PassTraceListener NOOP = (name, before, after, dur) -> {};
+	PassTraceListener NOOP = (name, before, after, dur) -> {
+	};
 
-    PassTraceListener SYSTEM_OUT = (name, before, after, dur) -> {
-        System.out.printf("[ImpCompiler Trace] Pass: %-28s (took %.3f ms)%n", name, dur / 1_000_000.0);
-        System.out.println("  -> Output AST: " + (after != null ? after.toScmString().replace("\n", "\n     ") : "null"));
-    };
+	PassTraceListener SYSTEM_OUT = (name, before, after, dur) -> {
+		System.out.printf("[ImpCompiler Trace] Pass: %-28s (took %.3f ms)%n", name, dur / 1_000_000.0);
+		System.out
+				.println("  -> Output AST: " + (after != null ? after.toScmString().replace("\n", "\n     ") : "null"));
+	};
 }

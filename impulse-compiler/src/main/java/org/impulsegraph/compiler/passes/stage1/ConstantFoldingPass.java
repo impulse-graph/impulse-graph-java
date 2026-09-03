@@ -14,63 +14,64 @@ import java.util.List;
  */
 public final class ConstantFoldingPass implements CompilerPass {
 
-    public static final ConstantFoldingPass INSTANCE = new ConstantFoldingPass();
+	public static final ConstantFoldingPass INSTANCE = new ConstantFoldingPass();
 
-    @Override
-    public String name() {
-        return "ConstantFoldingPass";
-    }
+	@Override
+	public String name() {
+		return "ConstantFoldingPass";
+	}
 
-    @Override
-    public ImpScmNode transform(ImpScmNode ast, CompilerContext context) {
-        if (ast == null) return null;
-        if (!context.options().enableConstantFolding()) {
-            return ast;
-        }
-        return foldNode(ast);
-    }
+	@Override
+	public ImpScmNode transform(ImpScmNode ast, CompilerContext context) {
+		if (ast == null)
+			return null;
+		if (!context.options().enableConstantFolding()) {
+			return ast;
+		}
+		return foldNode(ast);
+	}
 
-    private ImpScmNode foldNode(ImpScmNode node) {
-        if (node instanceof ScmCelExpr cel) {
-            if (cel.celAst() != null) {
-                CelAstNode optimized = CelAstOptimizer.optimize((CelAstNode) cel.celAst());
-                return new ScmCelExpr(cel.rawText(), optimized);
-            }
-            return cel;
-        }
+	private ImpScmNode foldNode(ImpScmNode node) {
+		if (node instanceof ScmCelExpr cel) {
+			if (cel.celAst() != null) {
+				CelAstNode optimized = CelAstOptimizer.optimize((CelAstNode) cel.celAst());
+				return new ScmCelExpr(cel.rawText(), optimized);
+			}
+			return cel;
+		}
 
-        if (node instanceof ScmProgram prog) {
-            List<ImpScmNode> folded = new ArrayList<>();
-            for (ImpScmNode step : prog.steps()) {
-                folded.add(foldNode(step));
-            }
-            return new ScmProgram(folded);
-        }
+		if (node instanceof ScmProgram prog) {
+			List<ImpScmNode> folded = new ArrayList<>();
+			for (ImpScmNode step : prog.steps()) {
+				folded.add(foldNode(step));
+			}
+			return new ScmProgram(folded);
+		}
 
-        if (node instanceof ScmWalk walk) {
-            List<ImpScmNode> foldFilterList = new ArrayList<>();
-            for (ImpScmNode step : walk.shaderSteps()) {
-                foldFilterList.add(foldNode(step));
-            }
-            List<ImpScmNode> foldSubs = new ArrayList<>();
-            for (ImpScmNode sub : walk.subSteps()) {
-                foldSubs.add(foldNode(sub));
-            }
-            return new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), foldFilterList, foldSubs);
-        }
+		if (node instanceof ScmWalk walk) {
+			List<ImpScmNode> foldFilterList = new ArrayList<>();
+			for (ImpScmNode step : walk.shaderSteps()) {
+				foldFilterList.add(foldNode(step));
+			}
+			List<ImpScmNode> foldSubs = new ArrayList<>();
+			for (ImpScmNode sub : walk.subSteps()) {
+				foldSubs.add(foldNode(sub));
+			}
+			return new ScmWalk(walk.relationName(), walk.relationId(), walk.direction(), foldFilterList, foldSubs);
+		}
 
-        if (node instanceof ScmVectorFilter vf) {
-            return new ScmVectorFilter(foldNode(vf.predicate()));
-        }
+		if (node instanceof ScmVectorFilter vf) {
+			return new ScmVectorFilter(foldNode(vf.predicate()));
+		}
 
-        if (node instanceof ScmList list) {
-            List<ImpScmNode> folded = new ArrayList<>();
-            for (ImpScmNode elem : list.elements()) {
-                folded.add(foldNode(elem));
-            }
-            return new ScmList(folded);
-        }
+		if (node instanceof ScmList list) {
+			List<ImpScmNode> folded = new ArrayList<>();
+			for (ImpScmNode elem : list.elements()) {
+				folded.add(foldNode(elem));
+			}
+			return new ScmList(folded);
+		}
 
-        return node;
-    }
+		return node;
+	}
 }

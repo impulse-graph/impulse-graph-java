@@ -7,21 +7,21 @@ import java.util.Objects;
  */
 public record ScmSymbol(String name) implements ImpScmNode {
 
-    public ScmSymbol {
-        Objects.requireNonNull(name, "symbol name must not be null");
-    }
+	public ScmSymbol {
+		Objects.requireNonNull(name, "symbol name must not be null");
+	}
 
-    @Override
-    public String toScmString() {
-        return name;
-    }
+	@Override
+	public String toScmString() {
+		return name;
+	}
 
-    @Override
-    public <R> R accept(ImpScmVisitor<R> visitor) {
-        return visitor.visitSymbol(this);
-    }
+	@Override
+	public <R> R accept(ImpScmVisitor<R> visitor) {
+		return visitor.visitSymbol(this);
+	}
 
-    public static ScmSymbol of(String name) {
-        return new ScmSymbol(name);
-    }
+	public static ScmSymbol of(String name) {
+		return new ScmSymbol(name);
+	}
 }

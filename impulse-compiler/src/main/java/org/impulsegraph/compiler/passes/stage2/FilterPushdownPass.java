@@ -8,59 +8,63 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Stage 2 Pass: Interleaves high-selectivity vector property filters directly into graph walk steps.
- * Enables execution via OP_CSR_WALK_FILTERED or fused SIMD kernels.
+ * Stage 2 Pass: Interleaves high-selectivity vector property filters directly
+ * into graph walk steps. Enables execution via OP_CSR_WALK_FILTERED or fused
+ * SIMD kernels.
  */
 public final class FilterPushdownPass implements CompilerPass {
 
-    public static final FilterPushdownPass INSTANCE = new FilterPushdownPass();
+	public static final FilterPushdownPass INSTANCE = new FilterPushdownPass();
 
-    @Override
-    public String name() {
-        return "FilterPushdownPass";
-    }
+	@Override
+	public String name() {
+		return "FilterPushdownPass";
+	}
 
-    @Override
-    public ImpScmNode transform(ImpScmNode ast, CompilerContext context) {
-        if (ast == null) return null;
-        if (!context.options().enableFilterPushdown()) {
-            return ast;
-        }
+	@Override
+	public ImpScmNode transform(ImpScmNode ast, CompilerContext context) {
+		if (ast == null)
+			return null;
+		if (!context.options().enableFilterPushdown()) {
+			return ast;
+		}
 
-        if (ast instanceof ScmProgram prog) {
-            List<ImpScmNode> steps = new ArrayList<>(prog.steps());
-            List<ImpScmNode> newSteps = new ArrayList<>();
+		if (ast instanceof ScmProgram prog) {
+			List<ImpScmNode> steps = new ArrayList<>(prog.steps());
+			List<ImpScmNode> newSteps = new ArrayList<>();
 
-            for (int i = 0; i < steps.size(); i++) {
-                ImpScmNode curr = steps.get(i);
+			for (int i = 0; i < steps.size(); i++) {
+				ImpScmNode curr = steps.get(i);
 
-                if (curr instanceof ScmWalk walk) {
-                    List<ImpScmNode> shaderSteps = new ArrayList<>(walk.shaderSteps());
-                    
-                    // Consume subsequent vector filters and projections
-                    while (i + 1 < steps.size()) {
-                        ImpScmNode next = steps.get(i + 1);
-                        if (next instanceof ScmVectorFilter vf) {
-                            shaderSteps.add(vf.predicate());
-                            i++;
-                        } else if (next instanceof ScmList list && !list.elements().isEmpty() && list.elements().get(0) instanceof ScmSymbol sym && sym.name().equals("project-state")) {
-                            shaderSteps.add(next);
-                            i++;
-                        } else {
-                            break;
-                        }
-                    }
-                    
-                    if (!shaderSteps.equals(walk.shaderSteps())) {
-                        curr = walk.withShaderSteps(shaderSteps);
-                    }
-                }
+				if (curr instanceof ScmWalk walk) {
+					List<ImpScmNode> shaderSteps = new ArrayList<>(walk.shaderSteps());
 
-                newSteps.add(curr);
-            }
-            return new ScmProgram(newSteps);
-        }
+					// Consume subsequent vector filters and projections
+					while (i + 1 < steps.size()) {
+						ImpScmNode next = steps.get(i + 1);
+						if (next instanceof ScmVectorFilter vf) {
+							shaderSteps.add(vf.predicate());
+							i++;
+						} else if (next instanceof ScmList list && !list.elements().isEmpty()
+								&& list.elements().get(0) instanceof ScmSymbol sym
+								&& sym.name().equals("project-state")) {
+							shaderSteps.add(next);
+							i++;
+						} else {
+							break;
+						}
+					}
 
-        return ast;
-    }
+					if (!shaderSteps.equals(walk.shaderSteps())) {
+						curr = walk.withShaderSteps(shaderSteps);
+					}
+				}
+
+				newSteps.add(curr);
+			}
+			return new ScmProgram(newSteps);
+		}
+
+		return ast;
+	}
 }

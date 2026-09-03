@@ -1,24 +1,14 @@
 package org.impulsegraph.compiler.ast;
 
 /**
- * Root sealed interface for all ImpScheme (ImpScm) AST nodes.
- * Homoiconic intermediate representation between high-level query frontends and native impOps VM bytecode.
+ * Root sealed interface for all ImpScheme (ImpScm) AST nodes. Homoiconic
+ * intermediate representation between high-level query frontends and native
+ * impOps VM bytecode.
  */
-public sealed interface ImpScmNode permits
-        ScmProgram,
-        ScmWalk,
-        ScmWalk2Hop,
-        ScmVectorFilter,
-        ScmStreamFilter,
-        ScmStreamProject,
-        ScmCelExpr,
-        ScmReduce,
-        ScmCollect,
-        ScmLiteral,
-        ScmSymbol,
-        ScmList {
+public sealed interface ImpScmNode permits ScmProgram, ScmWalk, ScmWalk2Hop, ScmVectorFilter, ScmStreamFilter,
+		ScmStreamProject, ScmCelExpr, ScmReduce, ScmCollect, ScmLiteral, ScmSymbol, ScmList {
 
-    String toScmString();
+	String toScmString();
 
-    <R> R accept(ImpScmVisitor<R> visitor);
+	<R> R accept(ImpScmVisitor<R> visitor);
 }

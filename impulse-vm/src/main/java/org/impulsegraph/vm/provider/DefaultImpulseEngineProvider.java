@@ -8,17 +8,18 @@ import org.impulsegraph.vm.statement.ImpulseStatementImpl;
 import org.impulsegraph.vm.traversal.DefaultDomainView;
 
 /**
- * Default VM execution engine provider implementation registered via ServiceLoader.
+ * Default VM execution engine provider implementation registered via
+ * ServiceLoader.
  */
 public class DefaultImpulseEngineProvider implements ImpulseEngineProvider {
 
-    @Override
-    public DomainView createDomainView(ImpulseGraphSnapshot snapshot, String domainName, int domainId, long nodeCount) {
-        return DefaultDomainView.getOrCreate(snapshot, domainName, domainId, nodeCount);
-    }
+	@Override
+	public DomainView createDomainView(ImpulseGraphSnapshot snapshot, String domainName, int domainId, long nodeCount) {
+		return DefaultDomainView.getOrCreate(snapshot, domainName, domainId, nodeCount);
+	}
 
-    @Override
-    public ImpulseStatement createStatement(ImpulseGraphSnapshot snapshot, String query) {
-        return new ImpulseStatementImpl(snapshot, query);
-    }
+	@Override
+	public ImpulseStatement createStatement(ImpulseGraphSnapshot snapshot, String query) {
+		return new ImpulseStatementImpl(snapshot, query);
+	}
 }
