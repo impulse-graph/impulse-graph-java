@@ -155,8 +155,9 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			}
 
 			// 3. Stage Relation Topologies to files
-			record StagedRel(int relId, int srcDomId, int tgtDomId, long nodeCount, long edgeCount,
-					ExternalSortStaging.TopologyFiles csr, ExternalSortStaging.TopologyFiles csc, boolean hasCsc) {
+			record StagedRel(int relId, int srcDomId, int tgtDomId, int tgtIdWidth, int edgeIndexWidth, long nodeCount,
+					long edgeCount, ExternalSortStaging.TopologyFiles csr, ExternalSortStaging.TopologyFiles csc,
+					boolean hasCsc) {
 			}
 
 			List<StagedRel> stagedRelations = new ArrayList<>();
@@ -205,15 +206,16 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 							cscFiles = staging.buildCsr(tgtNodeCount, edgeCount, srcIdWidth, edgeIndexWidth,
 									prefix.resolveSibling("csc_" + relIdx), cscReader);
 						} else {
-							cscFiles = staging.buildCscFromCsr(tgtNodeCount, edgeCount, srcIdWidth, edgeIndexWidth,
-									prefix, csrFiles.rowOffsetsFile(), csrFiles.columnTargetsFile(), srcNodeCount);
+							cscFiles = staging.buildCscFromCsr(tgtNodeCount, edgeCount, srcIdWidth, tgtIdWidth,
+									edgeIndexWidth, prefix, csrFiles.rowOffsetsFile(), csrFiles.columnTargetsFile(),
+									srcNodeCount);
 						}
 						stagedFilesToClean.add(cscFiles);
 					}
 				}
 
-				stagedRelations.add(new StagedRel(relIdx, srcDomId, tgtDomId, srcNodeCount, edgeCount, csrFiles,
-						cscFiles, includeCsc));
+				stagedRelations.add(new StagedRel(relIdx, srcDomId, tgtDomId, tgtIdWidth, edgeIndexWidth, srcNodeCount,
+						edgeCount, csrFiles, cscFiles, includeCsc));
 			}
 
 			// 4. Build Section 2 Directory Table
@@ -294,8 +296,8 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				relBuf.putShort((short) sr.srcDomId);
 				relBuf.putShort((short) sr.tgtDomId);
 				relBuf.put((byte) 0); // encoding_id = RAW
-				relBuf.put((byte) 4); // node_id_width = 4
-				relBuf.put((byte) 4); // edge_index_width = 4
+				relBuf.put((byte) sr.tgtIdWidth);
+				relBuf.put((byte) sr.edgeIndexWidth);
 				relBuf.put(new byte[3]); // reserved1
 				relBuf.putInt(rNameOff);
 				relBuf.putLong(sr.nodeCount);

@@ -46,7 +46,7 @@ public final class ExternalSortStaging {
 	 * Computes CSR topology from a source-sorted edge stream. Writes rowOffsets and
 	 * columnTargets to staged files and returns their paths.
 	 */
-	public TopologyFiles buildCsr(int srcNodeCount, long edgeCount, int srcIdWidth, int edgeIndexWidth,
+	public TopologyFiles buildCsr(int srcNodeCount, long edgeCount, int tgtIdWidth, int edgeIndexWidth,
 			Path outputPrefix, EdgeStreamReader reader) throws IOException {
 		Path rowOffPath = Files.createTempFile(stagingDir, outputPrefix.getFileName().toString() + "_csr_row_", ".bin");
 		Path colIdxPath = Files.createTempFile(stagingDir, outputPrefix.getFileName().toString() + "_csr_col_", ".bin");
@@ -72,9 +72,9 @@ public final class ExternalSortStaging {
 						colChannel.write(colBuf);
 						colBuf.clear();
 					}
-					if (srcIdWidth == 2) {
+					if (tgtIdWidth == 2) {
 						colBuf.putShort((short) v);
-					} else if (srcIdWidth == 8) {
+					} else if (tgtIdWidth == 8) {
 						colBuf.putLong(v);
 					} else {
 						colBuf.putInt((int) v);
@@ -116,15 +116,16 @@ public final class ExternalSortStaging {
 			rowOffBytes = (long) (srcNodeCount + 1) * edgeIndexWidth;
 		}
 
-		long colIdxBytes = edgeCount * srcIdWidth;
+		long colIdxBytes = edgeCount * tgtIdWidth;
 		return new TopologyFiles(rowOffPath, colIdxPath, rowOffBytes, colIdxBytes);
 	}
 
 	/**
 	 * Computes CSC topology from an in-memory or staged CSR representation.
 	 */
-	public TopologyFiles buildCscFromCsr(int tgtNodeCount, long edgeCount, int tgtIdWidth, int edgeIndexWidth,
-			Path outputPrefix, Path csrRowOffPath, Path csrColIdxPath, int srcNodeCount) throws IOException {
+	public TopologyFiles buildCscFromCsr(int tgtNodeCount, long edgeCount, int srcIdWidth, int tgtIdWidth,
+			int edgeIndexWidth, Path outputPrefix, Path csrRowOffPath, Path csrColIdxPath, int srcNodeCount)
+			throws IOException {
 		Path cscRowOffPath = Files.createTempFile(stagingDir, outputPrefix.getFileName().toString() + "_csc_row_",
 				".bin");
 		Path cscColIdxPath = Files.createTempFile(stagingDir, outputPrefix.getFileName().toString() + "_csc_col_",
@@ -163,7 +164,7 @@ public final class ExternalSortStaging {
 
 		// Pass 2: Invert edges
 		// For moderate edge counts, allocate CSC column index array off-heap
-		long colBytesTotal = edgeCount * tgtIdWidth;
+		long colBytesTotal = edgeCount * srcIdWidth;
 		try (Arena arena = Arena.ofConfined()) {
 			MemorySegment cscColSeg = arena.allocate(colBytesTotal, 128);
 
@@ -200,10 +201,10 @@ public final class ExternalSortStaging {
 
 						if (v >= 0 && v < tgtNodeCount) {
 							int insertPos = currentOffsets[(int) v]++;
-							if (tgtIdWidth == 2) {
+							if (srcIdWidth == 2) {
 								cscColSeg.setAtIndex(ValueLayout.JAVA_SHORT_UNALIGNED, insertPos,
 										(short) currentSource);
-							} else if (tgtIdWidth == 8) {
+							} else if (srcIdWidth == 8) {
 								cscColSeg.setAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, insertPos, currentSource);
 							} else {
 								cscColSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, insertPos, currentSource);
