@@ -4,7 +4,7 @@ import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.passes.CompilerPass;
 
-import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.Map;
 
 /**
@@ -34,8 +34,8 @@ public final class RegisterAllocationPass implements CompilerPass {
 	}
 
 	public static RegisterAssignment allocate(ImpScmNode ast) {
-		Map<ImpScmNode, Short> srcMap = new HashMap<>();
-		Map<ImpScmNode, Short> dstMap = new HashMap<>();
+		Map<ImpScmNode, Short> srcMap = new IdentityHashMap<>();
+		Map<ImpScmNode, Short> dstMap = new IdentityHashMap<>();
 		short currentReg = 0;
 		int maxReg = 1;
 

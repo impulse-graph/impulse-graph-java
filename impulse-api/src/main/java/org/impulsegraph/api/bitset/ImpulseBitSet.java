@@ -1,6 +1,6 @@
 package org.impulsegraph.api.bitset;
 
-public interface ImpulseBitSet {
+public interface ImpulseBitSet extends Iterable<Integer> {
 	void set(int bitIndex);
 	boolean get(int bitIndex);
 	void clear(int bitIndex);
@@ -44,5 +44,26 @@ public interface ImpulseBitSet {
 					}
 				}, java.util.Spliterator.ORDERED | java.util.Spliterator.DISTINCT | java.util.Spliterator.SORTED),
 						false);
+	}
+
+	@Override
+	default java.util.Iterator<Integer> iterator() {
+		return new java.util.Iterator<>() {
+			int next = nextSetBit(0);
+
+			@Override
+			public boolean hasNext() {
+				return next >= 0;
+			}
+
+			@Override
+			public Integer next() {
+				if (next < 0)
+					throw new java.util.NoSuchElementException();
+				int current = next;
+				next = nextSetBit(next + 1);
+				return current;
+			}
+		};
 	}
 }
