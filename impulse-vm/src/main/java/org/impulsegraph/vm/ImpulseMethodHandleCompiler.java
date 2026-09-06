@@ -135,13 +135,12 @@ public final class ImpulseMethodHandleCompiler {
 			}
 			case 0x01 -> nextPc++; // OP_NOP
 			case 0x02 -> {
-				long inputNode = (instr.payload() != 0) ? (long) instr.payload() : 0L;
-				VmHandlers.handleInitInputNode(state, ctx, instr, inputNode);
+				Object effectiveInput = (instr.payload() != 0) ? (long) instr.payload() : input;
+				VmHandlers.handleInitInputNode(state, ctx, instr, effectiveInput);
 				nextPc++;
 			}
 			case 0x03 -> {
-				VmHandlers.handleInitInputSet(state, ctx, instr,
-						new org.impulsegraph.api.bitset.OffHeapBitSet(ctx.arena(), 1000));
+				VmHandlers.handleInitInputSet(state, ctx, instr, input);
 				nextPc++;
 			}
 			case 0x04 -> {
@@ -207,16 +206,26 @@ public final class ImpulseMethodHandleCompiler {
 				nextPc++;
 			}
 			case 0x0E -> {
-				VmHandlers.handleCsrWalk2Hop(state, ctx, instr, null);
-				nextPc++;
+				VmHandlers.handleCsrWalk2Hop(state, ctx, instr, input);
+				if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0
+						&& VmHandlers.checkFlag(state, VmRegisterType.FLAG_ZF)) {
+					nextPc = (int) instructionCount;
+				} else {
+					nextPc++;
+				}
 			}
 			case 0x0F -> {
 				VmHandlers.handleCsrWalkState(state, ctx, instr);
 				nextPc++;
 			}
 			case 0x10 -> {
-				VmHandlers.handleCsrWalk(state, ctx, instr);
-				nextPc++;
+				VmHandlers.handleCsrWalk(state, ctx, instr, input);
+				if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0
+						&& VmHandlers.checkFlag(state, VmRegisterType.FLAG_ZF)) {
+					nextPc = (int) instructionCount;
+				} else {
+					nextPc++;
+				}
 			}
 			case 0x11 -> {
 				VmHandlers.handleCsrWalkFiltered(state, ctx, instr);
@@ -250,8 +259,13 @@ public final class ImpulseMethodHandleCompiler {
 				nextPc++;
 			} // OP_CSR_WALK_REDUCE
 			case 0x18 -> {
-				VmHandlers.handleCscWalk(state, ctx, instr);
-				nextPc++;
+				VmHandlers.handleCscWalk(state, ctx, instr, input);
+				if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0
+						&& VmHandlers.checkFlag(state, VmRegisterType.FLAG_ZF)) {
+					nextPc = (int) instructionCount;
+				} else {
+					nextPc++;
+				}
 			}
 			case 0x19 -> {
 				VmHandlers.handleHasCsr(state, ctx, instr);
@@ -290,7 +304,7 @@ public final class ImpulseMethodHandleCompiler {
 				nextPc++;
 			}
 			case 0x35 -> {
-				VmHandlers.handleVectorReduceSum(state, ctx, instr);
+				ctx.setFinalResult(VmHandlers.handleVectorReduceSum(state, ctx, instr));
 				nextPc++;
 			}
 			case 0x36 -> {
@@ -323,6 +337,8 @@ public final class ImpulseMethodHandleCompiler {
 			}
 			case 0x40 -> {
 				VmHandlers.handleCcAfforest(state, ctx, instr);
+				int handle = (int) VmHandlers.getRegisterValue(state, instr.dstReg());
+				ctx.setFinalResult(ctx.getNodeVector(handle));
 				nextPc++;
 			}
 			case 0x41 -> {
@@ -342,7 +358,7 @@ public final class ImpulseMethodHandleCompiler {
 				nextPc++;
 			}
 			case 0x45 -> {
-				VmHandlers.handleReduce(state, ctx, instr);
+				ctx.setFinalResult(VmHandlers.handleReduce(state, ctx, instr));
 				nextPc++;
 			}
 			case 0x46 -> {
@@ -633,7 +649,7 @@ public final class ImpulseMethodHandleCompiler {
 				nextPc++;
 			}
 			case 0x90 -> {
-				VmHandlers.handleCollectBitset(state, ctx, instr);
+				ctx.setFinalResult(VmHandlers.handleCollectBitset(state, ctx, instr, input));
 				nextPc++;
 			}
 			case 0x91 -> {

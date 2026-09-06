@@ -117,6 +117,14 @@ public class VmExecutionEngineTest {
 			assertEquals(2, resBs.cardinality());
 			assertTrue(resBs.get(10));
 			assertTrue(resBs.get(20));
+
+			MethodHandle mh = ImpulseMethodHandleCompiler.compile(prog, code.length);
+			Object mhRes = mh.invokeExact(graph, (Object) set1, arena);
+			assertTrue(mhRes instanceof ImpulseBitSet);
+			ImpulseBitSet mhBs = (ImpulseBitSet) mhRes;
+			assertEquals(2, mhBs.cardinality());
+			assertTrue(mhBs.get(10));
+			assertTrue(mhBs.get(20));
 		}
 	}
 
