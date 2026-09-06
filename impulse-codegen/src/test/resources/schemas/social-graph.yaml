@@ -9,7 +9,7 @@ nodes:
     attributes:
       username: { type: string, length: 15, nullable: false, indexed: true }
       email: { type: varstring, nullable: false }
-      embedding: { type: float32[768] }
+      embedding: { type: "float32[768]" }
   Post:
     key: int64
     denseId: int64
