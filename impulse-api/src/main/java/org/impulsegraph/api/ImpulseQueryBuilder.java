@@ -187,6 +187,35 @@ public class ImpulseQueryBuilder<R> {
 	}
 
 	/**
+	 * Add a reverse (CSC) edge walk step over the relation name.
+	 *
+	 * @param relationName
+	 *            Name of edge relation
+	 * @return This builder instance for method chaining
+	 */
+	public ImpulseQueryBuilder<R> walkReverse(String relationName) {
+		Objects.requireNonNull(relationName, "relationName must not be null");
+		steps.add(ScmWalk.reverse(relationName));
+		return this;
+	}
+
+	/**
+	 * Add a reverse (CSC) edge walk step with an embedded CEL expression.
+	 *
+	 * @param relationName
+	 *            Name of edge relation
+	 * @param celExpr
+	 *            CEL expression
+	 * @return This builder instance for method chaining
+	 */
+	public ImpulseQueryBuilder<R> walkReverseWithCel(String relationName, String celExpr) {
+		Objects.requireNonNull(relationName, "relationName must not be null");
+		Objects.requireNonNull(celExpr, "celExpr must not be null");
+		steps.add(ScmWalk.reverse(relationName, new ScmCelExpr(celExpr)));
+		return this;
+	}
+
+	/**
 	 * Repeat a sub-query pipeline a fixed number of times.
 	 *
 	 * @param stepFn

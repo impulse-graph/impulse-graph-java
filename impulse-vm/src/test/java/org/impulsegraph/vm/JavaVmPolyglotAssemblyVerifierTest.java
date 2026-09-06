@@ -387,19 +387,7 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 									pc++;
 								}
 								case 0x05 -> {
-									int domainId = instr.payload() & 0xFFFF;
-									if (domainId >= 32768) {
-										actualStatus = "IMPULSE_VM_ERR_OUT_OF_BOUNDS";
-										break;
-									}
-									int hDst = ctx.acquireBitset();
-									if (hDst < 0) {
-										actualStatus = "IMPULSE_VM_ERR_OUT_OF_BOUNDS";
-										break;
-									}
-									VmHandlers.setRegister(state, instr.dstReg(), hDst,
-											VmRegisterType.TYPE_BITSET_HANDLE);
-									VmHandlers.setFlag(state, VmRegisterType.FLAG_ZF, true);
+									VmHandlers.handleMapKeysToDense(state, ctx, instr);
 									pc++;
 								}
 								case 0x06 -> {

@@ -74,6 +74,11 @@ public final class ImpulseVmInterpreter {
 						pc++;
 					}
 
+					case OP_MAP_KEYS_TO_DENSE -> {
+						VmHandlers.handleMapKeysToDense(state, ctx, instr);
+						pc++;
+					}
+
 					case OP_CSR_WALK -> {
 						VmHandlers.handleCsrWalk(state, ctx, instr, input);
 						if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0
@@ -104,6 +109,26 @@ public final class ImpulseVmInterpreter {
 						}
 					}
 
+					case OP_HAS_CSR -> {
+						VmHandlers.handleHasCsr(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_HAS_CSC -> {
+						VmHandlers.handleHasCsc(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_HAS_COO -> {
+						VmHandlers.handleHasCoo(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_HAS_KEY_CATALOG -> {
+						VmHandlers.handleHasKeyCatalog(state, ctx, instr);
+						pc++;
+					}
+
 					case OP_ADAPTIVE_WALK -> {
 						VmHandlers.handleAdaptiveWalk(state, ctx, instr);
 						pc++;
@@ -116,6 +141,16 @@ public final class ImpulseVmInterpreter {
 
 					case OP_CSR_WALK_PREDICATE -> {
 						VmHandlers.handleCsrWalkPredicate(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_CSR_WALK_REDUCE_SUM -> {
+						VmHandlers.handleCsrWalkReduceSum(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_CSR_WALK_REDUCE -> {
+						VmHandlers.handleCsrWalkReduce(state, ctx, instr);
 						pc++;
 					}
 
@@ -255,7 +290,7 @@ public final class ImpulseVmInterpreter {
 						pc++;
 					}
 
-					case OP_NODE_FILTER -> {
+					case OP_NODE_FILTER, OP_NODE_FILTER_STR_PREFIX -> {
 						VmHandlers.handleNodeFilter(state, ctx, instr, input);
 						pc++;
 					}
@@ -392,8 +427,8 @@ public final class ImpulseVmInterpreter {
 							OP_STREAM_MATH_DIV, OP_STREAM_MATH_MOD, OP_STREAM_MATH_UNARY, OP_STREAM_CMP_EQ,
 							OP_STREAM_CMP_NEQ, OP_STREAM_CMP_GT, OP_STREAM_CMP_LT, OP_STREAM_LOGIC_AND,
 							OP_STREAM_LOGIC_OR, OP_STREAM_LOGIC_NOT, OP_STREAM_SELECT, OP_STREAM_REDUCE,
-							OP_STREAM_REDUCE_ARGMIN, OP_STREAM_REDUCE_ARGMAX, OP_STREAM_YIELD,
-							OP_STREAM_SCATTER_REDUCE -> {
+							OP_STREAM_REDUCE_ARGMIN, OP_STREAM_REDUCE_ARGMAX, OP_STREAM_YIELD, OP_STREAM_SCATTER_REDUCE,
+							OP_STREAM_FILTER -> {
 						pc++;
 					}
 					case OP_COLLECT_ARRAY -> {

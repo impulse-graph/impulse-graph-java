@@ -14,6 +14,7 @@ It acts as the **"Apache Arrow for Graph Analytics"** on the JVM, pairing an imm
 - **Java 21 LTS Baseline & Forward Compatibility**: Compiles against Java 21 LTS baseline (`<maven.compiler.release>21</maven.compiler.release>`) with 100% forward compatibility for Java 22, 23, 24, and 25+ runtimes.
 - **Zero External Runtime Dependencies**: All core modules maintain **strictly 0 third-party runtime dependencies** (`java.base`, `jdk.incubator.vector`, FFM).
 - **SIMD Vector API Acceleration**: Vectorizes graph traversal steps across unrolled AVX-512 and ARM Neon registers using `jdk.incubator.vector`.
+- **~10us JIT Compilation**: Generates native `MethodHandle` combinator trees from frontend ASTs in under 10 microseconds for dynamic real-time queries.
 - **Configurable Primitive Node ID Widths**: Independent per-domain physical integer addressing widths (`uint16_t`, `uint32_t`, `uint64_t`) optimizing cache line density and memory bandwidth.
 - **Per-Domain Dense ID Independence ($0 \dots N_d-1$)**: Strict per-domain ID spaces with explicit domain anchoring.
 - **Kleisli Frontier Traversal Pipeline**: Monadic frontier propagation $\langle D, S \rangle \xrightarrow{R} \langle D', S' \rangle$ with monoidic path reduction (`OR`, `MIN`, `MAX`, `SUM`).

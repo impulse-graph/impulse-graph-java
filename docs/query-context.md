@@ -33,7 +33,7 @@ The context contains:
 ImpulseGraph is designed for low-latency queries even while the graph is being updated. This is achieved through a "blue/green" snapshot swap mechanism.
 
 1.  **Immutable Snapshots**: Queries execute against an immutable `ImpulseGraphSnapshot`.
-2.  **Snapshot Swapping**: When a new version of the graph is ready (e.g., after a compaction), the `SnapshotSwapManager` atomically updates the pointer to the "current" snapshot.
+2.  **Snapshot Swapping**: When a new version of the graph is ready (e.g., after a full out-of-band rebuild), the `SnapshotSwapManager` atomically updates the pointer to the "current" snapshot.
 3.  **Automatic Re-compilation**: If a query is held by a long-running service, the engine can detect a snapshot swap. On the next execution, the query's internal pointers are automatically updated to point to the new off-heap segments. This ensures that the query always sees the most recent stable data without manual developer intervention.
 
 ## Thread Safety & Memory Management

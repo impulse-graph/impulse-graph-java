@@ -51,6 +51,7 @@
                     <testSourceDirectories>
                         <testSourceDirectory>src/test/clojure</testSourceDirectory>
                     </testSourceDirectories>
+                    <vmargs>--enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED</vmargs>
                 </configuration>
                 <executions>
                     <execution>

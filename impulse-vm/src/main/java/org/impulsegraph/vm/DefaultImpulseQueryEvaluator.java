@@ -42,20 +42,23 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 			metrics.setActiveQueries(graph.getActiveQueryCount());
 		}
 
-		if (graph != null && query != null && query.getAst() != null) {
-			CompiledQuery compiled = COMPILED_QUERY_CACHE.computeIfAbsent(query, q -> {
-				metrics.recordCacheMiss();
-				return compileAst(q.getAst(), graph, COMPILER_ARENA);
-			});
-
-			if (compiled != null) {
-				metrics.recordCacheHit();
-				R result = (R) compiled.execute(graph, input, COMPILER_ARENA);
-				metrics.recordQueryExecution(System.nanoTime() - startNanos);
-				return result;
-			}
+		if (graph == null || query == null || query.getAst() == null) {
+			throw new IllegalArgumentException("Snapshot, query, or query AST cannot be null");
 		}
-		throw new UnsupportedOperationException("Empty query or unable to compile pipeline");
+
+		CompiledQuery compiled = COMPILED_QUERY_CACHE.computeIfAbsent(query, q -> {
+			metrics.recordCacheMiss();
+			return compileAst(q.getAst(), graph, COMPILER_ARENA);
+		});
+
+		if (compiled != null) {
+			metrics.recordCacheHit();
+			R result = (R) compiled.execute(graph, input, COMPILER_ARENA);
+			metrics.recordQueryExecution(System.nanoTime() - startNanos);
+			return result;
+		}
+
+		throw new IllegalStateException("Failed to compile query AST to bytecode");
 	}
 
 	public static CompiledQuery compileAst(ImpScmNode ast, ImpulseGraphSnapshot snapshot, Arena arena) {

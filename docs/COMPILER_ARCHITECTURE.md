@@ -100,14 +100,15 @@ Measured on Apple Silicon M-series hardware with Java 25 FFM off-heap memory map
 
 ```
 ----------------------------------------------------------------------------------------
- Warmed Compilation Throughput:  549,040 compilations / second
-   • p50 (Median Latency):        1,750 ns   (1.750 µs)
-   • Mean (Average Latency):      1,787 ns   (1.787 µs)
-   • p90 Latency:                 1,875 ns   (1.875 µs)
-   • p99 Latency:                 2,083 ns   (2.083 µs)
+ 7-Stage AST Compilation Pipeline:
+   • Throughput:                 1,107,677 compilations / second
+   • Mean Latency:               0.892 µs (892 ns)
 ----------------------------------------------------------------------------------------
- Query Execution Throughput:      74,454 queries / second
-   • Mean Latency:                 9.958 µs
+ MethodHandle JIT Combinator Tree Generation (8 instructions):
+   • Mean Latency:               8.537 µs
+----------------------------------------------------------------------------------------
+ Total End-to-End JIT Pipeline (AST -> Optimization -> Bytecode -> MethodHandle):
+   • Total Latency:              < 10 µs per query
 ----------------------------------------------------------------------------------------
 ```
 

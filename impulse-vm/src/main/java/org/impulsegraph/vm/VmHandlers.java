@@ -170,6 +170,19 @@ public final class VmHandlers {
 		setRegister(state, instr.dstReg(), Integer.toUnsignedLong(Float.floatToRawIntBits(fVal)), TYPE_FLOAT);
 	}
 
+	public static void handleMapKeysToDense(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		int domainId = instr.payload() & 0xFFFF;
+		if (domainId >= 32768) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
+		int hDst = ctx.acquireBitset();
+		if (hDst < 0) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
+		setRegister(state, instr.dstReg(), hDst, TYPE_BITSET_HANDLE);
+		setFlag(state, FLAG_ZF, true);
+	}
+
 	private static final String[] PRECACHED_REL_NAMES = new String[256];
 	static {
 		for (int i = 0; i < 256; i++) {

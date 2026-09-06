@@ -79,6 +79,12 @@ public class ImpulseStatementImpl implements ImpulseStatement {
 	}
 
 	@Override
+	public ImpulseStatement bindStrings(String param, java.util.Collection<String> values) {
+		namedBindings.put(param, new java.util.ArrayList<>(values));
+		return this;
+	}
+
+	@Override
 	public ImpulseStatement clearBindings() {
 		namedBindings.clear();
 		positionalBindings.clear();

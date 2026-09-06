@@ -22,7 +22,7 @@ value class RelationName(val value: String)
 fun buildRebacQuery(
     entityType: String,
     relationName: String,
-    permission: String
+    permission: String,
 ): ImpulseGraphQuery<Boolean> {
     return impulseQuery<Boolean> {
         input(entityType, ArgType.SINGLE_NODE)
@@ -37,7 +37,7 @@ fun buildRebacQuery(
 fun buildNHopQuery(
     entityType: String,
     relationName: String,
-    hops: Int
+    hops: Int,
 ): ImpulseGraphQuery<Any> {
     return impulseQuery<Any> {
         input(entityType, ArgType.SINGLE_NODE)
