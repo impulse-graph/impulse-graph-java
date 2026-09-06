@@ -64,6 +64,18 @@
                             <version>4.31</version>
                         </eclipse>
                     </java>
+                    <formats>
+                        <format>
+                            <includes>
+                                <include>**/*.clj</include>
+                                <include>**/*.cljs</include>
+                                <include>**/*.cljc</include>
+                                <include>**/*.edn</include>
+                            </includes>
+                            <trimTrailingWhitespace/>
+                            <endWithNewline/>
+                        </format>
+                    </formats>
                 </configuration>
                 <executions>
                     <execution>

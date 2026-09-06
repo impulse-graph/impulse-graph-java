@@ -15,6 +15,8 @@
 
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
+        <scala.version>3.5.2</scala.version>
+        <scalatest.version>3.2.19</scalatest.version>
     </properties>
 
     <dependencies>
@@ -27,6 +29,7 @@
         <dependency>
             <groupId>org.scala-lang</groupId>
             <artifactId>scala3-library_3</artifactId>
+            <version>${scala.version}</version>
         </dependency>
 
         <!-- Test Dependencies -->
@@ -44,6 +47,7 @@
         <dependency>
             <groupId>org.scalatest</groupId>
             <artifactId>scalatest_3</artifactId>
+            <version>${scalatest.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -77,6 +81,18 @@
                     <args>
                         <arg>-new-syntax</arg>
                     </args>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <configuration>
+                    <scala>
+                        <scalafmt>
+                            <version>3.8.3</version>
+                            <file>.scalafmt.conf</file>
+                        </scalafmt>
+                    </scala>
                 </configuration>
             </plugin>
         </plugins>

@@ -13,6 +13,11 @@
     <artifactId>impulse-kotlin</artifactId>
     <name>Impulse Graph Engine - Kotlin Extensions &amp; DSL</name>
 
+    <properties>
+        <kotlin.version>2.1.10</kotlin.version>
+        <kotlinx.coroutines.version>1.9.0</kotlinx.coroutines.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.impulsegraph</groupId>
@@ -23,11 +28,13 @@
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
             <artifactId>kotlin-stdlib</artifactId>
+            <version>${kotlin.version}</version>
         </dependency>
 
         <dependency>
             <groupId>org.jetbrains.kotlinx</groupId>
             <artifactId>kotlinx-coroutines-core</artifactId>
+            <version>${kotlinx.coroutines.version}</version>
         </dependency>
 
         <!-- Test Dependencies -->
@@ -45,11 +52,13 @@
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
             <artifactId>kotlin-test-junit5</artifactId>
+            <version>${kotlin.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.jetbrains.kotlinx</groupId>
             <artifactId>kotlinx-coroutines-test</artifactId>
+            <version>${kotlinx.coroutines.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -98,6 +107,15 @@
                 </executions>
                 <configuration>
                     <jvmTarget>21</jvmTarget>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <configuration>
+                    <kotlin>
+                        <ktlint/>
+                    </kotlin>
                 </configuration>
             </plugin>
         </plugins>

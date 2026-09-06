@@ -13,13 +13,17 @@ object DomainTypes:
     def apply(value: String): RelationName = value
     extension (rel: RelationName) def value: String = rel
 
+export DomainTypes.{NodeId, RelationName}
+
 def buildRebacQuery(
     entityType: String,
     relationName: String,
     permission: String
 ): ImpulseGraphQuery[java.lang.Boolean] =
-  impulseQuery[java.lang.Boolean] { dsl =>
-    dsl.input(entityType, ArgType.SINGLE_NODE)
-    dsl.walkEdge(relationName)
-    dsl.extended(_.rebacCheck(permission))
+  impulseQuery[java.lang.Boolean] {
+    input(entityType, ArgType.SINGLE_NODE)
+    walkEdge(relationName)
+    extended {
+      rebacCheck(permission)
+    }
   }.collect(ReturnType.EXISTS)

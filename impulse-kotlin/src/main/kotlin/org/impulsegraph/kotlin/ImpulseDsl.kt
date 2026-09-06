@@ -13,14 +13,27 @@ annotation class ImpulseQueryDslMarker
  */
 @ImpulseQueryDslMarker
 class ImpulseQueryDsl<R>(
-    private val builder: ImpulseQueryBuilder<R> = ImpulseQueryBuilder()
+    private val builder: ImpulseQueryBuilder<R> = ImpulseQueryBuilder(),
 ) {
-
     /**
      * Define the input entity type and argument type for the query pipeline.
      */
-    fun input(entityType: String, argType: ArgType = ArgType.SINGLE_NODE): ImpulseQueryDsl<R> {
+    fun input(
+        entityType: String,
+        argType: ArgType = ArgType.SINGLE_NODE,
+    ): ImpulseQueryDsl<R> {
         builder.input(entityType, argType)
+        return this
+    }
+
+    /**
+     * Define the input entity type and seed node identifier.
+     */
+    fun input(
+        entityType: String,
+        seed: NodeId,
+    ): ImpulseQueryDsl<R> {
+        builder.input(entityType, ArgType.SINGLE_NODE)
         return this
     }
 
@@ -33,9 +46,20 @@ class ImpulseQueryDsl<R>(
     }
 
     /**
+     * Add a CSR forward edge walk step over a typed [RelationName].
+     */
+    infix fun walkEdge(relationName: RelationName): ImpulseQueryDsl<R> {
+        builder.walkEdge(relationName.value)
+        return this
+    }
+
+    /**
      * Walk edge with filter label.
      */
-    fun walkEdgeFiltered(relationName: String, filterLabel: String): ImpulseQueryDsl<R> {
+    fun walkEdgeFiltered(
+        relationName: String,
+        filterLabel: String,
+    ): ImpulseQueryDsl<R> {
         builder.walkEdgeFiltered(relationName, filterLabel)
         return this
     }
@@ -43,7 +67,12 @@ class ImpulseQueryDsl<R>(
     /**
      * Add a filtered CSR edge walk step based on numeric edge attribute comparison.
      */
-    fun walkEdgeFilteredAttribute(relationName: String, attributeName: String, op: String, value: Double): ImpulseQueryDsl<R> {
+    fun walkEdgeFilteredAttribute(
+        relationName: String,
+        attributeName: String,
+        op: String,
+        value: Double,
+    ): ImpulseQueryDsl<R> {
         builder.walkEdgeFilteredAttribute(relationName, attributeName, op, value)
         return this
     }
@@ -57,9 +86,21 @@ class ImpulseQueryDsl<R>(
     }
 
     /**
+     * Walk to target relation domain nodes over a typed [RelationName].
+     */
+    infix fun walkTarget(relationName: RelationName): ImpulseQueryDsl<R> {
+        builder.walkTarget(relationName.value)
+        return this
+    }
+
+    /**
      * Filter active candidate node set by comparing a node attribute against a numeric threshold.
      */
-    fun filterNodeAttribute(attributeName: String, op: String, value: Double): ImpulseQueryDsl<R> {
+    fun filterNodeAttribute(
+        attributeName: String,
+        op: String,
+        value: Double,
+    ): ImpulseQueryDsl<R> {
         builder.filterNodeAttribute(attributeName, op, value)
         return this
     }
@@ -67,7 +108,11 @@ class ImpulseQueryDsl<R>(
     /**
      * Add a map-reduce projection expression combining node and edge attributes.
      */
-    fun projectExpression(nodeAttribute: String, operator: String, edgeAttribute: String): ImpulseQueryDsl<R> {
+    fun projectExpression(
+        nodeAttribute: String,
+        operator: String,
+        edgeAttribute: String,
+    ): ImpulseQueryDsl<R> {
         builder.projectExpression(nodeAttribute, operator, edgeAttribute)
         return this
     }
@@ -75,7 +120,10 @@ class ImpulseQueryDsl<R>(
     /**
      * Repeat a sub-query pipeline a fixed number of times.
      */
-    fun repeat(count: Int, block: ImpulseQueryDsl<R>.() -> Unit): ImpulseQueryDsl<R> {
+    fun repeat(
+        count: Int,
+        block: ImpulseQueryDsl<R>.() -> Unit,
+    ): ImpulseQueryDsl<R> {
         builder.repeat({ subBuilder ->
             val dsl = ImpulseQueryDsl(subBuilder)
             dsl.block()
@@ -146,7 +194,10 @@ class ImpulseQueryDsl<R>(
  * Extended domain opcodes DSL wrapper.
  */
 class ExtendedOpsDsl<R>(private val extOps: ImpulseQueryBuilder.ExtendedOps<R>) {
-    fun islandDetect(src1Reg: Int, src2Reg: Int) {
+    fun islandDetect(
+        src1Reg: Int,
+        src2Reg: Int,
+    ) {
         extOps.islandDetect(src1Reg, src2Reg)
     }
 

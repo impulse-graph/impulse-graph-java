@@ -23,7 +23,7 @@
       (imp/out "GpPW")
       (imp/in "GpPW")
       (imp/in "CbG"))
-    
+
     (let [q (drug-repurposing nil 14726)]
       (is (= 4 (count (:steps q))))
       (is (= "DaG" (:relation-name (first (:steps q)))))

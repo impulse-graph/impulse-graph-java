@@ -185,12 +185,8 @@ public class SnapshotBuilderJmhBenchmark {
 	}
 
 	public static void main(String[] args) throws Exception {
-		Options opt = new OptionsBuilder()
-				.include(SnapshotBuilderJmhBenchmark.class.getSimpleName())
-				.forks(0)
-				.warmupIterations(2)
-				.measurementIterations(3)
-				.build();
+		Options opt = new OptionsBuilder().include(SnapshotBuilderJmhBenchmark.class.getSimpleName()).forks(0)
+				.warmupIterations(2).measurementIterations(3).build();
 
 		new Runner(opt).run();
 	}
