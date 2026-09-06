@@ -720,9 +720,10 @@ public class JavaVmJsonRunner {
 					try {
 						JitDriver driver = ImpulseMethodHandleCompiler.compileDriver(progSeg, instructionCount);
 						driver.execute(ctx, state, 0L, instructionCount);
-						// JIT sets PC internally. If it exited cleanly, pc should be instructionCount
-						pc = instructionCount;
+						// According to VM Spec §2.2, PC remains pointed at the halting or faulting instruction
+						pc = (int) VmStateLayout.PC_HANDLE.get(state, 0L);
 					} catch (Throwable t) {
+						pc = (int) VmStateLayout.PC_HANDLE.get(state, 0L);
 						t.printStackTrace();
 						String msg = t.getMessage();
 						if (msg != null && msg.contains("IMPULSE_VM_ERR_")) {
