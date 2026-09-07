@@ -27,7 +27,10 @@ public class JitDriver {
 			}
 			VmStateLayout.PC_HANDLE.set(state, 0L, lastPc);
 		} catch (Throwable t) {
-			VmStateLayout.PC_HANDLE.set(state, 0L, lastPc);
+			int currentPc = (int) VmStateLayout.PC_HANDLE.get(state, 0L);
+			if (currentPc >= 0 && currentPc < maxPc && currentPc != lastPc + 1) {
+				VmStateLayout.PC_HANDLE.set(state, 0L, lastPc);
+			}
 			if (t instanceof RuntimeException re)
 				throw re;
 			throw new RuntimeException(t);
