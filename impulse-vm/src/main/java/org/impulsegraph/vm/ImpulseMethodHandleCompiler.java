@@ -122,17 +122,23 @@ public final class ImpulseMethodHandleCompiler {
 	public static int fallbackExecute(MemorySegment programSeg, long instructionCount, VmQueryContext ctx,
 			MemorySegment state, Object input, int pc) {
 		VmHandlers.Instruction instr = VmHandlers.decodeInstruction(programSeg, pc);
+		if ((instr.flags() & VmRegisterType.OP_FLAG_EXTENDED) != 0) {
+			VmHandlers.ExtendedInstruction ext = VmHandlers.decodeExtendedInstruction(programSeg, pc);
+			instr = new VmHandlers.Instruction(instr.opcode(), instr.flags(), instr.dstReg(),
+					(instr.payload() & 0xFFFF) | (ext.arg3() << 16));
+		}
 		int nextPc = pc;
 		if (instr.dstReg() >= 64 && Byte.toUnsignedInt(instr.opcode()) != 0x09
 				&& Byte.toUnsignedInt(instr.opcode()) != 0x0B && Byte.toUnsignedInt(instr.opcode()) != 0x0C) {
 			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
 		}
 
-		switch (Byte.toUnsignedInt(instr.opcode())) {
+		try {
+			switch (Byte.toUnsignedInt(instr.opcode())) {
 
-			case 0x00 -> {
-				nextPc = (int) instructionCount;
-			}
+				case 0x00 -> {
+					nextPc = (int) instructionCount;
+				}
 			case 0x01 -> nextPc++; // OP_NOP
 			case 0x02 -> {
 				Object effectiveInput = (instr.payload() != 0) ? (long) instr.payload() : input;
@@ -150,7 +156,7 @@ public final class ImpulseMethodHandleCompiler {
 			case 0x05 -> {
 				int domainId = instr.payload() & 0xFFFF;
 				if (domainId >= 32768) {
-					throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+					VmStateLayout.PC_HANDLE.set(state, 0L, nextPc); throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
 				}
 				VmHandlers.validateReg(instr.dstReg());
 				int h = (VmHandlers.getRegisterType(state, instr.dstReg()) == VmRegisterType.TYPE_BITSET_HANDLE)
@@ -237,7 +243,7 @@ public final class ImpulseMethodHandleCompiler {
 			}
 			case 0x13 -> {
 				if (instr.flags() == (byte) 0xFF || ((instr.payload() >> 24) & 0xFF) == 0xFF) {
-					throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+					VmStateLayout.PC_HANDLE.set(state, 0L, nextPc); throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
 				}
 				VmHandlers.handleCsrWalkPredicate(state, ctx, instr);
 				nextPc++;
@@ -389,14 +395,14 @@ public final class ImpulseMethodHandleCompiler {
 				int offset = instr.payload();
 				nextPc += offset;
 				if (nextPc < 0 || nextPc >= instructionCount) {
-					throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+					VmStateLayout.PC_HANDLE.set(state, 0L, nextPc); throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
 				}
 			}
 			case 0x51 -> {
 				if (VmHandlers.checkFlag(state, VmRegisterType.FLAG_ZF)) {
 					nextPc += instr.payload();
 					if (nextPc < 0 || nextPc >= instructionCount) {
-						throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+						VmStateLayout.PC_HANDLE.set(state, 0L, nextPc); throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
 					}
 				} else {
 					nextPc++;
@@ -406,7 +412,7 @@ public final class ImpulseMethodHandleCompiler {
 				if (!VmHandlers.checkFlag(state, VmRegisterType.FLAG_ZF)) {
 					nextPc += instr.payload();
 					if (nextPc < 0 || nextPc >= instructionCount) {
-						throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+						VmStateLayout.PC_HANDLE.set(state, 0L, nextPc); throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
 					}
 				} else {
 					nextPc++;
@@ -419,7 +425,7 @@ public final class ImpulseMethodHandleCompiler {
 				if (val > 0) {
 					nextPc += instr.payload();
 					if (nextPc < 0 || nextPc >= instructionCount) {
-						throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+						VmStateLayout.PC_HANDLE.set(state, 0L, nextPc); throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
 					}
 				} else {
 					nextPc++;
@@ -688,7 +694,21 @@ public final class ImpulseMethodHandleCompiler {
 				throw new RuntimeException("IMPULSE_VM_ERR_INVALID_OPCODE");
 			}
 		}
+		} catch (Throwable t) {
+			int currentPc = (int) VmStateLayout.PC_HANDLE.get(state, 0L);
+			if (currentPc >= 0 && currentPc < instructionCount) {
+				if ((instr.flags() & VmRegisterType.OP_FLAG_EXTENDED) != 0) {
+					VmStateLayout.PC_HANDLE.set(state, 0L, pc + 1);
+				} else {
+					VmStateLayout.PC_HANDLE.set(state, 0L, pc);
+				}
+			}
+			throw t;
+		}
 
+		if ((instr.flags() & VmRegisterType.OP_FLAG_EXTENDED) != 0) {
+			nextPc++;
+		}
 		return nextPc;
 	}
 	private static MethodHandle getSkipHandler() throws Exception {
