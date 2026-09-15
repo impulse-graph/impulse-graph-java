@@ -34,13 +34,11 @@ jobs:
           echo "${{ secrets.MAVEN_GPG_PRIVATE_KEY }}" | gpg --batch --import
 
       - name: Publish artifacts
-        run: |
-          printf "%s" "${{ secrets.MAVEN_GPG_PASSPHRASE }}" > $RUNNER_TEMP/gpg-passphrase
-          mvn deploy -P release -DskipTests=true --batch-mode --errors
-          rm -f $RUNNER_TEMP/gpg-passphrase
+        run: mvn deploy -P release -DskipTests=true --batch-mode --errors
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          GPG_SECRET_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
 
       - name: Attest Build Provenance
         uses: actions/attest-build-provenance@v1
