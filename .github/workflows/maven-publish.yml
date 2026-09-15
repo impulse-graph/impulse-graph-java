@@ -27,7 +27,7 @@ jobs:
           server-username: CENTRAL_USERNAME
           server-password: CENTRAL_PASSWORD
           gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
-          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+          gpg-passphrase: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
 
       - name: Publish artifacts
         run: mvn deploy -P release -DskipTests=true --batch-mode --errors
