@@ -28,7 +28,10 @@ jobs:
           server-id: central
           server-username: CENTRAL_USERNAME
           server-password: CENTRAL_PASSWORD
-          gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+
+      - name: Import GPG Key
+        run: |
+          echo "${{ secrets.MAVEN_GPG_PRIVATE_KEY }}" | gpg --batch --import
 
       - name: Publish artifacts
         run: |
