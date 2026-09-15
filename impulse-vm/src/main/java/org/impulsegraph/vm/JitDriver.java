@@ -20,7 +20,8 @@ public class JitDriver {
 				// Object input, int currentPc) -> int (nextPc)
 				int nextPc = (int) handlers[pc].invokeExact(ctx, state, input, pc);
 				if (nextPc == (int) maxPc) {
-					// OP_HALT or block exit: according to VM spec §2.2, PC remains pointed at halting instruction
+					// OP_HALT or block exit: according to VM spec §2.2, PC remains pointed at
+					// halting instruction
 					break;
 				}
 				pc = nextPc;
