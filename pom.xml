@@ -191,6 +191,8 @@
                             <gpgArguments>
                                 <arg>--pinentry-mode</arg>
                                 <arg>loopback</arg>
+                                <arg>--passphrase-file</arg>
+                                <arg>${env.RUNNER_TEMP}/gpg-passphrase</arg>
                             </gpgArguments>
                         </configuration>
                     </plugin>

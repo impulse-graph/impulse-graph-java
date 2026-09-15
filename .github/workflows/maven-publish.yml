@@ -30,18 +30,14 @@ jobs:
           server-password: CENTRAL_PASSWORD
           gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
 
-      - name: Create valid settings-security.xml to bypass Maven SecDispatcher bug
-        run: |
-          mkdir -p ~/.m2
-          MASTER=$(mvn --encrypt-master-password "dummy" -q)
-          echo "<settingsSecurity><master>${MASTER}</master></settingsSecurity>" > ~/.m2/settings-security.xml
-
       - name: Publish artifacts
-        run: mvn deploy -P release -DskipTests=true --batch-mode --errors
+        run: |
+          printf "%s" "${{ secrets.MAVEN_GPG_PASSPHRASE }}" > $RUNNER_TEMP/gpg-passphrase
+          mvn deploy -P release -DskipTests=true --batch-mode --errors
+          rm -f $RUNNER_TEMP/gpg-passphrase
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
-          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
 
       - name: Attest Build Provenance
         uses: actions/attest-build-provenance@v1
