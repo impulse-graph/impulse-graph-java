@@ -30,7 +30,7 @@ jobs:
           gpg-passphrase: MAVEN_GPG_PASSPHRASE
 
       - name: Publish artifacts
-        run: mvn deploy -P release -DskipTests=true --batch-mode --errors -Dgpg.passphrase=${MAVEN_GPG_PASSPHRASE}
+        run: mvn deploy -P release -DskipTests=true --batch-mode --errors
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
