@@ -717,11 +717,12 @@ public class JavaVmJsonRunner {
 						}
 					}
 				} else {
-						try {
-							JitDriver driver = ImpulseMethodHandleCompiler.compileDriver(progSeg, instructionCount);
-							driver.execute(ctx, state, null, instructionCount);
-							// According to VM Spec §2.2, PC remains pointed at the halting or faulting instruction
-							pc = (int) VmStateLayout.PC_HANDLE.get(state, 0L);
+					try {
+						JitDriver driver = ImpulseMethodHandleCompiler.compileDriver(progSeg, instructionCount);
+						driver.execute(ctx, state, null, instructionCount);
+						// According to VM Spec §2.2, PC remains pointed at the halting or faulting
+						// instruction
+						pc = (int) VmStateLayout.PC_HANDLE.get(state, 0L);
 					} catch (Throwable t) {
 						pc = (int) VmStateLayout.PC_HANDLE.get(state, 0L);
 						t.printStackTrace();
