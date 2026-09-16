@@ -31,6 +31,12 @@ jobs:
           gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
           gpg-passphrase: MAVEN_GPG_PASSPHRASE
 
+      - name: Set Release Version from Tag
+        run: |
+          RAW_TAG="${{ github.ref_name }}"
+          CLEAN_VERSION="${RAW_TAG#v}"
+          mvn versions:set -DnewVersion=$CLEAN_VERSION -DgenerateBackupPoms=false
+
       - name: Publish artifacts
         run: mvn deploy -P release -DskipTests=true --batch-mode --errors
         env:
