@@ -244,7 +244,7 @@ Add the plugin to your `pom.xml` to automatically generate strongly-typed query 
 <plugin>
     <groupId>org.impulsegraph</groupId>
     <artifactId>impulse-maven-plugin</artifactId>
-    <version>0.9.0-SNAPSHOT</version>
+    <version>0.9.0</version>
     <executions>
         <execution>
             <goals>

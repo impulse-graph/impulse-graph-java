@@ -6,13 +6,7 @@ A practical guide for loading immutable binary snapshot files (`.imps`), queryin
 
 ## 1. Installation & Setup
 
-> [!TIP]
-> **Build from Source Recommendation**:
-> While Impulse Graph is in snapshot development, build the Java modules from source and install them directly into your local Maven cache (`~/.m2`):
-> ```bash
-> cd ~/impulse/impulse-graph-java
-> mvn clean install -DskipTests
-> ```
+Impulse Graph is published to **Maven Central** under groupId `org.impulsegraph`.
 
 ### 1.1 Dependency Coordinates
 
@@ -25,28 +19,28 @@ Add the engine modules to your `pom.xml`:
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-api</artifactId>
-        <version>0.9.0-SNAPSHOT</version>
+        <version>0.9.0</version>
     </dependency>
 
     <!-- Storage Layer & Binary Snapshot Loader / Builder -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-storage</artifactId>
-        <version>0.9.0-SNAPSHOT</version>
+        <version>0.9.0</version>
     </dependency>
 
     <!-- Compute VM & Execution Engine Provider -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-vm</artifactId>
-        <version>0.9.0-SNAPSHOT</version>
+        <version>0.9.0</version>
     </dependency>
 
     <!-- Query Compiler & openCypher Frontend (Optional, for declarative Cypher queries) -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-compiler</artifactId>
-        <version>0.9.0-SNAPSHOT</version>
+        <version>0.9.0</version>
     </dependency>
 </dependencies>
 ```
@@ -54,29 +48,30 @@ Add the engine modules to your `pom.xml`:
 #### Gradle (Groovy DSL — `build.gradle`)
 ```groovy
 dependencies {
-    implementation 'org.impulsegraph:impulse-api:0.9.0-SNAPSHOT'
-    implementation 'org.impulsegraph:impulse-storage:0.9.0-SNAPSHOT'
-    implementation 'org.impulsegraph:impulse-vm:0.9.0-SNAPSHOT'
-    implementation 'org.impulsegraph:impulse-compiler:0.9.0-SNAPSHOT' // Optional for Cypher
+    implementation 'org.impulsegraph:impulse-api:0.9.0'
+    implementation 'org.impulsegraph:impulse-storage:0.9.0'
+    implementation 'org.impulsegraph:impulse-vm:0.9.0'
+    implementation 'org.impulsegraph:impulse-compiler:0.9.0' // Optional for Cypher
 }
 ```
 
 #### Gradle (Kotlin DSL — `build.gradle.kts`)
 ```kotlin
 dependencies {
-    implementation("org.impulsegraph:impulse-api:0.9.0-SNAPSHOT")
-    implementation("org.impulsegraph:impulse-storage:0.9.0-SNAPSHOT")
-    implementation("org.impulsegraph:impulse-vm:0.9.0-SNAPSHOT")
-    implementation("org.impulsegraph:impulse-compiler:0.9.0-SNAPSHOT") // Optional for Cypher
+    implementation("org.impulsegraph:impulse-api:0.9.0")
+    implementation("org.impulsegraph:impulse-storage:0.9.0")
+    implementation("org.impulsegraph:impulse-vm:0.9.0")
+    implementation("org.impulsegraph:impulse-compiler:0.9.0") // Optional for Cypher
 }
 ```
 
-### 1.2 Required Java 21 LTS Runtime & Compiler Arguments
-Impulse Graph targets the **Java 21 LTS** baseline leveraging Foreign Function & Memory (FFM) off-heap segments and the Vector API (`jdk.incubator.vector`) for SIMD acceleration, with forward compatibility for Java 22, 23, 24, and 25+. Configure your runtime and build plugins with preview and incubator access flags:
+### 1.2 Dual Target Runtime JVM Flags (JDK 21 LTS & JDK 22+)
+Impulse Graph supports both **Java 21 LTS** (via JEP 442 FFM preview) and **Java 22+ / Java 25 LTS / Java 26+** (standard finalized FFM in `java.base` with zero preview flags required):
 
-```bash
---enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED
-```
+| Java Runtime | Required JVM Flags | Description |
+| :--- | :--- | :--- |
+| **Java 22+ / Java 25 LTS / Java 26+** | `--add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED` | **Standard FFM** in `java.base`. No preview flag required. |
+| **Java 21 LTS** | `--enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED` | Enables JEP 442 FFM Preview 3 on Java 21 LTS. |
 
 #### Maven Configuration (`pom.xml`)
 Ensure your compiler and surefire plugins pass the preview and incubator flags:
