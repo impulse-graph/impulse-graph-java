@@ -38,7 +38,7 @@ To support Maven builds, Gradle builds, and direct CLI execution, Java code gene
 * **Standalone CLI Usage**:
   `impulse-codegen` can be executed directly as a standalone CLI application via `GeneratorMain`:
   ```bash
-  java -cp "impulse-codegen-0.9.0-SNAPSHOT.jar:lib/*" \
+  java -cp "impulse-codegen-0.9.0.jar:lib/*" \
       org.impulsegraph.codegen.GeneratorMain <schema.yaml> <target-folder> [package-name]
   ```
 
@@ -80,7 +80,7 @@ To support Maven builds, Gradle builds, and direct CLI execution, Java code gene
 * **Usage**:
   ```groovy
   plugins {
-      id 'org.impulsegraph.impulse' version '0.9.0-SNAPSHOT'
+      id 'org.impulsegraph.impulse' version '0.9.0'
   }
 
   impulse {
