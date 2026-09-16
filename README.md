@@ -11,10 +11,10 @@ It acts as the **"Apache Arrow for Graph Analytics"** on the JVM, pairing an imm
 ## 🚀 Key Architectural Properties
 
 - **Zero Garbage Collection (GC) Overhead**: Memory-maps `.imps` v0.9.0 binary snapshot files off-heap via `java.lang.foreign.MemorySegment`.
-- **Java 21 LTS Baseline & Forward Compatibility**: Compiles against Java 21 LTS baseline (`<maven.compiler.release>21</maven.compiler.release>`) with 100% forward compatibility for Java 22, 23, 24, and 25+ runtimes.
+- **Java 21 LTS Baseline & Forward Compatibility**: Compiles against Java 21 LTS baseline with 100% forward compatibility for Java 22, 23, 24, and 25+ runtimes.
 - **Zero External Runtime Dependencies**: All core modules maintain **strictly 0 third-party runtime dependencies** (`java.base`, `jdk.incubator.vector`, FFM).
 - **SIMD Vector API Acceleration**: Vectorizes graph traversal steps across unrolled AVX-512 and ARM Neon registers using `jdk.incubator.vector`.
-- **~10us JIT Compilation**: Generates native `MethodHandle` combinator trees from frontend ASTs in under 10 microseconds for dynamic real-time queries.
+- **MethodHandle JIT Compilation**: Generates native `MethodHandle` combinator trees from frontend ASTs for dynamic queries.
 - **Configurable Primitive Node ID Widths**: Independent per-domain physical integer addressing widths (`uint16_t`, `uint32_t`, `uint64_t`) optimizing cache line density and memory bandwidth.
 - **Per-Domain Dense ID Independence ($0 \dots N_d-1$)**: Strict per-domain ID spaces with explicit domain anchoring.
 - **Kleisli Frontier Traversal Pipeline**: Monadic frontier propagation $\langle D, S \rangle \xrightarrow{R} \langle D', S' \rangle$ with monoidic path reduction (`OR`, `MIN`, `MAX`, `SUM`).
@@ -27,9 +27,11 @@ It acts as the **"Apache Arrow for Graph Analytics"** on the JVM, pairing an imm
 | :--- | :--- | :--- |
 | **`impulse-spec`** | Binary snapshot layout constants (Page 0, 128-byte hardware alignment, Section 2 string offsets). | **0** |
 | **`impulse-api`** | High-level contracts: `ImpulseGraphSnapshot`, `DomainView`, `Traversal`, `ImpulseStatement`, `RowReader`. | **0** |
-| **`impulse-storage`** | Off-heap snapshot loader (`BinarySnapshotLoader`), `GraphSnapshot`, `RelationSnapshot`, CSR/CSC/COO accessors, snapshot builder. | **0** |
-| **`impulse-compiler`** | ImpScheme S-Expression AST, CEL optimizer, 7-stage optimization passes, `impOps` bytecode emitter. | **0** |
+| **`impulse-storage`** | Off-heap snapshot loader (`BinarySnapshotLoader`), `GraphSnapshot`, `RelationSnapshot`, CSR/CSC/COO accessors. | **0** |
 | **`impulse-vm`** | Register VM (`R0`..`R63`), Java Vector API AVX-512 SIMD handlers (`VmHandlers`), `MethodHandle` JIT combinators, and Statement runner. | **0** |
+| **`impulse-compiler`** | ImpScheme S-Expression AST, CEL optimizer, openCypher lowering, 7-stage optimization passes, `impOps` bytecode emitter. | **0** |
+| **`impulse-builder`** | Streaming snapshot builder (`SnapshotBuilder`), single-pass S3/disk serialization, topology sorting, and chunk iterators. | **0** |
+| **`samples`** | Executable Java 21+ sample applications and walkthroughs. | **0** (Internal) |
 
 ---
 
@@ -54,6 +56,18 @@ Java 21 LTS or newer with preview features and Vector API enabled:
         <artifactId>impulse-vm</artifactId>
         <version>0.9.0-SNAPSHOT</version>
     </dependency>
+    <!-- Optional: Add impulse-compiler for openCypher parsing and multi-stage optimizations -->
+    <dependency>
+        <groupId>org.impulsegraph</groupId>
+        <artifactId>impulse-compiler</artifactId>
+        <version>0.9.0-SNAPSHOT</version>
+    </dependency>
+    <!-- Optional: Add impulse-builder for streaming snapshot generation -->
+    <dependency>
+        <groupId>org.impulsegraph</groupId>
+        <artifactId>impulse-builder</artifactId>
+        <version>0.9.0-SNAPSHOT</version>
+    </dependency>
 </dependencies>
 ```
 
@@ -64,17 +78,27 @@ JVM Runtime Flag:
 
 ### 2. Loading a Snapshot
 ```java
+import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import java.lang.foreign.Arena;
+import java.nio.file.Path;
+
 try (Arena arena = Arena.ofShared()) {
     var loaded = BinarySnapshotLoader.loadSnapshot(Path.of("hetionet.imps"), arena);
     ImpulseGraphSnapshot snap = loaded.getGraph();
     
-    // Ready for sub-microsecond queries
+    // Execute traversals against the immutable snapshot
 }
 ```
 
 ### 3. Querying the Graph (Fluent Traversal API)
 ```java
-var userDomain = snap.domain("User");
+import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.traversal.DomainView;
+import java.util.List;
+import java.util.Set;
+
+DomainView userDomain = snap.domain("User");
 
 // 1. Domain Key <-> Internal ID Resolution
 long denseId = userDomain.toDenseId("usr_alice"); // 0L
@@ -98,10 +122,13 @@ Set<String> recent = userDomain.fromKey("usr_alice")
     .toKeySet();
 ```
 
-### 4. Parameterized Cypher Queries (`ImpulseStatement`)
+### 4. Parameterized Prepared Statements (`ImpulseStatement`)
 ```java
-// OpenCypher query with automatic set deduplication
-try (ImpulseStatement stmt = snap.prepare("MATCH (u:User)-[:knows]->(f:User) WHERE u.id = $id RETURN f")) {
+import org.impulsegraph.api.statement.ImpulseStatement;
+import org.impulsegraph.api.statement.RowReader;
+
+// Parameterized traversal statement with automatic set deduplication
+try (ImpulseStatement stmt = snap.prepare("FROM User WHERE id = $id -> out('knows')")) {
     stmt.bindNode("$id", 0);
     try (RowReader rows = stmt.execute()) {
         while (rows.next()) {
@@ -111,6 +138,9 @@ try (ImpulseStatement stmt = snap.prepare("MATCH (u:User)-[:knows]->(f:User) WHE
 }
 ```
 
+> [!NOTE]
+> For declarative openCypher pattern matching (`MATCH ... WHERE ... RETURN ...`), the `impulse-compiler` module provides `CypherCompiler`, which parses openCypher queries into ImpScheme AST for the 7-stage optimizer pipeline. See the [openCypher Dialect Reference](docs/OPENCYPHER_REFERENCE.md) for details.
+
 ---
 
 ## 📚 Documentation
@@ -118,6 +148,8 @@ try (ImpulseStatement stmt = snap.prepare("MATCH (u:User)-[:knows]->(f:User) WHE
 - [**Quickstart Guide**](docs/GETTING_STARTED.md) — Loading snapshots, basic traversals, filtering, variable node ID width configuration, and prepared statements.
 - [**Advanced Querying Guide**](docs/ADVANCED_QUERYING.md) — Fixed-point loops (`repeatUntilStable`), monoidic reductions, state projections, and BitSet algebra.
 - [**openCypher Dialect Reference**](docs/OPENCYPHER_REFERENCE.md) — Supported Cypher grammar (`MATCH`, `WHERE`, `RETURN`), edge attribute filtering, and frontier set semantics.
+- [**Snapshot Builder Guide**](docs/SNAPSHOT_BUILDER.md) — Streaming snapshot construction, single-pass S3/disk serialization, and CSV/edge-list ingestion.
+- [**Ingestion Strategies**](docs/ingestion-strategies.md) — Strategies for building `.imps` snapshots from large-scale tabular data and knowledge graphs.
 - [**Memory & Performance Tuning Guide**](docs/MEMORY_TUNING_GUIDE.md) — FFM `Arena` lifecycle management, zero-GC mechanics, primitive ID width selection, and Vector API JVM tuning flags.
 - [**Compiler Architecture**](docs/COMPILER_ARCHITECTURE.md) — IR passes, optimization pipeline, `ImpAsm` disassembly inspection, and bytecode generation.
 - [**Code Samples & Walkthroughs**](samples/src/main/java/org/impulsegraph/samples) — Runnable Java 21+ code examples including traversals, SIMD filtering, parameterized statements, and snapshot creation.
@@ -130,7 +162,7 @@ Check the [`samples/`](samples/src/main/java/org/impulsegraph/samples) directory
 
 1. **[`BasicTraversalSample.java`](samples/src/main/java/org/impulsegraph/samples/BasicTraversalSample.java)**: Snapshot loading, entity key resolution, single & multi-hop traversals, and bitset arithmetic.
 2. **[`SimdFilteredQuerySample.java`](samples/src/main/java/org/impulsegraph/samples/SimdFilteredQuerySample.java)**: SIMD vector-accelerated predicate filtering on edge & node attributes.
-3. **[`CompiledStatementSample.java`](samples/src/main/java/org/impulsegraph/samples/CompiledStatementSample.java)**: Parameterized openCypher queries with sub-microsecond warmed JIT execution.
+3. **[`CompiledStatementSample.java`](samples/src/main/java/org/impulsegraph/samples/CompiledStatementSample.java)**: Parameterized statements and queries with warmed MethodHandle JIT execution.
 4. **[`SnapshotBuilderSample.java`](samples/src/main/java/org/impulsegraph/samples/SnapshotBuilderSample.java)**: Programmatic graph snapshot generation and binary serialization to `.imps`.
 
 ---
@@ -141,8 +173,11 @@ Check the [`samples/`](samples/src/main/java/org/impulsegraph/samples) directory
 # Full clean reactor build and test run
 mvn clean test
 
-# Run individual sample or test suite
-mvn test -Dtest=TestVectorSuiteTest
+# Run individual test suite within a specific module
+mvn test -pl impulse-storage -Dtest=TestVectorSuiteTest
+
+# Run individual test suite across the reactor without failing on uninvolved modules
+mvn test -Dtest=TestVectorSuiteTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 ---

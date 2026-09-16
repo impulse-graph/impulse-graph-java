@@ -13,3 +13,4 @@ Thumbs.db
 *.aot
 *.aotcache
 datasets/
+**/.jqwik-database*

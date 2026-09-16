@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 public class CscVmWalkTest {
 
 	private MemorySegment buildProgram(Arena arena, InstructionData... instrs) {
-		MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT, instrs.length);
+		MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT.byteSize() * instrs.length);
 		for (int i = 0; i < instrs.length; i++) {
 			long off = i * INSTRUCTION_SIZE_BYTES;
 			INSTR_OPCODE_HANDLE.set(prog, off, instrs[i].opcode);
@@ -43,8 +43,8 @@ public class CscVmWalkTest {
 	void testCscWalkThrowsIfMissing() {
 		try (Arena arena = Arena.ofShared()) {
 			int nodeCount = 5;
-			MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 2, 3, 4, 4, 4);
-			MemorySegment targets = arena.allocateFrom(ValueLayout.JAVA_INT, 1, 2, 3, 0);
+			MemorySegment offsets = TestSegmentHelper.allocateInts(arena, 0, 2, 3, 4, 4, 4);
+			MemorySegment targets = TestSegmentHelper.allocateInts(arena, 1, 2, 3, 0);
 
 			// Snapshot created WITHOUT CSC segments
 			RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, nodeCount, 4, offsets,
@@ -81,8 +81,8 @@ public class CscVmWalkTest {
 			int nodeCount = 5;
 			// Edges: 0->1, 0->2, 1->3, 2->1
 			// In-edges to node 1: from 0, from 2
-			MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 2, 3, 4, 4, 4);
-			MemorySegment targets = arena.allocateFrom(ValueLayout.JAVA_INT, 1, 2, 3, 1);
+			MemorySegment offsets = TestSegmentHelper.allocateInts(arena, 0, 2, 3, 4, 4, 4);
+			MemorySegment targets = TestSegmentHelper.allocateInts(arena, 1, 2, 3, 1);
 
 			RelationSnapshot origRel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, nodeCount, 4, offsets,
 					targets);

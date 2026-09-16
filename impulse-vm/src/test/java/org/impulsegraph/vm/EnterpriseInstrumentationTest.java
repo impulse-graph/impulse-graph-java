@@ -50,8 +50,8 @@ public class EnterpriseInstrumentationTest {
 		PrometheusMetricsExporter exporter = PrometheusMetricsExporter.enable();
 
 		try (Arena arena = Arena.ofShared()) {
-			MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 1, 1);
-			MemorySegment targets = arena.allocateFrom(ValueLayout.JAVA_INT, 10);
+			MemorySegment offsets = TestSegmentHelper.allocateInts(arena, 0, 1, 1);
+			MemorySegment targets = TestSegmentHelper.allocateInts(arena, 10);
 			RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 2, 1, offsets, targets);
 			ImpulseGraphSnapshot graph = new GraphSnapshot(arena, Map.of("userToGroup", rel));
 
@@ -74,8 +74,8 @@ public class EnterpriseInstrumentationTest {
 	@Test
 	public void testEnterpriseJmxMBeanRegistration() {
 		try (Arena arena = Arena.ofShared()) {
-			MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 1, 1);
-			MemorySegment targets = arena.allocateFrom(ValueLayout.JAVA_INT, 10);
+			MemorySegment offsets = TestSegmentHelper.allocateInts(arena, 0, 1, 1);
+			MemorySegment targets = TestSegmentHelper.allocateInts(arena, 10);
 			RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 2, 1, offsets, targets);
 			ImpulseGraphSnapshot graph = new GraphSnapshot(arena, Map.of("userToGroup", rel));
 

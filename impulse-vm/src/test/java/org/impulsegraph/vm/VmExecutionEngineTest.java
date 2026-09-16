@@ -31,7 +31,7 @@ public class VmExecutionEngineTest {
 	}
 
 	private MemorySegment buildProgram(Arena arena, InstructionData... instrs) {
-		MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT, instrs.length);
+		MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT.byteSize() * instrs.length);
 		for (int i = 0; i < instrs.length; i++) {
 			long off = i * INSTRUCTION_SIZE_BYTES;
 			INSTR_OPCODE_HANDLE.set(prog, off, instrs[i].opcode);
@@ -49,8 +49,8 @@ public class VmExecutionEngineTest {
 	public void testSimpleNodeInputAndWalk() throws Throwable {
 		try (Arena arena = Arena.ofShared()) {
 			// Build Graph Snapshot: 0 -> 1, 1 -> 2
-			MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 1, 2, 2);
-			MemorySegment targets = arena.allocateFrom(ValueLayout.JAVA_INT, 1, 2);
+			MemorySegment offsets = TestSegmentHelper.allocateInts(arena, 0, 1, 2, 2);
+			MemorySegment targets = TestSegmentHelper.allocateInts(arena, 1, 2);
 
 			RelationSnapshot relSnap = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 3, 2, offsets, targets);
 			ImpulseGraphSnapshot graph = new GraphSnapshot(arena, Map.of("rel_0", relSnap));

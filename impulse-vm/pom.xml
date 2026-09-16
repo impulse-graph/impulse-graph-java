@@ -12,7 +12,7 @@
 
     <artifactId>impulse-vm</artifactId>
     <name>Impulse Graph Engine - Compute VM</name>
-    <description>Pure Java 25 FFM off-heap CSR graph engine with zero external runtime dependencies</description>
+    <description>Pure Java 21 LTS FFM off-heap CSR graph engine with zero external runtime dependencies</description>
 
     <dependencies>
         <dependency>
@@ -40,6 +40,16 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-params</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.jqwik</groupId>
+            <artifactId>jqwik</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

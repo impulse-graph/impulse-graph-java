@@ -24,7 +24,7 @@ public class OpcodeDispatchBenchmarkTest {
 	}
 
 	private MemorySegment buildProgram(Arena arena, List<InstructionData> instrs) {
-		MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT, instrs.size());
+		MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT.byteSize() * instrs.size());
 		for (int i = 0; i < instrs.size(); i++) {
 			long off = (long) i * INSTRUCTION_SIZE_BYTES;
 			INSTR_OPCODE_HANDLE.set(prog, off, instrs.get(i).opcode);

@@ -1,37 +1,32 @@
 # Ingestion & Snapshot Generation Architecture
 
-> [!WARNING]
-> **SCRAPPED ARCHITECTURE**: The live ingestion, mutation, and compaction strategies described in this document have been **SCRAPPED** from the engine.
-> Impulse Graph is now a strictly **read-only** execution engine. All data ingestion must occur out-of-band by writing entirely new `.imps` snapshots using the `SnapshotBuilder` or CLI tooling, followed by a zero-downtime pointer swap.
->
-> This document remains solely for historical context.
-
 > [!NOTE]
-
-**Impulse Graph Engine — Java 21+ FFM Core Specification**  
-*Document Version: 1.0.0 | Target Spec: Impulse Binary Snapshot Format v0.9.0*
+> **Impulse Graph Engine — Java 21 LTS FFM Core Engine Specification**  
+> *Document Version: 2.0.0 | Target Spec: Impulse Binary Snapshot Format (`.imps`) v0.9.0*
 
 ---
 
 ## 1. Executive Architectural Summary
 
-Impulse Graph represents graph state as **immutable, zero-copy `.imps` binary snapshots** mapped off-heap using Java 21+ Foreign Function & Memory (FFM) `Arena` and `MemorySegment`. 
+Impulse Graph represents graph state as **immutable, zero-copy `.imps` binary snapshots** mapped directly off-heap using Java 21 LTS Foreign Function & Memory (FFM) `Arena` and `MemorySegment`. 
 
-To support continuous streaming data updates from upstream sources (Kafka, Debezium, batch ETL pipelines), the engine employs a **Blue-Green Atomic Snapshot Swap** pattern:
+By design, the core execution engine (`impulse-core`, `impulse-vm`, `impulse-storage`) is strictly **read-only (RO)** with zero third-party runtime dependencies. Real-time updates, Change Data Capture (CDC) streaming, and batch ingestion are completely decoupled from the query engine. All data ingestion occurs out-of-band via streaming snapshot compilers (`SnapshotBuilder` in `impulse-builder` or official CLI tooling), streaming new `.imps` snapshots direct-to-disk or cloud object storage (Amazon S3 / Google Cloud Storage) with strict single-pass semantics and bounded $O(\text{chunk})$ memory.
+
+Online query instances integrate updates through a **Blue-Green Atomic Pointer Swap** pattern:
 
 ```
                     Blue-Green Immutable Snapshot Generation Lifecycle
                     
- [ Upstream ETL / Kafka Stream ]
+ [ Upstream ETL / Kafka Stream / CDC ]
                │
-               ▼ (Batch Ingestion / Aggregation)
+               ▼ (Out-of-band Micro-Batch / Event Aggregation)
  ┌───────────────────────────┐
- │ Snapshot Builder Pipeline │ ──► Constructs clean off-heap CSR/CSC structures via SnapshotBuilder
- └───────────────────────────┘
+ │ Snapshot Builder Pipeline │ ──► Streams off-heap CSR/CSC structures via SnapshotBuilder
+ └───────────────────────────┘     (Strict O(chunk) heap footprint, single-pass S3 write)
                │
-               ▼ (Fast Serialization)
+               ▼ (Direct Streaming Serialization)
  ┌───────────────────────────┐
- │ Immutable .imps Snapshot  │ ──► Serializes Page 0, Catalogs, ID Mappings, & CSR Offsets to NVMe / S3
+ │ Immutable .imps Snapshot  │ ──► Writes Page 0, Catalogs, Topologies, & Footer Metadata to NVMe / S3
  └───────────────────────────┘
                │
                ▼ (Zero-Downtime Blue-Green Swap)
@@ -42,86 +37,97 @@ To support continuous streaming data updates from upstream sources (Kafka, Debez
 
 ---
 
-## 2. Composable Lego Block Taxonomy
+## 2. Ingestion & Snapshot Compilation Pipeline Architecture
 
-Enterprise graph workloads vary wildly in cardinality, write frequency, and read SLAs. Rather than forcing a one-size-fits-all model, Impulse decomposes ingestion into **5 orthogonal composable strategy dimensions**:
+Enterprise graph ingestion decouples into **3 orthogonal architectural layers**, eliminating in-engine mutation overhead while guaranteeing deterministic, bounded-memory snapshot generation:
 
 ```
- ┌────────────────────────┐     ┌────────────────────────┐     ┌────────────────────────┐
- │ 1. STORAGE CONTAINER   │     │ 2. DELETION STRATEGY   │     │ 3. INGESTION CADENCE   │
- ├────────────────────────┤     ├────────────────────────┤     ├────────────────────────┤
- │ • FrozenMmapSegment    │     │ • TombstoneBitSet      │     │ • InPlaceAtomic        │
- │ • DenseOffHeapSegment  │     │ • BatchRebuildOnly     │     │ • MicroBatchRCU        │
- │ • PagedAppendixSegment │     │ • AttributeFilterFlag  │     │ • CoWArraySwap         │
- │ • SparseDeltaHashTable │     └────────────────────────┘     │ • AppendixAppend       │
- └────────────────────────┘                                    └────────────────────────┘
-              │                                                             │
-              └──────────────────────────────┬──────────────────────────────┘
-                                             ▼
-                                ┌────────────────────────┐     ┌────────────────────────┐
-                                │ 4. TRANSPOSITION (CSC) │     │ 5. PERSISTENCE/FLUSH   │
-                                ├────────────────────────┤     ├────────────────────────┤
-                                │ • ForwardOnly (No CSC) │     │ • PureEphemeralRAM     │
-                                │ • EagerDualIndex       │     │ • LocalNvmeSpooler     │
-                                │ • LazyOnDemand         │     │ • CloudS3Streamer      │
-                                └────────────────────────┘     └────────────────────────┘
+ ┌─────────────────────────────────────────────────────────────────────────────┐
+ │ 1. UPSTREAM EVENT & ETL INGESTION (Out-of-band: impulse-platform / CDC)     │
+ ├─────────────────────────────────────────────────────────────────────────────┤
+ │ • Kafka WAL Consumers & Debezium CDC Connectors                             │
+ │ • Batch Lakehouse / Parquet / CSV Extractors                                │
+ │ • Out-of-band Micro-Batch Aggregators (Zero core engine runtime footprint) │
+ └──────────────────────────────────────┬──────────────────────────────────────┘
+                                        │
+                                        ▼
+ ┌─────────────────────────────────────────────────────────────────────────────┐
+ │ 2. STREAMING SNAPSHOT COMPILER (impulse-builder / SnapshotBuilder)          │
+ ├─────────────────────────────────────────────────────────────────────────────┤
+ │ • Domain Schema: Strict dense ID independence (0 .. N-1), uint16/32/64      │
+ │ • Topology Schemas: Mandatory CSR, optional CSC / COO with RAW / SIMD_COMP  │
+ │ • Data Providers (SPI): RelationDataSource, AttributeDataSource via FFM    │
+ │ • Adaptive Staging: ExternalSortStaging spills to NVMe when transposing CSC │
+ │ • Single-Pass S3 Writer: Streams Page 0, Topologies, & Footer (Zero seeks)  │
+ └──────────────────────────────────────┬──────────────────────────────────────┘
+                                        │
+                                        ▼
+ ┌─────────────────────────────────────────────────────────────────────────────┐
+ │ 3. ZERO-LOCK RUNTIME SERVING (impulse-storage / GraphSnapshot)              │
+ ├─────────────────────────────────────────────────────────────────────────────┤
+ │ • Zero-copy off-heap mmap via Arena.ofShared() with MADV_WILLNEED prefetch   │
+ │ • Blue-Green Atomic Pointer Swap (AtomicReference<GraphSnapshot>)           │
+ │ • RCU-style query counter draining: enterQuery() / exitQuery()              │
+ │ • Safe resource deallocation: drainAndClose() closes old off-heap Arena     │
+ └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.1 Storage Container Blocks
-1. **`FrozenMmapSegment`**: Zero-copy OS page cache mapped directly from `.imps`. Zero physical DRAM allocation.
-2. **`DenseOffHeapSegment`**: 100% contiguous, 128-byte aligned primitive arrays allocated in off-heap `Arena.ofShared()`. Delivers maximum AVX-512 / ARM NEON throughput.
-3. **`SnapshotBuilder`**: High-performance staged off-heap builder for aggregating batch edges and compiling directly to `.imps`.
+### 2.1 Domain Schema & Dense ID Independence
+Per the Impulse specification, there is **no synthetic or global flattened node ID space**. Every Node Domain (e.g. `User`, `Account`, `Product`) configures:
+1. **Exact Cardinality**: The total node count $N_d$, establishing an implicit dense integer range $[0, N_d - 1]$.
+2. **Primitive ID Width**: Configured via `PrimitiveWidth` (`UINT16` for $\le 65{,}536$ nodes, `UINT32` for $\le 4.29\text{B}$ nodes, `UINT64` for hyperscale graphs), optimizing memory alignment and cache efficiency.
+3. **Primary Key Indexing**: Optional reverse string/UUID-to-dense-ID lookup table.
+4. **Columnar Attributes**: Strongly-typed contiguous attribute vectors streamed sequentially in dense ID order.
 
-### 2.2 Deletion Strategy Blocks
-1. **`TombstoneBitSet`**: 1 bit per edge in off-heap memory. Filtered in 1 CPU cycle via AVX-512 `_mm512_andnot_si512` / `knot`.
-2. **`BatchRebuildOnly`**: Deletions are buffered in memory and physically purged during the next batch rebuild.
-3. **`AttributeFilterFlag`**: Logical status column (`status = DELETED`) checked via standard predicate filters.
+### 2.2 Relation Topologies & Transposition Modes
+Every relation connects an explicit Source Domain to a Target Domain with configurable physical indices:
+1. **Mandatory CSR (`Topology.CSR`)**: Compressed Sparse Row format, strictly sorted by Source Node ID. Mandatory for all outgoing edge traversals (`OP_CSR_WALK`).
+2. **Optional CSC (`Topology.CSC`)**: Compressed Sparse Column format, strictly sorted by Target Node ID for instant incoming/reverse traversals (`OP_CSC_WALK`).
+3. **Optional COO (`Topology.COO`)**: Uncompressed coordinate edge tuples `(src, tgt)` for bulk edge iteration or matrix transfers.
+4. **Transposition Handling**: If an upstream data source cannot provide a pre-sorted target stream (`getTargetSortedEdges()`), `SnapshotBuilder` leverages `ExternalSortStaging` to parallel merge-sort the CSR edges on NVMe storage within configured memory limits (`withStagingMemoryLimit`), maintaining strict bounded-RAM behavior.
 
-### 2.3 Ingestion Cadence Blocks
-1. **`InPlaceAtomic`**: Direct 1-nanosecond hardware atomic store (`VarHandle.setVolatile()`). Zero memory allocation.
-2. **`MicroBatchRCU`**: Single writer rebuilds relation in fresh `Arena` every $N$ seconds/events; atomic reference swap.
-3. **`CoWArraySwap`**: Copy-on-Write cloning of a single column array ($8\,\mu\text{s}$), mutating slot, and swapping pointer.
-4. **`AppendixAppend`**: Appends edge to node's unrolled appendix buffer in $15\text{ ns}$.
+### 2.3 Zero-Allocation Data Provider SPIs
+Data is streamed into the builder via high-throughput Service Provider Interfaces (SPIs) using Java 21 LTS Foreign Function & Memory (FFM) `MemorySegment` buffers:
+* **`RelationDataSource`**: Supplies the total edge count and an `EdgeChunkIterator`. The iterator populates off-heap source and target ID memory segments in chunks, completely eliminating Java heap object allocations (`Edge` objects) and garbage collection pauses during large graph ingestion.
+* **`AttributeDataSource`**: Streams typed attribute values (`DataType.I32`, `DataType.F64`, `DataType.vector(...)`) in ascending dense node ID order via `AttributeChunkIterator`.
 
-### 2.4 Transposition & Reverse Indexing Blocks
-1. **`ForwardOnly`**: CSC reverse index is completely disabled. Saves 50% memory and build time.
-2. **`EagerDualIndex`**: CSR and CSC indices are rebuilt and maintained synchronously.
-3. **`LazyOnDemand`**: CSC index is generated in RAM only if a reverse query (`OP_CSC_WALK`) is executed.
-
-### 2.5 Persistence & Compaction Blocks
-1. **`PureEphemeralRAM`**: No disk writes. Memory stays in off-heap RAM; crash recovery replays Kafka stream.
-2. **`LocalNvmeSpooler`**: Background thread writes fresh `.imps` to local NVMe every 10–30 minutes.
-3. **`CloudS3Streamer`**: Streams compacted `.imps` directly to Amazon S3 / Google Cloud Storage with committed Kafka offset.
+### 2.4 Single-Pass S3 Streaming Serialization
+Traditional graph formats require random disk seeks to update offset tables once edge payloads are written. Impulse Graph eliminates random writes:
+* **Precomputed Offsets**: Directory tables in Section 2 compute layout offsets upfront based on domain cardinalities and edge counts.
+* **Single-Pass Output**: The snapshot is streamed sequentially from Page 0, Section 2 directory table, 128-byte aligned topology sections, to the terminal Footer Block.
+* **Direct-to-Cloud Ingestion**: Writers stream directly to network sockets or cloud object storage (`Amazon S3`, `Google Cloud Storage`) via `WritableByteChannel` or `OutputStream` without local disk intermediaries.
 
 ---
 
 ## 3. Concurrency, Locking & Synchronization Architecture
 
-### 3.1 The Single-Writer Multi-Reader (SWMR) Model
-Impulse completely eliminates **Reader/Writer Locks (`ReentrantReadWriteLock`)** from the read path.
+### 3.1 Zero-Lock Traversal & Read-Only Invariants
+Impulse completely eliminates **Reader/Writer Locks (`ReentrantReadWriteLock`)** and atomic synchronization primitives from the traversal path.
 
 ```
- Single Ingestion Thread (Writer)                Concurrent Query Threads (Readers)
- ────────────────────────────────                ──────────────────────────────────
- • Consumes Kafka / Ring Buffer                  • Core 0: Traversal executing (Lock-Free)
- • Mutates off-heap arrays in isolation          • Core 1: Traversal executing (Lock-Free)
- • Zero lock contention                          • Core 2: Traversal executing (Lock-Free)
- • Publishes via release-fence memory store      • Readers NEVER acquire read-locks!
+ Out-of-Band Builder (Writer)                    Concurrent Query Threads (Readers)
+ ────────────────────────────                    ──────────────────────────────────
+ • Compiles new .imps snapshot                   • Core 0: Vector traversal executing (Lock-Free)
+ • Streams direct to NVMe / S3                   • Core 1: Vector traversal executing (Lock-Free)
+ • Zero runtime engine contention                • Core 2: Vector traversal executing (Lock-Free)
+ • Triggers atomic reference pointer swap        • Readers NEVER acquire locks or execute CAS!
 ```
 
-* **Why SWMR Dominates**: In traditional multi-threaded graphs, read locks cause **Cache Line Bouncing** across CPU cores (atomic CAS on lock addresses), degrading latency from $5\text{ ns}$ to $> 500\text{ ns}$. In Impulse, reader threads execute pure, unrestricted hardware memory loads.
+* **Elimination of Cache Contention**: In traditional graph databases, read locks cause **Cache Line Bouncing** across CPU cores (atomic CAS on shared lock cache lines), degrading traversal latencies from $5\text{ ns}$ to $> 500\text{ ns}$. In Impulse Graph, reader threads execute pure, uninterrupted hardware memory loads directly against off-heap `MemorySegment` buffers.
 
 ### 3.2 In-Flight Query Safety (RCU Draining Lifecycle)
-When a relation or snapshot is swapped:
-1. **`enterQuery()` / `exitQuery()`**: Readers increment a `LongAdder` counter upon entering a query and decrement upon completion.
-2. **Atomic Hot-Swap**: The writer updates `graphSnapshot.updateRelation("relName", newRelSnapshot)`. Future queries immediately pick up `newRelSnapshot`.
-3. **`awaitDrained()` & `drainAndClose()`**: In-flight queries on `oldRelSnapshot` continue running safely on their immutable memory segments. Once `activeQueryCount` hits zero, the background worker invokes `oldRelSnapshot.close()`, releasing its off-heap `Arena` directly to the OS kernel.
+When a new snapshot file is compiled and ready for serving, the query engine applies a zero-downtime pointer swap using an `AtomicReference<GraphSnapshot>`:
+
+1. **Active Query Accounting (`enterQuery()` / `exitQuery()`)**: Reader threads increment a high-performance off-heap or `LongAdder` counter upon entering a traversal and decrement upon completion.
+2. **Atomic Reference Swap**: The runtime performs an atomic pointer swap (`activeSnapshot.getAndSet(newSnapshot)`). New queries instantly route to `newSnapshot` with 0ns lock overhead.
+3. **Non-Blocking Draining (`awaitDrained()` & `drainAndClose()`)**: Existing in-flight queries executing against `oldSnapshot` continue reading their immutable memory-mapped pages safely. A background task invokes `oldSnapshot.drainAndClose(timeout, unit)`. Once active queries hit zero, the old `Arena` is closed, immediately unmapping memory from the OS kernel.
 
 ```java
-// Query execution wrapper in Java 25:
+// Query execution lifecycle in Java 21 LTS:
+GraphSnapshot snapshot = activeSnapshot.get();
 snapshot.enterQuery();
 try {
-    return compiledQuery.execute(snapshot, inputNode, arena);
+    return compiledQuery.execute(snapshot, inputNode, scratchArena);
 } finally {
     snapshot.exitQuery();
 }
@@ -129,94 +135,180 @@ try {
 
 ---
 
-## 4. Memory Footprint & Mathematical Overhead Equations
+## 4. Memory Footprint & Physical Layout Equations
 
-### 4.1 Base vs Live Ingestion Footprint
+### 4.1 Zero-Allocation Query Runtime
+Because the query runtime operates directly over memory-mapped `.imps` binary files, **physical DRAM allocation inside the JVM query engine is $0\text{ MB}$**:
 
-| Component | Physical Memory Equation | Concrete Size (10M Edges) |
+| Layer | Physical Footprint Model | Behavior & OS Interaction |
 | :--- | :--- | :--- |
-| **Base CSR Array** | $|V| \times 4\text{B} + |E| \times 4\text{B}$ | $\approx 44.0\text{ MB}$ (Virtual OS Page Cache) |
-| **Base CSC Transpose** | $|V| \times 4\text{B} + |E| \times 4\text{B}$ | $\approx 44.0\text{ MB}$ (Virtual OS Page Cache) |
-| **Tombstone BitSet** | $\lceil |E| / 8 \rceil\text{ bytes}$ | **$1.25\text{ MB}$** (Off-heap DRAM) |
-| **Paged Appendix (16-slot)** | $|V_{\text{active}}| \times 16 \times 4\text{B}$ | $\approx 6.40\text{ MB}$ (Off-heap DRAM) |
-| **COO RingBuffer (50k updates)** | $50,000 \times 8\text{B}$ | **$0.40\text{ MB}$** (Off-heap DRAM) |
+| **Java Heap Memory** | **$0\text{ MB}$** | Zero edge or node objects allocated on JVM heap. |
+| **Direct Off-Heap DRAM** | **$0\text{ MB}$ (managed)** | Mapped via `FileChannel.MapMode.READ_ONLY` into `Arena.ofShared()`. |
+| **OS Page Cache** | Demand-Paged | Kernel populates physical RAM on demand; prefetched via `segment.load()` (`MADV_WILLNEED`). |
+| **Clean Page Eviction** | Transparent | Under memory pressure, pages are reclaimed instantly without swapping or disk writes. |
 
-$$\text{Total Live DRAM Overhead} = \text{TombstoneBitSet} + \text{AppendixMemory} + \text{COORingBuffer} \le \mathbf{8.05\text{ MB}}$$
+### 4.2 Physical Storage Sizing Equations (v0.9.0 Format)
+For a graph relation connecting Source Domain $D_s$ (cardinality $|V_s|$) to Target Domain $D_t$ (cardinality $|V_t|$) with $|E|$ edges:
+
+$$\text{CSR Footprint} = (|V_s| + 1) \times W_{\text{edgeIdx}} + |E| \times W_{\text{tgtId}}$$
+
+$$\text{CSC Footprint} = (|V_t| + 1) \times W_{\text{edgeIdx}} + |E| \times W_{\text{srcId}}$$
+
+Where:
+* $W_{\text{edgeIdx}} = 4\text{ bytes}$ (or $8\text{ bytes}$ if $|V_s| > 4\text{B}$ or $|E| > 4\text{B}$).
+* $W_{\text{tgtId}}, W_{\text{srcId}} \in \{2, 4, 8\}\text{ bytes}$ as declared by the respective `DomainDefinition.idWidth`.
+
+### 4.3 Streaming Builder Bounded Memory Footprint
+During snapshot compilation, memory consumption is strictly bounded regardless of overall graph scale:
+
+$$\text{RAM}_{\text{builder}} = O(\text{chunk}) \le \text{stagingMemoryLimit} \quad (\text{default: } 64\text{ MB})$$
+
+If secondary reverse indexes (`Topology.CSC`) are enabled and the input stream is not pre-sorted by target node ID, `SnapshotBuilder` stages chunks to the configured `stagingDirectory` on NVMe storage, executing an external multi-way merge sort within configured memory bounds.
 
 ---
 
-## 5. User API: How Developers Declare Ingestion Strategies
+## 5. Ingestion Builder API & Query Swap Patterns
 
-### 5.1 Programmatic Java Builder API
-Developers configure ingestion policies per relation or globally using `DefaultSnapshotBuilder`:
+### 5.1 Programmatic Snapshot Compilation (`SnapshotBuilder`)
+Developers configure domains, relations, topologies, and streaming sources using the fluent `SnapshotBuilder` API (`org.impulsegraph.builder.api.*`):
 
 ```java
-DefaultSnapshotBuilder builder = new DefaultSnapshotBuilder()
-    // Configure Vehicle Location (High-Frequency In-Place Updates)
-    .withRelationStrategy("truckToLocation", IngestionStrategy.builder()
-        .storage(StorageContainer.DENSE_OFF_HEAP)
-        .ingestion(IngestionCadence.IN_PLACE_ATOMIC)
-        .transposition(TranspositionMode.FORWARD_ONLY)
-        .build())
+import org.impulsegraph.builder.api.*;
+import org.impulsegraph.builder.spi.*;
 
-    // Configure Security Relations (Batch RCU with S3 Sync)
-    .withRelationStrategy("userToGroup", IngestionStrategy.builder()
-        .storage(StorageContainer.DENSE_OFF_HEAP)
-        .ingestion(IngestionCadence.MICRO_BATCH_RCU)
-        .rebuildInterval(Duration.ofSeconds(5))
-        .transposition(TranspositionMode.EAGER_DUAL_INDEX)
-        .persistence(PersistenceMode.CLOUD_S3_STREAMER)
-        .build())
+import java.nio.channels.FileChannel;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 
-    // Configure Streaming Edge Graph (Tombstones + Appendices)
-    .withRelationStrategy("userFollows", IngestionStrategy.builder()
-        .storage(StorageContainer.PAGED_APPENDIX)
-        .deletions(DeletionStrategy.TOMBSTONE_BITSET)
-        .ingestion(IngestionCadence.APPENDIX_APPEND)
-        .compactionThreshold(0.20) // Compact at 20% tombstone ratio
-        .build());
+public class GraphIngestionPipeline {
+
+    public static void compileSnapshot(Path outputPath) throws Exception {
+        // 1. Define 'User' Domain with explicit cardinality and primitive width
+        DomainDefinition userDomain = DomainDefinition.builder(1_000_000L)
+            .idWidth(PrimitiveWidth.UINT32)
+            .withPrimaryKeyIndex(true)
+            .addAttribute("age", new UserAgeDataSource())
+            .build();
+
+        // 2. Define 'Account' Domain
+        DomainDefinition accountDomain = DomainDefinition.builder(500_000L)
+            .idWidth(PrimitiveWidth.UINT32)
+            .build();
+
+        // 3. Define 'OWNS' Relation with CSR and optional CSC reverse index
+        RelationDefinition ownsRelation = RelationDefinition.builder("User", "Account")
+            .addTopology(Topology.CSR, CompressionScheme.RAW)
+            .addTopology(Topology.CSC, CompressionScheme.RAW)
+            .dataSource(new UserAccountRelationDataSource()) // EdgeChunkIterator provider
+            .build();
+
+        // 4. Stream compiled snapshot direct to channel with bounded heap
+        try (FileChannel channel = FileChannel.open(outputPath,
+                StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
+            
+            SnapshotBuilder.create()
+                .withStagingDirectory(Path.of("/tmp/impulse-staging"))
+                .withStagingMemoryLimit(256 * 1024 * 1024L) // 256 MB RAM staging limit
+                .addDomain("User", userDomain)
+                .addDomain("Account", accountDomain)
+                .addRelation("OWNS", ownsRelation)
+                .addFooterMetadata("sys.kafka.topic", "banking-cdc")
+                .addFooterMetadata("sys.kafka.committed_offset", "1492048592")
+                .writeTo(channel);
+        }
+    }
+}
+```
+
+### 5.2 Query Engine Atomic Pointer Swap (`GraphSnapshotManager`)
+Query servers mount the newly compiled `.imps` snapshot file into a fresh shared arena and perform a zero-downtime Blue-Green swap:
+
+```java
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+
+import java.lang.foreign.Arena;
+import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
+public class GraphSnapshotManager implements AutoCloseable {
+    private final AtomicReference<GraphSnapshot> currentSnapshot = new AtomicReference<>();
+
+    public void swapToNewSnapshot(Path snapshotPath) throws Exception {
+        // 1. Map new immutable snapshot in a dedicated shared arena
+        Arena newArena = Arena.ofShared();
+        GraphSnapshot newSnapshot = BinarySnapshotLoader.loadSnapshot(snapshotPath, newArena).graph();
+
+        // 2. Atomic pointer swap (0ns lock overhead to active readers)
+        GraphSnapshot oldSnapshot = currentSnapshot.getAndSet(newSnapshot);
+
+        // 3. Asynchronously drain and close the retired snapshot's arena
+        if (oldSnapshot != null) {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    oldSnapshot.drainAndClose(30, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    oldSnapshot.close();
+                }
+            });
+        }
+    }
+
+    public GraphSnapshot getActiveSnapshot() {
+        return currentSnapshot.get();
+    }
+
+    @Override
+    public void close() {
+        GraphSnapshot snap = currentSnapshot.getAndSet(null);
+        if (snap != null) {
+            snap.close();
+        }
+    }
+}
 ```
 
 ---
 
-## 6. Binary `.imps` Mapping & Embedded Configuration (Spec v0.9.1)
+## 6. Binary `.imps` Metadata & Pod Cold-Start Protocol (Spec v0.9.0)
 
-To ensure snapshots are self-describing across languages (C++, Java, Rust, Python), the ingestion configuration and streaming metadata are embedded directly inside the **Section 1 Catalog and Section 5 Statistics Metadata**:
+To ensure snapshots are self-describing across polyglot runtimes (C++, Java, Rust, Python), streaming ingestion metadata and stream offsets are embedded directly inside the **Footer Custom Metadata Stream**:
 
-### 6.1 Section 1 / Section 5 Metadata Header Tags
+### 6.1 Embedded Footer Metadata Tags
 
 ```
- Section 1 / Section 5 Embedded Metadata Keys
+ Footer Custom Metadata Stream
  ─────────────────────────────────────────────────────────────────────────────
  • sys.kafka.topic:              "fleet-telematics-cdc"
  • sys.kafka.partition:          "0"
  • sys.kafka.committed_offset:   "1492048592"
- • sys.ingest.strategy.rel_0:    "IN_PLACE_ATOMIC|FORWARD_ONLY"
- • sys.ingest.strategy.rel_1:    "MICRO_BATCH_RCU|EAGER_DUAL|S3_FLUSH"
- • sys.ingest.strategy.rel_2:    "PAGED_APPENDIX|TOMBSTONE_BITSET"
+ • sys.build.git_commit:         "7fa2b9d"
+ • sys.build.timestamp_ms:       "1773620000000"
  ─────────────────────────────────────────────────────────────────────────────
 ```
 
-### 6.2 Automatic Pod Cold-Start & Catch-Up Protocol
-When a container pod boots up:
-1. **Load Base Snapshot**: Pod `mmap`s the latest `.imps` file in $< 1\,\mu\text{s}$.
-2. **Read Metadata Offset**: Extracts `sys.kafka.committed_offset` (e.g. `1492048592`).
-3. **Attach Kafka Stream**: Subscribes to `sys.kafka.topic` starting at offset `1492048593`.
-4. **Initialize Off-Heap Buffers**: Instantiates the declared Lego blocks (e.g. allocates Tombstone bitset and Appendix segments).
-5. **Begin Serving Queries**: Pod serves live queries immediately while catching up on the few remaining Kafka events.
+### 6.2 Container Pod Cold-Start & Ingestion Protocol
+When an Impulse Graph container pod initializes:
+1. **Load Base Snapshot**: Pod memory-maps the latest `.imps` file in $< 1\,\mu\text{s}$ via `BinarySnapshotLoader.loadSnapshot(path, arena)`.
+2. **OS Memory Prefetch**: Triggers `segment.load()` (`MADV_WILLNEED`), instructing the OS kernel to populate physical RAM pages in the background.
+3. **Immediate Query Serving**: Pod begins executing compiled vector traversals instantly with zero warmup and zero GC pauses.
+4. **Decoupled CDC Synchronization**: The external ingestion daemon (in `impulse-platform`) inspects `snapshot.getMetadata("sys.kafka.committed_offset")` and resumes consuming change events from offset $N+1$, compiling future snapshot generations out-of-band.
 
 ---
 
-## 7. Production Enterprise Recipes
+## 7. Production Enterprise Ingestion Patterns
 
-| Recipe Name | Target Workload | Composed Lego Blocks | Performance Metrics |
+| Ingestion Pattern | Target Workload | Architecture & Mechanism | Performance Characteristics |
 | :--- | :--- | :--- | :--- |
-| **1. IoT / Fleet Telematics** | 50k trucks sending 5-min GPS pings | `FrozenMmap` + `InPlaceAtomic` + `ForwardOnly` + `EphemeralRAM` | **$1\text{ ns}$ writes, $0\text{ MB}$ allocation, sub-microsecond routing** |
-| **2. Zanzibar ReBAC Security** | Fine-grained authorizations | `DenseOffHeap` + `BatchRebuild` + `MicroBatchRCU` (5s) + `EagerDual` + `S3Streamer` | **$0.3\text{ ns}$ traversal, $0$ read-locks, strict ACID snapshots** |
-| **3. High-Churn Streaming** | Social / Financial transactions | `PagedAppendix` + `TombstoneBitSet` + `AppendixAppend` + `LocalNvmeSpooler` | **$15\text{ ns}$ inserts, $2\text{ ns}$ deletes, 100% AVX-512 SIMD** |
-| **4. Massive Static Knowledge** | 100M-node Reference graphs | `FrozenMmap` + `TombstoneBitSet` + `ForwardOnly` + `CloudS3Streamer` | **$0\text{ DRAM}$ allocated, instant $< 1\,\mu\text{s}$ pod cold start** |
+| **1. Batch Lakehouse / Parquet ETL** | Billions of nodes/edges from Iceberg / Parquet | Single-pass compilation via `SnapshotBuilder` with external NVMe sort staging for CSC | $O(\text{chunk})$ bounded heap, single-pass zero-seek cloud upload, 128-byte hardware aligned |
+| **2. Micro-Batch CDC WAL Synchronization** | Operational OLTP tables via Debezium / Kafka | Out-of-band aggregator buffers deltas in `impulse-platform`, compiles new snapshot, triggers atomic swap | 0ns reader lock contention, RCU query draining, sub-microsecond traversal latency maintained |
+| **3. Zanzibar / ReBAC Authorizations** | Dynamic fine-grained access control (`impulse-authz`) | Micro-batch snapshot compilation (1–5s intervals), atomic pointer swap | Lock-free transitive reachability traversals, zero JVM garbage collection pauses |
+| **4. Hyperscale Multi-Terabyte Static Analytics** | 100M to 10B+ node reference graphs (Hetionet, DRKG) | Multi-domain `.imps` snapshot with `uint64_t` widths, mounted directly via read-only `mmap` | $0\text{ MB}$ JVM heap allocation, instant $< 1\,\mu\text{s}$ cold start, clean OS page cache eviction |
 
 ---
 
 ### Summary Architectural Conclusion
-By treating ingestion as a **composition of orthogonal off-heap Lego blocks**, Impulse Graph eliminates the traditional tradeoff between static immutable performance and live streaming mutability. The engine achieves **millions of streaming updates per second** while guaranteeing that **read queries never stop executing at full hardware SIMD memory-bus speed**.
+By decoupling ingestion from query execution and pairing an **immutable binary snapshot format (`.imps`)** with **out-of-band streaming compilation (`SnapshotBuilder`)** and **Blue-Green atomic pointer swaps**, Impulse Graph eliminates the traditional tradeoff between static query performance and continuous data updates. The query engine executes read-only traversals at full hardware memory-bus speed without locks or GC pauses, while streaming compilers generate new snapshots in bounded $O(\text{chunk})$ physical RAM.

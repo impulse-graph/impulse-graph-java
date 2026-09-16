@@ -76,6 +76,33 @@ public class HyperLogLogSketch {
 		return (long) estimate;
 	}
 
+	public void merge(HyperLogLogSketch other) {
+		if (other == null) {
+			return;
+		}
+		if (this.p != other.p) {
+			throw new IllegalArgumentException(
+					"Cannot merge sketches with different precisions: " + this.p + " vs " + other.p);
+		}
+		for (int i = 0; i < m; i++) {
+			if (other.registers[i] > this.registers[i]) {
+				this.registers[i] = other.registers[i];
+			}
+		}
+	}
+
+	public void union(HyperLogLogSketch other) {
+		merge(other);
+	}
+
+	public int getP() {
+		return p;
+	}
+
+	public int getM() {
+		return m;
+	}
+
 	private static long murmur3_64(byte[] data) {
 		long h = 0x123456789ABCDEFL;
 		long c1 = 0x87c37b91114253d5L;

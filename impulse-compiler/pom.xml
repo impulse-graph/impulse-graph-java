@@ -12,7 +12,7 @@
 
     <artifactId>impulse-compiler</artifactId>
     <name>Impulse Graph Engine - Compiler Suite</name>
-    <description>Pure Java 25 ImpScheme (ImpScm), CEL, and Multi-Frontend Query Optimizer and Bytecode Compiler</description>
+    <description>Pure Java 21 LTS ImpScheme (ImpScm), CEL, and Multi-Frontend Query Optimizer and Bytecode Compiler</description>
 
     <dependencies>
         <dependency>
@@ -40,6 +40,21 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-engine</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.jqwik</groupId>
+            <artifactId>jqwik</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>nl.jqno.equalsverifier</groupId>
+            <artifactId>equalsverifier-nodep</artifactId>
             <scope>test</scope>
         </dependency>
         <!-- JMH Benchmarks -->

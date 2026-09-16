@@ -18,64 +18,81 @@ public final class ImpulseLayoutsV0_9 {
 
 	// Section 1 Fixed 4KB Baseline Snapshot Header (Spec v0.9.0)
 	public static final StructLayout IMPULSE_SNAPSHOT_HEADER_V0_9_T_LAYOUT = MemoryLayout
-			.structLayout(ValueLayout.JAVA_INT.withName("magic"), ValueLayout.JAVA_SHORT.withName("version"),
-					ValueLayout.JAVA_INT.withName("data_offset"), ValueLayout.JAVA_SHORT.withName("domain_count"),
-					ValueLayout.JAVA_SHORT.withName("relation_count"), ValueLayout.JAVA_LONG.withName("timestamp_ms"),
-					ValueLayout.JAVA_LONG.withName("required_features"),
-					ValueLayout.JAVA_LONG.withName("footer_directory_offset"),
-					ValueLayout.JAVA_LONG.withName("footer_directory_bytes"),
+			.structLayout(ValueLayout.JAVA_INT_UNALIGNED.withName("magic"),
+					ValueLayout.JAVA_SHORT_UNALIGNED.withName("version"),
+					ValueLayout.JAVA_INT_UNALIGNED.withName("data_offset"),
+					ValueLayout.JAVA_SHORT_UNALIGNED.withName("domain_count"),
+					ValueLayout.JAVA_SHORT_UNALIGNED.withName("relation_count"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("timestamp_ms"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("required_features"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("footer_directory_offset"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("footer_directory_bytes"),
 					MemoryLayout.sequenceLayout(16, ValueLayout.JAVA_BYTE).withName("snapshot_uuid"),
-					ValueLayout.JAVA_SHORT.withName("header_checksum"),
+					ValueLayout.JAVA_SHORT_UNALIGNED.withName("header_checksum"),
 					MemoryLayout.sequenceLayout(4032, ValueLayout.JAVA_BYTE).withName("header_padding"))
 			.withName("impulse_snapshot_header_v0_9_t");
 
 	// Section 2 Domain Catalog Entry (16 Bytes)
 	public static final StructLayout IMPULSE_DOMAIN_CATALOG_ENTRY_V0_9_T_LAYOUT = MemoryLayout
-			.structLayout(ValueLayout.JAVA_SHORT.withName("domain_id"), ValueLayout.JAVA_BYTE.withName("key_type"),
-					ValueLayout.JAVA_BYTE.withName("reserved"), ValueLayout.JAVA_INT.withName("name_offset"),
-					ValueLayout.JAVA_LONG.withName("node_count"))
+			.structLayout(ValueLayout.JAVA_SHORT_UNALIGNED.withName("domain_id"),
+					ValueLayout.JAVA_BYTE.withName("key_type"), ValueLayout.JAVA_BYTE.withName("reserved"),
+					ValueLayout.JAVA_INT_UNALIGNED.withName("name_offset"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("node_count"))
 			.withName("impulse_domain_catalog_entry_v0_9_t");
 
 	// Section 2 Relation Directory Entry (128 Bytes)
-	public static final StructLayout IMPULSE_RELATION_DIRECTORY_ENTRY_V0_9_T_LAYOUT = MemoryLayout.structLayout(
-			ValueLayout.JAVA_SHORT.withName("relation_id"), ValueLayout.JAVA_SHORT.withName("src_domain_id"),
-			ValueLayout.JAVA_SHORT.withName("tgt_domain_id"), ValueLayout.JAVA_BYTE.withName("encoding_id"),
-			ValueLayout.JAVA_BYTE.withName("node_id_width"), ValueLayout.JAVA_BYTE.withName("edge_index_width"),
-			MemoryLayout.sequenceLayout(3, ValueLayout.JAVA_BYTE).withName("reserved1"),
-			ValueLayout.JAVA_INT.withName("name_offset"), ValueLayout.JAVA_LONG.withName("node_count"),
-			ValueLayout.JAVA_LONG.withName("edge_count"), ValueLayout.JAVA_LONG.withName("section_features"),
-			ValueLayout.JAVA_LONG.withName("csr_row_off_offset"), ValueLayout.JAVA_LONG.withName("csr_row_off_bytes"),
-			ValueLayout.JAVA_LONG.withName("csr_col_idx_offset"), ValueLayout.JAVA_LONG.withName("csr_col_idx_bytes"),
-			ValueLayout.JAVA_LONG.withName("csc_row_off_offset"), ValueLayout.JAVA_LONG.withName("csc_row_off_bytes"),
-			ValueLayout.JAVA_LONG.withName("csc_col_idx_offset"), ValueLayout.JAVA_LONG.withName("csc_col_idx_bytes"),
-			ValueLayout.JAVA_SHORT.withName("attr_count"),
-			MemoryLayout.sequenceLayout(22, ValueLayout.JAVA_BYTE).withName("reserved2"))
+	public static final StructLayout IMPULSE_RELATION_DIRECTORY_ENTRY_V0_9_T_LAYOUT = MemoryLayout
+			.structLayout(ValueLayout.JAVA_SHORT_UNALIGNED.withName("relation_id"),
+					ValueLayout.JAVA_SHORT_UNALIGNED.withName("src_domain_id"),
+					ValueLayout.JAVA_SHORT_UNALIGNED.withName("tgt_domain_id"),
+					ValueLayout.JAVA_BYTE.withName("encoding_id"), ValueLayout.JAVA_BYTE.withName("node_id_width"),
+					ValueLayout.JAVA_BYTE.withName("edge_index_width"),
+					MemoryLayout.sequenceLayout(3, ValueLayout.JAVA_BYTE).withName("reserved1"),
+					ValueLayout.JAVA_INT_UNALIGNED.withName("name_offset"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("node_count"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("edge_count"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("section_features"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("csr_row_off_offset"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("csr_row_off_bytes"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("csr_col_idx_offset"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("csr_col_idx_bytes"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("csc_row_off_offset"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("csc_row_off_bytes"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("csc_col_idx_offset"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("csc_col_idx_bytes"),
+					ValueLayout.JAVA_SHORT_UNALIGNED.withName("attr_count"),
+					MemoryLayout.sequenceLayout(22, ValueLayout.JAVA_BYTE).withName("reserved2"))
 			.withName("impulse_relation_directory_entry_v0_9_t");
 
 	// Section 2 Edge Attribute Descriptor Entry (44 Bytes)
 	public static final StructLayout IMPULSE_ATTRIBUTE_DESCRIPTOR_V0_9_T_LAYOUT = MemoryLayout
-			.structLayout(ValueLayout.JAVA_INT.withName("name_offset"), ValueLayout.JAVA_BYTE.withName("type_code"),
-					ValueLayout.JAVA_BYTE.withName("reserved1"), ValueLayout.JAVA_SHORT.withName("reserved2"),
-					ValueLayout.JAVA_INT.withName("dimension"), ValueLayout.JAVA_LONG.withName("data_offset"),
-					ValueLayout.JAVA_LONG.withName("data_bytes"), ValueLayout.JAVA_LONG.withName("offsets_offset"),
-					ValueLayout.JAVA_LONG.withName("offsets_bytes"))
+			.structLayout(ValueLayout.JAVA_INT_UNALIGNED.withName("name_offset"),
+					ValueLayout.JAVA_BYTE.withName("type_code"), ValueLayout.JAVA_BYTE.withName("reserved1"),
+					ValueLayout.JAVA_SHORT_UNALIGNED.withName("reserved2"),
+					ValueLayout.JAVA_INT_UNALIGNED.withName("dimension"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("data_offset"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("data_bytes"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("offsets_offset"),
+					ValueLayout.JAVA_LONG_UNALIGNED.withName("offsets_bytes"))
 			.withName("impulse_attribute_descriptor_v0_9_t");
 
 	// Section 2.6 Secondary Index Directory Entry (Fixed 64 Bytes POD)
-	public static final StructLayout IMPULSE_INDEX_DIRECTORY_ENTRY_V0_9_T_LAYOUT = MemoryLayout
-			.structLayout(ValueLayout.JAVA_INT.withName("index_id"), ValueLayout.JAVA_SHORT.withName("domain_id"),
-					ValueLayout.JAVA_SHORT.withName("relation_id"), ValueLayout.JAVA_SHORT.withName("attribute_index"),
-					ValueLayout.JAVA_BYTE.withName("index_type"), ValueLayout.JAVA_BYTE.withName("reserved1"),
-					ValueLayout.JAVA_INT.withName("name_offset"), ValueLayout.JAVA_LONG.withName("data_offset"),
-					ValueLayout.JAVA_LONG.withName("data_bytes"),
-					ValueLayout.JAVA_LONG.withName("payload_feature_mask"),
-					MemoryLayout.sequenceLayout(24, ValueLayout.JAVA_BYTE).withName("reserved_padding"))
+	public static final StructLayout IMPULSE_INDEX_DIRECTORY_ENTRY_V0_9_T_LAYOUT = MemoryLayout.structLayout(
+			ValueLayout.JAVA_INT_UNALIGNED.withName("index_id"), ValueLayout.JAVA_SHORT_UNALIGNED.withName("domain_id"),
+			ValueLayout.JAVA_SHORT_UNALIGNED.withName("relation_id"),
+			ValueLayout.JAVA_SHORT_UNALIGNED.withName("attribute_index"), ValueLayout.JAVA_BYTE.withName("index_type"),
+			ValueLayout.JAVA_BYTE.withName("reserved1"), ValueLayout.JAVA_INT_UNALIGNED.withName("name_offset"),
+			ValueLayout.JAVA_LONG_UNALIGNED.withName("data_offset"),
+			ValueLayout.JAVA_LONG_UNALIGNED.withName("data_bytes"),
+			ValueLayout.JAVA_LONG_UNALIGNED.withName("payload_feature_mask"),
+			MemoryLayout.sequenceLayout(24, ValueLayout.JAVA_BYTE).withName("reserved_padding"))
 			.withName("impulse_index_directory_entry_v0_9_t");
 
 	// 16-Byte Footer Trailer at EOF
 	public static final StructLayout IMPULSE_FOOTER_TRAILER_V0_9_T_LAYOUT = MemoryLayout
-			.structLayout(ValueLayout.JAVA_LONG.withName("footer_length"),
-					ValueLayout.JAVA_INT.withName("spec_version"), ValueLayout.JAVA_INT.withName("footer_magic"))
+			.structLayout(ValueLayout.JAVA_LONG_UNALIGNED.withName("footer_length"),
+					ValueLayout.JAVA_INT_UNALIGNED.withName("spec_version"),
+					ValueLayout.JAVA_INT_UNALIGNED.withName("footer_magic"))
 			.withName("impulse_footer_trailer_v0_9_t");
 
 }

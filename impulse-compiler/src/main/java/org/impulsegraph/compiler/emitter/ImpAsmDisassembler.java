@@ -79,7 +79,8 @@ public final class ImpAsmDisassembler {
 	static {
 		try {
 			for (java.lang.reflect.Field field : org.impulsegraph.vm.VmRegisterType.class.getDeclaredFields()) {
-				if (field.getName().startsWith("OP_") && field.getType() == byte.class) {
+				if (field.getName().startsWith("OP_") && !field.getName().startsWith("OP_FLAG_")
+						&& field.getType() == byte.class) {
 					byte val = field.getByte(null);
 					// If multiple constants have the same value (like OP_ADAPTIVE_WALK and
 					// OP_DENSE_WALK_LEGACY),

@@ -81,22 +81,18 @@ public interface RowReader extends AutoCloseable {
 	 * </p>
 	 */
 	default java.util.stream.Stream<RowReader> stream() {
-		return java.util.stream.StreamSupport
-				.stream(java.util.Spliterators.spliteratorUnknownSize(new java.util.Iterator<RowReader>() {
-					private boolean hasNext = RowReader.this.next();
+		return java.util.stream.StreamSupport.stream(
+				new java.util.Spliterators.AbstractSpliterator<RowReader>(rowCount() >= 0 ? rowCount() : Long.MAX_VALUE,
+						java.util.Spliterator.ORDERED | java.util.Spliterator.NONNULL) {
 					@Override
-					public boolean hasNext() {
-						return hasNext;
+					public boolean tryAdvance(java.util.function.Consumer<? super RowReader> action) {
+						if (RowReader.this.next()) {
+							action.accept(RowReader.this);
+							return true;
+						}
+						return false;
 					}
-					@Override
-					public RowReader next() {
-						if (!hasNext)
-							throw new java.util.NoSuchElementException();
-						RowReader current = RowReader.this;
-						hasNext = RowReader.this.next();
-						return current;
-					}
-				}, java.util.Spliterator.ORDERED | java.util.Spliterator.NONNULL), false);
+				}, false);
 	}
 
 	@Override

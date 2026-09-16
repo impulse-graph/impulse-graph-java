@@ -14,10 +14,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
+import org.junit.jupiter.api.Disabled;
 import static org.impulsegraph.vm.VmRegisterType.*;
 import static org.impulsegraph.vm.VmStateLayout.*;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+@Disabled("Manual 1.4B edge macro-benchmark")
 public class NodeIdWidthBenchmarkTest {
 
 	private static final Path TWITTER_SNAPSHOT_PATH = Path
@@ -27,7 +29,7 @@ public class NodeIdWidthBenchmarkTest {
 	}
 
 	private MemorySegment buildProgram(Arena arena, InstructionData... instrs) {
-		MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT, instrs.length);
+		MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT.byteSize() * instrs.length);
 		for (int i = 0; i < instrs.length; i++) {
 			long off = i * INSTRUCTION_SIZE_BYTES;
 			INSTR_OPCODE_HANDLE.set(prog, off, instrs[i].opcode);
@@ -78,7 +80,14 @@ public class NodeIdWidthBenchmarkTest {
 			System.out.printf("Allocating 64-bit target array:       %.2f GB (8 bytes/node ID)...%n",
 					targets64ByteSize / (1024.0 * 1024.0 * 1024.0));
 
-			MemorySegment targets64 = arena.allocate(targets64ByteSize);
+			MemorySegment targets64;
+			try {
+				targets64 = arena.allocate(targets64ByteSize);
+			} catch (OutOfMemoryError err) {
+				System.out.println("[SKIP] Insufficient direct memory to allocate 64-bit target array (needs "
+						+ (targets64ByteSize / (1024 * 1024 * 1024)) + " GB): " + err.getMessage());
+				return;
+			}
 			for (long i = 0; i < edgeCount; i++) {
 				int targetVal = targets32.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
 				targets64.setAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, i, (long) targetVal);

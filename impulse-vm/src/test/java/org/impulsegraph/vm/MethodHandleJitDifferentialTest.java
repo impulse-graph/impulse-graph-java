@@ -25,7 +25,7 @@ public class MethodHandleJitDifferentialTest {
 	}
 
 	private static MemorySegment buildProgram(Arena arena, InstructionData... instrs) {
-		MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT, instrs.length);
+		MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT.byteSize() * instrs.length);
 		for (int i = 0; i < instrs.length; i++) {
 			long off = i * INSTRUCTION_SIZE_BYTES;
 			INSTR_OPCODE_HANDLE.set(prog, off, instrs[i].opcode);
@@ -40,8 +40,8 @@ public class MethodHandleJitDifferentialTest {
 	@DisplayName("Parity: Single-Node Seed + CSR Walk + Collect BitSet")
 	void testNodeSeedAndCsrWalkParity() throws Throwable {
 		try (Arena arena = Arena.ofShared()) {
-			MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 2, 4, 5, 5);
-			MemorySegment targets = arena.allocateFrom(ValueLayout.JAVA_INT, 1, 2, 2, 3, 3);
+			MemorySegment offsets = TestSegmentHelper.allocateInts(arena, 0, 2, 4, 5, 5);
+			MemorySegment targets = TestSegmentHelper.allocateInts(arena, 1, 2, 2, 3, 3);
 			RelationSnapshot rel = new RelationSnapshot(arena, 4, 5, offsets, targets);
 			ImpulseGraphSnapshot graph = new GraphSnapshot(arena, Map.of("knows", rel));
 

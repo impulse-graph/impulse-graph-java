@@ -14,51 +14,125 @@ A practical guide for loading immutable binary snapshot files (`.imps`), queryin
 > mvn clean install -DskipTests
 > ```
 
-### 1.1 Maven Coordinates (`pom.xml`)
-Add the core engine modules to your `pom.xml`:
+### 1.1 Dependency Coordinates
+
+#### Maven (`pom.xml`)
+Add the engine modules to your `pom.xml`:
 
 ```xml
 <dependencies>
-    <!-- Public API -->
+    <!-- Public API & Domain Abstractions -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-api</artifactId>
         <version>0.9.0-SNAPSHOT</version>
     </dependency>
 
-    <!-- Storage Layer & Snapshot Builder -->
+    <!-- Storage Layer & Binary Snapshot Loader / Builder -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-storage</artifactId>
         <version>0.9.0-SNAPSHOT</version>
     </dependency>
 
-    <!-- Compute Engine & Query Interpreter -->
+    <!-- Compute VM & Execution Engine Provider -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-vm</artifactId>
         <version>0.9.0-SNAPSHOT</version>
     </dependency>
+
+    <!-- Query Compiler & openCypher Frontend (Optional, for declarative Cypher queries) -->
+    <dependency>
+        <groupId>org.impulsegraph</groupId>
+        <artifactId>impulse-compiler</artifactId>
+        <version>0.9.0-SNAPSHOT</version>
+    </dependency>
 </dependencies>
 ```
 
-### 1.2 Required JVM Arguments
-Configure your runtime and build plugins with standard Java 21 LTS preview and vector access flags:
+#### Gradle (Groovy DSL — `build.gradle`)
+```groovy
+dependencies {
+    implementation 'org.impulsegraph:impulse-api:0.9.0-SNAPSHOT'
+    implementation 'org.impulsegraph:impulse-storage:0.9.0-SNAPSHOT'
+    implementation 'org.impulsegraph:impulse-vm:0.9.0-SNAPSHOT'
+    implementation 'org.impulsegraph:impulse-compiler:0.9.0-SNAPSHOT' // Optional for Cypher
+}
+```
+
+#### Gradle (Kotlin DSL — `build.gradle.kts`)
+```kotlin
+dependencies {
+    implementation("org.impulsegraph:impulse-api:0.9.0-SNAPSHOT")
+    implementation("org.impulsegraph:impulse-storage:0.9.0-SNAPSHOT")
+    implementation("org.impulsegraph:impulse-vm:0.9.0-SNAPSHOT")
+    implementation("org.impulsegraph:impulse-compiler:0.9.0-SNAPSHOT") // Optional for Cypher
+}
+```
+
+### 1.2 Required Java 21 LTS Runtime & Compiler Arguments
+Impulse Graph targets the **Java 21 LTS** baseline leveraging Foreign Function & Memory (FFM) off-heap segments and the Vector API (`jdk.incubator.vector`) for SIMD acceleration, with forward compatibility for Java 22, 23, 24, and 25+. Configure your runtime and build plugins with preview and incubator access flags:
 
 ```bash
 --enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED
 ```
 
-In your `pom.xml`:
+#### Maven Configuration (`pom.xml`)
+Ensure your compiler and surefire plugins pass the preview and incubator flags:
+
 ```xml
-<plugin>
-    <groupId>org.apache.maven.plugins</groupId>
-    <artifactId>maven-surefire-plugin</artifactId>
-    <version>3.2.5</version>
-    <configuration>
-        <argLine>--enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED</argLine>
-    </configuration>
-</plugin>
+<properties>
+    <java.version>21</java.version>
+    <maven.compiler.release>21</maven.compiler.release>
+</properties>
+
+<build>
+    <plugins>
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-compiler-plugin</artifactId>
+            <version>3.13.0</version>
+            <configuration>
+                <release>${maven.compiler.release}</release>
+                <compilerArgs>
+                    <arg>--enable-preview</arg>
+                    <arg>--add-modules</arg>
+                    <arg>jdk.incubator.vector</arg>
+                </compilerArgs>
+            </configuration>
+        </plugin>
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <version>3.2.5</version>
+            <configuration>
+                <argLine>--enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED</argLine>
+            </configuration>
+        </plugin>
+    </plugins>
+</build>
+```
+
+#### Gradle Configuration (`build.gradle`)
+```groovy
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs += ["--enable-preview", "--add-modules", "jdk.incubator.vector"]
+}
+
+tasks.withType(JavaExec).configureEach {
+    jvmArgs += ["--enable-preview", "--add-modules", "jdk.incubator.vector", "--enable-native-access=ALL-UNNAMED"]
+}
+
+tasks.withType(Test).configureEach {
+    jvmArgs += ["--enable-preview", "--add-modules", "jdk.incubator.vector", "--enable-native-access=ALL-UNNAMED"]
+}
 ```
 
 ---
@@ -66,10 +140,10 @@ In your `pom.xml`:
 ## 2. Loading a Binary Snapshot (`.imps`)
 
 > [!NOTE]
-> **Creating Snapshots**:
-> You can create binary snapshots directly from code using the Java API (see [Section 5](#5-building-snapshots-from-code)), or generate them from CSV, TSV, and Parquet files using the CLI utilities in [`impulse-graph-tooling`](file:///Users/jesse/impulse/impulse-graph-tooling).
+> **Generating Binary Snapshots**:
+> To convert large datasets (CSV, TSV, Parquet) into zero-copy `.imps` binary snapshots, always use the official [`impulse-graph-tooling`](file:///Users/jesse/impulse/impulse-graph-tooling) CLI (`impulse build` or `impulse generate`). You can also programmatically build snapshots directly in Java via `DefaultSnapshotBuilder` (see [Section 5](#5-building-snapshots-from-code)).
 
-To load and query a snapshot file:
+To load and query an immutable binary snapshot file:
 
 ```java
 import org.impulsegraph.api.ImpulseGraphSnapshot;
@@ -79,7 +153,7 @@ import java.lang.foreign.Arena;
 import java.nio.file.Path;
 
 public class LoadSnapshotExample {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         // Manage off-heap lifecycle with an Arena
         try (Arena arena = Arena.ofShared()) {
             Path snapshotPath = Path.of("datasets/hetionet.imps");
@@ -93,17 +167,29 @@ public class LoadSnapshotExample {
 }
 ```
 
+> [!TIP]
+> **Convenience Loader for Tools & Scripts**:
+> For command-line utilities and test scripts with GC-managed off-heap arenas, you can load directly via:
+> ```java
+> ImpulseGraphSnapshot snap = ImpulseGraphSnapshot.load(Path.of("datasets/hetionet.imps"));
+> ```
+> For long-running server processes, always manage the `Arena` explicitly (e.g. `Arena.ofShared()`) to ensure deterministic off-heap deallocation.
+
 ---
 
 ## 3. Querying Connections (Fluent Traversal API)
 
-All queries start from a specific **node type / domain** (e.g. `User`, `Product`, `Disease`).
+In Impulse Graph Engine, there is **no global flattened or synthetic unified node ID space** (Rule 3.14). Every Node Domain (e.g. `User`, `Product`, `Disease`) maintains its own independent 0-indexed dense integer space $0 \dots N_d-1$. Dense node ID `0` in domain `User` is fundamentally distinct from dense node ID `0` in `Product`.
+
+All graph traversals follow the **Kleisli Frontier Propagation Model** (Rule 3.15), starting from an anchored domain context:
+$$\text{Pipeline} = \text{Anchor}(D_0, F_0, S_0) \gg= T_1 \gg= T_2 \dots \gg= \text{Collect}()$$
 
 Within a domain context, you can:
 1. **Translate between external keys and internal dense IDs** (`toDenseId` / `toKey`).
-2. **Filter** candidate nodes with `.filter(...)`.
-3. **Walk edges** to connected node types with `.out("relationName")`.
-4. **Collect results** into lists, sets, or key collections (`.toKeyList()`, `.toList()`, `.toSet()`, `.count()`).
+2. **Seed frontiers** from external business keys (`.fromKey(...)`, `.fromKeys(...)`), dense IDs (`.from(...)`), or bitsets.
+3. **Filter candidate nodes** via CEL predicates with `.filter(...)`.
+4. **Walk edges across domains** with `.out("relationName")` or `.in("relationName")` (transitions the traversal context to the relation's target/source domain).
+5. **Collect results** into lists, sets, or zero-copy off-heap bitsets (`.toKeyList()`, `.toKeySet()`, `.toList()`, `.toSet()`, `.toBitSet()`, `.count()`).
 
 ```java
 import org.impulsegraph.api.ImpulseGraphSnapshot;
@@ -173,7 +259,7 @@ public class TraversalExamples {
 
 ## 4. Parameterized Cypher Queries (`ImpulseStatement`)
 
-You can execute declarative openCypher graph queries using `snap.prepare(...)`. Execution uses a familiar cursor model similar to JDBC or SQLite:
+You can execute declarative openCypher graph queries using `snap.prepare(...)`. Statements are compiled into ImpScheme AST and lowered to native `impOps` bytecode, executing with sub-microsecond latency across parameter re-bindings:
 
 ```java
 import org.impulsegraph.api.ImpulseGraphSnapshot;
@@ -214,9 +300,46 @@ public class StatementExample {
 
 ## 5. Building Snapshots from Code
 
-To programmatically build and save a new `.imps` snapshot file with custom domains, entity keys, and relations:
+To programmatically build and save a new `.imps` snapshot file in Java:
+
+### 5.1 Quick Snapshot Serialization (`writeSnapshotBytes`)
+For simple graphs without custom domain catalogs or string keys, use `DefaultSnapshotBuilder.writeSnapshotBytes`:
 
 ```java
+import org.impulsegraph.storage.csr.DefaultSnapshotBuilder;
+import org.impulsegraph.storage.csr.GraphSnapshot;
+import org.impulsegraph.storage.csr.RelationSnapshot;
+
+import java.lang.foreign.Arena;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Map;
+
+public class BuildSnapshotSimpleExample {
+
+    public static void createSnapshot() throws Exception {
+        try (Arena arena = Arena.ofShared()) {
+            // Build relation: User -> Group (2 edges: 0 -> 10, 1 -> 10)
+            int[] rowOffsets = new int[]{0, 1, 2};
+            int[] colIndices = new int[]{10, 10};
+            RelationSnapshot rel = new RelationSnapshot(arena, 2, 2, rowOffsets, colIndices);
+
+            GraphSnapshot graph = new GraphSnapshot(arena, Map.of("userToGroup", rel));
+
+            // Serialize graph directly to .imps C-ABI binary format
+            byte[] impsBytes = DefaultSnapshotBuilder.writeSnapshotBytes(graph);
+            Files.write(Path.of("target/sample_graph.imps"), impsBytes);
+            System.out.printf("Saved binary snapshot (%d bytes).%n", impsBytes.length);
+        }
+    }
+}
+```
+
+### 5.2 Multi-Domain Snapshot with Domain Catalogs & Business Keys
+To configure explicit domain catalogs, external business keys, relation domain endpoints, and reverse CSC indices:
+
+```java
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 import org.impulsegraph.storage.csr.DefaultSnapshotBuilder;
 import org.impulsegraph.storage.csr.GraphSnapshot;
 import org.impulsegraph.storage.csr.RelationSnapshot;
@@ -247,12 +370,15 @@ public class BuildSnapshotExample {
             RelationSnapshot knowsRel = new RelationSnapshot(arena, 4, 5, offsets, targets);
             GraphSnapshot graph = new GraphSnapshot(arena, Map.of("knows", knowsRel));
 
-            // Build snapshot with domain metadata, business keys, and primitive ID widths:
-            // - nodeKeyType: (byte) 1 (String UUID/Key)
-            // - nodeIdWidth: 2 (16-bit uint16), 4 (32-bit uint32), or 8 (64-bit uint64)
+            // Build snapshot with domain catalog, business keys, and reverse CSC:
+            // - withDomain(domainId, name, keyType, nodeCount)
+            //   keyType: (byte) 11 (VAR_STRING), (byte) 3 (INT32), etc.
+            // - withRelationDomain(relName, srcDomainId, tgtDomainId)
             byte[] snapshotBytes = new DefaultSnapshotBuilder()
-                    .withDomain(0, "User", (byte) 1, 4) // 4 bytes = 32-bit node ID width
+                    .withDomain(0, "User", (byte) 11, 4L) // domainId: 0, name: "User", keyType: VAR_STRING, nodeCount: 4
+                    .withRelationDomain("knows", 0, 0)   // srcDomainId: 0 (User), tgtDomainId: 0 (User)
                     .withDomainKeys("User", List.of("usr_alice", "usr_bob", "usr_charlie", "usr_dave"))
+                    .withCsc(true)                       // Generate reverse transpose (CSC) index
                     .build(new BinarySnapshotLoader.DefaultLoadedSnapshot(
                             BinarySnapshotLoader.SNAPSHOT_MAGIC, (short) 9, graph, Map.of(), Map.of(), Map.of(), Map.of()
                     ));
@@ -264,11 +390,13 @@ public class BuildSnapshotExample {
 }
 ```
 
-### 5.1 Configuring Primitive Node ID Widths (16, 32, 64-Bit)
-Each domain independently configures its physical primitive integer width based on cardinality:
-* `2` bytes (`uint16_t`): Up to 65,536 nodes — optimal for compact entity catalogs (32 nodes / 64B cache line).
-* `4` bytes (`uint32_t`): Up to 4,294,967,296 nodes — standard enterprise default (16 nodes / 64B cache line).
-* `8` bytes (`uint64_t`): Hyperscale domains (8 nodes / 64B cache line).
+### 5.3 Configuring Primitive Node ID Widths (16, 32, 64-Bit)
+Each domain and relation independently configures its physical primitive integer representation width in the binary snapshot layout based on domain cardinality:
+* `2` bytes (`uint16_t`): Up to 65,536 nodes — optimal for compact entity catalogs (32 nodes per 64-byte cache line).
+* `4` bytes (`uint32_t`): Up to 4,294,967,296 nodes — standard enterprise default (16 nodes per 64-byte cache line).
+* `8` bytes (`uint64_t`): Hyperscale domains (8 nodes per 64-byte cache line).
+
+In the C-ABI binary specification (`ImpulseLayoutsV0_9`), `node_id_width` and `edge_index_width` are encoded in the 128-byte Relation Directory Entry. When building relations in Java, constructors on `RelationSnapshot` accept primitive widths (`nodeIdWidth`, `edgeIndexWidth`), and when generating from external datasets, `impulse-graph-tooling` sets these in the manifest schema.
 
 ---
 
@@ -276,5 +404,8 @@ Each domain independently configures its physical primitive integer width based 
 
 For deeper architectural topics, complex query patterns, and advanced features, see:
 - [**Advanced Querying Guide**](file:///Users/jesse/impulse/impulse-graph-java/docs/ADVANCED_QUERYING.md) — Fixed-point loops (`repeatUntilStable`), monoidic path reductions (MIN/MAX/SUM), state vector projections (`.project`), CEL parameter sweeps, and BitSet algebra.
+- [**openCypher Dialect Reference**](file:///Users/jesse/impulse/impulse-graph-java/docs/OPENCYPHER_REFERENCE.md) — Supported Cypher grammar (`MATCH`, `WHERE`, `RETURN`), edge attribute filtering, and frontier set semantics.
+- [**Memory & Performance Tuning Guide**](file:///Users/jesse/impulse/impulse-graph-java/docs/MEMORY_TUNING_GUIDE.md) — FFM `Arena` lifecycle management, zero-GC mechanics, primitive ID width selection, and Vector API JVM tuning flags.
 - [**Compiler Architecture**](file:///Users/jesse/impulse/impulse-graph-java/docs/COMPILER_ARCHITECTURE.md) — Multi-pass optimization pipeline, AST transformations, and bytecode emission.
 - [**Ingestion Strategies**](file:///Users/jesse/impulse/impulse-graph-java/docs/ingestion-strategies.md) — Streaming large-scale datasets directly to `.imps` files.
+- [**Executable Java Code Samples**](file:///Users/jesse/impulse/impulse-graph-java/samples/src/main/java/org/impulsegraph/samples) — Complete runnable examples in `samples/` covering basic traversals, SIMD attribute filtering, compiled statements, and snapshot generation.

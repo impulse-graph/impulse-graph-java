@@ -40,10 +40,25 @@ public final class SimpleEdgeSource implements RelationDataSource {
 			@Override
 			public int nextChunk(MemorySegment srcIds, MemorySegment tgtIds, int limit) {
 				int count = 0;
+				int sWidth = limit > 0 ? (int) (srcIds.byteSize() / limit) : 4;
+				int tWidth = limit > 0 ? (int) (tgtIds.byteSize() / limit) : 4;
 				while (index < edges.size() && count < limit) {
 					Edge e = edges.get(index++);
-					srcIds.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, count, (int) e.src());
-					tgtIds.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, count, (int) e.tgt());
+					if (sWidth == 2) {
+						srcIds.setAtIndex(ValueLayout.JAVA_SHORT_UNALIGNED, count, (short) e.src());
+					} else if (sWidth == 8) {
+						srcIds.setAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, count, e.src());
+					} else {
+						srcIds.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, count, (int) e.src());
+					}
+
+					if (tWidth == 2) {
+						tgtIds.setAtIndex(ValueLayout.JAVA_SHORT_UNALIGNED, count, (short) e.tgt());
+					} else if (tWidth == 8) {
+						tgtIds.setAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, count, e.tgt());
+					} else {
+						tgtIds.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, count, (int) e.tgt());
+					}
 					count++;
 				}
 				return count;

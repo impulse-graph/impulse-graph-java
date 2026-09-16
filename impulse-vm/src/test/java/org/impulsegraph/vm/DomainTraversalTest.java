@@ -27,8 +27,8 @@ public class DomainTraversalTest {
 			// node 1 -> [2, 3]
 			// node 2 -> [3]
 			// node 3 -> []
-			MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 2, 4, 5, 5);
-			MemorySegment targets = arena.allocateFrom(ValueLayout.JAVA_INT, 1, 2, 2, 3, 3);
+			MemorySegment offsets = TestSegmentHelper.allocateInts(arena, 0, 2, 4, 5, 5);
+			MemorySegment targets = TestSegmentHelper.allocateInts(arena, 1, 2, 2, 3, 3);
 			RelationSnapshot rel = new RelationSnapshot(arena, 4, 5, offsets, targets);
 
 			ImpulseGraphSnapshot snap = new GraphSnapshot(arena, Map.of("knows", rel));

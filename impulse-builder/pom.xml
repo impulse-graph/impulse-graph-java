@@ -12,7 +12,7 @@
 
     <artifactId>impulse-builder</artifactId>
     <name>Impulse Graph Engine - Streaming Snapshot Builder</name>
-    <description>Zero-dependency Java 25 streaming snapshot builder with S3 single-pass semantics</description>
+    <description>Zero-dependency Java 21 LTS streaming snapshot builder with S3 single-pass semantics</description>
 
     <dependencies>
         <dependency>
@@ -52,6 +52,16 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-params</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.jqwik</groupId>
+            <artifactId>jqwik</artifactId>
             <scope>test</scope>
         </dependency>
         <!-- JMH Benchmarks -->
