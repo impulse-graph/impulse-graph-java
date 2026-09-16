@@ -12,4 +12,5 @@
 
     <artifactId>impulse-spec</artifactId>
     <name>Impulse Graph Engine - Protocol Specification Constants</name>
+    <description>Protocol specification constants, memory layout offsets, and binary snapshot format invariants for Impulse Graph Engine</description>
 </project>

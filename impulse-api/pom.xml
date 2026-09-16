@@ -12,6 +12,7 @@
 
     <artifactId>impulse-api</artifactId>
     <name>Impulse Graph Engine - API Contracts</name>
+    <description>Public API contracts, query interfaces, and traversal primitives for Impulse Graph Engine</description>
 
     <dependencies>
         <dependency>
