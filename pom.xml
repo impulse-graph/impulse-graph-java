@@ -10,7 +10,7 @@
     <packaging>pom</packaging>
 
     <name>Impulse Graph Engine - Java Parent</name>
-    <description>Pure Java 21 LTS Foreign Function and Memory (FFM) Graph Engine</description>
+    <description>Pure Java 21 LTS and Java 22+ Foreign Function and Memory (FFM) Graph Engine</description>
     <url>https://impulsegraph.org</url>
 
     <licenses>
@@ -23,32 +23,32 @@
 
     <developers>
         <developer>
-            <id>impulsegraph</id>
-            <name>Impulse Graph Team</name>
-            <organization>Impulse Graph</organization>
-            <organizationUrl>https://impulsegraph.org</organizationUrl>
+            <id>impulse-graph</id>
+            <name>Impulse Graph Engine Contributors</name>
+            <url>https://github.com/impulse-graph</url>
         </developer>
     </developers>
 
     <scm>
         <connection>scm:git:git://github.com/impulse-graph/impulse-graph-java.git</connection>
         <developerConnection>scm:git:ssh://github.com:impulse-graph/impulse-graph-java.git</developerConnection>
-        <url>https://github.com/impulse-graph/impulse-graph-java/tree/main</url>
+        <url>https://github.com/impulse-graph/impulse-graph-java</url>
     </scm>
 
     <modules>
         <module>impulse-spec</module>
         <module>impulse-api</module>
         <module>impulse-storage</module>
-        <module>impulse-compiler</module>
         <module>impulse-vm</module>
+        <module>impulse-compiler</module>
         <module>impulse-builder</module>
         <module>samples</module>
     </modules>
 
     <properties>
         <java.version>21</java.version>
-        <maven.compiler.release>21</maven.compiler.release>
+        <maven.compiler.release>22</maven.compiler.release>
+        <argLine></argLine>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit.version>5.10.2</junit.version>
         <assertj.version>3.27.7</assertj.version>
@@ -108,24 +108,16 @@
     <build>
         <plugins>
             <plugin>
-                <groupId>org.jacoco</groupId>
-                <artifactId>jacoco-maven-plugin</artifactId>
-                <version>${jacoco.version}</version>
-                <executions>
-                    <execution>
-                        <id>prepare-agent</id>
-                        <goals>
-                            <goal>prepare-agent</goal>
-                        </goals>
-                    </execution>
-                    <execution>
-                        <id>report</id>
-                        <phase>test</phase>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
-                    </execution>
-                </executions>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.1</version>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Multi-Release>true</Multi-Release>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
@@ -166,7 +158,6 @@
                 <configuration>
                     <release>${maven.compiler.release}</release>
                     <compilerArgs>
-                        <arg>--enable-preview</arg>
                         <arg>--add-modules</arg>
                         <arg>jdk.incubator.vector</arg>
                     </compilerArgs>
@@ -177,7 +168,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
                 <configuration>
-                    <argLine>@{argLine} --enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED -XX:MaxDirectMemorySize=16g</argLine>
+                    <argLine>@{argLine} --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED -XX:MaxDirectMemorySize=16g</argLine>
                 </configuration>
             </plugin>
             <plugin>
@@ -185,7 +176,7 @@
                 <artifactId>maven-javadoc-plugin</artifactId>
                 <version>3.6.3</version>
                 <configuration>
-                    <additionalOptions>--enable-preview --add-modules jdk.incubator.vector</additionalOptions>
+                    <additionalOptions>--add-modules jdk.incubator.vector</additionalOptions>
                     <doclint>none</doclint>
                     <quiet>true</quiet>
                 </configuration>
@@ -194,6 +185,110 @@
     </build>
 
     <profiles>
+        <profile>
+            <id>jdk21</id>
+            <activation>
+                <jdk>21</jdk>
+            </activation>
+            <properties>
+                <maven.compiler.release>21</maven.compiler.release>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-compiler-plugin</artifactId>
+                        <configuration>
+                            <release>21</release>
+                            <compilerArgs>
+                                <arg>--enable-preview</arg>
+                                <arg>--add-modules</arg>
+                                <arg>jdk.incubator.vector</arg>
+                            </compilerArgs>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <argLine>@{argLine} --enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED -XX:MaxDirectMemorySize=16g</argLine>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <configuration>
+                            <additionalOptions>--enable-preview --add-modules jdk.incubator.vector</additionalOptions>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>jdk22-plus</id>
+            <activation>
+                <jdk>[22,)</jdk>
+            </activation>
+            <properties>
+                <maven.compiler.release>22</maven.compiler.release>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-compiler-plugin</artifactId>
+                        <configuration>
+                            <release>22</release>
+                            <compilerArgs>
+                                <arg>--add-modules</arg>
+                                <arg>jdk.incubator.vector</arg>
+                            </compilerArgs>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <argLine>@{argLine} --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED -XX:MaxDirectMemorySize=16g</argLine>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <configuration>
+                            <additionalOptions>--add-modules jdk.incubator.vector</additionalOptions>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>coverage</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.jacoco</groupId>
+                        <artifactId>jacoco-maven-plugin</artifactId>
+                        <version>${jacoco.version}</version>
+                        <executions>
+                            <execution>
+                                <id>prepare-agent</id>
+                                <goals>
+                                    <goal>prepare-agent</goal>
+                                </goals>
+                            </execution>
+                            <execution>
+                                <id>report</id>
+                                <phase>test</phase>
+                                <goals>
+                                    <goal>report</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
         <profile>
             <id>release</id>
             <build>
