@@ -6,7 +6,7 @@
 
     <groupId>org.impulsegraph</groupId>
     <artifactId>impulse-java-parent</artifactId>
-    <version>0.9.0-SNAPSHOT</version>
+    <version>0.9.0</version>
     <packaging>pom</packaging>
 
     <name>Impulse Graph Engine - Java Parent</name>

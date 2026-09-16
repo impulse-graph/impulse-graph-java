@@ -68,6 +68,7 @@ jobs:
           CLEAN_VERSION="${RAW_TAG#v}"
           echo "tag_name=$RAW_TAG" >> $GITHUB_OUTPUT
           echo "clean_version=$CLEAN_VERSION" >> $GITHUB_OUTPUT
+          mvn versions:set -DnewVersion=$CLEAN_VERSION -DgenerateBackupPoms=false
 
       - name: Build & Package Multi-Module JARs
         run: |
