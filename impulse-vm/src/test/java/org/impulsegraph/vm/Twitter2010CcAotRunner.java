@@ -56,7 +56,7 @@ public class Twitter2010CcAotRunner {
 			// 5: OP_STABLE_CHECK (check convergence on R2)
 			// 6: OP_COLLECT_BITSET (dst=2)
 			// 7: OP_HALT
-			MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT, 8);
+			MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT.byteSize() * 8);
 
 			// Instr 0: OP_INIT_INPUT_NODE
 			INSTR_OPCODE_HANDLE.set(prog, 0 * INSTRUCTION_SIZE_BYTES, OP_INIT_INPUT_NODE);

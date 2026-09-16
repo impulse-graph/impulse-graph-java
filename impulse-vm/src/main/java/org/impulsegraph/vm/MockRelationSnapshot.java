@@ -18,8 +18,8 @@ public class MockRelationSnapshot implements RelationSnapshot {
 	public MockRelationSnapshot(Arena arena, int nodeCount, long edgeCount, int[] offsets, int[] targets) {
 		this.nodeCount = nodeCount;
 		this.edgeCount = edgeCount;
-		this.rowOffsets = arena.allocateFrom(ValueLayout.JAVA_INT, offsets);
-		this.colTargets = arena.allocateFrom(ValueLayout.JAVA_INT, targets);
+		this.rowOffsets = arena.allocate((long) offsets.length * 4).copyFrom(MemorySegment.ofArray(offsets));
+		this.colTargets = arena.allocate((long) targets.length * 4).copyFrom(MemorySegment.ofArray(targets));
 		this.cscRowOffsets = this.rowOffsets;
 		this.cscColTargets = this.colTargets;
 	}

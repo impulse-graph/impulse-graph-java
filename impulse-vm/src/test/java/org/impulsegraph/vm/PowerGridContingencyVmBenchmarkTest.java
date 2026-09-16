@@ -58,7 +58,7 @@ public class PowerGridContingencyVmBenchmarkTest {
 
 			// Construct OP_ISLAND_DETECT program
 			// R0: Line Outage 1, R1: Line Outage 2, Dst R63
-			MemorySegment prog = arena.allocate(VmStateLayout.INSTRUCTION_LAYOUT, 2);
+			MemorySegment prog = arena.allocate(VmStateLayout.INSTRUCTION_LAYOUT.byteSize() * 2);
 			// INSTR: OP_ISLAND_DETECT dst=63, src1=0, src2=1, rel=0
 			int payload = 0 | (1 << 8) | (0 << 16);
 			VmStateLayout.INSTR_OPCODE_HANDLE.set(prog, 0L, VmRegisterType.OP_ISLAND_DETECT);
@@ -182,7 +182,7 @@ public class PowerGridContingencyVmBenchmarkTest {
 			System.out.printf("PowerGrid Bus Count (|V|):         %,d buses%n", busCount);
 			System.out.printf("Transmission Line Count (|E|):     %,d lines%n", lineCount);
 
-			MemorySegment prog = arena.allocate(VmStateLayout.INSTRUCTION_LAYOUT, 2);
+			MemorySegment prog = arena.allocate(VmStateLayout.INSTRUCTION_LAYOUT.byteSize() * 2);
 			int payload = 0 | (1 << 8) | (0 << 16);
 			VmStateLayout.INSTR_OPCODE_HANDLE.set(prog, 0L, VmRegisterType.OP_ISLAND_DETECT);
 			VmStateLayout.INSTR_FLAGS_HANDLE.set(prog, 0L, (byte) 0);

@@ -135,7 +135,7 @@ public class CrossEngineVerificationTest {
 			// 2: OP_MOV R0, R1
 			// 3: OP_HALT
 			int instrCount = 4;
-			MemorySegment progSeg = arena.allocate(INSTRUCTION_LAYOUT, instrCount);
+			MemorySegment progSeg = arena.allocate(INSTRUCTION_LAYOUT.byteSize() * instrCount);
 
 			setInstr(progSeg, 0, OP_LOAD_CONST_INT, (byte) 0, (short) 1, 10);
 			setInstr(progSeg, 1, OP_LOAD_CONST_INT, (byte) 0, (short) 2, 20);
@@ -196,8 +196,8 @@ public class CrossEngineVerificationTest {
 
 		try (Arena arena = Arena.ofConfined()) {
 			// Mock CSR: 4 nodes, 4 edges: 0 -> [1, 2], 1 -> [3], 2 -> [3]
-			MemorySegment rowOffsets = arena.allocateFrom(JAVA_INT, 0, 2, 3, 4, 4);
-			MemorySegment colIndices = arena.allocateFrom(JAVA_INT, 1, 2, 3, 3);
+			MemorySegment rowOffsets = TestSegmentHelper.allocateInts(arena, 0, 2, 3, 4, 4);
+			MemorySegment colIndices = TestSegmentHelper.allocateInts(arena, 1, 2, 3, 3);
 
 			// Bytecode:
 			// 0: OP_INIT_INPUT_NODE R0, 0
@@ -206,7 +206,7 @@ public class CrossEngineVerificationTest {
 			// 3: OP_COLLECT_BITSET dst=R2
 			// 4: OP_HALT
 			int instrCount = 5;
-			MemorySegment progSeg = arena.allocate(INSTRUCTION_LAYOUT, instrCount);
+			MemorySegment progSeg = arena.allocate(INSTRUCTION_LAYOUT.byteSize() * instrCount);
 
 			setInstr(progSeg, 0, OP_INIT_INPUT_NODE, (byte) 0, (short) 0, 0);
 			setInstr(progSeg, 1, OP_CSR_WALK, (byte) 0x02, (short) 1, (0 << 16) | 0); // OP_CSR_WALK rel=0, src=0, seed

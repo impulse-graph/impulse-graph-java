@@ -38,6 +38,18 @@ public class EquiDepthHistogramBuilder {
 		count++;
 	}
 
+	public void offer(long value) {
+		offer((double) value);
+	}
+
+	public void offer(int value) {
+		offer((double) value);
+	}
+
+	public int getCount() {
+		return count;
+	}
+
 	public long getNullCount() {
 		return nullCount;
 	}

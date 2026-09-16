@@ -56,7 +56,7 @@ public class Twitter2010CcVmBenchmarkTest {
 
 			// 1. Parallel Full-Graph Afforest Connected Components via Impulse VM
 			// OP_CC_AFFOREST
-			MemorySegment prog = arena.allocate(VmStateLayout.INSTRUCTION_LAYOUT, 2);
+			MemorySegment prog = arena.allocate(VmStateLayout.INSTRUCTION_LAYOUT.byteSize() * 2);
 			VmStateLayout.INSTR_OPCODE_HANDLE.set(prog, 0L, VmRegisterType.OP_CC_AFFOREST);
 			VmStateLayout.INSTR_FLAGS_HANDLE.set(prog, 0L, (byte) 0);
 			VmStateLayout.INSTR_DST_REG_HANDLE.set(prog, 0L, (short) 1);

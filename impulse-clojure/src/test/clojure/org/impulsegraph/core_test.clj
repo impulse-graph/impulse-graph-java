@@ -17,24 +17,24 @@
      groupToRole (Group -> Role): 1 -> 2, 2 -> 3"
   [arena]
   (let [;; follows: 0 -> 1, 1 -> 2, 2 -> 3
-        f-row-offsets (.allocateFrom ^Arena arena ValueLayout/JAVA_INT (int-array [0 1 2 3 3]))
-        f-col-targets (.allocateFrom ^Arena arena ValueLayout/JAVA_INT (int-array [1 2 3]))
-        f-csc-offsets (.allocateFrom ^Arena arena ValueLayout/JAVA_INT (int-array [0 0 1 2 3]))
-        f-csc-targets (.allocateFrom ^Arena arena ValueLayout/JAVA_INT (int-array [0 1 2]))
+        f-row-offsets (.allocateArray ^Arena arena ValueLayout/JAVA_INT (int-array [0 1 2 3 3]))
+        f-col-targets (.allocateArray ^Arena arena ValueLayout/JAVA_INT (int-array [1 2 3]))
+        f-csc-offsets (.allocateArray ^Arena arena ValueLayout/JAVA_INT (int-array [0 0 1 2 3]))
+        f-csc-targets (.allocateArray ^Arena arena ValueLayout/JAVA_INT (int-array [0 1 2]))
         rel-follows (RelationSnapshot. arena 4 3 f-row-offsets f-col-targets f-csc-offsets f-csc-targets)
 
         ;; userToGroup: 0 -> 1, 1 -> 2
-        u2g-offsets (.allocateFrom ^Arena arena ValueLayout/JAVA_INT (int-array [0 1 2 2 2]))
-        u2g-targets (.allocateFrom ^Arena arena ValueLayout/JAVA_INT (int-array [1 2]))
-        u2g-csc-offsets (.allocateFrom ^Arena arena ValueLayout/JAVA_INT (int-array [0 0 1 2 2]))
-        u2g-csc-targets (.allocateFrom ^Arena arena ValueLayout/JAVA_INT (int-array [0 1]))
+        u2g-offsets (.allocateArray ^Arena arena ValueLayout/JAVA_INT (int-array [0 1 2 2 2]))
+        u2g-targets (.allocateArray ^Arena arena ValueLayout/JAVA_INT (int-array [1 2]))
+        u2g-csc-offsets (.allocateArray ^Arena arena ValueLayout/JAVA_INT (int-array [0 0 1 2 2]))
+        u2g-csc-targets (.allocateArray ^Arena arena ValueLayout/JAVA_INT (int-array [0 1]))
         rel-u2g (RelationSnapshot. arena 4 2 u2g-offsets u2g-targets u2g-csc-offsets u2g-csc-targets)
 
         ;; groupToRole: 1 -> 2, 2 -> 3
-        g2r-offsets (.allocateFrom ^Arena arena ValueLayout/JAVA_INT (int-array [0 0 1 2 2]))
-        g2r-targets (.allocateFrom ^Arena arena ValueLayout/JAVA_INT (int-array [2 3]))
-        g2r-csc-offsets (.allocateFrom ^Arena arena ValueLayout/JAVA_INT (int-array [0 0 0 1 2]))
-        g2r-csc-targets (.allocateFrom ^Arena arena ValueLayout/JAVA_INT (int-array [1 2]))
+        g2r-offsets (.allocateArray ^Arena arena ValueLayout/JAVA_INT (int-array [0 0 1 2 2]))
+        g2r-targets (.allocateArray ^Arena arena ValueLayout/JAVA_INT (int-array [2 3]))
+        g2r-csc-offsets (.allocateArray ^Arena arena ValueLayout/JAVA_INT (int-array [0 0 0 1 2]))
+        g2r-csc-targets (.allocateArray ^Arena arena ValueLayout/JAVA_INT (int-array [1 2]))
         rel-g2r (RelationSnapshot. arena 4 2 g2r-offsets g2r-targets g2r-csc-offsets g2r-csc-targets)
 
         meta {"domain.User.nodeCount" "4"

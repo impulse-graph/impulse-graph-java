@@ -95,7 +95,7 @@ public final class CompiledQuery {
 		// 2. Clone instruction program segment to avoid mutating active concurrent
 		// memory segment
 		MemorySegment oldProg = currentState.programSeg();
-		MemorySegment newProgSeg = arena.allocate(INSTRUCTION_LAYOUT, currentState.instructionCount());
+		MemorySegment newProgSeg = arena.allocate(INSTRUCTION_LAYOUT.byteSize() * currentState.instructionCount());
 		newProgSeg.copyFrom(oldProg);
 
 		// 3. Patch Bytecode Instructions in new program segment

@@ -58,7 +58,7 @@ public class Twitter2010PrVmBenchmarkTest {
 
 			// Program Bytecode:
 			// R1 = OP_MXV (x = R1, dst = R2, rel = 0)
-			MemorySegment prog = arena.allocate(VmStateLayout.INSTRUCTION_LAYOUT, 2);
+			MemorySegment prog = arena.allocate(VmStateLayout.INSTRUCTION_LAYOUT.byteSize() * 2);
 			int payload = 1 | (0 << 16);
 			VmStateLayout.INSTR_OPCODE_HANDLE.set(prog, 0L, VmRegisterType.OP_MXV);
 			VmStateLayout.INSTR_FLAGS_HANDLE.set(prog, 0L, (byte) 0);

@@ -4,6 +4,7 @@ import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.bitset.ImpulseBitSet;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * frontier expansion) across: 1. Manual Java Pointer Loop 2. ImpulseVM Bytecode
  * Interpreter 3. ImpulseVM MethodHandle JIT Compiler
  */
+@Disabled("Manual 1.4B edge macro-benchmark")
 public class Twitter2010SideBySideBenchmarkTest {
 
 	private static final Path TWITTER_SNAPSHOT_PATH = Path
@@ -196,7 +198,7 @@ public class Twitter2010SideBySideBenchmarkTest {
 	private static boolean runImpulseVmInterpreter(ImpulseGraphSnapshot graph, int srcNode, int dstNode,
 			int targetHops) {
 		try (Arena iterArena = Arena.ofShared()) {
-			MemorySegment prog = iterArena.allocate(INSTRUCTION_LAYOUT, targetHops + 4);
+			MemorySegment prog = iterArena.allocate(INSTRUCTION_LAYOUT.byteSize() * (targetHops + 4));
 			int relId = 0;
 
 			setInstruction(prog, 0, OP_INIT_INPUT_NODE, (byte) 0, (short) 0, srcNode);
@@ -220,7 +222,7 @@ public class Twitter2010SideBySideBenchmarkTest {
 	private static boolean runImpulseVmJitCompiler(ImpulseGraphSnapshot graph, int srcNode, int dstNode, int targetHops)
 			throws Throwable {
 		try (Arena iterArena = Arena.ofShared()) {
-			MemorySegment prog = iterArena.allocate(INSTRUCTION_LAYOUT, targetHops + 4);
+			MemorySegment prog = iterArena.allocate(INSTRUCTION_LAYOUT.byteSize() * (targetHops + 4));
 			int relId = 0;
 
 			setInstruction(prog, 0, OP_INIT_INPUT_NODE, (byte) 0, (short) 0, srcNode);

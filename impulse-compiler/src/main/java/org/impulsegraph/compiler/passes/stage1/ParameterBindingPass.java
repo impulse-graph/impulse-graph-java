@@ -10,9 +10,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Stage 1 Pass: Parameter Binding & Constant Substitution. Injects compile-time
- * bound parameter values (e.g. @p1 -> "FRUIT", @minVoltage -> 0.95) into CEL
- * AST expressions prior to algebraic property inference and zone map pruning.
+ * Stage 1 Pass: Parameter Binding and Constant Substitution. Injects
+ * compile-time bound parameter values (e.g. @p1 -> "FRUIT", @minVoltage ->
+ * 0.95) into CEL AST expressions prior to algebraic property inference and zone
+ * map pruning.
  */
 public final class ParameterBindingPass implements CompilerPass {
 
@@ -99,9 +100,14 @@ public final class ParameterBindingPass implements CompilerPass {
 		if (params.containsKey(rawKey))
 			return params.get(rawKey);
 
+		String withAt = key.startsWith("@") ? key : "@" + key;
+		if (params.containsKey(withAt))
+			return params.get(withAt);
+
 		for (Map.Entry<String, Object> entry : params.entrySet()) {
 			String k = entry.getKey();
-			if (k.equalsIgnoreCase(key) || k.equalsIgnoreCase(rawKey)) {
+			String rawK = k.startsWith("@") ? k.substring(1) : k;
+			if (k.equalsIgnoreCase(key) || rawK.equalsIgnoreCase(rawKey)) {
 				return entry.getValue();
 			}
 		}

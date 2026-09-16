@@ -12,8 +12,9 @@ import java.util.List;
 
 /**
  * Stage 2 Pass: Injective Deduplication Bypass. Injective paths (where all
- * constituent relations have InDegree <= 1) preserve uniqueness. Replaces
- * expensive distinct deduplication passes with direct streaming collects.
+ * constituent relations have {@code InDegree <= 1}) preserve uniqueness.
+ * Replaces expensive distinct deduplication passes with direct streaming
+ * collects.
  */
 public final class InjectiveDeduplicationBypassPass implements CompilerPass {
 

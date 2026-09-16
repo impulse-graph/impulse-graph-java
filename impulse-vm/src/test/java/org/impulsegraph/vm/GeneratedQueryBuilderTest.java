@@ -78,13 +78,13 @@ public class GeneratedQueryBuilderTest {
 	@Test
 	public void testStronglyTypedGeneratedQueryExecution() {
 		try (Arena arena = Arena.ofShared()) {
-			MemorySegment u2gOffsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 1, 1);
-			MemorySegment u2gTargets = arena.allocateFrom(ValueLayout.JAVA_INT, 10);
+			MemorySegment u2gOffsets = TestSegmentHelper.allocateInts(arena, 0, 1, 1);
+			MemorySegment u2gTargets = TestSegmentHelper.allocateInts(arena, 10);
 			RelationSnapshot u2g = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 2, 1, u2gOffsets,
 					u2gTargets);
 
-			MemorySegment g2rOffsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1);
-			MemorySegment g2rTargets = arena.allocateFrom(ValueLayout.JAVA_INT, 5);
+			MemorySegment g2rOffsets = TestSegmentHelper.allocateInts(arena, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1);
+			MemorySegment g2rTargets = TestSegmentHelper.allocateInts(arena, 5);
 			RelationSnapshot g2r = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 12, 1, g2rOffsets,
 					g2rTargets);
 

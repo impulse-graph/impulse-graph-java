@@ -69,8 +69,8 @@ public class RelationStatisticsTest {
 	@DisplayName("Verify GraphStatistics aggregates multiple relation snapshots correctly")
 	public void testGraphStatisticsAggregation() {
 		try (Arena arena = Arena.ofShared()) {
-			MemorySegment u2gOffsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 2, 4);
-			MemorySegment u2gTargets = arena.allocateFrom(ValueLayout.JAVA_INT, 10, 20, 30, 40);
+			MemorySegment u2gOffsets = arena.allocate(12).copyFrom(MemorySegment.ofArray(new int[]{0, 2, 4}));
+			MemorySegment u2gTargets = arena.allocate(16).copyFrom(MemorySegment.ofArray(new int[]{10, 20, 30, 40}));
 			RelationSnapshot rel1 = new RelationSnapshot(arena, 2, 4, u2gOffsets, u2gTargets);
 
 			GraphSnapshot graphSnapshot = new GraphSnapshot(arena, Map.of("userToGroup", rel1));

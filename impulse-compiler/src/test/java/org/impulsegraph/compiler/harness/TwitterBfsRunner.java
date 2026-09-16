@@ -57,7 +57,7 @@ public class TwitterBfsRunner {
 			System.out.printf("Relation Edge Count:               %,d edges%n", rel.getEdgeCount());
 
 			// Build 2-hop BFS VM Program
-			MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT, 5);
+			MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT.byteSize() * 5);
 			INSTR_OPCODE_HANDLE.set(prog, 0 * INSTRUCTION_SIZE_BYTES, OP_INIT_INPUT_NODE);
 			INSTR_FLAGS_HANDLE.set(prog, 0 * INSTRUCTION_SIZE_BYTES, (byte) 0);
 			INSTR_DST_REG_HANDLE.set(prog, 0 * INSTRUCTION_SIZE_BYTES, (short) 0);

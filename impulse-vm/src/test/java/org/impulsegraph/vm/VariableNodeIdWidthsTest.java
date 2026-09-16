@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
 public class VariableNodeIdWidthsTest {
 
 	private MemorySegment buildProgram(Arena arena, InstructionData... instrs) {
-		MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT, instrs.length);
+		MemorySegment prog = arena.allocate(INSTRUCTION_LAYOUT.byteSize() * instrs.length);
 		for (int i = 0; i < instrs.length; i++) {
 			long off = i * INSTRUCTION_SIZE_BYTES;
 			INSTR_OPCODE_HANDLE.set(prog, off, instrs[i].opcode);

@@ -5,8 +5,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Opt-in observability and metrics registry for Impulse VM query engine. Pure
  * JDK 25 standard library with 0 third-party transitive dependencies. Defaults
- * to {@link #NOOP_REGISTRY} for zero allocation and zero C2 JIT overhead when
- * disabled.
+ * to {@link NoopMetricsRegistry#INSTANCE} for zero allocation and zero C2 JIT
+ * overhead when disabled.
  */
 public interface ImpulseMetricsRegistry {
 

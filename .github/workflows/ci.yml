@@ -1,4 +1,4 @@
-name: Impulse Graph Java 25 FFM CI
+name: Impulse Graph Java FFM CI (JDK 21 LTS & JDK 22+)
 
 on:
   push:
@@ -13,8 +13,20 @@ permissions:
 
 jobs:
   build-and-test-java:
-    name: Build & Test Java 25 Engine
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - java: '21'
+            name: 'Test Engine (JDK 21 LTS - Preview FFM)'
+            distribution: 'temurin'
+            profile: '-Pjdk21'
+          - java: '25'
+            name: 'Test Engine (JDK 22+ / Java 25 LTS - Standard FFM)'
+            distribution: 'temurin'
+            profile: '-Pjdk22-plus'
 
     env:
       HAS_PAT: ${{ secrets.ORGANIZATION_PAT }}
@@ -40,17 +52,17 @@ jobs:
             cp impulse-graph-spec/test-vectors/tc01_minimal_csr/snapshot.imps datasets/rbac_snapshot.imps
           fi
 
-      - name: Setup Java 25
+      - name: Setup Java ${{ matrix.java }}
         uses: actions/setup-java@v4
         with:
-          distribution: 'oracle'
-          java-version: '25'
+          distribution: ${{ matrix.distribution }}
+          java-version: ${{ matrix.java }}
           cache: 'maven'
 
-      - name: Build & Run Test Suites (All Modules)
+      - name: Build & Run Test Suites (${{ matrix.name }})
         run: |
           if [ -d impulse-graph-spec ]; then
-            mvn clean test --batch-mode --errors
+            mvn clean test ${{ matrix.profile }} --batch-mode --errors
           else
-            mvn clean test-compile --batch-mode --errors
+            mvn clean test-compile ${{ matrix.profile }} --batch-mode --errors
           fi

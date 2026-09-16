@@ -13,6 +13,9 @@ public class DegreeDistributionSketch {
 	private long max = Long.MIN_VALUE;
 	private long min = Long.MAX_VALUE;
 	private long zeroCount = 0;
+	private long sum = 0;
+	private double mean = 0.0;
+	private double sumSqDiff = 0.0;
 
 	public DegreeDistributionSketch(int sampleSize) {
 		this.reservoir = new int[sampleSize];
@@ -36,6 +39,31 @@ public class DegreeDistributionSketch {
 			}
 		}
 		count++;
+		sum += degree;
+		double delta = degree - mean;
+		mean += delta / count;
+		double delta2 = degree - mean;
+		sumSqDiff += delta * delta2;
+	}
+
+	public int getCount() {
+		return count;
+	}
+
+	public long getSum() {
+		return sum;
+	}
+
+	public double getMean() {
+		return count == 0 ? 0.0 : mean;
+	}
+
+	public double getVariance() {
+		return count == 0 ? 0.0 : sumSqDiff / count;
+	}
+
+	public double getStandardDeviation() {
+		return Math.sqrt(getVariance());
 	}
 
 	public long getMax() {

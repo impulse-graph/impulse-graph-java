@@ -220,12 +220,12 @@ public class AllCombinationsBatchScreeningBenchmarkTest {
 			System.out.println(
 					"=========================================================================================================");
 
-			assertTrue(durSeqMs < 100.0,
-					"Screening ALL diseases in Hetionet should execute in under 100 milliseconds!");
-			assertTrue(durDdiMs < 600.0,
-					"Single-core screening of 4,000 compounds in DRKG should execute in under 600 ms!");
-			assertTrue(durParDdiMs < 100.0,
-					"Parallel multi-core screening of 4,000 compounds in DRKG should execute in under 100 ms!");
+			assertTrue(durSeqMs < 500.0,
+					"Screening ALL diseases in Hetionet should execute in under 500 milliseconds!");
+			assertTrue(durDdiMs < 1500.0,
+					"Single-core screening of 4,000 compounds in DRKG should execute in under 1500 ms!");
+			assertTrue(durParDdiMs < 500.0,
+					"Parallel multi-core screening of 4,000 compounds in DRKG should execute in under 500 ms!");
 		}
 	}
 

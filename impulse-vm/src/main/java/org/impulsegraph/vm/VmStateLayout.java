@@ -9,11 +9,36 @@ import java.lang.invoke.VarHandle;
 import static java.lang.foreign.ValueLayout.*;
 
 /**
- * Java 25 FFM MemoryLayout definitions and VarHandle accessors for Impulse VM
+ * Java 21+ FFM MemoryLayout definitions and VarHandle accessors for Impulse VM
  * structs. Maps 1:1 with the 640-byte C-ABI struct impulse_vm_state_t and
  * 8-byte impulse_instruction_t.
  */
 public final class VmStateLayout {
+
+	private static final java.lang.invoke.MethodHandle SLICE_MH;
+	static {
+		try {
+			SLICE_MH = java.lang.invoke.MethodHandles.lookup().findVirtual(java.lang.foreign.MemorySegment.class,
+					"asSlice",
+					java.lang.invoke.MethodType.methodType(java.lang.foreign.MemorySegment.class, long.class));
+		} catch (ReflectiveOperationException e) {
+			throw new ExceptionInInitializerError(e);
+		}
+	}
+
+	private static VarHandle adapt(VarHandle vh) {
+		if (Runtime.version().feature() <= 21) {
+			if (vh.coordinateTypes().size() == 1
+					&& vh.coordinateTypes().get(0) == java.lang.foreign.MemorySegment.class) {
+				return java.lang.invoke.MethodHandles.collectCoordinates(vh, 0, SLICE_MH);
+			}
+			if (vh.coordinateTypes().size() == 2 && vh.coordinateTypes().get(0) == java.lang.foreign.MemorySegment.class
+					&& vh.coordinateTypes().get(1) == long.class) {
+				return java.lang.invoke.MethodHandles.collectCoordinates(vh, 0, SLICE_MH);
+			}
+		}
+		return vh;
+	}
 
 	private VmStateLayout() {
 	}
@@ -25,14 +50,14 @@ public final class VmStateLayout {
 	public static final StructLayout INSTRUCTION_LAYOUT = MemoryLayout.structLayout(JAVA_BYTE.withName("opcode"),
 			JAVA_BYTE.withName("flags"), JAVA_SHORT.withName("dst_reg"), JAVA_INT.withName("payload"));
 
-	public static final VarHandle INSTR_OPCODE_HANDLE = INSTRUCTION_LAYOUT
-			.varHandle(MemoryLayout.PathElement.groupElement("opcode"));
-	public static final VarHandle INSTR_FLAGS_HANDLE = INSTRUCTION_LAYOUT
-			.varHandle(MemoryLayout.PathElement.groupElement("flags"));
-	public static final VarHandle INSTR_DST_REG_HANDLE = INSTRUCTION_LAYOUT
-			.varHandle(MemoryLayout.PathElement.groupElement("dst_reg"));
-	public static final VarHandle INSTR_PAYLOAD_HANDLE = INSTRUCTION_LAYOUT
-			.varHandle(MemoryLayout.PathElement.groupElement("payload"));
+	public static final VarHandle INSTR_OPCODE_HANDLE = adapt(
+			INSTRUCTION_LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("opcode")));
+	public static final VarHandle INSTR_FLAGS_HANDLE = adapt(
+			INSTRUCTION_LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("flags")));
+	public static final VarHandle INSTR_DST_REG_HANDLE = adapt(
+			INSTRUCTION_LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("dst_reg")));
+	public static final VarHandle INSTR_PAYLOAD_HANDLE = adapt(
+			INSTRUCTION_LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("payload")));
 
 	/**
 	 * 640-byte VM State layout matching impulse_vm_state_t: - pc: uint32 (offset 0)
@@ -49,17 +74,18 @@ public final class VmStateLayout {
 			MemoryLayout.sequenceLayout(8, JAVA_INT).withName("call_stack"), JAVA_INT.withName("call_stack_depth"),
 			JAVA_INT.withName("reserved_padding2"));
 
-	public static final VarHandle PC_HANDLE = VM_STATE_LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("pc"));
-	public static final VarHandle FLAGS_HANDLE = VM_STATE_LAYOUT
-			.varHandle(MemoryLayout.PathElement.groupElement("flags"));
-	public static final VarHandle REGISTER_ELEMENT_HANDLE = VM_STATE_LAYOUT
-			.varHandle(MemoryLayout.PathElement.groupElement("registers"), MemoryLayout.PathElement.sequenceElement());
-	public static final VarHandle REGISTER_TYPE_ELEMENT_HANDLE = VM_STATE_LAYOUT.varHandle(
-			MemoryLayout.PathElement.groupElement("register_types"), MemoryLayout.PathElement.sequenceElement());
-	public static final VarHandle CALL_STACK_ELEMENT_HANDLE = VM_STATE_LAYOUT
-			.varHandle(MemoryLayout.PathElement.groupElement("call_stack"), MemoryLayout.PathElement.sequenceElement());
-	public static final VarHandle CALL_STACK_DEPTH_HANDLE = VM_STATE_LAYOUT
-			.varHandle(MemoryLayout.PathElement.groupElement("call_stack_depth"));
+	public static final VarHandle PC_HANDLE = adapt(
+			VM_STATE_LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("pc")));
+	public static final VarHandle FLAGS_HANDLE = adapt(
+			VM_STATE_LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("flags")));
+	public static final VarHandle REGISTER_ELEMENT_HANDLE = adapt(VM_STATE_LAYOUT
+			.varHandle(MemoryLayout.PathElement.groupElement("registers"), MemoryLayout.PathElement.sequenceElement()));
+	public static final VarHandle REGISTER_TYPE_ELEMENT_HANDLE = adapt(VM_STATE_LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("register_types"), MemoryLayout.PathElement.sequenceElement()));
+	public static final VarHandle CALL_STACK_ELEMENT_HANDLE = adapt(VM_STATE_LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("call_stack"), MemoryLayout.PathElement.sequenceElement()));
+	public static final VarHandle CALL_STACK_DEPTH_HANDLE = adapt(
+			VM_STATE_LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("call_stack_depth")));
 
 	public static final long STATE_SIZE_BYTES = VM_STATE_LAYOUT.byteSize();
 	public static final long INSTRUCTION_SIZE_BYTES = INSTRUCTION_LAYOUT.byteSize();

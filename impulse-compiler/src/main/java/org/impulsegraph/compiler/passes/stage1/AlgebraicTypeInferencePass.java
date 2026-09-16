@@ -16,7 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Stage 1 Pass: Universal Algebraic Type & Property Inference. Binds snapshot
+ * Stage 1 Pass: Universal Algebraic Type and Property Inference. Binds snapshot
  * attribute zone maps, infers interval bounds, computes variance/monotonicity,
  * and annotates AST nodes with algebraic signatures.
  */

@@ -24,8 +24,8 @@ public class AttributeProjectionAndReducerTest {
 	@Test
 	public void testNodeAndEdgeAttributeFiltering() {
 		try (Arena arena = Arena.ofShared()) {
-			MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 2, 2);
-			MemorySegment targets = arena.allocateFrom(ValueLayout.JAVA_INT, 10, 11);
+			MemorySegment offsets = TestSegmentHelper.allocateInts(arena, 0, 2, 2);
+			MemorySegment targets = TestSegmentHelper.allocateInts(arena, 10, 11);
 			RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 3, 2, offsets, targets);
 			ImpulseGraphSnapshot graph = new GraphSnapshot(arena, Map.of("routeToCity", rel));
 
@@ -42,8 +42,8 @@ public class AttributeProjectionAndReducerTest {
 	@Test
 	public void testExpressionProjectionAndReduceSum() {
 		try (Arena arena = Arena.ofShared()) {
-			MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 2, 2);
-			MemorySegment targets = arena.allocateFrom(ValueLayout.JAVA_INT, 10, 11);
+			MemorySegment offsets = TestSegmentHelper.allocateInts(arena, 0, 2, 2);
+			MemorySegment targets = TestSegmentHelper.allocateInts(arena, 10, 11);
 			RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 3, 2, offsets, targets);
 			ImpulseGraphSnapshot graph = new GraphSnapshot(arena, Map.of("routeToCity", rel));
 
@@ -66,8 +66,8 @@ public class AttributeProjectionAndReducerTest {
 	@Test
 	public void testReduceFirstEarlyTermination() {
 		try (Arena arena = Arena.ofShared()) {
-			MemorySegment offsets = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 2, 2);
-			MemorySegment targets = arena.allocateFrom(ValueLayout.JAVA_INT, 10, 11);
+			MemorySegment offsets = TestSegmentHelper.allocateInts(arena, 0, 2, 2);
+			MemorySegment targets = TestSegmentHelper.allocateInts(arena, 10, 11);
 			RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 3, 2, offsets, targets);
 			ImpulseGraphSnapshot graph = new GraphSnapshot(arena, Map.of("routeToCity", rel));
 

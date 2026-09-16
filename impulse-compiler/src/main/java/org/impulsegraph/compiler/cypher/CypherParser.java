@@ -36,10 +36,12 @@ public final class CypherParser {
 
 	private final CypherLexer lexer;
 	private CypherToken curr;
+	private CypherToken next;
 
 	public CypherParser(String query) {
 		this.lexer = new CypherLexer(Objects.requireNonNull(query, "query must not be null"));
-		advance();
+		this.curr = lexer.nextToken();
+		this.next = lexer.nextToken();
 	}
 
 	public static CypherQuery parse(String query) {
@@ -221,11 +223,12 @@ public final class CypherParser {
 	}
 
 	private boolean peekNextTokenIsColon() {
-		return false; // Handled by lookahead check if needed
+		return next != null && next.type() == CypherTokenType.COLON;
 	}
 
 	private void advance() {
-		curr = lexer.nextToken();
+		curr = next;
+		next = lexer.nextToken();
 	}
 
 	private boolean match(CypherTokenType type) {

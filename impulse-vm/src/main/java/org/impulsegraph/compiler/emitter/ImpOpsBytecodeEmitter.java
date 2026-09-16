@@ -175,23 +175,75 @@ public final class ImpOpsBytecodeEmitter {
 						if (list.elements().size() > 1 && list.elements().get(1) instanceof ScmLiteral.ScmInt cnt) {
 							repeatCount = (int) cnt.value();
 						}
-						short countReg = (short) (currentReg + 2);
+						short startReg = currentReg;
+						if (!firstStepEmitted) {
+							instrList.add(new InstructionWord(OP_INIT_INPUT_NODE, (byte) 0, startReg, 0));
+							firstStepEmitted = true;
+						}
+						short countReg = 2; // R2
 						instrList.add(new InstructionWord(OP_LOAD_CONST_INT, (byte) 0, countReg, repeatCount));
 						long loopStartPc = instrList.size();
 
+						short subOutReg = startReg;
 						if (list.elements().size() > 2 && list.elements().get(2) instanceof ScmProgram subProg) {
-							currentReg = emitSubSteps(subProg.steps(), snapshot, instrList, patches, relationIdMap,
-									currentReg);
+							subOutReg = emitSubSteps(subProg.steps(), snapshot, instrList, patches, relationIdMap,
+									startReg);
 						}
-						instrList.add(new InstructionWord(OP_LOOP_DECR, (byte) 0, countReg, (int) loopStartPc));
+						// Forward destination register back to startReg for next iteration
+						if (subOutReg != startReg) {
+							instrList.add(new InstructionWord(OP_MOV, (byte) 0, startReg, (int) subOutReg));
+						}
+						int loopEndPc = instrList.size();
+						int relOffset = (int) (loopStartPc - loopEndPc);
+						instrList.add(new InstructionWord(OP_LOOP_DECR, (byte) 0, countReg, relOffset));
+						currentReg = startReg;
 					} else if ("repeat-until-stable".equalsIgnoreCase(opName)) {
-						long loopStartPc = instrList.size();
-						if (list.elements().size() > 1 && list.elements().get(1) instanceof ScmProgram subProg) {
-							currentReg = emitSubSteps(subProg.steps(), snapshot, instrList, patches, relationIdMap,
-									currentReg);
+						short startReg = currentReg;
+						if (!firstStepEmitted) {
+							instrList.add(new InstructionWord(OP_INIT_INPUT_NODE, (byte) 0, startReg, 0));
+							firstStepEmitted = true;
 						}
-						instrList.add(new InstructionWord(OP_STABLE_CHECK, (byte) 0, currentReg, 0));
-						instrList.add(new InstructionWord(OP_JNZ, (byte) 0, (short) 0, (int) loopStartPc));
+						// Accumulator register for all reached nodes across iterations
+						short accReg = 2;
+						// Initialize accReg with seed in startReg
+						instrList.add(new InstructionWord(OP_MOV, (byte) 0, accReg, (int) startReg));
+
+						long loopStartPc = instrList.size();
+
+						short subOutReg = startReg;
+						if (list.elements().size() > 1 && list.elements().get(1) instanceof ScmProgram subProg) {
+							subOutReg = emitSubSteps(subProg.steps(), snapshot, instrList, patches, relationIdMap,
+									startReg);
+						}
+
+						// Check if newly reached nodes (subOutReg) are already a subset of accReg
+						int checkPayload = subOutReg & 0xFFFF;
+						instrList.add(new InstructionWord(OP_STABLE_CHECK, (byte) 0, accReg, checkPayload));
+
+						// Placeholder for OP_JZ loopExit
+						int jzPc = instrList.size();
+						instrList.add(new InstructionWord(OP_JZ, (byte) 0, (short) 0, 0));
+
+						// Union subOutReg into accReg: accReg = accReg | subOutReg
+						int unionPayload = ((subOutReg & 0xFFFF) << 16) | (accReg & 0xFFFF);
+						instrList.add(new InstructionWord(OP_SET_UNION, (byte) 0, accReg, unionPayload));
+
+						// Forward frontier for next iteration
+						if (subOutReg != startReg) {
+							instrList.add(new InstructionWord(OP_MOV, (byte) 0, startReg, (int) subOutReg));
+						}
+
+						// Unconditional jump back to loopStartPc
+						int jmpPc = instrList.size();
+						instrList.add(new InstructionWord(OP_JMP, (byte) 0, (short) 0, (int) (loopStartPc - jmpPc)));
+
+						// loopExit point: patch OP_JZ with relative offset to loopExitPc
+						int loopExitPc = instrList.size();
+						instrList.set(jzPc, new InstructionWord(OP_JZ, (byte) 0, (short) 0, (int) (loopExitPc - jzPc)));
+
+						// Return full accumulated visited set
+						instrList.add(new InstructionWord(OP_MOV, (byte) 0, startReg, (int) accReg));
+						currentReg = startReg;
 					} else if ("project-expression".equalsIgnoreCase(opName)) {
 						String attrName = "";
 						if (list.elements().size() > 1 && list.elements().get(1) instanceof ScmSymbol sym) {
@@ -219,7 +271,7 @@ public final class ImpOpsBytecodeEmitter {
 
 		// Allocate off-heap instruction memory segment
 		long count = instrList.size();
-		MemorySegment programSeg = arena.allocate(INSTRUCTION_LAYOUT, count);
+		MemorySegment programSeg = arena.allocate(INSTRUCTION_LAYOUT.byteSize() * count);
 
 		for (int i = 0; i < count; i++) {
 			long off = (long) i * 8; // 8-byte instruction layout

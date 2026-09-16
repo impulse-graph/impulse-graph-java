@@ -9,7 +9,7 @@ import java.util.Objects;
 
 /**
  * High-performance off-heap CSR relation snapshot container holding edge
- * targets for a single relation. Backed by Java 25 Foreign Function & Memory
+ * targets for a single relation. Backed by Java 25 Foreign Function and Memory
  * (FFM) {@link Arena} and off-heap {@link MemorySegment}s.
  */
 public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, AutoCloseable {

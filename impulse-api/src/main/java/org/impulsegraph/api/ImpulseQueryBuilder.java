@@ -39,7 +39,7 @@ public class ImpulseQueryBuilder<R> {
 	 * @param entityType
 	 *            Name of input entity domain (e.g. "USER", "Bus", "Load")
 	 * @param argType
-	 *            Argument type format (e.g. {@link ArgType#SINGLE_ID},
+	 *            Argument type format (e.g. {@link ArgType#SINGLE_NODE},
 	 *            {@link ArgType#ROARING_BITSET})
 	 * @return This builder instance for method chaining
 	 */
@@ -125,8 +125,8 @@ public class ImpulseQueryBuilder<R> {
 	 * @param relationName
 	 *            Name of edge relation (e.g. "Branch", "in_section")
 	 * @param celExpr
-	 *            CEL predicate expression (e.g. "edge.status == 1 && edge.rate_a
-	 *            >= @minRating")
+	 *            CEL predicate expression (e.g.
+	 *            {@code "edge.status == 1 && edge.rate_a >= @minRating"})
 	 * @return This builder instance for method chaining
 	 */
 	public ImpulseQueryBuilder<R> walkEdgeWithCel(String relationName, String celExpr) {
@@ -140,8 +140,8 @@ public class ImpulseQueryBuilder<R> {
 	 * Filter active candidate node set with an embedded CEL expression.
 	 *
 	 * @param celExpr
-	 *            CEL predicate expression (e.g. "node.vm < @minVoltage || node.vm
-	 *            > @maxVoltage")
+	 *            CEL predicate expression (e.g.
+	 *            {@code "node.vm < @minVoltage || node.vm > @maxVoltage"})
 	 * @return This builder instance for method chaining
 	 */
 	public ImpulseQueryBuilder<R> filterWithCel(String celExpr) {
@@ -261,7 +261,7 @@ public class ImpulseQueryBuilder<R> {
 	 * @param attributeName
 	 *            Edge attribute name
 	 * @param op
-	 *            Comparison operator (e.g. ">", "==", "<=")
+	 *            Comparison operator (e.g. {@code ">"}, {@code "=="}, {@code "<="})
 	 * @param value
 	 *            Threshold double value
 	 * @return This builder instance for method chaining

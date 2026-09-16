@@ -107,8 +107,8 @@ public final class DefaultSnapshotBuilder {
 		}
 
 		int numEdges = (int) (csrColumnTargets.byteSize() / 4);
-		MemorySegment cscRowOffSeg = arena.allocate(ValueLayout.JAVA_INT, nodeCount + 1);
-		MemorySegment cscColIdxSeg = arena.allocate(ValueLayout.JAVA_INT, numEdges);
+		MemorySegment cscRowOffSeg = arena.allocate((long) (nodeCount + 1) * 4);
+		MemorySegment cscColIdxSeg = arena.allocate((long) numEdges * 4);
 
 		int[] inDegrees = new int[nodeCount];
 		for (int i = 0; i < numEdges; i++) {

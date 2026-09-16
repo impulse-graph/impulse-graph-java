@@ -13,11 +13,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Stage 1 Pass: Zone Map Pruning & Dead Code Elimination. Evaluates predicates
- * against precomputed attribute zone maps: 1. If predicate is provably FALSE
- * (e.g. u.age > 250 when max(age)==114), prunes traversal branch. 2. If
- * predicate is provably TRUE for 100% of rows, strips the filter from the inner
- * traversal loop.
+ * Stage 1 Pass: Zone Map Pruning and Dead Code Elimination. Evaluates
+ * predicates against precomputed attribute zone maps: 1. If predicate is
+ * provably FALSE (e.g. u.age > 250 when max(age)==114), prunes traversal
+ * branch. 2. If predicate is provably TRUE for 100% of rows, strips the filter
+ * from the inner traversal loop.
  */
 public final class ZoneMapPruningPass implements CompilerPass {
 
