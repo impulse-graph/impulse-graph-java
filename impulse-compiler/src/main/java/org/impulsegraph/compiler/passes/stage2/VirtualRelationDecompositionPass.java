@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Stage 2 Pass: Virtual Relation Coproduct Decomposition & Partition
+ * Stage 2 Pass: Virtual Relation Coproduct Decomposition and Partition
  * Elimination. Decomposes virtual super-relations (VR = R1 + R2 + R3) into
  * optimal constituent paths. Prunes non-matching partitions using zone maps,
  * and specializes surviving constituent walks.

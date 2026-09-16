@@ -10,9 +10,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Stage 1 Pass: Parameter Binding & Constant Substitution. Injects compile-time
- * bound parameter values (e.g. @p1 -> "FRUIT", @minVoltage -> 0.95) into CEL
- * AST expressions prior to algebraic property inference and zone map pruning.
+ * Stage 1 Pass: Parameter Binding and Constant Substitution. Injects
+ * compile-time bound parameter values (e.g. @p1 -> "FRUIT", @minVoltage ->
+ * 0.95) into CEL AST expressions prior to algebraic property inference and zone
+ * map pruning.
  */
 public final class ParameterBindingPass implements CompilerPass {
 

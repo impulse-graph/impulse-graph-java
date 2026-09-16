@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Pure Java AST Optimizer & Constant Folder for CEL ASTs. 1-to-1 equivalent
+ * Pure Java AST Optimizer and Constant Folder for CEL ASTs. 1-to-1 equivalent
  * with impulse-cpp AstOptimizer.
  */
 public final class CelAstOptimizer {

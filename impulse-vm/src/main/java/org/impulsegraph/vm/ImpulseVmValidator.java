@@ -3,7 +3,7 @@ package org.impulsegraph.vm;
 import static org.impulsegraph.vm.VmRegisterType.*;
 
 /**
- * Java 25 Ahead-of-Time Bytecode Type & Register Validator for ImpulseVM.
+ * Java 25 Ahead-of-Time Bytecode Type and Register Validator for ImpulseVM.
  * Performs single-pass abstract type propagation across registers R0..R63.
  * Eliminates dynamic type tag branch mispredictions in SIMD execution loops.
  */
