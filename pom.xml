@@ -347,6 +347,9 @@
                             <publishingServerId>central</publishingServerId>
                             <tokenAuth>true</tokenAuth>
                             <autoPublish>false</autoPublish>
+                            <excludeArtifacts>
+                                <excludeArtifact>impulse-samples</excludeArtifact>
+                            </excludeArtifacts>
                         </configuration>
                     </plugin>
                 </plugins>
