@@ -110,10 +110,42 @@ public interface Traversal<T> {
 	}
 
 	/**
+	 * Fixed-point loop: repeats outgoing edge walk across {@code relation} until
+	 * the frontier set converges ({@code Frontier_{t+1} == Frontier_t}).
+	 */
+	default Traversal<T> repeatUntilStable(String relation) {
+		return repeatUntilStable(step -> step.out(relation));
+	}
+
+	/**
+	 * Fixed-point loop: repeats filtered outgoing edge walk across {@code relation}
+	 * until the frontier set converges ({@code Frontier_{t+1} == Frontier_t}).
+	 */
+	default Traversal<T> repeatUntilStable(String relation, String edgePredicate) {
+		return repeatUntilStable(step -> step.out(relation, edgePredicate));
+	}
+
+	/**
 	 * Fixed-point loop: repeats step until frontier set converges (Frontier_{t+1}
 	 * == Frontier_t).
 	 */
 	Traversal<T> repeatUntilStable(Function<Traversal<ImpulseBitSet>, Traversal<ImpulseBitSet>> step);
+
+	/**
+	 * Repeats outgoing edge walk across {@code relation} up to {@code iterations}
+	 * times.
+	 */
+	default Traversal<T> repeat(int iterations, String relation) {
+		return repeat(iterations, step -> step.out(relation));
+	}
+
+	/**
+	 * Repeats filtered outgoing edge walk across {@code relation} up to
+	 * {@code iterations} times.
+	 */
+	default Traversal<T> repeat(int iterations, String relation, String edgePredicate) {
+		return repeat(iterations, step -> step.out(relation, edgePredicate));
+	}
 
 	/**
 	 * Repeats step exactly n times.

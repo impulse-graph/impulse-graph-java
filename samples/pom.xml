@@ -39,5 +39,10 @@
             <artifactId>impulse-compiler</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.impulsegraph</groupId>
+            <artifactId>impulse-builder</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
 </project>
