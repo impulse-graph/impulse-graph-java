@@ -204,6 +204,8 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 		OPCODE_MAP.put("OP_STREAM_LOAD_TGT_ID", (byte) 0xBB);
 		OPCODE_MAP.put("OP_STREAM_LOAD_EDGE_ID", (byte) 0xBC);
 		OPCODE_MAP.put("OP_STREAM_LOAD_CONST", (byte) 0xBD);
+		OPCODE_MAP.put("OP_STREAM_YIELD", (byte) 0xBE);
+		OPCODE_MAP.put("OP_STREAM_SCATTER_REDUCE", (byte) 0xBF);
 	}
 
 	public record Expectation(String status, Map<Integer, Long> registers, Boolean zf, Boolean st, Integer pc,

@@ -224,14 +224,13 @@ public final class ImpOpsBytecodeEmitter {
 						int jzPc = instrList.size();
 						instrList.add(new InstructionWord(OP_JZ, (byte) 0, (short) 0, 0));
 
-						// Union subOutReg into accReg: accReg = accReg | subOutReg
-						int unionPayload = ((subOutReg & 0xFFFF) << 16) | (accReg & 0xFFFF);
-						instrList.add(new InstructionWord(OP_SET_UNION, (byte) 0, accReg, unionPayload));
+						// Compute delta frontier for next iteration: startReg = subOutReg \ accReg
+						int diffPayload = ((accReg & 0xFFFF) << 16) | (subOutReg & 0xFFFF);
+						instrList.add(new InstructionWord(OP_SET_DIFFERENCE, (byte) 0, startReg, diffPayload));
 
-						// Forward frontier for next iteration
-						if (subOutReg != startReg) {
-							instrList.add(new InstructionWord(OP_MOV, (byte) 0, startReg, (int) subOutReg));
-						}
+						// Union newly discovered frontier into accReg: accReg = accReg | startReg
+						int unionPayload = ((startReg & 0xFFFF) << 16) | (accReg & 0xFFFF);
+						instrList.add(new InstructionWord(OP_SET_UNION, (byte) 0, accReg, unionPayload));
 
 						// Unconditional jump back to loopStartPc
 						int jmpPc = instrList.size();

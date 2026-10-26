@@ -163,16 +163,78 @@ public final class VmQueryContext implements AutoCloseable {
 		return state;
 	}
 
-	// --- Bitset Management ---
+	// --- Bitset & Relation Cache Management ---
+
+	private static final Map<ImpulseGraphSnapshot, SnapshotMetadataCache> SNAPSHOT_CACHE = Collections
+			.synchronizedMap(new WeakHashMap<>());
+
+	private static final class SnapshotMetadataCache {
+		final int maxNodeCount;
+		final org.impulsegraph.api.RelationSnapshot[] byIndex;
+		final Map<String, org.impulsegraph.api.RelationSnapshot> mapRef;
+
+		SnapshotMetadataCache(ImpulseGraphSnapshot snap) {
+			Map<String, org.impulsegraph.api.RelationSnapshot> all = snap.getAllRelationSnapshots();
+			this.mapRef = all;
+			if (all == null || all.isEmpty()) {
+				this.maxNodeCount = 1024 * 1024;
+				this.byIndex = new org.impulsegraph.api.RelationSnapshot[0];
+			} else {
+				int max = 0;
+				org.impulsegraph.api.RelationSnapshot[] arr = new org.impulsegraph.api.RelationSnapshot[all.size()];
+				int i = 0;
+				for (org.impulsegraph.api.RelationSnapshot rel : all.values()) {
+					if (rel != null) {
+						max = Math.max(max, rel.getNodeCount());
+					}
+					arr[i++] = rel;
+				}
+				this.maxNodeCount = max > 0 ? max : 1024 * 1024;
+				this.byIndex = arr;
+			}
+		}
+
+		org.impulsegraph.api.RelationSnapshot resolve(ImpulseGraphSnapshot snap, int relId) {
+			if (mapRef != null && !mapRef.isEmpty()) {
+				String key = "rel_" + relId;
+				org.impulsegraph.api.RelationSnapshot direct = mapRef.get(key);
+				if (direct != null) {
+					return direct;
+				}
+				if (relId >= 0 && relId < byIndex.length) {
+					return byIndex[relId];
+				}
+			}
+			return snap.getRelationSnapshot("rel_" + relId);
+		}
+	}
+
+	private SnapshotMetadataCache metadataCache;
+
+	private SnapshotMetadataCache getMetadataCache() {
+		if (snapshot == null)
+			return null;
+		SnapshotMetadataCache c = this.metadataCache;
+		if (c == null) {
+			c = SNAPSHOT_CACHE.computeIfAbsent(snapshot, SnapshotMetadataCache::new);
+			this.metadataCache = c;
+		}
+		return c;
+	}
+
+	public org.impulsegraph.api.RelationSnapshot resolveRelation(int relId) {
+		if (snapshot == null)
+			return null;
+		SnapshotMetadataCache c = getMetadataCache();
+		return c != null ? c.resolve(snapshot, relId) : null;
+	}
 
 	private int getMaxNodeCount(ImpulseGraphSnapshot snap) {
-		if (snap == null || snap.getAllRelationSnapshots().isEmpty())
+		if (snap == null)
 			return 1024 * 1024;
-		int max = 0;
-		for (org.impulsegraph.api.RelationSnapshot rel : snap.getAllRelationSnapshots().values()) {
-			max = Math.max(max, rel.getNodeCount());
-		}
-		return max;
+		SnapshotMetadataCache c = (snap == this.snapshot) ? getMetadataCache()
+				: SNAPSHOT_CACHE.computeIfAbsent(snap, SnapshotMetadataCache::new);
+		return c != null ? c.maxNodeCount : 1024 * 1024;
 	}
 
 	public int acquireBitset() {

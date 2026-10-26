@@ -191,22 +191,9 @@ public final class VmHandlers {
 	}
 
 	private static RelationSnapshot resolveRelation(VmQueryContext ctx, int relId) {
-		ImpulseGraphSnapshot graph = ctx.snapshot();
-		if (graph == null)
+		if (ctx == null)
 			return null;
-		String name = (relId >= 0 && relId < 256) ? PRECACHED_REL_NAMES[relId] : ("rel_" + relId);
-		RelationSnapshot rel = graph.getRelationSnapshot(name);
-		if (rel == null && !graph.getAllRelationSnapshots().isEmpty()) {
-			int idx = 0;
-			for (RelationSnapshot snap : graph.getAllRelationSnapshots().values()) {
-				if (idx == relId) {
-					rel = snap;
-					break;
-				}
-				idx++;
-			}
-		}
-		return rel;
+		return ctx.resolveRelation(relId);
 	}
 
 	public static void handleCsrWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -274,8 +261,11 @@ public final class VmHandlers {
 			}
 		}
 
-		int outHandle = ctx.acquireBitset();
+		int outHandle = (dstReg != srcReg && getRegisterType(state, dstReg) == TYPE_BITSET_HANDLE)
+				? (int) getRegisterValue(state, dstReg)
+				: ctx.acquireBitset();
 		ImpulseBitSet outBs = ctx.getBitset(outHandle);
+		outBs.clear();
 
 		if (rel != null) {
 			if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
@@ -344,8 +334,11 @@ public final class VmHandlers {
 		validateReg(dstReg);
 		validateReg(srcReg);
 
-		int outHandle = ctx.acquireBitset();
+		int outHandle = (dstReg != srcReg && getRegisterType(state, dstReg) == TYPE_BITSET_HANDLE)
+				? (int) getRegisterValue(state, dstReg)
+				: ctx.acquireBitset();
 		ImpulseBitSet outBs = ctx.getBitset(outHandle);
+		outBs.clear();
 
 		if (rel1 != null && rel2 != null) {
 			MemorySegment r1Offsets = rel1.getRowOffsetsSegment();
@@ -1168,7 +1161,9 @@ public final class VmHandlers {
 		byte typeTag = getRegisterType(state, srcReg);
 		if (typeTag == TYPE_BITSET_HANDLE) {
 			ImpulseBitSet srcBs = ctx.getBitset((int) val);
-			int dstHandle = ctx.acquireBitset();
+			int dstHandle = (instr.dstReg() != srcReg && getRegisterType(state, instr.dstReg()) == TYPE_BITSET_HANDLE)
+					? (int) getRegisterValue(state, instr.dstReg())
+					: ctx.acquireBitset();
 			ImpulseBitSet dstBs = ctx.getBitset(dstHandle);
 			dstBs.clear();
 			if (srcBs != null) {
@@ -1216,6 +1211,16 @@ public final class VmHandlers {
 						isSubset = false;
 						break;
 					}
+				}
+			}
+		} else if (srcType == TYPE_BITSET_HANDLE && dstType != TYPE_BITSET_HANDLE) {
+			ImpulseBitSet bsSrc = ctx.getBitset((int) srcVal);
+			if (bsSrc != null) {
+				int first = bsSrc.nextSetBit(0);
+				if (first < 0) {
+					isSubset = true;
+				} else if (first == (int) dstVal && bsSrc.nextSetBit(first + 1) < 0) {
+					isSubset = true;
 				}
 			}
 		} else if (srcType != TYPE_BITSET_HANDLE && dstType == TYPE_BITSET_HANDLE) {
@@ -3002,7 +3007,6 @@ public final class VmHandlers {
 		validateReg(dst);
 		validateReg(src);
 		setRegister(state, dst, 0L, TYPE_FLOAT_VECTOR);
-		setFlag(state, FLAG_ZF, false);
 	}
 
 	public static void handleCooWalkDirectStore(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -3104,7 +3108,6 @@ public final class VmHandlers {
 			}
 		}
 		setRegister(state, dst, handle, TYPE_FLOAT_VECTOR);
-		setFlag(state, FLAG_ZF, false);
 	}
 
 	public static void handleGatherEdgeAttr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -3115,7 +3118,6 @@ public final class VmHandlers {
 		int handle = ctx.acquireFloatVector(1024);
 		float[] vec = ctx.getFloatVector(handle);
 		setRegister(state, dst, handle, TYPE_FLOAT_VECTOR);
-		setFlag(state, FLAG_ZF, false);
 	}
 
 	public static void handleVectorTimeValidAt(MemorySegment state, VmQueryContext ctx, Instruction instr) {
