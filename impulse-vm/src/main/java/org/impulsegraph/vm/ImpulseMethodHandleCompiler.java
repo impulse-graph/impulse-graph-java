@@ -32,11 +32,22 @@ public final class ImpulseMethodHandleCompiler {
 
 	public static JitDriver compileDriver(MemorySegment programSeg, long instructionCount) throws Exception {
 		MethodHandle[] handlers = new MethodHandle[(int) instructionCount];
+		VmHandlers.Instruction[] decoded = new VmHandlers.Instruction[(int) instructionCount];
 		for (int pc = 0; pc < instructionCount; pc++) {
 			VmHandlers.Instruction inst = VmHandlers.decodeInstruction(programSeg, pc);
-			handlers[pc] = bindInstruction(inst, pc, programSeg, instructionCount);
+			if ((inst.flags() & VmRegisterType.OP_FLAG_EXTENDED) != 0) {
+				VmHandlers.ExtendedInstruction ext = VmHandlers.decodeExtendedInstruction(programSeg, pc);
+				inst = new VmHandlers.Instruction(inst.opcode(), inst.flags(), inst.dstReg(),
+						(inst.payload() & 0xFFFF) | (ext.arg3() << 16));
+			}
+			decoded[pc] = inst;
+			byte op = inst.opcode();
+			if (op == VmRegisterType.OP_COO_WALK_STREAM || op == VmRegisterType.OP_CSR_WALK_STREAM
+					|| op == VmRegisterType.OP_CSC_WALK_STREAM || (op >= (byte) 0xA1 && op <= (byte) 0xBD)) {
+				handlers[pc] = bindInstruction(inst, pc, programSeg, instructionCount);
+			}
 		}
-		return new JitDriver(handlers);
+		return new JitDriver(handlers, programSeg, decoded);
 	}
 
 	public static MethodHandle compile(MemorySegment programSeg, long instructionCount) {
@@ -52,22 +63,10 @@ public final class ImpulseMethodHandleCompiler {
 		}
 
 		try {
-			MethodHandle[] handlers = new MethodHandle[(int) instructionCount];
-			for (int pc = 0; pc < instructionCount; pc++) {
-				VmHandlers.Instruction inst = VmHandlers.decodeInstruction(programSeg, pc);
-				handlers[pc] = bindInstruction(inst, pc, programSeg, instructionCount);
-			}
-
-			JitDriver driver = new JitDriver(handlers);
+			JitDriver driver = compileDriver(programSeg, instructionCount);
 			MethodHandle mh1 = MethodHandles.insertArguments(BLOCK_DRIVER_MH, 0, driver);
 			MethodHandle mh2 = MethodHandles.insertArguments(mh1, 4, instructionCount);
 			return MethodHandles.insertArguments(mh2, 3, stringPool);
-			// Note: bind order.
-			// BLOCK_DRIVER_MH signature: (JitDriver, ImpulseGraphSnapshot, Object, Arena,
-			// List, long)
-			// insert(0, driver) -> (ImpulseGraphSnapshot, Object, Arena, List, long)
-			// insert(4, instructionCount) -> (ImpulseGraphSnapshot, Object, Arena, List)
-			// insert(3, stringPool) -> (ImpulseGraphSnapshot, Object, Arena)
 		} catch (Exception e) {
 			throw new RuntimeException("Failed to compile method handle pipeline", e);
 		}
@@ -127,6 +126,11 @@ public final class ImpulseMethodHandleCompiler {
 			instr = new VmHandlers.Instruction(instr.opcode(), instr.flags(), instr.dstReg(),
 					(instr.payload() & 0xFFFF) | (ext.arg3() << 16));
 		}
+		return executeDecoded(programSeg, instructionCount, instr, ctx, state, input, pc);
+	}
+
+	public static int executeDecoded(MemorySegment programSeg, long instructionCount, VmHandlers.Instruction instr,
+			VmQueryContext ctx, MemorySegment state, Object input, int pc) {
 		int nextPc = pc;
 		if (instr.dstReg() >= 64 && Byte.toUnsignedInt(instr.opcode()) != 0x09
 				&& Byte.toUnsignedInt(instr.opcode()) != 0x0B && Byte.toUnsignedInt(instr.opcode()) != 0x0C) {
@@ -728,7 +732,7 @@ public final class ImpulseMethodHandleCompiler {
 
 	public static Object executeCompiled(JitDriver driver, ImpulseGraphSnapshot snapshot, Object input, Arena arena,
 			List<String> stringPool, long instructionCount) {
-		try (VmQueryContext ctx = new VmQueryContext(snapshot, arena)) {
+		try (VmQueryContext ctx = VmQueryContext.acquire(snapshot, arena)) {
 			ctx.setStringPool(stringPool);
 			MemorySegment state = ctx.allocateStateSegment();
 			Object res = driver.execute(ctx, state, input, instructionCount);

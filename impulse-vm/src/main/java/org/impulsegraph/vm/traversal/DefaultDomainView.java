@@ -14,13 +14,47 @@ import java.util.Objects;
  */
 public class DefaultDomainView implements DomainView {
 
-	private static final java.util.Map<ImpulseGraphSnapshot, java.util.Map<String, DomainView>> DOMAIN_CACHE = new java.util.WeakHashMap<>();
+	private static final java.util.Map<ImpulseGraphSnapshot, java.util.concurrent.ConcurrentHashMap<String, DomainView>> DOMAIN_CACHE = java.util.Collections
+			.synchronizedMap(new java.util.WeakHashMap<>());
 
-	public static synchronized DomainView getOrCreate(ImpulseGraphSnapshot snapshot, String domainName, int domainId,
+	private record CachedSnapshotDomains(ImpulseGraphSnapshot snapshot,
+			java.util.concurrent.ConcurrentHashMap<String, DomainView> domainMap) {
+	}
+
+	private static volatile CachedSnapshotDomains lastSnapshotDomains;
+
+	public static DomainView getOrCreate(ImpulseGraphSnapshot snapshot, String domainName, int domainId,
 			long nodeCount) {
-		var domainMap = DOMAIN_CACHE.computeIfAbsent(snapshot, k -> new java.util.concurrent.ConcurrentHashMap<>());
+		Objects.requireNonNull(snapshot, "snapshot must not be null");
+		CachedSnapshotDomains cached = lastSnapshotDomains;
+		java.util.concurrent.ConcurrentHashMap<String, DomainView> domainMap;
+		if (cached != null && cached.snapshot == snapshot) {
+			domainMap = cached.domainMap;
+		} else {
+			domainMap = DOMAIN_CACHE.computeIfAbsent(snapshot, k -> new java.util.concurrent.ConcurrentHashMap<>());
+			lastSnapshotDomains = new CachedSnapshotDomains(snapshot, domainMap);
+		}
 		String key = (domainName != null) ? domainName : "default";
-		return domainMap.computeIfAbsent(key, k -> new DefaultDomainView(snapshot, k, domainId, nodeCount));
+		DomainView existing = domainMap.get(key);
+		if (existing != null) {
+			return existing;
+		}
+		return domainMap.computeIfAbsent(key, k -> {
+			long resolvedCount = nodeCount;
+			if (resolvedCount < 0) {
+				resolvedCount = snapshot.getNodeCount(domainName);
+				if (resolvedCount <= 0 && !snapshot.getAllRelationSnapshots().isEmpty()) {
+					var firstRel = snapshot.getRelationSnapshot(0);
+					if (firstRel == null) {
+						firstRel = snapshot.getAllRelationSnapshots().values().iterator().next();
+					}
+					if (firstRel != null) {
+						resolvedCount = firstRel.getNodeCount();
+					}
+				}
+			}
+			return new DefaultDomainView(snapshot, k, domainId, Math.max(0L, resolvedCount));
+		});
 	}
 
 	private final ImpulseGraphSnapshot snapshot;

@@ -37,19 +37,18 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 		var metrics = org.impulsegraph.api.metrics.ImpulseMetricsRegistry.getInstance();
 		ImpulseGraphSnapshot graph = snapshot;
 
-		if (graph != null) {
-			metrics.setOffHeapMemoryBytes(graph.getOffHeapMemorySizeBytes());
-			metrics.setActiveQueries(graph.getActiveQueryCount());
-		}
-
 		if (graph == null || query == null || query.getAst() == null) {
 			throw new IllegalArgumentException("Snapshot, query, or query AST cannot be null");
 		}
 
-		CompiledQuery compiled = COMPILED_QUERY_CACHE.computeIfAbsent(query, q -> {
-			metrics.recordCacheMiss();
-			return compileAst(q.getAst(), graph, COMPILER_ARENA);
-		});
+		CompiledQuery compiled = COMPILED_QUERY_CACHE.get(query);
+		if (compiled == null) {
+			metrics.setOffHeapMemoryBytes(graph.getOffHeapMemorySizeBytes());
+			compiled = COMPILED_QUERY_CACHE.computeIfAbsent(query, q -> {
+				metrics.recordCacheMiss();
+				return compileAst(q.getAst(), graph, COMPILER_ARENA);
+			});
+		}
 
 		if (compiled != null) {
 			metrics.recordCacheHit();

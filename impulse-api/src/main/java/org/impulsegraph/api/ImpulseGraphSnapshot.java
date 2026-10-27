@@ -58,6 +58,43 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
 	RelationSnapshot getRelationSnapshot(String relationName);
 
 	/**
+	 * Obtains the {@link RelationSnapshot} for the given 0-indexed physical
+	 * relation ID without string allocation or map lookup.
+	 */
+	default RelationSnapshot getRelationSnapshot(int relationId) {
+		if (relationId < 0) {
+			return null;
+		}
+		Map<String, RelationSnapshot> all = getAllRelationSnapshots();
+		if (all == null || all.isEmpty()) {
+			return null;
+		}
+		int idx = 0;
+		for (RelationSnapshot rel : all.values()) {
+			if (idx++ == relationId) {
+				return rel;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Returns the maximum node count across all domains/relations in this snapshot.
+	 */
+	default int getMaxNodeCount() {
+		int max = 0;
+		Map<String, RelationSnapshot> all = getAllRelationSnapshots();
+		if (all != null) {
+			for (RelationSnapshot rel : all.values()) {
+				if (rel != null) {
+					max = Math.max(max, rel.getNodeCount());
+				}
+			}
+		}
+		return max > 0 ? max : 1024 * 1024;
+	}
+
+	/**
 	 * Returns a map of all relation snapshots.
 	 */
 	Map<String, RelationSnapshot> getAllRelationSnapshots();
@@ -143,14 +180,7 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
 	 * Binds an explicit domain anchor context for initiating traversals.
 	 */
 	default org.impulsegraph.api.traversal.DomainView domain(String domainName) {
-		long nodeCount = getNodeCount(domainName);
-		if (nodeCount <= 0 && !getAllRelationSnapshots().isEmpty()) {
-			var first = getAllRelationSnapshots().values().iterator().next();
-			if (first != null)
-				nodeCount = first.getNodeCount();
-		}
-		return org.impulsegraph.api.spi.ImpulseEngineRegistry.getProvider().createDomainView(this, domainName, 0,
-				nodeCount);
+		return org.impulsegraph.api.spi.ImpulseEngineRegistry.getProvider().createDomainView(this, domainName, 0, -1L);
 	}
 
 	/**

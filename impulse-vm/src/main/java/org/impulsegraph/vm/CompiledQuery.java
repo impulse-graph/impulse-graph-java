@@ -19,8 +19,12 @@ import static org.impulsegraph.vm.VmStateLayout.*;
  */
 public final class CompiledQuery {
 
-	public record QueryBindingState(ImpulseGraphSnapshot snapshot, MethodHandle methodHandle, MemorySegment programSeg,
-			long instructionCount, Map<String, Integer> relationIdMap) {
+	public record QueryBindingState(ImpulseGraphSnapshot snapshot, MethodHandle methodHandle, JitDriver jitDriver,
+			MemorySegment programSeg, long instructionCount, Map<String, Integer> relationIdMap) {
+		public QueryBindingState(ImpulseGraphSnapshot snapshot, MethodHandle methodHandle, MemorySegment programSeg,
+				long instructionCount, Map<String, Integer> relationIdMap) {
+			this(snapshot, methodHandle, null, programSeg, instructionCount, relationIdMap);
+		}
 	}
 
 	private final List<RelationInstructionPatch> patches;
@@ -36,8 +40,15 @@ public final class CompiledQuery {
 		this.patches = List.copyOf(patches);
 		this.arena = arena;
 		MethodHandle mh = ImpulseMethodHandleCompiler.compile(programSeg, instructionCount, this.stringPool);
-		this.bindingState = new AtomicReference<>(
-				new QueryBindingState(initialSnapshot, mh, programSeg, instructionCount, new HashMap<>(relationIdMap)));
+		JitDriver driver = null;
+		if (!Boolean.getBoolean("impulse.compiler.disable_jit") && instructionCount > 0) {
+			try {
+				driver = ImpulseMethodHandleCompiler.compileDriver(programSeg, instructionCount);
+			} catch (Exception ignored) {
+			}
+		}
+		this.bindingState = new AtomicReference<>(new QueryBindingState(initialSnapshot, mh, driver, programSeg,
+				instructionCount, new HashMap<>(relationIdMap)));
 	}
 
 	public QueryBindingState bindingState() {
@@ -109,7 +120,14 @@ public final class CompiledQuery {
 		// 4. Compile new MethodHandle and perform Atomic Swap
 		MethodHandle newMh = ImpulseMethodHandleCompiler.compile(newProgSeg, currentState.instructionCount(),
 				this.stringPool);
-		QueryBindingState newState = new QueryBindingState(newSnapshot, newMh, newProgSeg,
+		JitDriver newDriver = null;
+		if (!Boolean.getBoolean("impulse.compiler.disable_jit") && currentState.instructionCount() > 0) {
+			try {
+				newDriver = ImpulseMethodHandleCompiler.compileDriver(newProgSeg, currentState.instructionCount());
+			} catch (Exception ignored) {
+			}
+		}
+		QueryBindingState newState = new QueryBindingState(newSnapshot, newMh, newDriver, newProgSeg,
 				currentState.instructionCount(), newRelationIdMap);
 		this.bindingState.set(newState);
 	}
@@ -130,6 +148,10 @@ public final class CompiledQuery {
 			targetSnapshot.enterQuery();
 		}
 		try {
+			if (state.jitDriver() != null) {
+				return ImpulseMethodHandleCompiler.executeCompiled(state.jitDriver(), targetSnapshot, input,
+						executionArena, this.stringPool, state.instructionCount());
+			}
 			if (state.methodHandle() != null) {
 				return state.methodHandle().invoke(targetSnapshot, input, executionArena);
 			}
@@ -252,6 +274,7 @@ public final class CompiledQuery {
 			case OP_LOOP_DECR -> "OP_LOOP_DECR";
 			case OP_STABLE_CHECK -> "OP_STABLE_CHECK";
 			case OP_MOV -> "OP_MOV";
+			case OP_SWAP_REG -> "OP_SWAP_REG";
 			case OP_CLEAR_REG -> "OP_CLEAR_REG";
 			case OP_ISLAND_DETECT -> "OP_ISLAND_DETECT";
 			case OP_REBAC_CHECK -> "OP_REBAC_CHECK";
