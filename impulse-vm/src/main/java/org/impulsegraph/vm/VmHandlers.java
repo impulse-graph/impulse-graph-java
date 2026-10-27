@@ -183,30 +183,10 @@ public final class VmHandlers {
 		setFlag(state, FLAG_ZF, true);
 	}
 
-	private static final String[] PRECACHED_REL_NAMES = new String[256];
-	static {
-		for (int i = 0; i < 256; i++) {
-			PRECACHED_REL_NAMES[i] = "rel_" + i;
-		}
-	}
-
 	private static RelationSnapshot resolveRelation(VmQueryContext ctx, int relId) {
-		ImpulseGraphSnapshot graph = ctx.snapshot();
-		if (graph == null)
+		if (ctx == null)
 			return null;
-		String name = (relId >= 0 && relId < 256) ? PRECACHED_REL_NAMES[relId] : ("rel_" + relId);
-		RelationSnapshot rel = graph.getRelationSnapshot(name);
-		if (rel == null && !graph.getAllRelationSnapshots().isEmpty()) {
-			int idx = 0;
-			for (RelationSnapshot snap : graph.getAllRelationSnapshots().values()) {
-				if (idx == relId) {
-					rel = snap;
-					break;
-				}
-				idx++;
-			}
-		}
-		return rel;
+		return ctx.resolveRelation(relId);
 	}
 
 	public static void handleCsrWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -274,8 +254,11 @@ public final class VmHandlers {
 			}
 		}
 
-		int outHandle = ctx.acquireBitset();
+		int outHandle = (dstReg != srcReg && getRegisterType(state, dstReg) == TYPE_BITSET_HANDLE)
+				? (int) getRegisterValue(state, dstReg)
+				: ctx.acquireBitset();
 		ImpulseBitSet outBs = ctx.getBitset(outHandle);
+		outBs.clear();
 
 		if (rel != null) {
 			if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
@@ -283,8 +266,11 @@ public final class VmHandlers {
 			} else if (srcType == TYPE_BITSET_HANDLE) {
 				ImpulseBitSet inBs = ctx.getBitset((int) srcVal);
 				if (inBs != null) {
-					long card = inBs.cardinality();
-					int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
+					boolean maybeLarge = !(inBs instanceof OffHeapBitSet obs) || obs.maxPossibleCardinality() >= 5_000;
+					long card = maybeLarge ? inBs.cardinality() : 0L;
+					int numThreads = (card >= 5_000)
+							? Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism())
+							: 1;
 					if (card >= 5_000 && numThreads > 1) {
 						java.util.concurrent.atomic.AtomicInteger nextChunk = new java.util.concurrent.atomic.AtomicInteger(
 								0);
@@ -344,8 +330,11 @@ public final class VmHandlers {
 		validateReg(dstReg);
 		validateReg(srcReg);
 
-		int outHandle = ctx.acquireBitset();
+		int outHandle = (dstReg != srcReg && getRegisterType(state, dstReg) == TYPE_BITSET_HANDLE)
+				? (int) getRegisterValue(state, dstReg)
+				: ctx.acquireBitset();
 		ImpulseBitSet outBs = ctx.getBitset(outHandle);
+		outBs.clear();
 
 		if (rel1 != null && rel2 != null) {
 			MemorySegment r1Offsets = rel1.getRowOffsetsSegment();
@@ -1168,7 +1157,9 @@ public final class VmHandlers {
 		byte typeTag = getRegisterType(state, srcReg);
 		if (typeTag == TYPE_BITSET_HANDLE) {
 			ImpulseBitSet srcBs = ctx.getBitset((int) val);
-			int dstHandle = ctx.acquireBitset();
+			int dstHandle = (instr.dstReg() != srcReg && getRegisterType(state, instr.dstReg()) == TYPE_BITSET_HANDLE)
+					? (int) getRegisterValue(state, instr.dstReg())
+					: ctx.acquireBitset();
 			ImpulseBitSet dstBs = ctx.getBitset(dstHandle);
 			dstBs.clear();
 			if (srcBs != null) {
@@ -1210,12 +1201,16 @@ public final class VmHandlers {
 			ImpulseBitSet bsSrc = ctx.getBitset((int) srcVal);
 			ImpulseBitSet bsDst = ctx.getBitset((int) dstVal);
 			if (bsSrc != null && bsDst != null) {
-				isSubset = true;
-				for (int i = bsSrc.nextSetBit(0); i >= 0; i = bsSrc.nextSetBit(i + 1)) {
-					if (!bsDst.get(i)) {
-						isSubset = false;
-						break;
-					}
+				isSubset = bsSrc.isSubsetOf(bsDst);
+			}
+		} else if (srcType == TYPE_BITSET_HANDLE && dstType != TYPE_BITSET_HANDLE) {
+			ImpulseBitSet bsSrc = ctx.getBitset((int) srcVal);
+			if (bsSrc != null) {
+				int first = bsSrc.nextSetBit(0);
+				if (first < 0) {
+					isSubset = true;
+				} else if (first == (int) dstVal && bsSrc.nextSetBit(first + 1) < 0) {
+					isSubset = true;
 				}
 			}
 		} else if (srcType != TYPE_BITSET_HANDLE && dstType == TYPE_BITSET_HANDLE) {
@@ -1271,17 +1266,21 @@ public final class VmHandlers {
 				outBs.set((int) val);
 			}
 			setRegister(state, dst, outHandle, TYPE_BITSET_HANDLE);
+			ctx.setFinalResult(outBs);
 			return outBs;
 		}
 
 		setRegister(state, dst, val, typeTag);
 
 		if (typeTag == TYPE_BITSET_HANDLE) {
-			return ctx.getBitset((int) val);
+			ImpulseBitSet res = ctx.getBitset((int) val);
+			ctx.setFinalResult(res);
+			return res;
 		} else if (typeTag == TYPE_NODE_ID || typeTag == TYPE_INT64) {
 			int outHandle = ctx.acquireBitset();
 			ImpulseBitSet outBs = ctx.getBitset(outHandle);
 			outBs.set((int) val);
+			ctx.setFinalResult(outBs);
 			return outBs;
 		}
 		return null;
@@ -1431,7 +1430,7 @@ public final class VmHandlers {
 			lines2.add(-1);
 
 		ImpulseGraphSnapshot graph = ctx.snapshot();
-		RelationSnapshot rel = (graph != null) ? graph.getRelationSnapshot("rel_" + relId) : null;
+		RelationSnapshot rel = resolveRelation(ctx, relId);
 		if (rel == null && graph != null && !graph.getAllRelationSnapshots().isEmpty()) {
 			rel = graph.getAllRelationSnapshots().values().iterator().next();
 		}
@@ -2059,17 +2058,11 @@ public final class VmHandlers {
 		rel.setCscSegments(cscOffsetsSeg, cscTargetsSeg);
 
 		int slotId = instr.dstReg();
-		Map<String, RelationSnapshot> relations;
 		if (ctx.getSnapshot() instanceof MockImpulseGraphSnapshot mockSnap) {
-			relations = new HashMap<>(mockSnap.getAllRelationSnapshots());
+			ctx.setSnapshot(mockSnap.withSlot(slotId, rel));
 		} else {
-			relations = new HashMap<>();
+			ctx.setSnapshot(new MockImpulseGraphSnapshot(Map.of()).withSlot(slotId, rel));
 		}
-		relations.put("rel_" + slotId, rel);
-		if (slotId == 0) {
-			relations.put("connectedTo", rel);
-		}
-		ctx.setSnapshot(new MockImpulseGraphSnapshot(relations));
 	}
 
 	public static void handleThrow(MemorySegment state, Instruction instr) {
@@ -2757,7 +2750,7 @@ public final class VmHandlers {
 		int relId = instr.payload() & 0xFFFF;
 
 		ImpulseGraphSnapshot graph = ctx.snapshot();
-		RelationSnapshot rel = (graph != null) ? graph.getRelationSnapshot("rel_" + relId) : null;
+		RelationSnapshot rel = resolveRelation(ctx, relId);
 		if (rel == null && graph != null && !graph.getAllRelationSnapshots().isEmpty()) {
 			rel = graph.getAllRelationSnapshots().values().iterator().next();
 		}
@@ -3002,7 +2995,6 @@ public final class VmHandlers {
 		validateReg(dst);
 		validateReg(src);
 		setRegister(state, dst, 0L, TYPE_FLOAT_VECTOR);
-		setFlag(state, FLAG_ZF, false);
 	}
 
 	public static void handleCooWalkDirectStore(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -3104,7 +3096,6 @@ public final class VmHandlers {
 			}
 		}
 		setRegister(state, dst, handle, TYPE_FLOAT_VECTOR);
-		setFlag(state, FLAG_ZF, false);
 	}
 
 	public static void handleGatherEdgeAttr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -3115,7 +3106,6 @@ public final class VmHandlers {
 		int handle = ctx.acquireFloatVector(1024);
 		float[] vec = ctx.getFloatVector(handle);
 		setRegister(state, dst, handle, TYPE_FLOAT_VECTOR);
-		setFlag(state, FLAG_ZF, false);
 	}
 
 	public static void handleVectorTimeValidAt(MemorySegment state, VmQueryContext ctx, Instruction instr) {

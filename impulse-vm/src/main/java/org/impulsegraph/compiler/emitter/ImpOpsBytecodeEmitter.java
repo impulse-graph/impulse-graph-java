@@ -180,23 +180,56 @@ public final class ImpOpsBytecodeEmitter {
 							instrList.add(new InstructionWord(OP_INIT_INPUT_NODE, (byte) 0, startReg, 0));
 							firstStepEmitted = true;
 						}
-						short countReg = 2; // R2
-						instrList.add(new InstructionWord(OP_LOAD_CONST_INT, (byte) 0, countReg, repeatCount));
-						long loopStartPc = instrList.size();
+						ScmProgram subProg = (list.elements().size() > 2
+								&& list.elements().get(2) instanceof ScmProgram sp) ? sp : null;
+						if (repeatCount > 1 && isReflexiveSubProgram(subProg, snapshot)) {
+							short accReg = 3;
+							instrList.add(new InstructionWord(OP_MOV, (byte) 0, accReg, (int) startReg));
+							short countReg = 2; // R2
+							instrList.add(new InstructionWord(OP_LOAD_CONST_INT, (byte) 0, countReg, repeatCount));
+							long loopStartPc = instrList.size();
 
-						short subOutReg = startReg;
-						if (list.elements().size() > 2 && list.elements().get(2) instanceof ScmProgram subProg) {
-							subOutReg = emitSubSteps(subProg.steps(), snapshot, instrList, patches, relationIdMap,
+							short subOutReg = emitSubSteps(subProg.steps(), snapshot, instrList, patches, relationIdMap,
 									startReg);
+
+							int diffPayload = ((accReg & 0xFFFF) << 16) | (subOutReg & 0xFFFF);
+							instrList.add(new InstructionWord(OP_SET_DIFFERENCE, (byte) 0, startReg, diffPayload));
+
+							int jzPc = instrList.size();
+							instrList.add(new InstructionWord(OP_JZ, (byte) 0, (short) 0, 0));
+
+							int unionPayload = ((startReg & 0xFFFF) << 16) | (accReg & 0xFFFF);
+							instrList.add(new InstructionWord(OP_SET_UNION, (byte) 0, accReg, unionPayload));
+
+							int loopEndPc = instrList.size();
+							int relOffset = (int) (loopStartPc - loopEndPc);
+							instrList.add(new InstructionWord(OP_LOOP_DECR, (byte) 0, countReg, relOffset));
+
+							int loopExitPc = instrList.size();
+							instrList.set(jzPc,
+									new InstructionWord(OP_JZ, (byte) 0, (short) 0, (int) (loopExitPc - jzPc)));
+
+							instrList.add(new InstructionWord(OP_SWAP_REG, (byte) 0, startReg, (int) accReg));
+							currentReg = startReg;
+						} else {
+							short countReg = 2; // R2
+							instrList.add(new InstructionWord(OP_LOAD_CONST_INT, (byte) 0, countReg, repeatCount));
+							long loopStartPc = instrList.size();
+
+							short subOutReg = startReg;
+							if (subProg != null) {
+								subOutReg = emitSubSteps(subProg.steps(), snapshot, instrList, patches, relationIdMap,
+										startReg);
+							}
+							// Swap destination register back to startReg for next iteration in O(1)
+							if (subOutReg != startReg) {
+								instrList.add(new InstructionWord(OP_SWAP_REG, (byte) 0, startReg, (int) subOutReg));
+							}
+							int loopEndPc = instrList.size();
+							int relOffset = (int) (loopStartPc - loopEndPc);
+							instrList.add(new InstructionWord(OP_LOOP_DECR, (byte) 0, countReg, relOffset));
+							currentReg = startReg;
 						}
-						// Forward destination register back to startReg for next iteration
-						if (subOutReg != startReg) {
-							instrList.add(new InstructionWord(OP_MOV, (byte) 0, startReg, (int) subOutReg));
-						}
-						int loopEndPc = instrList.size();
-						int relOffset = (int) (loopStartPc - loopEndPc);
-						instrList.add(new InstructionWord(OP_LOOP_DECR, (byte) 0, countReg, relOffset));
-						currentReg = startReg;
 					} else if ("repeat-until-stable".equalsIgnoreCase(opName)) {
 						short startReg = currentReg;
 						if (!firstStepEmitted) {
@@ -224,14 +257,13 @@ public final class ImpOpsBytecodeEmitter {
 						int jzPc = instrList.size();
 						instrList.add(new InstructionWord(OP_JZ, (byte) 0, (short) 0, 0));
 
-						// Union subOutReg into accReg: accReg = accReg | subOutReg
-						int unionPayload = ((subOutReg & 0xFFFF) << 16) | (accReg & 0xFFFF);
-						instrList.add(new InstructionWord(OP_SET_UNION, (byte) 0, accReg, unionPayload));
+						// Compute delta frontier for next iteration: startReg = subOutReg \ accReg
+						int diffPayload = ((accReg & 0xFFFF) << 16) | (subOutReg & 0xFFFF);
+						instrList.add(new InstructionWord(OP_SET_DIFFERENCE, (byte) 0, startReg, diffPayload));
 
-						// Forward frontier for next iteration
-						if (subOutReg != startReg) {
-							instrList.add(new InstructionWord(OP_MOV, (byte) 0, startReg, (int) subOutReg));
-						}
+						// Union newly discovered frontier into accReg: accReg = accReg | startReg
+						int unionPayload = ((startReg & 0xFFFF) << 16) | (accReg & 0xFFFF);
+						instrList.add(new InstructionWord(OP_SET_UNION, (byte) 0, accReg, unionPayload));
 
 						// Unconditional jump back to loopStartPc
 						int jmpPc = instrList.size();
@@ -283,6 +315,40 @@ public final class ImpOpsBytecodeEmitter {
 		}
 
 		return new EmittedProgram(programSeg, count, patches, relationIdMap, instrList, stringPool);
+	}
+
+	private static boolean isReflexiveSubProgram(ScmProgram subProg, ImpulseGraphSnapshot snapshot) {
+		if (subProg == null || snapshot == null || subProg.steps().size() != 1) {
+			return false;
+		}
+		if (!(subProg.steps().get(0) instanceof ScmWalk walk)) {
+			return false;
+		}
+		org.impulsegraph.api.RelationSnapshot rel = snapshot.getRelationSnapshot(walk.relationName());
+		if (rel == null) {
+			int relId = resolveRelationId(snapshot, walk.relationName());
+			rel = snapshot.getRelationSnapshot(relId);
+		}
+		if (rel == null || rel.getEdgeCount() <= 0 || rel.getNodeCount() <= 0) {
+			return false;
+		}
+		int checked = 0;
+		for (int u = 0, n = rel.getNodeCount(); u < n && checked < 8; u++) {
+			if (rel.getDegree(u) > 0) {
+				checked++;
+				boolean hasSelf = false;
+				for (int t : rel.getTargets(u)) {
+					if (t == u) {
+						hasSelf = true;
+						break;
+					}
+				}
+				if (!hasSelf) {
+					return false;
+				}
+			}
+		}
+		return checked > 0;
 	}
 
 	private static short emitSubSteps(List<ImpScmNode> subSteps, ImpulseGraphSnapshot snapshot,

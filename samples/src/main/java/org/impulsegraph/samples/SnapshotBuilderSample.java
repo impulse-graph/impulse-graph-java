@@ -26,20 +26,13 @@ public class SnapshotBuilderSample {
 		}
 
 		// 1. Define Domains
-		DomainDefinition userDomain = DomainDefinition.builder(5L)
-				.idWidth(PrimitiveWidth.UINT32)
-				.withPrimaryKeyIndex(true)
-				.build();
+		DomainDefinition userDomain = DomainDefinition.builder(5L).idWidth(PrimitiveWidth.UINT32)
+				.withPrimaryKeyIndex(true).build();
 
-		DomainDefinition groupDomain = DomainDefinition.builder(15L)
-				.idWidth(PrimitiveWidth.UINT32)
-				.build();
+		DomainDefinition groupDomain = DomainDefinition.builder(15L).idWidth(PrimitiveWidth.UINT32).build();
 
 		// 2. Define Edges (User 0 -> Group 10, User 1 -> Group 10)
-		List<long[]> edges = List.of(
-				new long[]{0, 10},
-				new long[]{1, 10}
-		);
+		List<long[]> edges = List.of(new long[]{0, 10}, new long[]{1, 10});
 
 		RelationDataSource edgeSource = new RelationDataSource() {
 			@Override
@@ -73,21 +66,16 @@ public class SnapshotBuilderSample {
 		};
 
 		RelationDefinition userToGroup = RelationDefinition.builder("User", "Group")
-				.addTopology(Topology.CSR, CompressionScheme.RAW)
-				.addTopology(Topology.CSC, CompressionScheme.RAW)
-				.dataSource(edgeSource)
-				.build();
+				.addTopology(Topology.CSR, CompressionScheme.RAW).addTopology(Topology.CSC, CompressionScheme.RAW)
+				.dataSource(edgeSource).build();
 
 		// 3. Build and stream snapshot directly to disk
-		SnapshotBuilder.create()
-				.addDomain("User", userDomain)
-				.addDomain("Group", groupDomain)
-				.addRelation("userToGroup", userToGroup)
-				.addFooterMetadata("app", "SnapshotBuilderSample")
+		SnapshotBuilder.create().addDomain("User", userDomain).addDomain("Group", groupDomain)
+				.addRelation("userToGroup", userToGroup).addFooterMetadata("app", "SnapshotBuilderSample")
 				.writeTo(targetSnapshot);
 
-		System.out.printf("Binary snapshot successfully written to %s (%d bytes).%n",
-				targetSnapshot, Files.size(targetSnapshot));
+		System.out.printf("Binary snapshot successfully written to %s (%d bytes).%n", targetSnapshot,
+				Files.size(targetSnapshot));
 
 		// 4. Load back off-heap with zero-copy mmap
 		try (Arena arena = Arena.ofShared()) {

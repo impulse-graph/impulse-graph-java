@@ -417,6 +417,211 @@ class OffHeapBitSetTest {
 		}
 	}
 
+	@Test
+	@DisplayName("MC/DC: Active word-range watermarks [minWord .. maxWord], maxPossibleCardinality, and clear(bitIndex) contraction")
+	void testActiveWordRangeWatermarksAndClearContractionMcdc() {
+		try (Arena arena = Arena.ofConfined()) {
+			OffHeapBitSet bs = new OffHeapBitSet(arena, 640); // 10 words (0..9)
+			assertThat(bs.wordCount()).isEqualTo(10);
+			assertThat(bs.maxPossibleCardinality()).isEqualTo(0);
+			assertThat(bs.isEmpty()).isTrue();
+
+			// Negative set/get/clear with bitIndex < 0 and bitIndex >= 640
+			bs.set(-1);
+			bs.set(640);
+			assertThat(bs.get(-1)).isFalse();
+			assertThat(bs.get(640)).isFalse();
+			bs.clear(-1);
+			bs.clear(640);
+			assertThat(bs.maxPossibleCardinality()).isEqualTo(0);
+
+			// Set bits in words 2, 5, and 7
+			bs.set(2 * 64 + 3);
+			assertThat(bs.maxPossibleCardinality()).isEqualTo(64);
+			bs.set(7 * 64 + 10);
+			bs.set(7 * 64 + 20);
+			assertThat(bs.maxPossibleCardinality()).isEqualTo(6 * 64); // words 2..7
+			bs.set(5 * 64 + 1);
+			assertThat(bs.maxPossibleCardinality()).isEqualTo(6 * 64);
+
+			// get(bitIndex) MC/DC: wordIndex < minWord (word 1), wordIndex > maxWord (word
+			// 8), wordIndex >= wordCount (word 12)
+			assertThat(bs.get(1 * 64 + 3)).isFalse();
+			assertThat(bs.get(8 * 64 + 3)).isFalse();
+			assertThat(bs.get(12 * 64)).isFalse();
+			assertThat(bs.get(5 * 64 + 1)).isTrue();
+
+			// clear(bitIndex) outside [minWord .. maxWord] is a no-op
+			bs.clear(1 * 64 + 3);
+			bs.clear(8 * 64 + 3);
+			assertThat(bs.cardinality()).isEqualTo(4L);
+
+			// clear(bitIndex) in word 7 where updated != 0L (7*64+20 still set) -> maxWord
+			// stays 7
+			bs.clear(7 * 64 + 10);
+			assertThat(bs.maxPossibleCardinality()).isEqualTo(6 * 64);
+
+			// clear(bitIndex) at interior word 5 where updated == 0L -> minWord (2) and
+			// maxWord (7) unchanged
+			bs.clear(5 * 64 + 1);
+			assertThat(bs.maxPossibleCardinality()).isEqualTo(6 * 64);
+
+			// clear(bitIndex) at minWord (2) where updated == 0L -> minWord advances across
+			// zero words (3..6) to 7
+			bs.clear(2 * 64 + 3);
+			assertThat(bs.maxPossibleCardinality()).isEqualTo(64);
+			assertThat(bs.nextSetBit(0)).isEqualTo(7 * 64 + 20);
+
+			// clear(bitIndex) at last remaining bit (word 7 == minWord == maxWord) ->
+			// resets to empty
+			bs.clear(7 * 64 + 20);
+			assertThat(bs.maxPossibleCardinality()).isEqualTo(0);
+			assertThat(bs.isEmpty()).isTrue();
+			assertThat(bs.cardinality()).isEqualTo(0L);
+
+			// Also test maxWord retreat when minWord < maxWord and maxWord becomes 0L
+			bs.set(2 * 64 + 1);
+			bs.set(6 * 64 + 1);
+			assertThat(bs.maxPossibleCardinality()).isEqualTo(5 * 64);
+			bs.clear(6 * 64 + 1);
+			assertThat(bs.maxPossibleCardinality()).isEqualTo(64);
+			assertThat(bs.nextSetBit(0)).isEqualTo(2 * 64 + 1);
+		}
+	}
+
+	@Test
+	@DisplayName("MC/DC: Pre-allocated segment constructors (isZeroed true vs false) and lazy isEmpty watermark reset")
+	void testPreAllocatedIsZeroedAndLazyIsEmptyReset() {
+		try (Arena arena = Arena.ofConfined()) {
+			MemorySegment seg = arena.allocate(4 * ValueLayout.JAVA_LONG.byteSize());
+			// Unzeroed assumption (isZeroed = false): minWord = 0, maxWord = 3
+			OffHeapBitSet unzeroed = new OffHeapBitSet(seg, 256, false);
+			assertThat(unzeroed.maxPossibleCardinality()).isEqualTo(256);
+			// Calling isEmpty() scans words 0..3, finds all 0L, and resets watermarks to
+			// empty
+			assertThat(unzeroed.isEmpty()).isTrue();
+			assertThat(unzeroed.maxPossibleCardinality()).isEqualTo(0);
+
+			// Zeroed assumption (isZeroed = true): minWord = 4, maxWord = -1 immediately
+			OffHeapBitSet zeroed = new OffHeapBitSet(seg, 256, true);
+			assertThat(zeroed.maxPossibleCardinality()).isEqualTo(0);
+			assertThat(zeroed.isEmpty()).isTrue();
+		}
+	}
+
+	@Test
+	@DisplayName("MC/DC: isSubsetOf across OffHeapBitSet watermarks, capacity mismatches, and generic ImpulseBitSet fallback")
+	void testIsSubsetOfMcdc() {
+		try (Arena arena = Arena.ofConfined()) {
+			OffHeapBitSet a = new OffHeapBitSet(arena, 512); // 8 words
+			OffHeapBitSet b = new OffHeapBitSet(arena, 512); // 8 words
+			OffHeapBitSet small = new OffHeapBitSet(arena, 128); // 2 words
+
+			// 1. Empty bitset is a subset of any bitset (including empty)
+			assertThat(a.isSubsetOf(b)).isTrue();
+
+			// 2. a has bit in word 3, b is empty -> w > b.maxWord -> false
+			a.set(3 * 64 + 5);
+			assertThat(a.isSubsetOf(b)).isFalse();
+
+			// 3. b has bit only in word 5 -> for a's word 3, w < b.minWord -> false
+			b.set(5 * 64 + 1);
+			assertThat(a.isSubsetOf(b)).isFalse();
+
+			// 4. b has bits in words 2 and 5, plus word 3 with DIFFERENT bit -> (sw & ~dw)
+			// != 0L -> false
+			b.set(2 * 64 + 1);
+			b.set(3 * 64 + 9);
+			assertThat(a.isSubsetOf(b)).isFalse();
+
+			// 5. b also has (3*64 + 5), and a has an interior zero word (set 5*64+1 in a,
+			// so word 4 is 0L) -> true
+			a.set(5 * 64 + 1);
+			b.set(3 * 64 + 5);
+			assertThat(a.isSubsetOf(b)).isTrue();
+
+			// 6. Capacity mismatch: a has bit in word 3 (index 197), small only has 2 words
+			// (wordCount = 2)
+			small.set(0);
+			small.set(64);
+			assertThat(a.isSubsetOf(small)).isFalse();
+
+			// 7. Generic non-OffHeapBitSet fallback (ImpulseBitSet.super.isSubsetOf)
+			StubImpulseBitSet stub = new StubImpulseBitSet();
+			stub.set(3 * 64 + 5);
+			assertThat(a.isSubsetOf(stub)).isFalse(); // missing 5*64 + 1
+			stub.set(5 * 64 + 1);
+			assertThat(a.isSubsetOf(stub)).isTrue();
+		}
+	}
+
+	@Test
+	@DisplayName("MC/DC: Word-range bounded OR, AND, and ANDNOT edge cases (empty, disjoint ranges, capacity clipping)")
+	void testWordRangeBoundedOrAndAndNotEdgeCasesMcdc() {
+		try (Arena arena = Arena.ofConfined()) {
+			OffHeapBitSet a = new OffHeapBitSet(arena, 512); // 8 words (0..7)
+			OffHeapBitSet b = new OffHeapBitSet(arena, 512); // 8 words (0..7)
+			OffHeapBitSet wide = new OffHeapBitSet(arena, 1024); // 16 words (0..15)
+
+			// OR with empty b -> no-op
+			a.set(2 * 64 + 1);
+			a.or(b);
+			assertThat(a.cardinality()).isEqualTo(1L);
+
+			// OR where other only has bits beyond a.wordCount (startW > endW) -> no-op
+			wide.set(12 * 64 + 7);
+			a.or(wide);
+			assertThat(a.cardinality()).isEqualTo(1L);
+
+			// AND when this is empty -> no-op
+			OffHeapBitSet empty = new OffHeapBitSet(arena, 512);
+			empty.and(a);
+			assertThat(empty.isEmpty()).isTrue();
+
+			// AND when other is empty -> clears this
+			a.and(b);
+			assertThat(a.isEmpty()).isTrue();
+
+			// AND when word ranges are disjoint (a in word 1, b in word 6 -> startW > endW)
+			// -> clears this
+			a.set(1 * 64 + 2);
+			b.set(6 * 64 + 2);
+			a.and(b);
+			assertThat(a.isEmpty()).isTrue();
+
+			// AND with partial overlap where prefix (word 1) and suffix (word 7) must be
+			// zeroed and overlap (word 4) becomes 0L
+			a.set(1 * 64 + 1);
+			a.set(4 * 64 + 10);
+			a.set(7 * 64 + 1);
+			b.clear();
+			b.set(4 * 64 + 20); // same word 4, different bit
+			a.and(b);
+			assertThat(a.isEmpty()).isTrue();
+			assertThat(a.maxPossibleCardinality()).isEqualTo(0);
+
+			// ANDNOT when this is empty (T, F) or other is empty (F, T) -> no-op
+			empty.andNot(b);
+			assertThat(empty.isEmpty()).isTrue();
+			a.set(2 * 64 + 3);
+			OffHeapBitSet emptyOther = new OffHeapBitSet(arena, 512);
+			a.andNot(emptyOther);
+			assertThat(a.get(2 * 64 + 3)).isTrue();
+
+			// ANDNOT when word ranges are disjoint (a in word 2, b in word 4 -> startW >
+			// endW) -> no-op
+			a.andNot(b);
+			assertThat(a.get(2 * 64 + 3)).isTrue();
+
+			// ANDNOT that clears all bits in a -> tightenBounds resets minWord = wordCount,
+			// maxWord = -1
+			b.set(2 * 64 + 3);
+			a.andNot(b);
+			assertThat(a.isEmpty()).isTrue();
+			assertThat(a.maxPossibleCardinality()).isEqualTo(0);
+		}
+	}
+
 	/**
 	 * Stub implementation of ImpulseBitSet using java.util.BitSet for fallback
 	 * branch verification.

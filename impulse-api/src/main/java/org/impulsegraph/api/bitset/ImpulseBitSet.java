@@ -13,6 +13,15 @@ public interface ImpulseBitSet extends Iterable<Integer> {
 	void and(ImpulseBitSet set);
 	void andNot(ImpulseBitSet set);
 
+	default boolean isSubsetOf(ImpulseBitSet other) {
+		for (int i = nextSetBit(0); i >= 0; i = nextSetBit(i + 1)) {
+			if (!other.get(i)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	/**
 	 * Executes the given action for each set bit in this bitset.
 	 */

@@ -17,8 +17,10 @@ public class GraphSnapshot
 			org.impulsegraph.storage.stats.StatisticsView {
 
 	private final Arena arena;
-	private final Map<String, RelationSnapshot> relationMap = java.util.Collections
-			.synchronizedMap(new java.util.LinkedHashMap<>());
+	private final Map<String, RelationSnapshot> relationMap;
+	private final Map<String, org.impulsegraph.api.RelationSnapshot> unmodifiableRelationMap;
+	private final RelationSnapshot[] relationsById;
+	private final int maxNodeCount;
 	private final org.impulsegraph.api.stats.GraphStatistics graphStats = new org.impulsegraph.api.stats.GraphStatistics();
 	private final Map<String, String> metadata = new ConcurrentHashMap<>();
 
@@ -28,12 +30,66 @@ public class GraphSnapshot
 
 	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots, Map<String, String> metadata) {
 		this.arena = Objects.requireNonNull(arena, "Arena must not be null");
-		if (snapshots != null) {
-			this.relationMap.putAll(snapshots);
+		if (snapshots == null || snapshots.isEmpty()) {
+			this.relationMap = Map.of();
+			this.unmodifiableRelationMap = Map.of();
+			this.relationsById = new RelationSnapshot[0];
+			this.maxNodeCount = 1024 * 1024;
+		} else {
+			java.util.LinkedHashMap<String, RelationSnapshot> copy = new java.util.LinkedHashMap<>(snapshots);
+			this.relationMap = Collections.unmodifiableMap(copy);
+			this.unmodifiableRelationMap = Collections.unmodifiableMap(copy);
+			int maxSlot = copy.size() - 1;
+			for (String key : copy.keySet()) {
+				if (key != null && key.startsWith("rel_")) {
+					int idx = parseNonNegativeSlot(key.substring(4));
+					if (idx > maxSlot) {
+						maxSlot = idx;
+					}
+				}
+			}
+			RelationSnapshot[] arr = new RelationSnapshot[maxSlot + 1];
+			int i = 0;
+			int maxNodes = 0;
+			for (RelationSnapshot rel : copy.values()) {
+				if (rel != null) {
+					maxNodes = Math.max(maxNodes, rel.getNodeCount());
+				}
+				arr[i++] = rel;
+			}
+			for (Map.Entry<String, RelationSnapshot> entry : copy.entrySet()) {
+				String key = entry.getKey();
+				if (key != null && key.startsWith("rel_")) {
+					int idx = parseNonNegativeSlot(key.substring(4));
+					if (idx >= 0 && idx < arr.length) {
+						arr[idx] = entry.getValue();
+					}
+				}
+			}
+			this.relationsById = arr;
+			this.maxNodeCount = maxNodes > 0 ? maxNodes : 1024 * 1024;
 		}
 		if (metadata != null) {
 			this.metadata.putAll(metadata);
 		}
+	}
+
+	private static int parseNonNegativeSlot(String s) {
+		if (s == null || s.isEmpty()) {
+			return -1;
+		}
+		int val = 0;
+		for (int i = 0; i < s.length(); i++) {
+			char c = s.charAt(i);
+			if (c < '0' || c > '9') {
+				return -1;
+			}
+			val = val * 10 + (c - '0');
+			if (val >= 65536) {
+				return -1;
+			}
+		}
+		return val;
 	}
 
 	@Override
@@ -96,17 +152,34 @@ public class GraphSnapshot
 	}
 
 	@Override
-	public Map<String, org.impulsegraph.api.RelationSnapshot> getAllRelationSnapshots() {
-		return Collections.unmodifiableMap(relationMap);
+	public RelationSnapshot getRelationSnapshot(int relationId) {
+		return (relationId >= 0 && relationId < relationsById.length) ? relationsById[relationId] : null;
 	}
 
+	@Override
+	public int getMaxNodeCount() {
+		return maxNodeCount;
+	}
+
+	@Override
+	public Map<String, org.impulsegraph.api.RelationSnapshot> getAllRelationSnapshots() {
+		return unmodifiableRelationMap;
+	}
+
+	private volatile long cachedOffHeapBytes = -1L;
+
 	public long getOffHeapMemorySizeBytes() {
+		long cached = this.cachedOffHeapBytes;
+		if (cached >= 0L) {
+			return cached;
+		}
 		long total = 0;
 		for (RelationSnapshot snapshot : relationMap.values()) {
 			if (snapshot != null) {
 				total += snapshot.getMemoryFootprintBytes();
 			}
 		}
+		this.cachedOffHeapBytes = total;
 		return total;
 	}
 
