@@ -263,6 +263,8 @@ public final class VmRegisterType {
 	public static final int BINARY_OP_MAX = 3;
 	public static final int BINARY_OP_AND = 4;
 	public static final int BINARY_OP_OR = 5;
+	public static final int BINARY_OP_ARGMIN = 6;
+	public static final int BINARY_OP_ARGMAX = 7;
 
 	// VM Execution status codes
 	public static final int VM_OK = 0;

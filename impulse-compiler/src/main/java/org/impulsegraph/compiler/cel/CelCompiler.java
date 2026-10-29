@@ -73,6 +73,9 @@ public final class CelCompiler {
 				if ("-".equals(op)) {
 					yield (streamMode ? "(- 0 " : "(- 0 ") + toImpScheme(node.children().get(0), streamMode) + ")";
 				}
+				if ("~".equals(op)) {
+					yield "(~ " + toImpScheme(node.children().get(0), streamMode) + ")";
+				}
 				yield toImpScheme(node.children().get(0), streamMode);
 			}
 			case BINARY_OP -> {

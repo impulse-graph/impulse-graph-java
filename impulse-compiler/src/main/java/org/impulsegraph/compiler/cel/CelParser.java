@@ -15,9 +15,13 @@ public final class CelParser {
 		PREC_OR, // ||
 		PREC_AND, // &&
 		PREC_COMPARE, // == != < <= > >= in
+		PREC_BIT_OR, // |
+		PREC_BIT_XOR, // ^
+		PREC_BIT_AND, // &
+		PREC_SHIFT, // << >>
 		PREC_ADD_SUB, // + -
 		PREC_MUL_DIV, // * / %
-		PREC_UNARY, // ! - +
+		PREC_UNARY, // ! - + ~
 		PREC_CALL_MEMBER // . () []
 	}
 
@@ -56,6 +60,10 @@ public final class CelParser {
 			case PIPE_PIPE -> Precedence.PREC_OR;
 			case AMP_AMP -> Precedence.PREC_AND;
 			case EQ_EQ, BANG_EQ, LT, LT_EQ, GT, GT_EQ, KW_IN -> Precedence.PREC_COMPARE;
+			case PIPE -> Precedence.PREC_BIT_OR;
+			case CARET -> Precedence.PREC_BIT_XOR;
+			case AMP -> Precedence.PREC_BIT_AND;
+			case LT_LT, GT_GT -> Precedence.PREC_SHIFT;
 			case PLUS, MINUS -> Precedence.PREC_ADD_SUB;
 			case STAR, SLASH, PERCENT -> Precedence.PREC_MUL_DIV;
 			case DOT, LPAREN, LBRACKET -> Precedence.PREC_CALL_MEMBER;
@@ -74,7 +82,7 @@ public final class CelParser {
 			case STRING_LITERAL -> CelAstNode.makeString(t.text());
 			case IDENTIFIER -> CelAstNode.makeIdent(t.text());
 			case PARAMETER_REF -> CelAstNode.makeParam(t.text());
-			case BANG, MINUS, PLUS -> {
+			case BANG, MINUS, PLUS, TILDE -> {
 				CelAstNode operand = parsePrecedence(Precedence.PREC_UNARY);
 				yield CelAstNode.makeUnary(t.text(), operand);
 			}

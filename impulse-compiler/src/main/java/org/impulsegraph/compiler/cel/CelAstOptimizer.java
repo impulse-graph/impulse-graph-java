@@ -55,6 +55,13 @@ public final class CelAstOptimizer {
 			if (child.kind() == CelAstNode.Kind.LITERAL_FLOAT) {
 				return CelAstNode.makeFloat(-child.floatVal());
 			}
+		} else if ("~".equals(op)) {
+			if (child.kind() == CelAstNode.Kind.LITERAL_INT) {
+				return CelAstNode.makeInt(~child.intVal());
+			}
+			if (child.kind() == CelAstNode.Kind.UNARY_OP && "~".equals(child.text())) {
+				return child.children().get(0);
+			}
 		}
 		return node;
 	}
@@ -82,6 +89,11 @@ public final class CelAstOptimizer {
 				case "<=" -> CelAstNode.makeBool(a <= b);
 				case ">" -> CelAstNode.makeBool(a > b);
 				case ">=" -> CelAstNode.makeBool(a >= b);
+				case "&" -> CelAstNode.makeInt(a & b);
+				case "|" -> CelAstNode.makeInt(a | b);
+				case "^" -> CelAstNode.makeInt(a ^ b);
+				case "<<" -> CelAstNode.makeInt(a << (b & 63));
+				case ">>" -> CelAstNode.makeInt(a >> (b & 63));
 				default -> node;
 			};
 		}

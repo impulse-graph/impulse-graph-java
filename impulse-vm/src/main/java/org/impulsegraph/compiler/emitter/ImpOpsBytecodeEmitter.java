@@ -148,11 +148,11 @@ public final class ImpOpsBytecodeEmitter {
 						default -> OP_REDUCE;
 					};
 					int opId = switch (red.op()) {
-						case SUM, COUNT -> 0;
-						case MIN -> 1;
-						case MAX -> 2;
-						case ARGMIN -> 3;
-						case ARGMAX -> 4;
+						case SUM, COUNT -> BINARY_OP_ADD;
+						case MIN -> BINARY_OP_MIN;
+						case MAX -> BINARY_OP_MAX;
+						case ARGMIN -> BINARY_OP_ARGMIN;
+						case ARGMAX -> BINARY_OP_ARGMAX;
 						case FIRST -> 5;
 					};
 					int payload = (opId << 16) | (srcReg & 0xFFFF);

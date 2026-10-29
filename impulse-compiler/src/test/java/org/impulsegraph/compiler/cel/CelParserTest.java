@@ -86,4 +86,43 @@ public class CelParserTest {
 		CelAstNode opt5 = CelAstOptimizer.optimize(ast5);
 		assertEquals("4.0", CelCompiler.toImpScheme(opt5));
 	}
+
+	@Test
+	@DisplayName("CEL Bitwise Operators (&, |, ^, ~, <<, >>) and Hex/Binary Literals (0x, 0b)")
+	void testBitwiseAndHexBinaryLiterals() {
+		CelAstNode astHex = CelParser.parse("0x7F");
+		assertNotNull(astHex);
+		assertEquals(127L, astHex.intVal());
+
+		CelAstNode astHexSep = CelParser.parse("0xFF_00");
+		assertNotNull(astHexSep);
+		assertEquals(65280L, astHexSep.intVal());
+
+		CelAstNode astBin = CelParser.parse("0b0111_1111");
+		assertNotNull(astBin);
+		assertEquals(127L, astBin.intVal());
+
+		CelAstNode ast1 = CelParser.parse("(lane & 0x7F) == 0x7F");
+		assertNotNull(ast1);
+		assertEquals("(vec-cmp-eq (& lane 127) 127)", CelCompiler.toImpScheme(ast1));
+
+		CelAstNode ast2 = CelParser.parse("popcount(lane & 0x7F) > 3");
+		assertNotNull(ast2);
+		assertEquals("(vec-cmp-gt (popcount (& lane 127)) 3)", CelCompiler.toImpScheme(ast2));
+
+		CelAstNode ast3 = CelParser.parse("((a | b) ^ ~c) << 2 >> 1");
+		assertNotNull(ast3);
+		assertEquals("(>> (<< (^ (| a b) (~ c)) 2) 1)", CelCompiler.toImpScheme(ast3));
+
+		CelAstNode ast4 = CelParser.parse("a | b ^ c & d << e + 1 == 0x05");
+		assertNotNull(ast4);
+		assertEquals("(vec-cmp-eq (| a (^ b (& c (<< d (+ e 1))))) 5)", CelCompiler.toImpScheme(ast4));
+
+		assertEquals(0x30L, CelAstOptimizer.optimize(CelParser.parse("0xF0 & 0x3C")).intVal());
+		assertEquals(0xFFL, CelAstOptimizer.optimize(CelParser.parse("0xF0 | 0x0F")).intVal());
+		assertEquals(0xF0L, CelAstOptimizer.optimize(CelParser.parse("0xFF ^ 0x0F")).intVal());
+		assertEquals(16L, CelAstOptimizer.optimize(CelParser.parse("1 << 4")).intVal());
+		assertEquals(8L, CelAstOptimizer.optimize(CelParser.parse("32 >> 2")).intVal());
+		assertEquals(-1L, CelAstOptimizer.optimize(CelParser.parse("~0")).intVal());
+	}
 }

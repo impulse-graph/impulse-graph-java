@@ -1792,10 +1792,34 @@ public final class VmHandlers {
 		}
 	}
 
+	private static int resolveReduceSrcReg(MemorySegment state, Instruction instr) {
+		int dstReg = instr.dstReg();
+		int srcReg = instr.payload() & 0xFFFF;
+		if (srcReg == 0 && dstReg != 0 && getRegisterType(state, 0) == TYPE_NULL) {
+			srcReg = dstReg;
+		}
+		return srcReg;
+	}
+
 	public static Object handleVectorReduceMax(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-		int srcReg = instr.dstReg();
+		int dstReg = instr.dstReg();
+		int srcReg = resolveReduceSrcReg(state, instr);
 		byte type = getRegisterType(state, srcReg);
-		double maxVal = Double.NEGATIVE_INFINITY;
+		if (type == TYPE_DOUBLE_VECTOR) {
+			double maxVal = Double.NEGATIVE_INFINITY;
+			double[] vec = ctx.getDoubleVector((int) getRegisterValue(state, srcReg));
+			if (vec != null) {
+				for (double v : vec) {
+					if (!Double.isNaN(v) && v > maxVal) {
+						maxVal = v;
+					}
+				}
+			}
+			setRegister(state, dstReg, Double.doubleToRawLongBits(maxVal), TYPE_DOUBLE);
+			setFlag(state, FLAG_ZF, maxVal == 0.0);
+			return maxVal;
+		}
+		float maxVal = Float.NEGATIVE_INFINITY;
 		if (type == TYPE_FLOAT_VECTOR) {
 			float[] vec = ctx.getFloatVector((int) getRegisterValue(state, srcReg));
 			if (vec != null) {
@@ -1806,14 +1830,30 @@ public final class VmHandlers {
 				}
 			}
 		}
-		setRegister(state, srcReg, Double.doubleToRawLongBits(maxVal), TYPE_FLOAT);
-		return maxVal;
+		setRegister(state, dstReg, Integer.toUnsignedLong(Float.floatToRawIntBits(maxVal)), TYPE_FLOAT);
+		setFlag(state, FLAG_ZF, maxVal == 0.0f);
+		return (double) maxVal;
 	}
 
 	public static Object handleVectorReduceMin(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-		int srcReg = instr.dstReg();
+		int dstReg = instr.dstReg();
+		int srcReg = resolveReduceSrcReg(state, instr);
 		byte type = getRegisterType(state, srcReg);
-		double minVal = Double.POSITIVE_INFINITY;
+		if (type == TYPE_DOUBLE_VECTOR) {
+			double minVal = Double.POSITIVE_INFINITY;
+			double[] vec = ctx.getDoubleVector((int) getRegisterValue(state, srcReg));
+			if (vec != null) {
+				for (double v : vec) {
+					if (!Double.isNaN(v) && v < minVal) {
+						minVal = v;
+					}
+				}
+			}
+			setRegister(state, dstReg, Double.doubleToRawLongBits(minVal), TYPE_DOUBLE);
+			setFlag(state, FLAG_ZF, minVal == 0.0);
+			return minVal;
+		}
+		float minVal = Float.POSITIVE_INFINITY;
 		if (type == TYPE_FLOAT_VECTOR) {
 			float[] vec = ctx.getFloatVector((int) getRegisterValue(state, srcReg));
 			if (vec != null) {
@@ -1824,16 +1864,57 @@ public final class VmHandlers {
 				}
 			}
 		}
-		setRegister(state, srcReg, Double.doubleToRawLongBits(minVal), TYPE_FLOAT);
-		return minVal;
+		setRegister(state, dstReg, Integer.toUnsignedLong(Float.floatToRawIntBits(minVal)), TYPE_FLOAT);
+		setFlag(state, FLAG_ZF, minVal == 0.0f);
+		return (double) minVal;
+	}
+
+	public static Object handleVectorReduceMul(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		int dstReg = instr.dstReg();
+		int srcReg = resolveReduceSrcReg(state, instr);
+		byte type = getRegisterType(state, srcReg);
+		if (type == TYPE_DOUBLE_VECTOR) {
+			double[] vec = ctx.getDoubleVector((int) getRegisterValue(state, srcReg));
+			double prod = (vec != null && vec.length > 0) ? 1.0 : 0.0;
+			if (vec != null) {
+				for (double v : vec) {
+					prod *= v;
+				}
+			}
+			setRegister(state, dstReg, Double.doubleToRawLongBits(prod), TYPE_DOUBLE);
+			setFlag(state, FLAG_ZF, prod == 0.0);
+			return prod;
+		}
+		float[] vec = (type == TYPE_FLOAT_VECTOR) ? ctx.getFloatVector((int) getRegisterValue(state, srcReg)) : null;
+		float prod = (vec != null && vec.length > 0) ? 1.0f : 0.0f;
+		if (vec != null) {
+			for (float v : vec) {
+				prod *= v;
+			}
+		}
+		setRegister(state, dstReg, Integer.toUnsignedLong(Float.floatToRawIntBits(prod)), TYPE_FLOAT);
+		setFlag(state, FLAG_ZF, prod == 0.0f);
+		return (double) prod;
 	}
 
 	public static Object handleVectorReduceArgMax(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-		int srcReg = instr.dstReg();
+		int dstReg = instr.dstReg();
+		int srcReg = resolveReduceSrcReg(state, instr);
 		byte type = getRegisterType(state, srcReg);
 		double maxVal = Double.NEGATIVE_INFINITY;
 		int argMax = -1;
-		if (type == TYPE_FLOAT_VECTOR) {
+		if (type == TYPE_DOUBLE_VECTOR) {
+			double[] vec = ctx.getDoubleVector((int) getRegisterValue(state, srcReg));
+			if (vec != null) {
+				for (int i = 0; i < vec.length; i++) {
+					double v = vec[i];
+					if (!Double.isNaN(v) && v > maxVal) {
+						maxVal = v;
+						argMax = i;
+					}
+				}
+			}
+		} else if (type == TYPE_FLOAT_VECTOR) {
 			float[] vec = ctx.getFloatVector((int) getRegisterValue(state, srcReg));
 			if (vec != null) {
 				for (int i = 0; i < vec.length; i++) {
@@ -1845,16 +1926,29 @@ public final class VmHandlers {
 				}
 			}
 		}
-		setRegister(state, srcReg, argMax, TYPE_NODE_ID);
+		setRegister(state, dstReg, argMax, TYPE_NODE_ID);
+		setFlag(state, FLAG_ZF, argMax == 0);
 		return argMax;
 	}
 
 	public static Object handleVectorReduceArgMin(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-		int srcReg = instr.dstReg();
+		int dstReg = instr.dstReg();
+		int srcReg = resolveReduceSrcReg(state, instr);
 		byte type = getRegisterType(state, srcReg);
 		double minVal = Double.POSITIVE_INFINITY;
 		int argMin = -1;
-		if (type == TYPE_FLOAT_VECTOR) {
+		if (type == TYPE_DOUBLE_VECTOR) {
+			double[] vec = ctx.getDoubleVector((int) getRegisterValue(state, srcReg));
+			if (vec != null) {
+				for (int i = 0; i < vec.length; i++) {
+					double v = vec[i];
+					if (!Double.isNaN(v) && v < minVal) {
+						minVal = v;
+						argMin = i;
+					}
+				}
+			}
+		} else if (type == TYPE_FLOAT_VECTOR) {
 			float[] vec = ctx.getFloatVector((int) getRegisterValue(state, srcReg));
 			if (vec != null) {
 				for (int i = 0; i < vec.length; i++) {
@@ -1866,7 +1960,8 @@ public final class VmHandlers {
 				}
 			}
 		}
-		setRegister(state, srcReg, argMin, TYPE_NODE_ID);
+		setRegister(state, dstReg, argMin, TYPE_NODE_ID);
+		setFlag(state, FLAG_ZF, argMin == 0);
 		return argMin;
 	}
 
@@ -1880,10 +1975,11 @@ public final class VmHandlers {
 		}
 		Instruction redInstr = new Instruction((byte) 0x45, instr.flags(), instr.dstReg(), srcReg);
 		return switch (opId) {
-			case 1 -> handleVectorReduceMin(state, ctx, redInstr);
-			case 2 -> handleVectorReduceMax(state, ctx, redInstr);
-			case 3 -> handleVectorReduceArgMin(state, ctx, redInstr);
-			case 4 -> handleVectorReduceArgMax(state, ctx, redInstr);
+			case BINARY_OP_MUL -> handleVectorReduceMul(state, ctx, redInstr);
+			case BINARY_OP_MIN -> handleVectorReduceMin(state, ctx, redInstr);
+			case BINARY_OP_MAX -> handleVectorReduceMax(state, ctx, redInstr);
+			case BINARY_OP_ARGMIN -> handleVectorReduceArgMin(state, ctx, redInstr);
+			case BINARY_OP_ARGMAX -> handleVectorReduceArgMax(state, ctx, redInstr);
 			default -> {
 				handleVectorReduceSum(state, ctx, redInstr);
 				yield 0.0;
@@ -3289,6 +3385,7 @@ public final class VmHandlers {
 					compiledShader.invokeExact(ctx, state, actualSource, actualTarget, eIdx, s_regs, outBs);
 				}
 			}
+			setFlag(state, FLAG_ZF, outBs.isEmpty());
 		} catch (Throwable t) {
 			if (t instanceof RuntimeException re)
 				throw re;
@@ -3343,6 +3440,8 @@ public final class VmHandlers {
 		if (colIdx == null)
 			colIdx = rel.getColumnTargetsSegment();
 
+		java.util.Set<Long> reducedTargets = new java.util.HashSet<>();
+
 		for (int u : activeSources) {
 			int nodeBound = isCsc ? (int) (rowOff.byteSize() / 4 - 1) : rel.getNodeCount();
 			if (u < 0 || u >= nodeBound)
@@ -3354,7 +3453,6 @@ public final class VmHandlers {
 				int neighbor = colIdx.getAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) eIdx);
 				int actualSource = isCsc ? neighbor : u;
 				int actualTarget = isCsc ? u : neighbor;
-				outBs.set(actualTarget);
 
 				float[] s_regs = new float[16];
 				boolean abort = false;
@@ -3547,14 +3645,48 @@ public final class VmHandlers {
 								setRegister(state, globalReg, handle, TYPE_FLOAT_VECTOR);
 							}
 							if (vec != null && actualTarget < vec.length) {
+								long tkey = (((long) globalReg) << 32) | (actualTarget & 0xFFFFFFFFL);
+								boolean firstTouch = reducedTargets.add(tkey);
 								float current = vec[actualTarget];
 								float next = current;
 								switch (monoid) {
 									case 0 -> next = current + val;
-									case 1 -> next = Math.max(current, val);
-									case 2 -> next = Math.min(current, val);
+									case 1 -> next = firstTouch ? val : Math.max(current, val);
+									case 2 -> next = firstTouch ? val : Math.min(current, val);
 								}
 								vec[actualTarget] = next;
+							}
+						}
+						case VmRegisterType.OP_STREAM_REDUCE_ARGMIN, VmRegisterType.OP_STREAM_REDUCE_ARGMAX -> {
+							float val = s_regs[sDst];
+							int valReg = sPayloadLow;
+							int argReg = sPayloadHigh;
+							boolean isMin = (op == VmRegisterType.OP_STREAM_REDUCE_ARGMIN);
+
+							byte rType = getRegisterType(state, valReg);
+							int handle;
+							float[] vec;
+							if (rType == TYPE_FLOAT_VECTOR) {
+								handle = (int) getRegisterValue(state, valReg);
+								vec = ctx.getFloatVector(handle);
+							} else {
+								int size = Math.max(rel.getNodeCount(), 65536);
+								vec = new float[size];
+								handle = ctx.registerFloatVector(vec);
+								setRegister(state, valReg, handle, TYPE_FLOAT_VECTOR);
+							}
+							if (vec != null && actualTarget < vec.length) {
+								long tkey = (((long) valReg) << 32) | (actualTarget & 0xFFFFFFFFL);
+								boolean firstTouch = !reducedTargets.contains(tkey);
+								float current = vec[actualTarget];
+								boolean isBetter = firstTouch || (isMin ? (val < current) : (val > current));
+								if (isBetter) {
+									reducedTargets.add(tkey);
+									vec[actualTarget] = val;
+									if (argReg < 64) {
+										setRegister(state, argReg, actualSource, TYPE_NODE_ID);
+									}
+								}
 							}
 						}
 					}
@@ -3564,7 +3696,11 @@ public final class VmHandlers {
 
 					mutPc++;
 				}
+				if (!abort) {
+					outBs.set(actualTarget);
+				}
 			}
 		}
+		setFlag(state, FLAG_ZF, outBs.isEmpty());
 	}
 }

@@ -42,8 +42,9 @@ public final class ImpulseMethodHandleCompiler {
 			}
 			decoded[pc] = inst;
 			byte op = inst.opcode();
+			int uOp = Byte.toUnsignedInt(op);
 			if (op == VmRegisterType.OP_COO_WALK_STREAM || op == VmRegisterType.OP_CSR_WALK_STREAM
-					|| op == VmRegisterType.OP_CSC_WALK_STREAM || (op >= (byte) 0xA1 && op <= (byte) 0xBD)) {
+					|| op == VmRegisterType.OP_CSC_WALK_STREAM || (uOp >= 0xA1 && uOp <= 0xBF)) {
 				handlers[pc] = bindInstruction(inst, pc, programSeg, instructionCount);
 			}
 		}
@@ -93,7 +94,8 @@ public final class ImpulseMethodHandleCompiler {
 
 		// Skip shader instructions in the main loop (they are executed by the compiled
 		// shader)
-		if (op >= (byte) 0xA1 && op <= (byte) 0xBD) {
+		int uOp = Byte.toUnsignedInt(op);
+		if (uOp >= 0xA1 && uOp <= 0xBF) {
 			return getSkipHandler();
 		}
 
@@ -692,7 +694,8 @@ public final class ImpulseMethodHandleCompiler {
 					VmHandlers.handleStreamWalk(state, ctx, instr, programSeg, instructionCount);
 					nextPc++;
 				}
-				case 0xA1, 0xA2 -> {
+				case 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF, 0xB0, 0xB1, 0xB2,
+						0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF -> {
 					nextPc++;
 				}
 				case 0x28, 0x29, 0x2B, 0x2C, 0x3E, 0x3F, 0x4F, 0x59, 0x5D, 0x5E, 0x5F, 0x6D, 0x6E, 0x6F, 0x76, 0x77,
