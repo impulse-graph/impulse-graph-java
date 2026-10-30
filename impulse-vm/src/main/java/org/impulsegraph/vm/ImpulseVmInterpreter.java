@@ -25,17 +25,25 @@ public final class ImpulseVmInterpreter {
 
 	public static Object execute(MemorySegment programSeg, long instructionCount, ImpulseGraphSnapshot snapshot,
 			Object input, Arena arena) {
-		return execute(programSeg, instructionCount, snapshot, input, arena, null);
+		return execute(programSeg, instructionCount, snapshot, input, arena, null, null);
 	}
 
 	public static Object execute(MemorySegment programSeg, long instructionCount, ImpulseGraphSnapshot snapshot,
 			Object input, Arena arena, java.util.List<String> stringPool) {
+		return execute(programSeg, instructionCount, snapshot, input, arena, stringPool, null);
+	}
+
+	public static Object execute(MemorySegment programSeg, long instructionCount, ImpulseGraphSnapshot snapshot,
+			Object input, Arena arena, java.util.List<String> stringPool, MemorySegment inlineDataSeg) {
 		if (programSeg == null || instructionCount <= 0) {
 			return new OffHeapBitSet(arena, 1000);
 		}
 
 		try (VmQueryContext ctx = VmQueryContext.acquire(snapshot, arena)) {
 			ctx.setStringPool(stringPool);
+			if (inlineDataSeg != null) {
+				ctx.setInlineData(inlineDataSeg, inlineDataSeg.byteSize());
+			}
 			MemorySegment state = ctx.allocateStateSegment();
 			Object finalResult = null;
 
@@ -460,14 +468,17 @@ public final class ImpulseVmInterpreter {
 					}
 					case OP_COLLECT_ARRAY -> {
 						VmHandlers.handleCollectArray(state, ctx, instr);
+						finalResult = ctx.getFinalResult();
 						pc++;
 					}
 					case OP_MAP_DENSE_TO_KEYS -> {
 						VmHandlers.handleMapDenseToKeys(state, ctx, instr);
+						finalResult = ctx.getFinalResult();
 						pc++;
 					}
 					case OP_COLLECT_VALUE_MAP -> {
 						VmHandlers.handleCollectValueMap(state, ctx, instr);
+						finalResult = ctx.getFinalResult();
 						pc++;
 					}
 
@@ -652,6 +663,7 @@ public final class ImpulseVmInterpreter {
 							OP_LANE_CSC_WALK, OP_LANE_PRUNE_MASK, OP_LANE_FILTER_QUORUM, OP_LANE_REDUCE_AND,
 							OP_LANE_REDUCE_ATTR, OP_LANE_SET_COVER, OP_VECTOR_ANN_SEARCH, OP_VECTOR_RERANK_DOT -> {
 						VmMultiLaneHandlers.handleMultiLaneOpcode(state, ctx, instr, (int) pc);
+						finalResult = ctx.getFinalResult();
 						pc++;
 					}
 
@@ -674,6 +686,9 @@ public final class ImpulseVmInterpreter {
 				VmInvariants.verifyPostStep(state, ctx);
 			}
 
+			if (finalResult == null) {
+				finalResult = ctx.getFinalResult();
+			}
 			return (finalResult != null) ? finalResult : new OffHeapBitSet(arena, 1000);
 		}
 	}

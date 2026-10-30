@@ -708,8 +708,12 @@ public final class BinarySnapshotLoader {
 
 				LoadedDomain srcDom = domainsById.get(srcDomId);
 				LoadedDomain tgtDom = domainsById.get(tgtDomId);
+				long srcDomainNodeCount = (srcDom != null) ? srcDom.nodeCount() : 0L;
 				long tgtDomainNodeCount = (tgtDom != null) ? tgtDom.nodeCount() : 0L;
-				auditRelationIntegrity(relId, nodeCount, edgeCount, tgtDomainNodeCount, nodeIdWidth, edgeIndexWidth,
+				long effectiveTgtNodeCount = (srcDomainNodeCount > 0 && nodeCount > srcDomainNodeCount)
+						? Math.max(nodeCount, tgtDomainNodeCount)
+						: tgtDomainNodeCount;
+				auditRelationIntegrity(relId, nodeCount, edgeCount, effectiveTgtNodeCount, nodeIdWidth, edgeIndexWidth,
 						offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg);
 
 				List<MemorySegment> attrSegments = new ArrayList<>();

@@ -515,6 +515,10 @@ public final class VmQueryContext implements AutoCloseable {
 		return arr;
 	}
 
+	public int[] peekScratchInt(int slot) {
+		return TL_BUFFER_POOL.get().scratchInts[slot];
+	}
+
 	public long[] scratchLong(int slot, int minCap) {
 		ThreadLocalBufferPool pool = TL_BUFFER_POOL.get();
 		long[] arr = pool.scratchLongs[slot];
@@ -778,6 +782,77 @@ public final class VmQueryContext implements AutoCloseable {
 		int handle = valueMaps.size();
 		valueMaps.add(map);
 		return handle;
+	}
+
+	public int materializeValueMap(int[] scratch, int count, byte valsType, int valsHandle) {
+		Map<Integer, Object> outMap = new LinkedHashMap<>(Math.max(4, count));
+		if (valsType == VmRegisterType.TYPE_FLOAT_VECTOR) {
+			float[] fv = getFloatVector(valsHandle);
+			if (fv != null) {
+				boolean positional = (fv.length == count);
+				for (int i = 0; i < count; i++) {
+					int u = scratch[i];
+					if (u >= 0 && u < fv.length && !positional) {
+						outMap.put(u, fv[u]);
+					} else if (i < fv.length) {
+						outMap.put(u, fv[i]);
+					}
+				}
+			}
+		} else if (valsType == VmRegisterType.TYPE_DOUBLE_VECTOR) {
+			double[] dv = getDoubleVector(valsHandle);
+			if (dv != null) {
+				boolean positional = (dv.length == count);
+				for (int i = 0; i < count; i++) {
+					int u = scratch[i];
+					if (u >= 0 && u < dv.length && !positional) {
+						outMap.put(u, dv[u]);
+					} else if (i < dv.length) {
+						outMap.put(u, dv[i]);
+					}
+				}
+			}
+		} else if (valsType == VmRegisterType.TYPE_NODE_VECTOR) {
+			int[] iv = getIntVector(valsHandle);
+			if (iv != null) {
+				boolean positional = (iv.length == count);
+				for (int i = 0; i < count; i++) {
+					int u = scratch[i];
+					if (u >= 0 && u < iv.length && !positional) {
+						outMap.put(u, (long) iv[u]);
+					} else if (i < iv.length) {
+						outMap.put(u, (long) iv[i]);
+					}
+				}
+			}
+		} else if (valsType == VmRegisterType.TYPE_UINT64_VECTOR) {
+			long[] lv = getLongVector(valsHandle);
+			if (lv != null) {
+				boolean positional = (lv.length == count);
+				for (int i = 0; i < count; i++) {
+					int u = scratch[i];
+					if (u >= 0 && u < lv.length && !positional) {
+						outMap.put(u, lv[u]);
+					} else if (i < lv.length) {
+						outMap.put(u, lv[i]);
+					}
+				}
+			}
+		} else if (valsType == VmRegisterType.TYPE_STRING_VECTOR) {
+			String[] sv = getStringVector(valsHandle);
+			if (sv != null) {
+				boolean positional = (sv.length == count);
+				for (int i = 0; i < count; i++) {
+					int u = scratch[i];
+					if (u >= 0 && u < sv.length && !positional) {
+						outMap.put(u, sv[u]);
+					} else if (i < sv.length) {
+						outMap.put(u, sv[i]);
+					}
+				}
+			}
+		}
+		return registerValueMap(outMap);
 	}
 
 	public int valueMapCount() {

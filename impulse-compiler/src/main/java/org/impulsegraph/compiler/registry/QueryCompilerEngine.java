@@ -72,9 +72,11 @@ public final class QueryCompilerEngine {
 
 		CompilerOptions opts = options != null ? options : CompilerOptions.DEFAULT;
 
-		// 1. Fast path: check compiled plan cache (only when all optimizations are at
-		// default mask 0)
-		if (opts.effectiveDisabledPassesMask() == 0) {
+		// 1. Fast path: check compiled plan cache (when standard optimizations are at
+		// default mask)
+		boolean isDefaultCacheable = opts.effectiveDisabledPassesMask() == CompilerOptions.DEFAULT
+				.effectiveDisabledPassesMask();
+		if (isDefaultCacheable) {
 			CompiledQuery cached = queryObject.getCompiledPlan(snapshot);
 			if (cached != null) {
 				planCacheMetrics.recordHit();
@@ -105,7 +107,7 @@ public final class QueryCompilerEngine {
 			long duration = System.nanoTime() - start;
 			compilerMetrics.recordStage2(duration);
 
-			if (opts.effectiveDisabledPassesMask() == 0) {
+			if (isDefaultCacheable) {
 				queryObject.cacheCompiledPlan(snapshot, compiled);
 				planCacheMetrics.setPlanCount(planCacheMetrics.activePlans() + 1);
 			}

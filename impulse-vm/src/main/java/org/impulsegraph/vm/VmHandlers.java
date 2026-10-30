@@ -1495,6 +1495,79 @@ public final class VmHandlers {
 					outBs.or(bs);
 			} else if (typeTag == TYPE_NODE_ID || typeTag == TYPE_INT64) {
 				outBs.set((int) val);
+			} else if (typeTag == TYPE_LANE_FRONTIER) {
+				VmLaneFrontier lf = ctx.getLaneFrontier((int) val);
+				if (lf != null && lf.lanes() != null) {
+					long mask = lf.activeMask();
+					long[] lanes = lf.lanes();
+					for (int u = 0, n = Math.min(lf.nodeCount(), lanes.length); u < n; u++) {
+						if ((lanes[u] & mask) != 0L) {
+							outBs.set(u);
+						}
+					}
+				}
+			} else if (typeTag == TYPE_NODE_VECTOR) {
+				int[] vec = ctx.getIntVector((int) val);
+				if (vec != null) {
+					for (int v : vec) {
+						if (v >= 0)
+							outBs.set(v);
+					}
+				}
+			} else if (typeTag == TYPE_UINT64_VECTOR) {
+				long[] vec = ctx.getLongVector((int) val);
+				if (vec != null) {
+					for (long v : vec) {
+						if (v >= 0L)
+							outBs.set((int) v);
+					}
+				}
+			}
+			setRegister(state, dst, outHandle, TYPE_BITSET_HANDLE);
+			ctx.setFinalResult(outBs);
+			return outBs;
+		}
+
+		if (typeTag == TYPE_LANE_FRONTIER) {
+			VmLaneFrontier lf = ctx.getLaneFrontier((int) val);
+			int outHandle = ctx.acquireBitset();
+			ImpulseBitSet outBs = ctx.getBitset(outHandle);
+			if (lf != null && lf.lanes() != null) {
+				long mask = lf.activeMask();
+				long[] lanes = lf.lanes();
+				for (int u = 0, n = Math.min(lf.nodeCount(), lanes.length); u < n; u++) {
+					if ((lanes[u] & mask) != 0L) {
+						outBs.set(u);
+					}
+				}
+			}
+			setRegister(state, dst, outHandle, TYPE_BITSET_HANDLE);
+			ctx.setFinalResult(outBs);
+			return outBs;
+		} else if (typeTag == TYPE_NODE_VECTOR) {
+			int[] vec = ctx.getIntVector((int) val);
+			int outHandle = ctx.acquireBitset();
+			ImpulseBitSet outBs = ctx.getBitset(outHandle);
+			if (vec != null) {
+				for (int v : vec) {
+					if (v >= 0) {
+						outBs.set(v);
+					}
+				}
+			}
+			setRegister(state, dst, outHandle, TYPE_BITSET_HANDLE);
+			ctx.setFinalResult(outBs);
+			return outBs;
+		} else if (typeTag == TYPE_UINT64_VECTOR) {
+			long[] vec = ctx.getLongVector((int) val);
+			int outHandle = ctx.acquireBitset();
+			ImpulseBitSet outBs = ctx.getBitset(outHandle);
+			if (vec != null) {
+				for (long v : vec) {
+					if (v >= 0L) {
+						outBs.set((int) v);
+					}
+				}
 			}
 			setRegister(state, dst, outHandle, TYPE_BITSET_HANDLE);
 			ctx.setFinalResult(outBs);
@@ -1968,7 +2041,7 @@ public final class VmHandlers {
 		if (type == TYPE_FLOAT) {
 			long raw = getRegisterValue(state, src);
 			float val = Float.intBitsToFloat((int) (raw & 0xFFFFFFFFL));
-			setRegister(state, dst, Float.floatToRawIntBits(val), TYPE_FLOAT);
+			setRegister(state, dst, Integer.toUnsignedLong(Float.floatToRawIntBits(val)), TYPE_FLOAT);
 			setFlag(state, FLAG_ZF, val == 0.0f);
 			ctx.setFinalResultDouble(val);
 			return Boolean.TRUE;
@@ -1982,7 +2055,7 @@ public final class VmHandlers {
 					}
 				}
 			}
-			setRegister(state, dst, Float.floatToRawIntBits(fsum), TYPE_FLOAT);
+			setRegister(state, dst, Integer.toUnsignedLong(Float.floatToRawIntBits(fsum)), TYPE_FLOAT);
 			setFlag(state, FLAG_ZF, fsum == 0.0f);
 			ctx.setFinalResultDouble(fsum);
 			return Boolean.TRUE;
@@ -2375,6 +2448,10 @@ public final class VmHandlers {
 	}
 
 	public static void handleLoadInlineArray(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		if ((instr.flags() & 0x01) != 0) {
+			handleLoadInlineIntArray(state, ctx, instr);
+			return;
+		}
 		MemorySegment inlineSeg = ctx.inlineDataSegment();
 		if (inlineSeg == null) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
@@ -3782,30 +3859,157 @@ public final class VmHandlers {
 		setFlag(state, FLAG_ZF, false);
 	}
 
+	private static int extractActiveNodeIdsToScratch(MemorySegment state, VmQueryContext ctx, int srcReg,
+			int scratchSlot) {
+		byte srcType = getRegisterType(state, srcReg);
+		long srcVal = getRegisterValue(state, srcReg);
+		if (srcType == TYPE_BITSET_HANDLE) {
+			ImpulseBitSet bs = ctx.getBitset((int) srcVal);
+			if (bs == null) {
+				return 0;
+			}
+			int card = (int) bs.cardinality();
+			int[] out = ctx.scratchInt(scratchSlot, Math.max(16, card));
+			int idx = 0;
+			for (int u = bs.nextSetBit(0); u >= 0; u = bs.nextSetBit(u + 1)) {
+				if (idx >= out.length) {
+					int[] next = ctx.scratchInt(scratchSlot, out.length << 1);
+					System.arraycopy(out, 0, next, 0, idx);
+					out = next;
+				}
+				out[idx++] = u;
+			}
+			return idx;
+		} else if (srcType == TYPE_LANE_FRONTIER) {
+			VmLaneFrontier lf = ctx.getLaneFrontier((int) srcVal);
+			if (lf == null || lf.lanes() == null) {
+				return 0;
+			}
+			long mask = lf.activeMask();
+			long[] lanes = lf.lanes();
+			int n = Math.min(lf.nodeCount(), lanes.length);
+			int[] out = ctx.scratchInt(scratchSlot, Math.max(16, n));
+			int idx = 0;
+			for (int u = 0; u < n; u++) {
+				if ((lanes[u] & mask) != 0L) {
+					out[idx++] = u;
+				}
+			}
+			return idx;
+		} else if (srcType == TYPE_NODE_VECTOR) {
+			int[] vec = ctx.getIntVector((int) srcVal);
+			if (vec == null) {
+				return 0;
+			}
+			int[] out = ctx.scratchInt(scratchSlot, Math.max(16, vec.length));
+			int idx = 0;
+			for (int v : vec) {
+				if (v >= 0) {
+					out[idx++] = v;
+				}
+			}
+			return idx;
+		} else if (srcType == TYPE_UINT64_VECTOR) {
+			long[] vec = ctx.getLongVector((int) srcVal);
+			if (vec == null) {
+				return 0;
+			}
+			int[] out = ctx.scratchInt(scratchSlot, Math.max(16, vec.length));
+			int idx = 0;
+			for (long v : vec) {
+				if (v >= 0L) {
+					out[idx++] = (int) v;
+				}
+			}
+			return idx;
+		} else if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
+			int[] out = ctx.scratchInt(scratchSlot, 16);
+			if (srcVal >= 0L) {
+				out[0] = (int) srcVal;
+				return 1;
+			}
+			return 0;
+		}
+		return 0;
+	}
+
+	private static String resolveDenseNodeKey(ImpulseGraphSnapshot snap, int domainId, int nodeId) {
+		if (snap != null) {
+			String domName = snap.getDomainName(domainId);
+			if (domName != null) {
+				String k = snap.getMetadata("domain." + domName + ".id." + nodeId);
+				if (k != null) {
+					return k;
+				}
+				k = snap.getMetadata("key." + domName + "." + nodeId);
+				if (k != null) {
+					return k;
+				}
+			}
+			for (String d : snap.getDomainNames()) {
+				String k = snap.getMetadata("domain." + d + ".id." + nodeId);
+				if (k != null) {
+					return k;
+				}
+				k = snap.getMetadata("key." + d + "." + nodeId);
+				if (k != null) {
+					return k;
+				}
+			}
+			Map<String, String> meta = snap.getMetadataMap();
+			if (meta != null) {
+				String idSuffix = ".id." + nodeId;
+				String keySuffix = "." + nodeId;
+				for (Map.Entry<String, String> e : meta.entrySet()) {
+					if ((e.getKey().startsWith("domain.") && e.getKey().endsWith(idSuffix))
+							|| (e.getKey().startsWith("key.") && e.getKey().endsWith(keySuffix))) {
+						return e.getValue();
+					}
+				}
+			}
+		}
+		return "node_" + nodeId;
+	}
+
 	public static void handleCollectArray(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int dst = instr.dstReg();
 		int src = instr.payload() & 0xFFFF;
 		validateReg(dst);
 		validateReg(src);
-		setRegister(state, dst, 0L, TYPE_NODE_VECTOR);
 		byte srcType = getRegisterType(state, src);
-		boolean isEmpty = true;
-		if (srcType == TYPE_BITSET_HANDLE) {
-			ImpulseBitSet bs = ctx.getBitset((int) getRegisterValue(state, src));
-			isEmpty = (bs == null || bs.isEmpty());
-		} else if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
-			isEmpty = false;
+		int count = extractActiveNodeIdsToScratch(state, ctx, src, 0);
+		int[] scratch = ctx.peekScratchInt(0);
+		int handle = ctx.acquireIntVector(count);
+		int[] outArr = ctx.getIntVector(handle);
+		if (count > 0 && outArr != null) {
+			System.arraycopy(scratch, 0, outArr, 0, count);
 		}
+		setRegister(state, dst, handle, TYPE_NODE_VECTOR);
+		ctx.setFinalResult(outArr);
+		boolean isEmpty = (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) ? false : (count == 0);
 		setFlag(state, FLAG_ZF, isEmpty);
 	}
 
 	public static void handleMapDenseToKeys(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int dst = instr.dstReg();
 		int src = instr.payload() & 0xFF;
+		int domainId = (instr.payload() >>> 16) & 0xFFFF;
 		validateReg(dst);
 		validateReg(src);
-		setRegister(state, dst, 0L, TYPE_STRING_VECTOR);
-		setFlag(state, FLAG_ZF, false);
+		byte srcType = getRegisterType(state, src);
+		int count = extractActiveNodeIdsToScratch(state, ctx, src, 0);
+		int[] scratch = ctx.peekScratchInt(0);
+		int handle = ctx.acquireStringVector(count);
+		String[] keys = ctx.getStringVector(handle);
+		ImpulseGraphSnapshot snap = ctx.getSnapshot();
+		for (int i = 0; i < count; i++) {
+			keys[i] = resolveDenseNodeKey(snap, domainId, scratch[i]);
+		}
+		setRegister(state, dst, handle, TYPE_STRING_VECTOR);
+		ctx.setFinalResult(java.util.Arrays.asList(keys));
+		boolean isEmpty = (srcType == TYPE_BITSET_HANDLE || srcType == TYPE_LANE_FRONTIER || srcType == TYPE_NODE_VECTOR
+				|| srcType == TYPE_UINT64_VECTOR) && (count == 0);
+		setFlag(state, FLAG_ZF, isEmpty);
 	}
 
 	public static void handleCollectValueMap(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -3815,8 +4019,15 @@ public final class VmHandlers {
 		validateReg(dst);
 		validateReg(nodesReg);
 		validateReg(valsReg);
-		setRegister(state, dst, 0L, TYPE_VALUE_MAP);
-		setFlag(state, FLAG_ZF, true);
+		int count = extractActiveNodeIdsToScratch(state, ctx, nodesReg, 0);
+		int[] scratch = ctx.peekScratchInt(0);
+		byte valsType = getRegisterType(state, valsReg);
+		int valsHandle = (int) getRegisterValue(state, valsReg);
+		int mapHandle = ctx.materializeValueMap(scratch, count, valsType, valsHandle);
+		Map<Integer, Object> outMap = ctx.getValueMap(mapHandle);
+		setRegister(state, dst, mapHandle, TYPE_VALUE_MAP);
+		ctx.setFinalResult(outMap);
+		setFlag(state, FLAG_ZF, outMap == null || outMap.isEmpty());
 	}
 
 	public static void handleCsrWalkFiltered(MemorySegment state, VmQueryContext ctx, Instruction instr) {

@@ -5,7 +5,7 @@ package org.impulsegraph.compiler.cypher;
  */
 public enum CypherTokenType {
 	// Keywords
-	KW_MATCH, KW_WHERE, KW_RETURN, KW_AND, KW_OR, KW_NOT, KW_COUNT,
+	KW_MATCH, KW_WHERE, KW_RETURN, KW_AND, KW_OR, KW_NOT, KW_COUNT, KW_IN, KW_ORDER, KW_BY, KW_DESC, KW_ASC, KW_LIMIT,
 
 	// Punctuation & Brackets
 	LPAREN, // (

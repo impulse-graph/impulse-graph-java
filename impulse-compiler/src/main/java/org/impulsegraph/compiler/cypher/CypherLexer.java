@@ -195,6 +195,12 @@ public final class CypherLexer {
 			case "OR" -> CypherTokenType.KW_OR;
 			case "NOT" -> CypherTokenType.KW_NOT;
 			case "COUNT" -> CypherTokenType.KW_COUNT;
+			case "IN" -> CypherTokenType.KW_IN;
+			case "ORDER" -> CypherTokenType.KW_ORDER;
+			case "BY" -> CypherTokenType.KW_BY;
+			case "DESC" -> CypherTokenType.KW_DESC;
+			case "ASC" -> CypherTokenType.KW_ASC;
+			case "LIMIT" -> CypherTokenType.KW_LIMIT;
 			default -> CypherTokenType.IDENTIFIER;
 		};
 

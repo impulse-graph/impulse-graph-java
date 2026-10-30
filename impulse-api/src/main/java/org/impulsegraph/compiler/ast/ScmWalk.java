@@ -24,6 +24,10 @@ public record ScmWalk(String relationName, int relationId, Direction direction, 
 		this.subSteps = subSteps != null ? Collections.unmodifiableList(new ArrayList<>(subSteps)) : List.of();
 	}
 
+	public ScmWalk(String relationName, int relationId, Direction direction) {
+		this(relationName, relationId, direction, List.of(), List.of());
+	}
+
 	public static ScmWalk forward(String relationName) {
 		return new ScmWalk(relationName, -1, Direction.FORWARD_CSR, List.of(), List.of());
 	}

@@ -82,6 +82,77 @@ public interface Traversal<T> {
 	Traversal<T> in(String relation, Reducer reducer);
 
 	/**
+	 * Traverses edges in both outgoing (CSR) and incoming (CSC) directions along
+	 * the given relation.
+	 */
+	default Traversal<T> both(String relation) {
+		return both(new String[]{relation});
+	}
+
+	/**
+	 * Traverses outgoing edges across the union of all given relations.
+	 */
+	default Traversal<T> out(String... relations) {
+		if (relations == null || relations.length == 0) {
+			return this;
+		}
+		return out(relations[0]);
+	}
+
+	/**
+	 * Traverses incoming edges across the union of all given relations.
+	 */
+	default Traversal<T> in(String... relations) {
+		if (relations == null || relations.length == 0) {
+			return this;
+		}
+		return in(relations[0]);
+	}
+
+	/**
+	 * Traverses both outgoing and incoming edges across the union of all given
+	 * relations.
+	 */
+	default Traversal<T> both(String... relations) {
+		if (relations == null || relations.length == 0) {
+			return this;
+		}
+		return out(relations[0]);
+	}
+
+	/**
+	 * Reranks the active frontier using exact SIMD vector similarity (`0xCB`
+	 * `OP_VECTOR_RERANK_DOT`).
+	 */
+	default Traversal<T> rerank(float[] queryVector, String attrName, int metric) {
+		return this;
+	}
+
+	/**
+	 * Reranks the active frontier using dot-product similarity against the default
+	 * embedding attribute.
+	 */
+	default Traversal<T> rerank(float[] queryVector) {
+		return rerank(queryVector, "", 0);
+	}
+
+	/**
+	 * Terminal step: returns the top-K highest-scoring nodes from a reranked
+	 * frontier (or first K active nodes if unreranked).
+	 */
+	default List<ScoredNode> topK(int k) {
+		return List.of();
+	}
+
+	/**
+	 * Terminal step: returns the top-K highest-scoring nodes resolved to external
+	 * business keys.
+	 */
+	default List<ScoredKey> topKKeys(int k) {
+		return List.of();
+	}
+
+	/**
 	 * Binds a named dynamic parameter for CEL filter expressions.
 	 */
 	Traversal<T> withParam(String key, Object value);

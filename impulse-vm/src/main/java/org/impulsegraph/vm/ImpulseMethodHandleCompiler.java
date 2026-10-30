@@ -736,8 +736,16 @@ public final class ImpulseMethodHandleCompiler {
 
 	public static Object executeCompiled(JitDriver driver, ImpulseGraphSnapshot snapshot, Object input, Arena arena,
 			List<String> stringPool, long instructionCount) {
+		return executeCompiled(driver, snapshot, input, arena, stringPool, instructionCount, null);
+	}
+
+	public static Object executeCompiled(JitDriver driver, ImpulseGraphSnapshot snapshot, Object input, Arena arena,
+			List<String> stringPool, long instructionCount, MemorySegment inlineDataSeg) {
 		try (VmQueryContext ctx = VmQueryContext.acquire(snapshot, arena)) {
 			ctx.setStringPool(stringPool);
+			if (inlineDataSeg != null) {
+				ctx.setInlineData(inlineDataSeg, inlineDataSeg.byteSize());
+			}
 			MemorySegment state = ctx.allocateStateSegment();
 			Object res = driver.execute(ctx, state, input, instructionCount);
 			return res != null ? res : new OffHeapBitSet(arena, 1000);

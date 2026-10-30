@@ -341,10 +341,10 @@ public class CypherLexerAndParserTest {
 					.isInstanceOf(IllegalArgumentException.class)
 					.hasMessageContaining("Typed Edge Walk Mandate: Relationship type is mandatory");
 
-			// 3. Unbounded wildcard * without upper bound (Unbounded Traversal Mandate)
-			assertThatThrownBy(() -> CypherParser.parse("MATCH (u)-[:KNOWS*]->(v) RETURN v"))
-					.isInstanceOf(IllegalArgumentException.class).hasMessageContaining(
-							"Unbounded Traversal Mandate: Unbounded wildcard '*' without upper bound is not permitted");
+			// 3. Unbounded wildcard * lowers to fixed-point Kleene star (isUnbounded =
+			// true)
+			CypherParser.CypherQuery kleeneQuery = CypherParser.parse("MATCH (u)-[:KNOWS*]->(v) RETURN v");
+			assertTrue(kleeneQuery.path().steps().get(0).edge().isUnbounded());
 
 			// 4. Incomplete variable length *1.. without upper bound
 			assertThatThrownBy(() -> CypherParser.parse("MATCH (u)-[:KNOWS*1..]->(v) RETURN v"))

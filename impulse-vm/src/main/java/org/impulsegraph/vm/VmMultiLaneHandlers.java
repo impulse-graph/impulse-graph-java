@@ -840,6 +840,8 @@ public final class VmMultiLaneHandlers {
 
 			case 0xCA -> { // OP_VECTOR_ANN_SEARCH
 				int srcReg = pU8_0;
+				int topK = (pU8_1 > 0) ? pU8_1 : ((pU16High > 0) ? pU16High : 1);
+				int vhdrOff = pU16High;
 				VmHandlers.validateReg(srcReg);
 				VmRegType tag = VmRegType.fromTag(VmHandlers.getRegisterType(state, srcReg));
 				if (tag != VmRegType.T_FLOAT_VECTOR) {
@@ -850,21 +852,77 @@ public final class VmMultiLaneHandlers {
 				if (qVec == null) {
 					throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
 				}
+				int dim = qVec.length;
+				float[] flatEmbs = resolveEmbeddingFloats(ctx, vhdrOff);
+				int[] topNodes = ctx.scratchInt(0, Math.max(64, topK));
+				int topCount = 0;
+				if (flatEmbs != null && dim > 0 && flatEmbs.length >= dim) {
+					int nNodes = flatEmbs.length / dim;
+					int takeCap = Math.min(256, Math.min(topK, nNodes));
+					int[] bestU = ctx.scratchInt(1, 256);
+					float[] bestD = ctx.scratchFloat(0, 256);
+					for (int u = 0; u < nNodes; u++) {
+						float dist = 0.0f;
+						int base = u * dim;
+						for (int d = 0; d < dim; d++) {
+							float diff = qVec[d] - flatEmbs[base + d];
+							dist += diff * diff;
+						}
+						if (takeCap == 0) {
+							continue;
+						}
+						if (topCount < takeCap
+								|| isBetterCandidate(u, dist, bestU[topCount - 1], bestD[topCount - 1])) {
+							int pos = topCount;
+							if (topCount < takeCap) {
+								topCount++;
+							} else {
+								pos = takeCap - 1;
+							}
+							while (pos > 0 && isBetterCandidate(u, dist, bestU[pos - 1], bestD[pos - 1])) {
+								bestU[pos] = bestU[pos - 1];
+								bestD[pos] = bestD[pos - 1];
+								pos--;
+							}
+							bestU[pos] = u;
+							bestD[pos] = dist;
+						}
+					}
+					for (int i = 0; i < topCount; i++) {
+						topNodes[i] = bestU[i];
+					}
+				} else {
+					topNodes[0] = 0;
+					topCount = 1;
+				}
 				if ((flags & 1) != 0) {
-					int k = 1;
+					int k = Math.min(64, topCount);
 					VmLaneFrontier.LaneWidth width = VmLaneFrontier.selectLaneWidth(k);
 					long activeMask = VmRegType.makeActiveMaskU64(k);
-					int nodeCount = resolveNodeCount(ctx, 0, 4);
+					int maxN = 0;
+					for (int i = 0; i < topCount; i++) {
+						if (topNodes[i] > maxN) {
+							maxN = topNodes[i];
+						}
+					}
+					int nodeCount = resolveNodeCount(ctx, 0, maxN + 1);
 					int hLf = ctx.acquireLaneFrontier(width, k, activeMask, nodeCount);
 					VmLaneFrontier lf = ctx.getLaneFrontier(hLf);
-					lf.lanes()[0] |= 1L;
+					for (int b = 0; b < k; b++) {
+						int u = topNodes[b];
+						if (u >= 0 && u < nodeCount) {
+							lf.lanes()[u] |= (1L << b);
+						}
+					}
 					VmHandlers.setRegister(state, dst, hLf, TYPE_LANE_FRONTIER);
-					VmHandlers.setFlag(state, FLAG_ZF, false);
+					VmHandlers.setFlag(state, FLAG_ZF, k == 0);
 				} else {
 					int hOut = ctx.acquireBitset();
 					ImpulseBitSet bset = ctx.getBitset(hOut);
 					bset.clear();
-					bset.set(0);
+					for (int i = 0; i < topCount; i++) {
+						bset.set(topNodes[i]);
+					}
 					VmHandlers.setRegister(state, dst, hOut, TYPE_BITSET_HANDLE);
 					VmHandlers.setFlag(state, FLAG_ZF, bset.isEmpty());
 				}
@@ -873,6 +931,8 @@ public final class VmMultiLaneHandlers {
 			case 0xCB -> { // OP_VECTOR_RERANK_DOT
 				int src1 = pU8_0;
 				int src2 = pU8_1;
+				int attrId = pU16High;
+				int metricFlag = flags & 0x03;
 				VmHandlers.validateReg(src1);
 				VmHandlers.validateReg(src2);
 				VmRegType t1 = VmRegType.fromTag(VmHandlers.getRegisterType(state, src1));
@@ -885,6 +945,7 @@ public final class VmMultiLaneHandlers {
 				if (qVec == null) {
 					throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
 				}
+				int[] cands = ctx.scratchInt(0, 64);
 				int candCount = 0;
 				if (t1 == VmRegType.T_BITSET_HANDLE) {
 					int hB = (int) VmHandlers.getRegisterValue(state, src1);
@@ -893,30 +954,146 @@ public final class VmMultiLaneHandlers {
 						throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
 					}
 					for (int u = bs.nextSetBit(0); u >= 0; u = bs.nextSetBit(u + 1)) {
-						candCount++;
+						if (candCount >= cands.length) {
+							int[] next = ctx.scratchInt(0, cands.length << 1);
+							System.arraycopy(cands, 0, next, 0, candCount);
+							cands = next;
+						}
+						cands[candCount++] = u;
 					}
 				} else if (t1 == VmRegType.T_LANE_FRONTIER) {
 					VmLaneFrontier lf = requireLaneFrontier(state, ctx, src1);
 					long activeMask = lf.activeMask();
 					long[] lanes = lf.lanes();
+					cands = ctx.scratchInt(0, Math.max(64, lf.nodeCount()));
 					for (int u = 0, n = lf.nodeCount(); u < n; u++) {
 						if ((lanes[u] & activeMask) != 0L) {
-							candCount++;
+							cands[candCount++] = u;
 						}
 					}
 				} else {
 					throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_REGISTER");
 				}
+				float[] flatEmbs = resolveEmbeddingFloats(ctx, attrId);
+				int dim = qVec.length;
 				int hOut = ctx.acquireFloatVector(candCount);
 				float[] scores = ctx.getFloatVector(hOut);
-				float defaultScore = qVec.length > 0 ? qVec[0] : 0.0f;
-				Arrays.fill(scores, 0, candCount, defaultScore);
+				float defaultScore = dim > 0 ? qVec[0] : 0.0f;
+				for (int i = 0; i < candCount; i++) {
+					int u = cands[i];
+					if (flatEmbs != null && dim > 0 && (u + 1) * dim <= flatEmbs.length) {
+						scores[i] = evalMetricScore(metricFlag, qVec, flatEmbs, u * dim, dim);
+					} else {
+						scores[i] = defaultScore;
+					}
+				}
 				VmHandlers.setRegister(state, dst, hOut, TYPE_FLOAT_VECTOR);
 				VmHandlers.setFlag(state, FLAG_ZF, candCount == 0);
 			}
 
 			default -> throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_OPCODE");
 		}
+
+		byte outType = VmHandlers.getRegisterType(state, dst);
+		int outHandle = (int) VmHandlers.getRegisterValue(state, dst);
+		switch (outType) {
+			case TYPE_LANE_FRONTIER -> ctx.setFinalResult(ctx.getLaneFrontier(outHandle));
+			case TYPE_BITSET_HANDLE -> ctx.setFinalResult(ctx.getBitset(outHandle));
+			case TYPE_NODE_VECTOR -> ctx.setFinalResult(ctx.getIntVector(outHandle));
+			case TYPE_FLOAT_VECTOR -> ctx.setFinalResult(ctx.getFloatVector(outHandle));
+			case TYPE_UINT64_VECTOR -> ctx.setFinalResult(ctx.getLongVector(outHandle));
+			case TYPE_INT64 -> ctx.setFinalResultLong(VmHandlers.getRegisterValue(state, dst));
+			default -> {
+			}
+		}
+	}
+
+	private static boolean isBetterCandidate(int u1, float d1, int u2, float d2) {
+		int cmp = Float.compare(d1, d2);
+		return cmp < 0 || (cmp == 0 && u1 < u2);
+	}
+
+	private static float evalMetricScore(int metricFlag, float[] qVec, float[] flatEmbs, int offset, int dim) {
+		return switch (metricFlag) {
+			case 0 -> { // MetricDot
+				float dot = 0.0f;
+				for (int d = 0; d < dim; d++) {
+					dot += qVec[d] * flatEmbs[offset + d];
+				}
+				yield dot;
+			}
+			case 1 -> { // MetricL2 (negative squared L2)
+				float sumSq = 0.0f;
+				for (int d = 0; d < dim; d++) {
+					float diff = qVec[d] - flatEmbs[offset + d];
+					sumSq += diff * diff;
+				}
+				yield -sumSq;
+			}
+			case 2 -> { // MetricCosine
+				float dot = 0.0f;
+				float nq = 0.0f;
+				float nv = 0.0f;
+				for (int d = 0; d < dim; d++) {
+					float qd = qVec[d];
+					float vd = flatEmbs[offset + d];
+					dot += qd * vd;
+					nq += qd * qd;
+					nv += vd * vd;
+				}
+				float denom = (float) (Math.sqrt(nq) * Math.sqrt(nv));
+				yield (denom <= 1e-12f) ? 0.0f : (dot / denom);
+			}
+			default -> { // MetricHamming (3)
+				int ham = 0;
+				for (int d = 0; d < dim; d++) {
+					if ((qVec[d] >= 0.0f) != (flatEmbs[offset + d] >= 0.0f)) {
+						ham++;
+					}
+				}
+				yield (float) (-ham);
+			}
+		};
+	}
+
+	private static float[] resolveEmbeddingFloats(VmQueryContext ctx, int attrId) {
+		Object mock = ctx.getMockAttribute(attrId);
+		if (mock == null && attrId != 0) {
+			mock = ctx.getMockAttribute(0);
+		}
+		if (mock instanceof float[] fa) {
+			return fa;
+		}
+		if (mock instanceof int[] ia) {
+			float[] out = ctx.scratchFloat(2, ia.length);
+			for (int i = 0; i < ia.length; i++) {
+				out[i] = Float.intBitsToFloat(ia[i]);
+			}
+			return out;
+		}
+		if (ctx.getSnapshot() != null) {
+			String attrName = ctx.getString(attrId);
+			for (RelationSnapshot rel : ctx.getSnapshot().getAllRelationSnapshots().values()) {
+				if (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot csrRel) {
+					int idx = (attrName != null) ? csrRel.findAttributeIndex(attrName) : attrId;
+					if (idx < 0 && attrId < csrRel.getAttributeSegments().size()) {
+						idx = attrId;
+					}
+					if (idx >= 0 && idx < csrRel.getAttributeSegments().size()) {
+						MemorySegment seg = csrRel.getAttributeSegments().get(idx);
+						if (seg != null && seg.byteSize() >= 4L) {
+							int nFloats = (int) (seg.byteSize() / 4L);
+							float[] out = ctx.scratchFloat(2, nFloats);
+							for (int i = 0; i < nFloats; i++) {
+								out[i] = seg.get(ValueLayout.JAVA_FLOAT_UNALIGNED, (long) i * 4L);
+							}
+							return out;
+						}
+					}
+				}
+			}
+		}
+		return null;
 	}
 
 	private static float[] resolveAttrFloats(MemorySegment state, VmQueryContext ctx, int attrOrReg, boolean fromReg,
@@ -961,6 +1138,10 @@ public final class VmMultiLaneHandlers {
 				out[i] = Float.intBitsToFloat(ia[i]);
 			}
 			return out;
+		}
+		float[] snapAttr = resolveEmbeddingFloats(ctx, attrOrReg);
+		if (snapAttr != null) {
+			return snapAttr;
 		}
 		float[] fallback = ctx.scratchFloat(1, nodeCount);
 		for (int i = 0; i < nodeCount; i++) {

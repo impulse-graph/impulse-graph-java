@@ -75,6 +75,46 @@ public final class PhysicalBindingPass implements CompilerPass {
 			return new ScmVectorFilter(bindNode(vf.predicate(), snapshot));
 		}
 
+		if (node instanceof ScmLaneWalk lw) {
+			int relId = lw.relationId();
+			if (relId < 0 && !lw.relationName().isEmpty()) {
+				relId = resolveRelationId(snapshot, lw.relationName());
+			}
+			return lw.withRelationId(relId);
+		}
+
+		if (node instanceof ScmLaneSetEdgeMask lsem) {
+			int relId = lsem.relationId();
+			if (relId < 0 && !lsem.relationName().isEmpty()) {
+				relId = resolveRelationId(snapshot, lsem.relationName());
+			}
+			return lsem.withRelationId(relId);
+		}
+
+		if (node instanceof ScmLanePruneMask lpm) {
+			int relId = lpm.relationId();
+			if (relId < 0 && !lpm.relationName().isEmpty()) {
+				relId = resolveRelationId(snapshot, lpm.relationName());
+			}
+			return lpm.withRelationId(relId);
+		}
+
+		if (node instanceof ScmFixpoint fp) {
+			int relId = fp.relationId();
+			if (relId < 0 && !fp.relationName().isEmpty()) {
+				relId = resolveRelationId(snapshot, fp.relationName());
+			}
+			List<ImpScmNode> boundBody = new ArrayList<>();
+			for (ImpScmNode s : fp.bodySteps()) {
+				boundBody.add(bindNode(s, snapshot));
+			}
+			return new ScmFixpoint(fp.relationName(), relId, fp.direction(), fp.maxIterations(), boundBody);
+		}
+
+		if (node instanceof ScmSetOp setOp) {
+			return new ScmSetOp(setOp.kind(), bindNode(setOp.rhs(), snapshot));
+		}
+
 		return node;
 	}
 

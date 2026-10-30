@@ -101,6 +101,57 @@ public interface ImpulseStatement extends AutoCloseable {
 	 */
 	long count();
 
+	/**
+	 * Executes the statement and materializes a multi-lane bit-sliced frontier
+	 * ({@code TYPE_LANE_FRONTIER}) as an array of 64-bit lane masks per dense node
+	 * ID (masked by {@code activeMask}).
+	 */
+	default long[] executeLaneFrontier() {
+		throw new UnsupportedOperationException("executeLaneFrontier() not implemented by this provider");
+	}
+
+	/**
+	 * Executes the statement and materializes the resulting node vector
+	 * ({@code TYPE_NODE_VECTOR} or active frontier nodes) as a {@code long[]}
+	 * array.
+	 */
+	default long[] executeNodeVector() {
+		ImpulseBitSet bs = executeBitSet();
+		if (bs == null) {
+			return new long[0];
+		}
+		long[] out = new long[(int) bs.cardinality()];
+		int idx = 0;
+		for (int u = bs.nextSetBit(0); u >= 0; u = bs.nextSetBit(u + 1)) {
+			out[idx++] = u;
+		}
+		return out;
+	}
+
+	/**
+	 * Executes the statement and materializes the resulting float vector
+	 * ({@code TYPE_FLOAT_VECTOR}) as a {@code float[]} array.
+	 */
+	default float[] executeFloatVector() {
+		throw new UnsupportedOperationException("executeFloatVector() not implemented by this provider");
+	}
+
+	/**
+	 * Executes the statement and materializes the resulting external string keys
+	 * ({@code TYPE_STRING_VECTOR}).
+	 */
+	default java.util.List<String> executeKeys() {
+		throw new UnsupportedOperationException("executeKeys() not implemented by this provider");
+	}
+
+	/**
+	 * Executes the statement and materializes the resulting node-to-value map
+	 * ({@code TYPE_VALUE_MAP}).
+	 */
+	default java.util.Map<Integer, Object> executeValueMap() {
+		throw new UnsupportedOperationException("executeValueMap() not implemented by this provider");
+	}
+
 	@Override
 	void close();
 }
