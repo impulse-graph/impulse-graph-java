@@ -34,7 +34,7 @@ public final class ImpulseVmInterpreter {
 			return new OffHeapBitSet(arena, 1000);
 		}
 
-		try (VmQueryContext ctx = new VmQueryContext(snapshot, arena)) {
+		try (VmQueryContext ctx = VmQueryContext.acquire(snapshot, arena)) {
 			ctx.setStringPool(stringPool);
 			MemorySegment state = ctx.allocateStateSegment();
 			Object finalResult = null;
@@ -43,7 +43,7 @@ public final class ImpulseVmInterpreter {
 			while (pc >= 0 && pc < instructionCount) {
 				VmHandlers.Instruction instr = VmHandlers.decodeInstruction(programSeg, pc);
 				if (DEBUG_MODE) {
-					LOG.info("EXEC: pc=" + pc + ", op=" + String.format("0x%02X", instr.opcode()));
+					LOG.info("EXEC: pc=" + pc + ", op=0x" + Integer.toHexString(instr.opcode() & 0xFF));
 				}
 
 				switch (instr.opcode()) {
@@ -80,9 +80,13 @@ public final class ImpulseVmInterpreter {
 					}
 
 					case OP_CSR_WALK -> {
+						int curPc = (int) pc;
 						VmHandlers.handleCsrWalk(state, ctx, instr, input);
-						if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0
-								&& VmHandlers.checkFlag(state, FLAG_ZF)) {
+						boolean empty = VmHandlers.checkFlag(state, FLAG_ZF);
+						VmBranchCoverageRecorder.recordGlobalBranch(curPc, OP_CSR_WALK, 0,
+								VmBranchCoverageRecorder.BranchKind.TWO_WAY,
+								VmBranchCoverageRecorder.BranchExpectation.COVERAGE_BOTH, empty ? 1 : 0);
+						if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0 && empty) {
 							pc = instructionCount; // Short-circuit early exit
 						} else {
 							pc++;
@@ -90,9 +94,13 @@ public final class ImpulseVmInterpreter {
 					}
 
 					case OP_CSR_WALK_2HOP -> {
+						int curPc = (int) pc;
 						VmHandlers.handleCsrWalk2Hop(state, ctx, instr, input);
-						if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0
-								&& VmHandlers.checkFlag(state, FLAG_ZF)) {
+						boolean empty = VmHandlers.checkFlag(state, FLAG_ZF);
+						VmBranchCoverageRecorder.recordGlobalBranch(curPc, OP_CSR_WALK_2HOP, 0,
+								VmBranchCoverageRecorder.BranchKind.TWO_WAY,
+								VmBranchCoverageRecorder.BranchExpectation.COVERAGE_BOTH, empty ? 1 : 0);
+						if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0 && empty) {
 							pc = instructionCount; // Short-circuit early exit
 						} else {
 							pc++;
@@ -100,9 +108,13 @@ public final class ImpulseVmInterpreter {
 					}
 
 					case OP_CSC_WALK -> {
+						int curPc = (int) pc;
 						VmHandlers.handleCscWalk(state, ctx, instr, input);
-						if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0
-								&& VmHandlers.checkFlag(state, FLAG_ZF)) {
+						boolean empty = VmHandlers.checkFlag(state, FLAG_ZF);
+						VmBranchCoverageRecorder.recordGlobalBranch(curPc, OP_CSC_WALK, 0,
+								VmBranchCoverageRecorder.BranchKind.TWO_WAY,
+								VmBranchCoverageRecorder.BranchExpectation.COVERAGE_BOTH, empty ? 1 : 0);
+						if ((instr.flags() & VmHandlers.FLAG_HALT_ON_EMPTY) != 0 && empty) {
 							pc = instructionCount; // Short-circuit early exit
 						} else {
 							pc++;
@@ -215,8 +227,13 @@ public final class ImpulseVmInterpreter {
 					}
 
 					case OP_JZ -> {
+						int curPc = (int) pc;
 						int offset = instr.payload();
-						if (VmHandlers.checkFlag(state, FLAG_ZF)) {
+						boolean taken = VmHandlers.checkFlag(state, FLAG_ZF);
+						VmBranchCoverageRecorder.recordGlobalBranch(curPc, OP_JZ, 0,
+								VmBranchCoverageRecorder.BranchKind.TWO_WAY,
+								VmBranchCoverageRecorder.BranchExpectation.COVERAGE_BOTH, taken ? 0 : 1);
+						if (taken) {
 							pc += offset;
 						} else {
 							pc++;
@@ -224,8 +241,13 @@ public final class ImpulseVmInterpreter {
 					}
 
 					case OP_JNZ -> {
+						int curPc = (int) pc;
 						int offset = instr.payload();
-						if (!VmHandlers.checkFlag(state, FLAG_ZF)) {
+						boolean taken = !VmHandlers.checkFlag(state, FLAG_ZF);
+						VmBranchCoverageRecorder.recordGlobalBranch(curPc, OP_JNZ, 0,
+								VmBranchCoverageRecorder.BranchKind.TWO_WAY,
+								VmBranchCoverageRecorder.BranchExpectation.COVERAGE_BOTH, taken ? 0 : 1);
+						if (taken) {
 							pc += offset;
 						} else {
 							pc++;
@@ -233,12 +255,17 @@ public final class ImpulseVmInterpreter {
 					}
 
 					case OP_LOOP_DECR -> {
+						int curPc = (int) pc;
 						int offset = instr.payload();
 						long count = VmHandlers.getRegisterValue(state, instr.dstReg());
 						count--;
 						VmHandlers.setRegister(state, instr.dstReg(), count, TYPE_INT64);
 						VmHandlers.setFlag(state, FLAG_ZF, count == 0);
-						if (count > 0) {
+						boolean taken = count > 0;
+						VmBranchCoverageRecorder.recordGlobalBranch(curPc, OP_LOOP_DECR, 0,
+								VmBranchCoverageRecorder.BranchKind.TWO_WAY,
+								VmBranchCoverageRecorder.BranchExpectation.COVERAGE_BOTH, taken ? 0 : 1);
+						if (taken) {
 							pc += offset;
 						} else {
 							pc++;
@@ -460,12 +487,14 @@ public final class ImpulseVmInterpreter {
 					}
 
 					case OP_VECTOR_REDUCE_SUM -> {
-						finalResult = VmHandlers.handleVectorReduceSum(state, ctx, instr);
+						VmHandlers.handleVectorReduceSum(state, ctx, instr);
+						finalResult = ctx.getFinalResult();
 						pc++;
 					}
 
 					case OP_REDUCE -> {
-						finalResult = VmHandlers.handleReduce(state, ctx, instr);
+						VmHandlers.handleReduce(state, ctx, instr);
+						finalResult = ctx.getFinalResult();
 						pc++;
 					}
 
@@ -619,6 +648,13 @@ public final class ImpulseVmInterpreter {
 						pc++;
 					}
 
+					case OP_LANE_INIT_SEEDS, OP_LANE_INIT_GROUPS, OP_LANE_SET_EDGE_MASK, OP_LANE_CSR_WALK,
+							OP_LANE_CSC_WALK, OP_LANE_PRUNE_MASK, OP_LANE_FILTER_QUORUM, OP_LANE_REDUCE_AND,
+							OP_LANE_REDUCE_ATTR, OP_LANE_SET_COVER, OP_VECTOR_ANN_SEARCH, OP_VECTOR_RERANK_DOT -> {
+						VmMultiLaneHandlers.handleMultiLaneOpcode(state, ctx, instr, (int) pc);
+						pc++;
+					}
+
 					case OP_HALT -> {
 						pc = instructionCount;
 					}
@@ -633,8 +669,9 @@ public final class ImpulseVmInterpreter {
 					}
 
 					default -> throw new IllegalArgumentException(
-							"Unknown opcode: 0x" + Integer.toHexString(instr.opcode() & 0xFF));
+							"IMPULSE_VM_ERR_INVALID_OPCODE: 0x" + Integer.toHexString(instr.opcode() & 0xFF));
 				}
+				VmInvariants.verifyPostStep(state, ctx);
 			}
 
 			return (finalResult != null) ? finalResult : new OffHeapBitSet(arena, 1000);

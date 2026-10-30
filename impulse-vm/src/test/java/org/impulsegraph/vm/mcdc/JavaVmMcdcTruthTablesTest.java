@@ -303,11 +303,11 @@ public class JavaVmMcdcTruthTablesTest {
 				}
 				for (int funcId = 0; funcId <= 10; funcId++) {
 					VmHandlers.handleVecMathBinary(state, ctx,
-							makeInstr(OP_VEC_MATH_BINARY, (byte) funcId, 21, (10 << 16) | 10));
+							makeInstr(OP_VEC_MATH_BINARY, (byte) funcId, 21, (funcId << 16) | (10 << 8) | 10));
 				}
 				for (int funcId = 0; funcId <= 3; funcId++) {
-					VmHandlers.handleVecMathTernary(state, ctx,
-							makeInstr(OP_VEC_MATH_TERNARY, (byte) funcId, 22, (10 << 16) | 10));
+					VmHandlers.handleVecMathTernary(state, ctx, makeInstr(OP_VEC_MATH_TERNARY, (byte) funcId, 22,
+							(funcId << 24) | (10 << 16) | (10 << 8) | 10));
 				}
 
 				// 7. Vector Reductions (Sum, Min, Max, ArgMin, ArgMax, Reduce dispatch)
@@ -427,6 +427,10 @@ public class JavaVmMcdcTruthTablesTest {
 				VmHandlers.handleReadEdgeWeight(state, ctx, makeInstr(OP_READ_EDGE_WEIGHT, (byte) 0, 12, 0));
 
 				// Roaring Bitmaps ops
+				int rb1 = ctx.acquireBitset();
+				int rb2 = ctx.acquireBitset();
+				VmHandlers.setRegister(state, 12, rb1, TYPE_BITSET_HANDLE);
+				VmHandlers.setRegister(state, 13, rb2, TYPE_BITSET_HANDLE);
 				VmHandlers.handleRoaringBitmapAnd(state, ctx,
 						makeInstr(OP_ROARING_BITMAP_AND, (byte) 0, 14, (12 << 16) | 13));
 				VmHandlers.handleRoaringBitmapOr(state, ctx,

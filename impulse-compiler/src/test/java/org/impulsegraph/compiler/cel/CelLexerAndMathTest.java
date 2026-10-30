@@ -158,7 +158,8 @@ public class CelLexerAndMathTest {
 			assertEquals(CelTokenType.AMP_AMP, lexer.nextToken().type());
 			assertEquals(CelTokenType.PIPE_PIPE, lexer.nextToken().type());
 			assertEquals(CelTokenType.BANG, lexer.nextToken().type());
-			// Single = yields END_OF_FILE fallback token; & and | yield bitwise AMP and PIPE
+			// Single = yields END_OF_FILE fallback token; & and | yield bitwise AMP and
+			// PIPE
 			assertEquals(CelTokenType.END_OF_FILE, lexer.nextToken().type());
 			assertEquals(CelTokenType.AMP, lexer.nextToken().type());
 			assertEquals(CelTokenType.PIPE, lexer.nextToken().type());

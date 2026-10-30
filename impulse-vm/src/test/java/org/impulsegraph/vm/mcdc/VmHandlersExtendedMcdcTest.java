@@ -130,17 +130,15 @@ public class VmHandlersExtendedMcdcTest {
 				VmHandlers.handleVecCmpEq(state, ctx, makeInstr(OP_VEC_CMP_EQ, (byte) 0, 14, (11 << 8) | 10));
 				assertTrue(VmHandlers.checkFlag(state, FLAG_ZF));
 
-				// 4. Set Ops safe handling on null/missing bitset handles
+				// 4. Set Ops bounds checking on unallocated bitset handles (999)
 				VmHandlers.setRegister(state, 5, 999L, TYPE_BITSET_HANDLE);
 				VmHandlers.setRegister(state, 6, 999L, TYPE_BITSET_HANDLE);
-				VmHandlers.handleSetUnion(state, ctx, makeInstr(OP_SET_UNION, (byte) 0, 7, (5 << 16) | 6));
-				assertEquals(TYPE_BITSET_HANDLE, VmHandlers.getRegisterType(state, 7));
-
-				VmHandlers.handleSetIntersect(state, ctx, makeInstr(OP_SET_INTERSECT, (byte) 0, 8, (5 << 16) | 6));
-				assertEquals(TYPE_BITSET_HANDLE, VmHandlers.getRegisterType(state, 8));
-
-				VmHandlers.handleSetDifference(state, ctx, makeInstr(OP_SET_DIFFERENCE, (byte) 0, 9, (5 << 16) | 6));
-				assertEquals(TYPE_BITSET_HANDLE, VmHandlers.getRegisterType(state, 9));
+				assertThrows(IllegalStateException.class, () -> VmHandlers.handleSetUnion(state, ctx,
+						makeInstr(OP_SET_UNION, (byte) 0, 7, (5 << 16) | 6)));
+				assertThrows(IllegalStateException.class, () -> VmHandlers.handleSetIntersect(state, ctx,
+						makeInstr(OP_SET_INTERSECT, (byte) 0, 8, (5 << 16) | 6)));
+				assertThrows(IllegalStateException.class, () -> VmHandlers.handleSetDifference(state, ctx,
+						makeInstr(OP_SET_DIFFERENCE, (byte) 0, 9, (5 << 16) | 6)));
 			}
 		}
 	}

@@ -56,7 +56,8 @@ public class JavaVmJsonRunner {
 					rel.setCsc(null, null);
 					ImpulseGraphSnapshot graph = new MockImpulseGraphSnapshot(Map.of("connectedTo", rel, "rel_0", rel));
 					ctx.setSnapshot(graph);
-				} else if (!impasFile.getFileName().toString().contains("null_snapshot")) {
+				} else if (!impasFile.getFileName().toString().contains("null_snapshot")
+						&& !impasFile.getFileName().toString().contains("cov_0x24_mask_ops_pos")) {
 					int[] offsets = new int[]{0, 2, 3, 3};
 					int[] targets = new int[]{1, 2, 2};
 					MockRelationSnapshot rel = new MockRelationSnapshot(arena, 3, 3, offsets, targets);
@@ -104,14 +105,15 @@ public class JavaVmJsonRunner {
 
 						VmHandlers.Instruction instr = VmHandlers.decodeInstruction(progSeg, pc);
 						boolean isExtended = (instr.flags() & VmRegisterType.OP_FLAG_EXTENDED) != 0;
-						if (instr.opcode() == 0x10) {
-							System.err.println("OP_CSR_WALK: flags=" + instr.flags() + " isExtended=" + isExtended);
-						}
 						if (isExtended) {
 							try {
 								VmHandlers.ExtendedInstruction ext = VmHandlers.decodeExtendedInstruction(progSeg, pc);
+								int packedPayload = (Byte.toUnsignedInt(instr.opcode()) == 0x3D)
+										? ((instr.payload() & 0xFF) | (((instr.payload() >>> 16) & 0xFF) << 8)
+												| ((ext.arg3() & 0xFF) << 16) | ((ext.arg4() & 0xFF) << 24))
+										: ((instr.payload() & 0xFFFF) | (ext.arg3() << 16));
 								instr = new VmHandlers.Instruction(instr.opcode(), instr.flags(), instr.dstReg(),
-										(instr.payload() & 0xFFFF) | (ext.arg3() << 16));
+										packedPayload);
 							} catch (IllegalStateException e) {
 								actualStatus = "IMPULSE_VM_ERR_INVALID_INSTRUCTION";
 								break;
@@ -196,24 +198,7 @@ public class JavaVmJsonRunner {
 									pc++;
 								}
 								case 0x0B, 0x0C -> {
-									int attrId = instr.dstReg();
-									int srcReg = instr.payload() & 0xFF;
-									if (srcReg < 64) {
-										int h = (int) VmHandlers.getRegisterValue(state, srcReg);
-										int[] iarr = ctx.getIntVector(h);
-										if (iarr != null) {
-											ctx.setMockAttribute(attrId, iarr);
-										} else {
-											float[] farr = ctx.getFloatVector(h);
-											if (farr != null) {
-												int[] converted = new int[farr.length];
-												for (int k = 0; k < farr.length; k++) {
-													converted[k] = Float.floatToRawIntBits(farr[k]);
-												}
-												ctx.setMockAttribute(attrId, converted);
-											}
-										}
-									}
+									VmHandlers.handleInitMockAttr(state, ctx, instr);
 									pc++;
 								}
 								case 0x0D -> {
@@ -451,11 +436,19 @@ public class JavaVmJsonRunner {
 									long arg1 = VmHandlers.getRegisterValue(state, 13);
 									long arg2 = VmHandlers.getRegisterValue(state, 14);
 									long arg3 = VmHandlers.getRegisterValue(state, 15);
+									byte t0 = VmHandlers.getRegisterType(state, 12);
+									byte t1 = VmHandlers.getRegisterType(state, 13);
+									byte t2 = VmHandlers.getRegisterType(state, 14);
+									byte t3 = VmHandlers.getRegisterType(state, 15);
 
-									VmHandlers.setRegister(state, 0, arg0, VmRegisterType.TYPE_INT64);
-									VmHandlers.setRegister(state, 1, arg1, VmRegisterType.TYPE_INT64);
-									VmHandlers.setRegister(state, 2, arg2, VmRegisterType.TYPE_INT64);
-									VmHandlers.setRegister(state, 3, arg3, VmRegisterType.TYPE_INT64);
+									VmHandlers.setRegister(state, 0, arg0,
+											t0 != VmRegisterType.TYPE_NULL ? t0 : VmRegisterType.TYPE_INT64);
+									VmHandlers.setRegister(state, 1, arg1,
+											t1 != VmRegisterType.TYPE_NULL ? t1 : VmRegisterType.TYPE_INT64);
+									VmHandlers.setRegister(state, 2, arg2,
+											t2 != VmRegisterType.TYPE_NULL ? t2 : VmRegisterType.TYPE_INT64);
+									VmHandlers.setRegister(state, 3, arg3,
+											t3 != VmRegisterType.TYPE_NULL ? t3 : VmRegisterType.TYPE_INT64);
 
 									if (target >= 0 && target < instructionCount)
 										pc = target;
@@ -483,7 +476,7 @@ public class JavaVmJsonRunner {
 									pc++;
 								}
 								case 0x1D -> {
-									VmHandlers.handleCsrWalk(state, ctx, instr);
+									VmHandlers.handleAdaptiveWalk(state, ctx, instr);
 									pc++;
 								} // OP_ADAPTIVE_WALK
 								case 0x1E -> {
@@ -685,7 +678,13 @@ public class JavaVmJsonRunner {
 									VmHandlers.handleStreamWalk(state, ctx, instr, progSeg, instructionCount);
 									pc++;
 								}
-								case 0xA1, 0xA2 -> {
+								case 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF, 0xB0,
+										0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD,
+										0xBE -> {
+									pc++;
+								}
+								case 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB -> {
+									VmMultiLaneHandlers.handleMultiLaneOpcode(state, ctx, instr, (int) pc);
 									pc++;
 								}
 								case 0x28, 0x29, 0x2B, 0x2C, 0x3E, 0x3F, 0x4F, 0x59, 0x5D, 0x5E, 0x5F, 0x6D, 0x6E, 0x6F,

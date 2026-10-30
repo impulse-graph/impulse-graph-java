@@ -13,6 +13,8 @@ import java.nio.file.StandardOpenOption;
 import java.util.*;
 import java.util.function.BiFunction;
 
+import org.impulsegraph.api.util.ImpulseAssert;
+
 import static org.impulsegraph.spec.v0_9.ImpulseLayoutsV0_9.SPEC_MAGIC;
 
 public final class BinarySnapshotLoader {
@@ -26,11 +28,17 @@ public final class BinarySnapshotLoader {
 		private final int domainId;
 		private final String name;
 		private final byte keyType;
+		private final long nodeCount;
 
 		public LoadedDomain(int domainId, String name, byte keyType) {
+			this(domainId, name, keyType, 0L);
+		}
+
+		public LoadedDomain(int domainId, String name, byte keyType, long nodeCount) {
 			this.domainId = domainId;
 			this.name = name;
 			this.keyType = keyType;
+			this.nodeCount = nodeCount;
 		}
 
 		public int domainId() {
@@ -41,6 +49,9 @@ public final class BinarySnapshotLoader {
 		}
 		public byte keyType() {
 			return keyType;
+		}
+		public long nodeCount() {
+			return nodeCount;
 		}
 	}
 
@@ -476,7 +487,10 @@ public final class BinarySnapshotLoader {
 		Objects.requireNonNull(arena, "arena must not be null");
 
 		long segSize = segment.byteSize();
+		ImpulseAssert.testcase(segSize == 58);
 		if (segSize < 58) {
+			ImpulseAssert.checkWellFormed(false,
+					() -> "snapshot file size (" + segSize + " bytes) is smaller than header");
 			throw new IllegalArgumentException("snapshot file size (" + segSize + " bytes) is smaller than header");
 		}
 
@@ -485,6 +499,8 @@ public final class BinarySnapshotLoader {
 
 		int magic = buf.getInt(0);
 		if (magic != SNAPSHOT_MAGIC) {
+			ImpulseAssert.checkWellFormed(false,
+					() -> String.format("invalid snapshot magic 0x%X (expected 0x%X)", magic, SNAPSHOT_MAGIC));
 			throw new IllegalArgumentException(
 					String.format("invalid snapshot magic 0x%X (expected 0x%X)", magic, SNAPSHOT_MAGIC));
 		}
@@ -492,6 +508,7 @@ public final class BinarySnapshotLoader {
 		short version = buf.getShort(4);
 		int ver = Short.toUnsignedInt(version);
 		if (ver != 9 && ver != 0x0009 && ver != 2 && ver != 0x0204) {
+			ImpulseAssert.checkWellFormed(false, () -> "Unsupported protocol version number: " + ver);
 			throw new IllegalArgumentException("Unsupported protocol version number: " + ver);
 		}
 
@@ -501,6 +518,8 @@ public final class BinarySnapshotLoader {
 
 		int domainCount = Short.toUnsignedInt(buf.getShort(10));
 		int relationCount = Short.toUnsignedInt(buf.getShort(12));
+		ImpulseAssert.testcase(domainCount == 0);
+		ImpulseAssert.testcase(relationCount == 0);
 
 		boolean isV09 = (ver == 9 || ver == 0x0009);
 
@@ -508,11 +527,20 @@ public final class BinarySnapshotLoader {
 		int dirOffset = dataOffset;
 		if (isV09) {
 			long footerDirectoryOffset = buf.getLong(30);
+			if (footerDirectoryOffset < 0 || footerDirectoryOffset >= segSize) {
+				ImpulseAssert.checkWellFormed(false, () -> "Invalid footerDirectoryOffset: " + footerDirectoryOffset);
+				throw new IllegalArgumentException("Invalid footerDirectoryOffset: " + footerDirectoryOffset);
+			}
 			if (footerDirectoryOffset > 0 && footerDirectoryOffset < segSize) {
 				dirOffset = (int) footerDirectoryOffset;
 			}
 		}
 
+		if (dirOffset < 0 || dirOffset >= segSize) {
+			int badDirOffset = dirOffset;
+			ImpulseAssert.checkWellFormed(false, () -> "Invalid catalog directory offset: " + badDirOffset);
+			throw new IllegalArgumentException("Invalid catalog directory offset: " + badDirOffset);
+		}
 		buf.position(dirOffset);
 
 		Map<Integer, LoadedDomain> domainsById = new HashMap<>();
@@ -520,8 +548,14 @@ public final class BinarySnapshotLoader {
 
 		if (isV09) {
 			// Read Shared String Table Header & Pool
+			if (buf.remaining() < 4) {
+				ImpulseAssert.checkWellFormed(false, () -> "Truncated Section 2 string table header");
+				throw new IllegalArgumentException("Truncated Section 2 string table header");
+			}
 			int strPoolBytes = buf.getInt();
 			if (strPoolBytes < 1 || buf.position() + strPoolBytes > segSize) {
+				ImpulseAssert.checkWellFormed(false,
+						() -> "Invalid or overflowing Section 2 string_table_bytes: " + strPoolBytes);
 				throw new IllegalArgumentException(
 						"Invalid or overflowing Section 2 string_table_bytes: " + strPoolBytes);
 			}
@@ -529,11 +563,13 @@ public final class BinarySnapshotLoader {
 			buf.get(poolBytes);
 
 			if (poolBytes[0] != 0) {
+				ImpulseAssert.checkWellFormed(false, () -> "Invalid String Table: byte 0 of string pool MUST be '\\0'");
 				throw new IllegalArgumentException("Invalid String Table: byte 0 of string pool MUST be '\\0'");
 			}
 
 			BiFunction<Integer, String, String> getString = (off, defaultVal) -> {
 				if (off < 0 || off >= poolBytes.length) {
+					ImpulseAssert.checkWellFormed(false, () -> "String offset out of bounds: " + off);
 					throw new IllegalArgumentException("String offset out of bounds: " + off);
 				}
 				int end = off;
@@ -541,6 +577,7 @@ public final class BinarySnapshotLoader {
 					end++;
 				}
 				if (end >= poolBytes.length) {
+					ImpulseAssert.checkWellFormed(false, () -> "Unterminated string in string pool at offset " + off);
 					throw new IllegalArgumentException("Unterminated string in string pool at offset " + off);
 				}
 				return new String(poolBytes, off, end - off, StandardCharsets.UTF_8);
@@ -557,9 +594,13 @@ public final class BinarySnapshotLoader {
 				buf.get(); // reserved
 				int nameOff = buf.getInt();
 				long nodeCount = buf.getLong();
+				if (nodeCount < 0) {
+					ImpulseAssert.checkWellFormed(false, () -> "Negative domain nodeCount: " + nodeCount);
+					throw new IllegalArgumentException("Negative domain nodeCount: " + nodeCount);
+				}
 
 				String domName = getString.apply(nameOff, "dom_" + domId);
-				LoadedDomain domain = new LoadedDomain(domId, domName, keyType);
+				LoadedDomain domain = new LoadedDomain(domId, domName, keyType, nodeCount);
 				domainsById.put(domId, domain);
 				domainsByName.put(domName, domain);
 			}
@@ -596,6 +637,17 @@ public final class BinarySnapshotLoader {
 				long cscColIdxBytes = buf.getLong();
 				int attrCount = Short.toUnsignedInt(buf.getShort());
 				buf.position(buf.position() + 22); // reserved2
+
+				if (nodeCount < 0 || edgeCount < 0) {
+					ImpulseAssert.checkWellFormed(false,
+							() -> "Negative relation nodeCount or edgeCount: " + nodeCount + ", " + edgeCount);
+					throw new IllegalArgumentException(
+							"Negative relation nodeCount or edgeCount: " + nodeCount + ", " + edgeCount);
+				}
+				validateSectionBounds("CSR row_offsets", csrRowOffOffset, csrRowOffBytes, segSize);
+				validateSectionBounds("CSR col_idx", csrColIdxOffset, csrColIdxBytes, segSize);
+				validateSectionBounds("CSC row_offsets", cscRowOffOffset, cscRowOffBytes, segSize);
+				validateSectionBounds("CSC col_idx", cscColIdxOffset, cscColIdxBytes, segSize);
 
 				List<LoadedAttribute> attributes = new ArrayList<>();
 				for (int a = 0; a < attrCount; a++) {
@@ -654,6 +706,12 @@ public final class BinarySnapshotLoader {
 						? segment.asSlice(cscColIdxOffset, cscColIdxBytes)
 						: MemorySegment.NULL;
 
+				LoadedDomain srcDom = domainsById.get(srcDomId);
+				LoadedDomain tgtDom = domainsById.get(tgtDomId);
+				long tgtDomainNodeCount = (tgtDom != null) ? tgtDom.nodeCount() : 0L;
+				auditRelationIntegrity(relId, nodeCount, edgeCount, tgtDomainNodeCount, nodeIdWidth, edgeIndexWidth,
+						offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg);
+
 				List<MemorySegment> attrSegments = new ArrayList<>();
 				List<MemorySegment> validitySegments = new ArrayList<>();
 				for (LoadedAttribute attr : attributes) {
@@ -682,8 +740,6 @@ public final class BinarySnapshotLoader {
 				relIdToSnapshot.put(relId, relSnap);
 				relationSnapshots.putIfAbsent("rel_" + srcDomId + "_" + tgtDomId, relSnap);
 
-				LoadedDomain srcDom = domainsById.get(srcDomId);
-				LoadedDomain tgtDom = domainsById.get(tgtDomId);
 				if (srcDom != null && tgtDom != null && !srcDom.name().isEmpty() && !tgtDom.name().isEmpty()) {
 					String domainRelName = srcDom.name().toLowerCase() + "To"
 							+ tgtDom.name().substring(0, 1).toUpperCase() + tgtDom.name().substring(1).toLowerCase();
@@ -867,6 +923,105 @@ public final class BinarySnapshotLoader {
 		if (rem != 0) {
 			buf.position(buf.position() + (64 - rem));
 		}
+	}
+
+	private static void validateSectionBounds(String sectionName, long offset, long lengthBytes, long segSize) {
+		if (offset < 0 || lengthBytes < 0 || (offset > 0 && (offset > segSize || lengthBytes > segSize - offset))) {
+			ImpulseAssert.checkWellFormed(false, () -> sectionName + " section out of bounds: offset=" + offset
+					+ ", bytes=" + lengthBytes + ", segSize=" + segSize);
+			throw new IllegalArgumentException(sectionName + " section out of bounds: offset=" + offset + ", bytes="
+					+ lengthBytes + ", segSize=" + segSize);
+		}
+		if (offset > 0 && (offset & 127L) != 0L) {
+			ImpulseAssert.checkWellFormed(false, () -> sectionName + " offset not 128-byte aligned: offset=" + offset);
+			throw new IllegalArgumentException(sectionName + " offset not 128-byte aligned: offset=" + offset);
+		}
+	}
+
+	private static void auditRelationIntegrity(int relId, long nodeCount, long edgeCount, long tgtDomainNodeCount,
+			byte nodeIdWidth, byte edgeIndexWidth, MemorySegment offsetsSeg, MemorySegment targetsSeg,
+			MemorySegment cscOffsetsSeg, MemorySegment cscTargetsSeg) {
+		int offWidth = (edgeIndexWidth == 8) ? 8 : (edgeIndexWidth == 2 ? 2 : 4);
+		int tgtWidth = (nodeIdWidth == 8) ? 8 : (nodeIdWidth == 2 ? 2 : 4);
+		if (!MemorySegment.NULL.equals(offsetsSeg) && offsetsSeg.byteSize() >= (nodeCount + 1) * offWidth) {
+			long firstOff = readUnsignedAt(offsetsSeg, 0, offWidth);
+			if (firstOff != 0L) {
+				ImpulseAssert.checkWellFormed(false,
+						() -> "CSR row_offsets[0] != 0 for relation " + relId + ": " + firstOff);
+				throw new IllegalArgumentException("CSR row_offsets[0] != 0 for relation " + relId + ": " + firstOff);
+			}
+			long lastOff = readUnsignedAt(offsetsSeg, nodeCount, offWidth);
+			if (lastOff != edgeCount) {
+				ImpulseAssert.checkWellFormed(false, () -> "CSR row_offsets[nodeCount] (" + lastOff + ") != edgeCount ("
+						+ edgeCount + ") for relation " + relId);
+				throw new IllegalArgumentException("CSR row_offsets[nodeCount] (" + lastOff + ") != edgeCount ("
+						+ edgeCount + ") for relation " + relId);
+			}
+			if (ImpulseAssert.ENABLE_AUDIT || nodeCount <= 100_000) {
+				long prev = firstOff;
+				for (long u = 1; u <= nodeCount; u++) {
+					long curr = readUnsignedAt(offsetsSeg, u, offWidth);
+					if (curr < prev || curr > edgeCount) {
+						long badU = u;
+						long badPrev = prev;
+						ImpulseAssert.checkWellFormed(false, () -> "Non-monotonic CSR row_offsets at u=" + badU + " ("
+								+ badPrev + " -> " + curr + ") for relation " + relId);
+						throw new IllegalArgumentException("Non-monotonic CSR row_offsets at u=" + badU + " (" + badPrev
+								+ " -> " + curr + ") for relation " + relId);
+					}
+					prev = curr;
+				}
+			}
+		}
+		if (!MemorySegment.NULL.equals(targetsSeg) && targetsSeg.byteSize() >= edgeCount * tgtWidth) {
+			if (ImpulseAssert.ENABLE_AUDIT || edgeCount <= 100_000) {
+				for (long e = 0; e < edgeCount; e++) {
+					long tgt = readUnsignedAt(targetsSeg, e, tgtWidth);
+					if (tgt < 0 || (tgtDomainNodeCount > 0 && tgt >= tgtDomainNodeCount)) {
+						long badE = e;
+						ImpulseAssert.checkWellFormed(false, () -> "CSR target dense ID out of bounds at e=" + badE
+								+ ": " + tgt + " (tgtDomainNodeCount=" + tgtDomainNodeCount + ")");
+						throw new IllegalArgumentException("CSR target dense ID out of bounds at e=" + badE + ": " + tgt
+								+ " (tgtDomainNodeCount=" + tgtDomainNodeCount + ")");
+					}
+				}
+			}
+		}
+		if (!MemorySegment.NULL.equals(cscOffsetsSeg) && tgtDomainNodeCount > 0
+				&& cscOffsetsSeg.byteSize() >= (tgtDomainNodeCount + 1) * offWidth) {
+			long firstCsc = readUnsignedAt(cscOffsetsSeg, 0, offWidth);
+			long lastCsc = readUnsignedAt(cscOffsetsSeg, tgtDomainNodeCount, offWidth);
+			if (firstCsc != 0L || lastCsc != edgeCount) {
+				ImpulseAssert.checkWellFormed(false, () -> "Invalid CSC row_offsets bounds for relation " + relId
+						+ ": first=" + firstCsc + ", last=" + lastCsc + ", edgeCount=" + edgeCount);
+				throw new IllegalArgumentException("Invalid CSC row_offsets bounds for relation " + relId + ": first="
+						+ firstCsc + ", last=" + lastCsc + ", edgeCount=" + edgeCount);
+			}
+		}
+		if (!MemorySegment.NULL.equals(cscTargetsSeg) && cscTargetsSeg.byteSize() >= edgeCount * tgtWidth) {
+			if (ImpulseAssert.ENABLE_AUDIT || edgeCount <= 100_000) {
+				for (long e = 0; e < edgeCount; e++) {
+					long src = readUnsignedAt(cscTargetsSeg, e, tgtWidth);
+					if (src < 0 || (nodeCount > 0 && src >= nodeCount)) {
+						long badE = e;
+						ImpulseAssert.checkWellFormed(false, () -> "CSC source dense ID out of bounds at e=" + badE
+								+ ": " + src + " (nodeCount=" + nodeCount + ")");
+						throw new IllegalArgumentException("CSC source dense ID out of bounds at e=" + badE + ": " + src
+								+ " (nodeCount=" + nodeCount + ")");
+					}
+				}
+			}
+		}
+	}
+
+	private static long readUnsignedAt(MemorySegment seg, long index, int widthBytes) {
+		return switch (widthBytes) {
+			case 2 -> Short.toUnsignedLong(
+					seg.get(ValueLayout.JAVA_SHORT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN), index * 2L));
+			case 8 -> seg.get(ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN), index * 8L);
+			default -> Integer.toUnsignedLong(
+					seg.get(ValueLayout.JAVA_INT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN), index * 4L));
+		};
 	}
 
 	private static String capitalize(String s) {

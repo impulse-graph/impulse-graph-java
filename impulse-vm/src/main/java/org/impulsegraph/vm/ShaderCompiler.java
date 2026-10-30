@@ -40,8 +40,8 @@ public class ShaderCompiler {
 		try {
 			java.util.Set<Long> reducedTargets = new java.util.HashSet<>();
 			MethodHandle pipeline = LOOKUP.findStatic(ShaderOps.class, "commitTarget",
-					MethodType.methodType(void.class, VmQueryContext.class,
-							MemorySegment.class, int.class, int.class, int.class, float[].class, ImpulseBitSet.class));
+					MethodType.methodType(void.class, VmQueryContext.class, MemorySegment.class, int.class, int.class,
+							int.class, float[].class, ImpulseBitSet.class));
 
 			for (int i = instructions.size() - 1; i >= 0; i--) {
 				VmHandlers.Instruction inst = instructions.get(i);
@@ -60,7 +60,8 @@ public class ShaderCompiler {
 		}
 	}
 
-	private static MethodHandle getOpMethodHandle(VmHandlers.Instruction inst, java.util.Set<Long> reducedTargets) throws Exception {
+	private static MethodHandle getOpMethodHandle(VmHandlers.Instruction inst, java.util.Set<Long> reducedTargets)
+			throws Exception {
 		byte op = inst.opcode();
 		int sDst = inst.dstReg();
 		int sPayloadLow = inst.payload() & 0xFFFF;
@@ -224,34 +225,30 @@ public class ShaderCompiler {
 								int.class, int.class, int.class, float[].class, ImpulseBitSet.class)),
 						0, sDst);
 			case VmRegisterType.OP_STREAM_REDUCE :
-				return MethodHandles
-						.insertArguments(
-								LOOKUP.findStatic(ShaderOps.class, "reduce",
-										MethodType.methodType(void.class, int.class, int.class, int.class,
-												java.util.Set.class, VmQueryContext.class, MemorySegment.class,
-												int.class, int.class, int.class, float[].class, ImpulseBitSet.class)),
-								0, sDst, sPayloadLow, sPayloadHigh, reducedTargets);
+				return MethodHandles.insertArguments(
+						LOOKUP.findStatic(ShaderOps.class, "reduce",
+								MethodType.methodType(void.class, int.class, int.class, int.class, java.util.Set.class,
+										VmQueryContext.class, MemorySegment.class, int.class, int.class, int.class,
+										float[].class, ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, sPayloadHigh, reducedTargets);
 			case VmRegisterType.OP_STREAM_REDUCE_ARGMIN :
-				return MethodHandles
-						.insertArguments(
-								LOOKUP.findStatic(ShaderOps.class, "reduceArgMin",
-										MethodType.methodType(void.class, int.class, int.class, int.class,
-												java.util.Set.class, VmQueryContext.class, MemorySegment.class,
-												int.class, int.class, int.class, float[].class, ImpulseBitSet.class)),
-								0, sDst, sPayloadLow, sPayloadHigh, reducedTargets);
+				return MethodHandles.insertArguments(
+						LOOKUP.findStatic(ShaderOps.class, "reduceArgMin",
+								MethodType.methodType(void.class, int.class, int.class, int.class, java.util.Set.class,
+										VmQueryContext.class, MemorySegment.class, int.class, int.class, int.class,
+										float[].class, ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, sPayloadHigh, reducedTargets);
 			case VmRegisterType.OP_STREAM_REDUCE_ARGMAX :
-				return MethodHandles
-						.insertArguments(
-								LOOKUP.findStatic(ShaderOps.class, "reduceArgMax",
-										MethodType.methodType(void.class, int.class, int.class, int.class,
-												java.util.Set.class, VmQueryContext.class, MemorySegment.class,
-												int.class, int.class, int.class, float[].class, ImpulseBitSet.class)),
-								0, sDst, sPayloadLow, sPayloadHigh, reducedTargets);
+				return MethodHandles.insertArguments(
+						LOOKUP.findStatic(ShaderOps.class, "reduceArgMax",
+								MethodType.methodType(void.class, int.class, int.class, int.class, java.util.Set.class,
+										VmQueryContext.class, MemorySegment.class, int.class, int.class, int.class,
+										float[].class, ImpulseBitSet.class)),
+						0, sDst, sPayloadLow, sPayloadHigh, reducedTargets);
 			case VmRegisterType.OP_STREAM_YIELD :
 				return LOOKUP.findStatic(ShaderOps.class, "commitTarget",
-						MethodType.methodType(void.class, VmQueryContext.class,
-								MemorySegment.class, int.class, int.class, int.class, float[].class,
-								ImpulseBitSet.class));
+						MethodType.methodType(void.class, VmQueryContext.class, MemorySegment.class, int.class,
+								int.class, int.class, float[].class, ImpulseBitSet.class));
 		}
 		return null;
 	}

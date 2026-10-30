@@ -206,6 +206,19 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 		OPCODE_MAP.put("OP_STREAM_LOAD_CONST", (byte) 0xBD);
 		OPCODE_MAP.put("OP_STREAM_YIELD", (byte) 0xBE);
 		OPCODE_MAP.put("OP_STREAM_SCATTER_REDUCE", (byte) 0xBF);
+
+		OPCODE_MAP.put("OP_LANE_INIT_SEEDS", (byte) 0xC0);
+		OPCODE_MAP.put("OP_LANE_INIT_GROUPS", (byte) 0xC1);
+		OPCODE_MAP.put("OP_LANE_SET_EDGE_MASK", (byte) 0xC2);
+		OPCODE_MAP.put("OP_LANE_CSR_WALK", (byte) 0xC3);
+		OPCODE_MAP.put("OP_LANE_CSC_WALK", (byte) 0xC4);
+		OPCODE_MAP.put("OP_LANE_PRUNE_MASK", (byte) 0xC5);
+		OPCODE_MAP.put("OP_LANE_FILTER_QUORUM", (byte) 0xC6);
+		OPCODE_MAP.put("OP_LANE_REDUCE_AND", (byte) 0xC7);
+		OPCODE_MAP.put("OP_LANE_REDUCE_ATTR", (byte) 0xC8);
+		OPCODE_MAP.put("OP_LANE_SET_COVER", (byte) 0xC9);
+		OPCODE_MAP.put("OP_VECTOR_ANN_SEARCH", (byte) 0xCA);
+		OPCODE_MAP.put("OP_VECTOR_RERANK_DOT", (byte) 0xCB);
 	}
 
 	public record Expectation(String status, Map<Integer, Long> registers, Boolean zf, Boolean st, Integer pc,
@@ -1338,6 +1351,58 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 								dstReg = parseVal(tokens[1], symbolMap);
 							if (tokens.length > 2)
 								payload = parseVal(tokens[2], symbolMap);
+						} else if (opName.equals("OP_LANE_INIT_GROUPS") || opName.equals("OP_LANE_SET_EDGE_MASK")
+								|| opName.equals("OP_LANE_REDUCE_ATTR") || opName.equals("OP_LANE_SET_COVER")
+								|| opName.equals("OP_VECTOR_RERANK_DOT")) {
+							if (tokens.length > 1)
+								dstReg = parseVal(tokens[1], symbolMap);
+							if (tokens.length == 4) {
+								payload = (parseVal(tokens[2], symbolMap) & 0xFFFF)
+										| ((parseVal(tokens[3], symbolMap) & 0xFFFF) << 16);
+							} else if (tokens.length >= 5) {
+								payload = (parseVal(tokens[2], symbolMap) & 0xFF)
+										| ((parseVal(tokens[3], symbolMap) & 0xFF) << 8)
+										| ((parseVal(tokens[4], symbolMap) & 0xFFFF) << 16);
+								if (tokens.length > 5)
+									flags = (byte) parseVal(tokens[5], symbolMap);
+							} else if (tokens.length == 3) {
+								payload = parseVal(tokens[2], symbolMap) & 0xFFFF;
+							}
+						} else if (opName.equals("OP_LANE_PRUNE_MASK")) {
+							if (tokens.length > 1)
+								dstReg = parseVal(tokens[1], symbolMap);
+							if (tokens.length >= 6) {
+								payload = (parseVal(tokens[2], symbolMap) & 0xFF)
+										| ((parseVal(tokens[3], symbolMap) & 0xFF) << 8)
+										| ((parseVal(tokens[4], symbolMap) & 0xFF) << 16)
+										| ((parseVal(tokens[5], symbolMap) & 0xFF) << 24);
+								if (tokens.length > 6)
+									flags = (byte) parseVal(tokens[6], symbolMap);
+							} else {
+								if (tokens.length > 2)
+									payload |= (parseVal(tokens[2], symbolMap) & 0xFF);
+								if (tokens.length > 3)
+									payload |= ((parseVal(tokens[3], symbolMap) & 0xFF) << 8);
+								if (tokens.length > 4)
+									flags = (byte) parseVal(tokens[4], symbolMap);
+							}
+						} else if (opName.equals("OP_LANE_FILTER_QUORUM")) {
+							if (tokens.length > 1)
+								dstReg = parseVal(tokens[1], symbolMap);
+							if (tokens.length >= 6) {
+								payload = (parseVal(tokens[2], symbolMap) & 0xFF)
+										| ((parseVal(tokens[3], symbolMap) & 0xFF) << 8)
+										| ((parseVal(tokens[4], symbolMap) & 0xFF) << 16)
+										| ((parseVal(tokens[5], symbolMap) & 0xFF) << 24);
+								flags = (byte) (tokens.length > 6 ? parseVal(tokens[6], symbolMap) : 1);
+							} else {
+								if (tokens.length > 2)
+									payload |= (parseVal(tokens[2], symbolMap) & 0xFFFF);
+								if (tokens.length > 3)
+									payload |= ((parseVal(tokens[3], symbolMap) & 0xFFFF) << 16);
+								if (tokens.length > 4)
+									flags = (byte) parseVal(tokens[4], symbolMap);
+							}
 						} else {
 							if (tokens.length > 1) {
 								if (tokens[1].startsWith("R")) {

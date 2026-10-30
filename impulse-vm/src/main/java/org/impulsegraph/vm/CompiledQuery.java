@@ -148,12 +148,17 @@ public final class CompiledQuery {
 			targetSnapshot.enterQuery();
 		}
 		try {
-			if (state.jitDriver() != null) {
-				return ImpulseMethodHandleCompiler.executeCompiled(state.jitDriver(), targetSnapshot, input,
-						executionArena, this.stringPool, state.instructionCount());
-			}
-			if (state.methodHandle() != null) {
-				return state.methodHandle().invoke(targetSnapshot, input, executionArena);
+			boolean jitDisabled = (org.impulsegraph.api.util.ImpulseTestControl.getDisabledOptimizationsMask()
+					& org.impulsegraph.compiler.trace.CompilerOptions.OPT_METHOD_HANDLE_JIT) != 0;
+			org.impulsegraph.api.util.ImpulseAssert.testcase(512, jitDisabled);
+			if (!jitDisabled) {
+				if (state.jitDriver() != null) {
+					return ImpulseMethodHandleCompiler.executeCompiled(state.jitDriver(), targetSnapshot, input,
+							executionArena, this.stringPool, state.instructionCount());
+				}
+				if (state.methodHandle() != null) {
+					return state.methodHandle().invoke(targetSnapshot, input, executionArena);
+				}
 			}
 			return ImpulseVmInterpreter.execute(state.programSeg(), state.instructionCount(), targetSnapshot, input,
 					executionArena, this.stringPool);
