@@ -143,4 +143,20 @@ public interface DomainView {
 		}
 		return from(ids);
 	}
+
+	/**
+	 * Returns a builder for 64-lane bit-sliced multi-seed/concept-group traversals
+	 * anchored in this domain.
+	 */
+	default MultiLaneBuilder multiLane() {
+		throw new UnsupportedOperationException("multiLane() not implemented by this DomainView provider");
+	}
+
+	/**
+	 * Initializes a traversal frontier from an Approximate Nearest Neighbor (ANN)
+	 * vector search over the given embedding index or float attribute.
+	 */
+	default Traversal<ImpulseBitSet> vectorSearch(String indexOrAttr, float[] queryVector, int topK) {
+		throw new UnsupportedOperationException("vectorSearch() not implemented by this DomainView provider");
+	}
 }

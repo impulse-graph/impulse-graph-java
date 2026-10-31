@@ -60,12 +60,20 @@ public final class CelLexer {
 					cursor++;
 					yield CelToken.of(CelTokenType.LT_EQ, "<=", start);
 				}
+				if (peek() == '<') {
+					cursor++;
+					yield CelToken.of(CelTokenType.LT_LT, "<<", start);
+				}
 				yield CelToken.of(CelTokenType.LT, "<", start);
 			}
 			case '>' -> {
 				if (peek() == '=') {
 					cursor++;
 					yield CelToken.of(CelTokenType.GT_EQ, ">=", start);
+				}
+				if (peek() == '>') {
+					cursor++;
+					yield CelToken.of(CelTokenType.GT_GT, ">>", start);
 				}
 				yield CelToken.of(CelTokenType.GT, ">", start);
 			}
@@ -74,15 +82,17 @@ public final class CelLexer {
 					cursor++;
 					yield CelToken.of(CelTokenType.AMP_AMP, "&&", start);
 				}
-				yield CelToken.of(CelTokenType.END_OF_FILE, String.valueOf(c), start);
+				yield CelToken.of(CelTokenType.AMP, "&", start);
 			}
 			case '|' -> {
 				if (peek() == '|') {
 					cursor++;
 					yield CelToken.of(CelTokenType.PIPE_PIPE, "||", start);
 				}
-				yield CelToken.of(CelTokenType.END_OF_FILE, String.valueOf(c), start);
+				yield CelToken.of(CelTokenType.PIPE, "|", start);
 			}
+			case '^' -> CelToken.of(CelTokenType.CARET, "^", start);
+			case '~' -> CelToken.of(CelTokenType.TILDE, "~", start);
 
 			case '@' -> parseParam(start);
 
@@ -160,6 +170,45 @@ public final class CelLexer {
 	}
 
 	private CelToken parseNumber(char firstDigit, int start) {
+		if (firstDigit == '0' && cursor < src.length() && (src.charAt(cursor) == 'x' || src.charAt(cursor) == 'X')) {
+			StringBuilder raw = new StringBuilder("0").append(src.charAt(cursor++));
+			StringBuilder digits = new StringBuilder();
+			while (cursor < src.length()) {
+				char c = src.charAt(cursor);
+				if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+					raw.append(c);
+					digits.append(c);
+					cursor++;
+				} else if (c == '_') {
+					raw.append(c);
+					cursor++;
+				} else {
+					break;
+				}
+			}
+			long val = digits.isEmpty() ? 0L : Long.parseUnsignedLong(digits.toString(), 16);
+			return CelToken.ofInt(val, raw.toString(), start);
+		}
+		if (firstDigit == '0' && cursor < src.length() && (src.charAt(cursor) == 'b' || src.charAt(cursor) == 'B')) {
+			StringBuilder raw = new StringBuilder("0").append(src.charAt(cursor++));
+			StringBuilder digits = new StringBuilder();
+			while (cursor < src.length()) {
+				char c = src.charAt(cursor);
+				if (c == '0' || c == '1') {
+					raw.append(c);
+					digits.append(c);
+					cursor++;
+				} else if (c == '_') {
+					raw.append(c);
+					cursor++;
+				} else {
+					break;
+				}
+			}
+			long val = digits.isEmpty() ? 0L : Long.parseUnsignedLong(digits.toString(), 2);
+			return CelToken.ofInt(val, raw.toString(), start);
+		}
+
 		StringBuilder sb = new StringBuilder();
 		sb.append(firstDigit);
 		boolean isFloat = false;
@@ -168,6 +217,8 @@ public final class CelLexer {
 			char c = src.charAt(cursor);
 			if (Character.isDigit(c)) {
 				sb.append(c);
+				cursor++;
+			} else if (c == '_') {
 				cursor++;
 			} else if (c == '.' && !isFloat && cursor + 1 < src.length() && Character.isDigit(src.charAt(cursor + 1))) {
 				isFloat = true;

@@ -44,6 +44,7 @@ public final class VmRegisterType {
 	public static final byte TYPE_DOUBLE_VECTOR = 0x0D;
 	public static final byte TYPE_UINT64_VECTOR = 0x0E;
 	public static final byte TYPE_FRONTIER_STATE = 0x0F;
+	public static final byte TYPE_LANE_FRONTIER = 0x10;
 
 	// Opcodes Definitions
 	public static final byte OP_HALT = (byte) 0x00;
@@ -250,6 +251,20 @@ public final class VmRegisterType {
 	public static final byte OP_STREAM_YIELD = (byte) 0xBE;
 	public static final byte OP_STREAM_SCATTER_REDUCE = (byte) 0xBF;
 
+	// Multi-Lane & Vector Search Opcodes (0xC0 - 0xCB)
+	public static final byte OP_LANE_INIT_SEEDS = (byte) 0xC0;
+	public static final byte OP_LANE_INIT_GROUPS = (byte) 0xC1;
+	public static final byte OP_LANE_SET_EDGE_MASK = (byte) 0xC2;
+	public static final byte OP_LANE_CSR_WALK = (byte) 0xC3;
+	public static final byte OP_LANE_CSC_WALK = (byte) 0xC4;
+	public static final byte OP_LANE_PRUNE_MASK = (byte) 0xC5;
+	public static final byte OP_LANE_FILTER_QUORUM = (byte) 0xC6;
+	public static final byte OP_LANE_REDUCE_AND = (byte) 0xC7;
+	public static final byte OP_LANE_REDUCE_ATTR = (byte) 0xC8;
+	public static final byte OP_LANE_SET_COVER = (byte) 0xC9;
+	public static final byte OP_VECTOR_ANN_SEARCH = (byte) 0xCA;
+	public static final byte OP_VECTOR_RERANK_DOT = (byte) 0xCB;
+
 	// GraphBLAS Semiring IDs
 	public static final int SEMIRING_PLUS_TIMES = 0;
 	public static final int SEMIRING_MIN_PLUS = 1;
@@ -263,6 +278,8 @@ public final class VmRegisterType {
 	public static final int BINARY_OP_MAX = 3;
 	public static final int BINARY_OP_AND = 4;
 	public static final int BINARY_OP_OR = 5;
+	public static final int BINARY_OP_ARGMIN = 6;
+	public static final int BINARY_OP_ARGMAX = 7;
 
 	// VM Execution status codes
 	public static final int VM_OK = 0;

@@ -37,13 +37,17 @@ public final class ImpulseMethodHandleCompiler {
 			VmHandlers.Instruction inst = VmHandlers.decodeInstruction(programSeg, pc);
 			if ((inst.flags() & VmRegisterType.OP_FLAG_EXTENDED) != 0) {
 				VmHandlers.ExtendedInstruction ext = VmHandlers.decodeExtendedInstruction(programSeg, pc);
-				inst = new VmHandlers.Instruction(inst.opcode(), inst.flags(), inst.dstReg(),
-						(inst.payload() & 0xFFFF) | (ext.arg3() << 16));
+				int packedPayload = (Byte.toUnsignedInt(inst.opcode()) == 0x3D)
+						? ((inst.payload() & 0xFF) | (((inst.payload() >>> 16) & 0xFF) << 8)
+								| ((ext.arg3() & 0xFF) << 16) | ((ext.arg4() & 0xFF) << 24))
+						: ((inst.payload() & 0xFFFF) | (ext.arg3() << 16));
+				inst = new VmHandlers.Instruction(inst.opcode(), inst.flags(), inst.dstReg(), packedPayload);
 			}
 			decoded[pc] = inst;
 			byte op = inst.opcode();
+			int uOp = Byte.toUnsignedInt(op);
 			if (op == VmRegisterType.OP_COO_WALK_STREAM || op == VmRegisterType.OP_CSR_WALK_STREAM
-					|| op == VmRegisterType.OP_CSC_WALK_STREAM || (op >= (byte) 0xA1 && op <= (byte) 0xBD)) {
+					|| op == VmRegisterType.OP_CSC_WALK_STREAM || (uOp >= 0xA1 && uOp <= 0xBF)) {
 				handlers[pc] = bindInstruction(inst, pc, programSeg, instructionCount);
 			}
 		}
@@ -93,7 +97,8 @@ public final class ImpulseMethodHandleCompiler {
 
 		// Skip shader instructions in the main loop (they are executed by the compiled
 		// shader)
-		if (op >= (byte) 0xA1 && op <= (byte) 0xBD) {
+		int uOp = Byte.toUnsignedInt(op);
+		if (uOp >= 0xA1 && uOp <= 0xBF) {
 			return getSkipHandler();
 		}
 
@@ -123,8 +128,11 @@ public final class ImpulseMethodHandleCompiler {
 		VmHandlers.Instruction instr = VmHandlers.decodeInstruction(programSeg, pc);
 		if ((instr.flags() & VmRegisterType.OP_FLAG_EXTENDED) != 0) {
 			VmHandlers.ExtendedInstruction ext = VmHandlers.decodeExtendedInstruction(programSeg, pc);
-			instr = new VmHandlers.Instruction(instr.opcode(), instr.flags(), instr.dstReg(),
-					(instr.payload() & 0xFFFF) | (ext.arg3() << 16));
+			int packedPayload = (Byte.toUnsignedInt(instr.opcode()) == 0x3D)
+					? ((instr.payload() & 0xFF) | (((instr.payload() >>> 16) & 0xFF) << 8) | ((ext.arg3() & 0xFF) << 16)
+							| ((ext.arg4() & 0xFF) << 24))
+					: ((instr.payload() & 0xFFFF) | (ext.arg3() << 16));
+			instr = new VmHandlers.Instruction(instr.opcode(), instr.flags(), instr.dstReg(), packedPayload);
 		}
 		return executeDecoded(programSeg, instructionCount, instr, ctx, state, input, pc);
 	}
@@ -145,8 +153,7 @@ public final class ImpulseMethodHandleCompiler {
 				}
 				case 0x01 -> nextPc++; // OP_NOP
 				case 0x02 -> {
-					Object effectiveInput = (instr.payload() != 0) ? (long) instr.payload() : input;
-					VmHandlers.handleInitInputNode(state, ctx, instr, effectiveInput);
+					VmHandlers.handleInitInputNode(state, ctx, instr, input);
 					nextPc++;
 				}
 				case 0x03 -> {
@@ -192,24 +199,7 @@ public final class ImpulseMethodHandleCompiler {
 					nextPc++;
 				}
 				case 0x0B, 0x0C -> {
-					int attrId = instr.dstReg();
-					int srcReg = instr.payload() & 0xFF;
-					if (srcReg < 64) {
-						int h = (int) VmHandlers.getRegisterValue(state, srcReg);
-						int[] iarr = ctx.getIntVector(h);
-						if (iarr != null) {
-							ctx.setMockAttribute(attrId, iarr);
-						} else {
-							float[] farr = ctx.getFloatVector(h);
-							if (farr != null) {
-								int[] converted = new int[farr.length];
-								for (int k = 0; k < farr.length; k++) {
-									converted[k] = Float.floatToRawIntBits(farr[k]);
-								}
-								ctx.setMockAttribute(attrId, converted);
-							}
-						}
-					}
+					VmHandlers.handleInitMockAttr(state, ctx, instr);
 					nextPc++;
 				}
 				case 0x0D -> {
@@ -316,7 +306,7 @@ public final class ImpulseMethodHandleCompiler {
 					nextPc++;
 				}
 				case 0x35 -> {
-					ctx.setFinalResult(VmHandlers.handleVectorReduceSum(state, ctx, instr));
+					VmHandlers.handleVectorReduceSum(state, ctx, instr);
 					nextPc++;
 				}
 				case 0x36 -> {
@@ -370,7 +360,7 @@ public final class ImpulseMethodHandleCompiler {
 					nextPc++;
 				}
 				case 0x45 -> {
-					ctx.setFinalResult(VmHandlers.handleReduce(state, ctx, instr));
+					VmHandlers.handleReduce(state, ctx, instr);
 					nextPc++;
 				}
 				case 0x46 -> {
@@ -457,11 +447,19 @@ public final class ImpulseMethodHandleCompiler {
 					long arg1 = VmHandlers.getRegisterValue(state, 13);
 					long arg2 = VmHandlers.getRegisterValue(state, 14);
 					long arg3 = VmHandlers.getRegisterValue(state, 15);
+					byte t0 = VmHandlers.getRegisterType(state, 12);
+					byte t1 = VmHandlers.getRegisterType(state, 13);
+					byte t2 = VmHandlers.getRegisterType(state, 14);
+					byte t3 = VmHandlers.getRegisterType(state, 15);
 
-					VmHandlers.setRegister(state, 0, arg0, VmRegisterType.TYPE_INT64);
-					VmHandlers.setRegister(state, 1, arg1, VmRegisterType.TYPE_INT64);
-					VmHandlers.setRegister(state, 2, arg2, VmRegisterType.TYPE_INT64);
-					VmHandlers.setRegister(state, 3, arg3, VmRegisterType.TYPE_INT64);
+					VmHandlers.setRegister(state, 0, arg0,
+							t0 != VmRegisterType.TYPE_NULL ? t0 : VmRegisterType.TYPE_INT64);
+					VmHandlers.setRegister(state, 1, arg1,
+							t1 != VmRegisterType.TYPE_NULL ? t1 : VmRegisterType.TYPE_INT64);
+					VmHandlers.setRegister(state, 2, arg2,
+							t2 != VmRegisterType.TYPE_NULL ? t2 : VmRegisterType.TYPE_INT64);
+					VmHandlers.setRegister(state, 3, arg3,
+							t3 != VmRegisterType.TYPE_NULL ? t3 : VmRegisterType.TYPE_INT64);
 
 					if (target >= 0 && target < instructionCount)
 						nextPc = target;
@@ -490,7 +488,7 @@ public final class ImpulseMethodHandleCompiler {
 					throw new RuntimeException("IMPULSE_VM_ERR_TRAP");
 				}
 				case 0x1D -> {
-					VmHandlers.handleCsrWalk(state, ctx, instr);
+					VmHandlers.handleAdaptiveWalk(state, ctx, instr);
 					nextPc++;
 				} // OP_ADAPTIVE_WALK
 				case 0x1E -> {
@@ -692,7 +690,12 @@ public final class ImpulseMethodHandleCompiler {
 					VmHandlers.handleStreamWalk(state, ctx, instr, programSeg, instructionCount);
 					nextPc++;
 				}
-				case 0xA1, 0xA2 -> {
+				case 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF, 0xB0, 0xB1, 0xB2,
+						0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE -> {
+					nextPc++;
+				}
+				case 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB -> {
+					VmMultiLaneHandlers.handleMultiLaneOpcode(state, ctx, instr, pc);
 					nextPc++;
 				}
 				case 0x28, 0x29, 0x2B, 0x2C, 0x3E, 0x3F, 0x4F, 0x59, 0x5D, 0x5E, 0x5F, 0x6D, 0x6E, 0x6F, 0x76, 0x77,
@@ -704,6 +707,7 @@ public final class ImpulseMethodHandleCompiler {
 					throw new RuntimeException("IMPULSE_VM_ERR_INVALID_OPCODE");
 				}
 			}
+			VmInvariants.verifyPostStep(state, ctx);
 		} catch (Throwable t) {
 			int currentPc = (int) VmStateLayout.PC_HANDLE.get(state, 0L);
 			if (currentPc >= 0 && currentPc < instructionCount) {
@@ -732,8 +736,16 @@ public final class ImpulseMethodHandleCompiler {
 
 	public static Object executeCompiled(JitDriver driver, ImpulseGraphSnapshot snapshot, Object input, Arena arena,
 			List<String> stringPool, long instructionCount) {
+		return executeCompiled(driver, snapshot, input, arena, stringPool, instructionCount, null);
+	}
+
+	public static Object executeCompiled(JitDriver driver, ImpulseGraphSnapshot snapshot, Object input, Arena arena,
+			List<String> stringPool, long instructionCount, MemorySegment inlineDataSeg) {
 		try (VmQueryContext ctx = VmQueryContext.acquire(snapshot, arena)) {
 			ctx.setStringPool(stringPool);
+			if (inlineDataSeg != null) {
+				ctx.setInlineData(inlineDataSeg, inlineDataSeg.byteSize());
+			}
 			MemorySegment state = ctx.allocateStateSegment();
 			Object res = driver.execute(ctx, state, input, instructionCount);
 			return res != null ? res : new OffHeapBitSet(arena, 1000);

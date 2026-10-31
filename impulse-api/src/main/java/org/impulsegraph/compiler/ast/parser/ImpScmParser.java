@@ -142,6 +142,150 @@ public final class ImpScmParser {
 				case "collect-vector" -> {
 					return ScmCollect.vector();
 				}
+				case "collect-list" -> {
+					return ScmCollect.list();
+				}
+				case "collect-scalar" -> {
+					return ScmCollect.scalar();
+				}
+				case "collect-distinct" -> {
+					return ScmCollect.distinct();
+				}
+				case "collect-keys" -> {
+					return ScmCollect.keys();
+				}
+				case "collect-value_map", "collect-value-map" -> {
+					return ScmCollect.valueMap();
+				}
+				case "lane-init-seeds" -> {
+					List<Long> seeds = extractLongList(elements.size() > 1 ? elements.get(1) : null);
+					int maxNodes = elements.size() > 2 ? extractInt(elements.get(2), 0) : 0;
+					return new ScmLaneInitSeeds(seeds, maxNodes);
+				}
+				case "lane-init-groups" -> {
+					List<List<Long>> groups = new ArrayList<>();
+					if (elements.size() > 1 && elements.get(1) instanceof ScmList gList) {
+						for (ImpScmNode g : gList.elements()) {
+							groups.add(extractLongList(g));
+						}
+					}
+					int maxNodes = elements.size() > 2 ? extractInt(elements.get(2), 0) : 0;
+					return new ScmLaneInitGroups(groups, maxNodes);
+				}
+				case "lane-set-edge-mask" -> {
+					String relName = "";
+					int relId = -1;
+					if (elements.size() > 1) {
+						if (elements.get(1) instanceof ScmLiteral.ScmString s) {
+							relName = s.value();
+						} else if (elements.get(1) instanceof ScmLiteral.ScmInt n) {
+							relId = (int) n.value();
+						}
+					}
+					List<Long> tripped = elements.size() > 2 ? extractLongList(elements.get(2)) : List.of();
+					boolean packed = elements.size() > 3 && extractBool(elements.get(3), false);
+					return new ScmLaneSetEdgeMask(relName, relId, tripped, packed);
+				}
+				case "lane-csr-walk", "lane-walk-csr", "lane-csc-walk", "lane-walk-csc" -> {
+					ScmWalk.Direction dir = (name.contains("csc"))
+							? ScmWalk.Direction.REVERSE_CSC
+							: ScmWalk.Direction.FORWARD_CSR;
+					String relName = "";
+					int relId = -1;
+					if (elements.size() > 1) {
+						if (elements.get(1) instanceof ScmLiteral.ScmString s) {
+							relName = s.value();
+						} else if (elements.get(1) instanceof ScmLiteral.ScmInt n) {
+							relId = (int) n.value();
+						} else if (elements.get(1) instanceof ScmSymbol s) {
+							relName = s.name();
+						}
+					}
+					boolean acc = elements.size() > 2 && extractBool(elements.get(2), false);
+					boolean fp = elements.size() > 3 && extractBool(elements.get(3), false);
+					return new ScmLaneWalk(relName, relId, dir, acc, fp);
+				}
+				case "lane-prune-mask" -> {
+					int mode = elements.size() > 1 ? extractInt(elements.get(1), 0) : 0;
+					int arg1 = elements.size() > 2 ? extractInt(elements.get(2), 0) : 0;
+					int arg2 = elements.size() > 3 ? extractInt(elements.get(3), 0) : 0;
+					List<Long> deny = elements.size() > 4 ? extractLongList(elements.get(4)) : List.of();
+					return new ScmLanePruneMask(mode, arg1, arg2, "", -1, deny);
+				}
+				case "lane-filter-quorum" -> {
+					int k = elements.size() > 1 ? extractInt(elements.get(1), 1) : 1;
+					boolean inv = elements.size() > 2 && extractBool(elements.get(2), false);
+					return new ScmLaneFilterQuorum(k, inv);
+				}
+				case "lane-reduce-and" -> {
+					int mode = elements.size() > 1 ? extractInt(elements.get(1), 0) : 0;
+					return new ScmLaneReduceAnd(mode);
+				}
+				case "lane-reduce-attr" -> {
+					int attrId = 0;
+					String attrName = "";
+					if (elements.size() > 1) {
+						if (elements.get(1) instanceof ScmLiteral.ScmString s) {
+							attrName = s.value();
+						} else {
+							attrId = extractInt(elements.get(1), 0);
+						}
+					}
+					int redOp = elements.size() > 2 ? extractInt(elements.get(2), 0) : 0;
+					boolean fromReg = elements.size() > 3 && extractBool(elements.get(3), false);
+					return new ScmLaneReduceAttr(attrId, attrName, redOp, fromReg);
+				}
+				case "lane-set-cover" -> {
+					int maxN = elements.size() > 1 ? extractInt(elements.get(1), 4) : 4;
+					long mask = elements.size() > 2 ? extractUnsignedLong(elements.get(2), ~0L) : ~0L;
+					boolean pairMode = elements.size() > 3 && extractBool(elements.get(3), false);
+					return new ScmLaneSetCover(maxN, mask, pairMode);
+				}
+				case "vector-ann-search" -> {
+					float[] q = elements.size() > 1 ? extractFloatArray(elements.get(1)) : new float[0];
+					int topK = elements.size() > 2 ? extractInt(elements.get(2), 1) : 1;
+					int idxId = elements.size() > 3 ? extractInt(elements.get(3), 0) : 0;
+					boolean ml = elements.size() > 4 && extractBool(elements.get(4), false);
+					return new ScmVectorAnnSearch(q, topK, idxId, "", ml);
+				}
+				case "vector-rerank-dot" -> {
+					float[] q = elements.size() > 1 ? extractFloatArray(elements.get(1)) : new float[0];
+					int attrId = elements.size() > 2 ? extractInt(elements.get(2), 0) : 0;
+					int metric = elements.size() > 3 ? extractInt(elements.get(3), 0) : 0;
+					return new ScmVectorRerankDot(q, attrId, "", metric);
+				}
+				case "fixpoint" -> {
+					String relName = "";
+					int relId = -1;
+					if (elements.size() > 1) {
+						if (elements.get(1) instanceof ScmLiteral.ScmString s) {
+							relName = s.value();
+						} else if (elements.get(1) instanceof ScmLiteral.ScmInt n) {
+							relId = (int) n.value();
+						} else if (elements.get(1) instanceof ScmSymbol s) {
+							relName = s.name();
+						}
+					}
+					int maxIter = elements.size() > 2 ? extractInt(elements.get(2), 100) : 100;
+					ScmWalk.Direction dir = ScmWalk.Direction.FORWARD_CSR;
+					List<ImpScmNode> body = new ArrayList<>();
+					for (int i = 3; i < elements.size(); i++) {
+						ImpScmNode el = elements.get(i);
+						if (el instanceof ScmSymbol s && s.name().equals(":csc")) {
+							dir = ScmWalk.Direction.REVERSE_CSC;
+						} else {
+							body.add(el);
+						}
+					}
+					return new ScmFixpoint(relName, relId, dir, maxIter, body);
+				}
+				case "set-union", "set-intersect", "set-diff" -> {
+					ScmSetOp.Kind kind = "set-union".equals(name)
+							? ScmSetOp.Kind.UNION
+							: "set-intersect".equals(name) ? ScmSetOp.Kind.INTERSECT : ScmSetOp.Kind.DIFF;
+					ImpScmNode rhs = elements.size() > 1 ? elements.get(1) : ScmList.of();
+					return new ScmSetOp(kind, rhs);
+				}
 				default -> {
 				}
 			}
@@ -215,8 +359,68 @@ public final class ImpScmParser {
 		if (isFloat) {
 			return ScmLiteral.ofFloat(Double.parseDouble(numText));
 		} else {
-			return ScmLiteral.ofInt(Long.parseLong(numText));
+			try {
+				return ScmLiteral.ofInt(Long.parseLong(numText));
+			} catch (NumberFormatException e) {
+				return ScmLiteral.ofInt(Long.parseUnsignedLong(numText));
+			}
 		}
+	}
+
+	private static List<Long> extractLongList(ImpScmNode node) {
+		if (node instanceof ScmList list) {
+			List<Long> out = new ArrayList<>(list.elements().size());
+			for (ImpScmNode el : list.elements()) {
+				if (el instanceof ScmLiteral.ScmInt n) {
+					out.add(n.value());
+				}
+			}
+			return out;
+		}
+		if (node instanceof ScmLiteral.ScmInt n) {
+			return List.of(n.value());
+		}
+		return List.of();
+	}
+
+	private static float[] extractFloatArray(ImpScmNode node) {
+		if (node instanceof ScmList list) {
+			float[] out = new float[list.elements().size()];
+			int idx = 0;
+			for (ImpScmNode el : list.elements()) {
+				if (el instanceof ScmLiteral.ScmFloat f) {
+					out[idx++] = (float) f.value();
+				} else if (el instanceof ScmLiteral.ScmInt n) {
+					out[idx++] = (float) n.value();
+				}
+			}
+			return idx == out.length ? out : java.util.Arrays.copyOf(out, idx);
+		}
+		return new float[0];
+	}
+
+	private static int extractInt(ImpScmNode node, int defaultVal) {
+		if (node instanceof ScmLiteral.ScmInt n) {
+			return (int) n.value();
+		}
+		return defaultVal;
+	}
+
+	private static long extractUnsignedLong(ImpScmNode node, long defaultVal) {
+		if (node instanceof ScmLiteral.ScmInt n) {
+			return n.value();
+		}
+		return defaultVal;
+	}
+
+	private static boolean extractBool(ImpScmNode node, boolean defaultVal) {
+		if (node instanceof ScmLiteral.ScmBool b) {
+			return b.value();
+		}
+		if (node instanceof ScmLiteral.ScmInt n) {
+			return n.value() != 0L;
+		}
+		return defaultVal;
 	}
 
 	private ScmSymbol parseSymbol() {

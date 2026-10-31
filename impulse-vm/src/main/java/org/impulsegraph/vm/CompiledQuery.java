@@ -31,11 +31,19 @@ public final class CompiledQuery {
 	private final Arena arena;
 	private final AtomicReference<QueryBindingState> bindingState;
 	private final List<String> stringPool;
+	private final MemorySegment inlineDataSegment;
 
 	public CompiledQuery(MemorySegment programSeg, long instructionCount, List<RelationInstructionPatch> patches,
 			Map<String, Integer> relationIdMap, ImpulseGraphSnapshot initialSnapshot, Arena arena,
 			List<String> stringPool) {
+		this(programSeg, instructionCount, patches, relationIdMap, initialSnapshot, arena, stringPool, null);
+	}
+
+	public CompiledQuery(MemorySegment programSeg, long instructionCount, List<RelationInstructionPatch> patches,
+			Map<String, Integer> relationIdMap, ImpulseGraphSnapshot initialSnapshot, Arena arena,
+			List<String> stringPool, MemorySegment inlineDataSegment) {
 		this.stringPool = stringPool != null ? List.copyOf(stringPool) : List.of();
+		this.inlineDataSegment = inlineDataSegment;
 		Objects.requireNonNull(programSeg, "programSeg must not be null");
 		this.patches = List.copyOf(patches);
 		this.arena = arena;
@@ -49,6 +57,10 @@ public final class CompiledQuery {
 		}
 		this.bindingState = new AtomicReference<>(new QueryBindingState(initialSnapshot, mh, driver, programSeg,
 				instructionCount, new HashMap<>(relationIdMap)));
+	}
+
+	public MemorySegment inlineDataSegment() {
+		return inlineDataSegment;
 	}
 
 	public QueryBindingState bindingState() {
@@ -148,18 +160,23 @@ public final class CompiledQuery {
 			targetSnapshot.enterQuery();
 		}
 		try {
-			if (state.jitDriver() != null) {
-				return ImpulseMethodHandleCompiler.executeCompiled(state.jitDriver(), targetSnapshot, input,
-						executionArena, this.stringPool, state.instructionCount());
-			}
-			if (state.methodHandle() != null) {
-				return state.methodHandle().invoke(targetSnapshot, input, executionArena);
+			boolean jitDisabled = (org.impulsegraph.api.util.ImpulseTestControl.getDisabledOptimizationsMask()
+					& org.impulsegraph.compiler.trace.CompilerOptions.OPT_METHOD_HANDLE_JIT) != 0;
+			org.impulsegraph.api.util.ImpulseAssert.testcase(512, jitDisabled);
+			if (!jitDisabled) {
+				if (state.jitDriver() != null) {
+					return ImpulseMethodHandleCompiler.executeCompiled(state.jitDriver(), targetSnapshot, input,
+							executionArena, this.stringPool, state.instructionCount(), this.inlineDataSegment);
+				}
+				if (state.methodHandle() != null && this.inlineDataSegment == null) {
+					return state.methodHandle().invoke(targetSnapshot, input, executionArena);
+				}
 			}
 			return ImpulseVmInterpreter.execute(state.programSeg(), state.instructionCount(), targetSnapshot, input,
-					executionArena, this.stringPool);
+					executionArena, this.stringPool, this.inlineDataSegment);
 		} catch (Throwable e) {
 			return ImpulseVmInterpreter.execute(state.programSeg(), state.instructionCount(), targetSnapshot, input,
-					executionArena, this.stringPool);
+					executionArena, this.stringPool, this.inlineDataSegment);
 		} finally {
 			if (targetSnapshot != null) {
 				targetSnapshot.exitQuery();
@@ -285,6 +302,22 @@ public final class CompiledQuery {
 			case OP_REDUCE -> "OP_REDUCE";
 			case OP_COLLECT_BITSET -> "OP_COLLECT_BITSET";
 			case OP_COLLECT_ARRAY -> "OP_COLLECT_ARRAY";
+			case OP_MAP_DENSE_TO_KEYS -> "OP_MAP_DENSE_TO_KEYS";
+			case OP_COLLECT_VALUE_MAP -> "OP_COLLECT_VALUE_MAP";
+			case OP_FIXPOINT_KLEENE_STAR -> "OP_FIXPOINT_KLEENE_STAR";
+			case OP_LOAD_INLINE_ARRAY -> "OP_LOAD_INLINE_ARRAY";
+			case OP_LANE_INIT_SEEDS -> "OP_LANE_INIT_SEEDS";
+			case OP_LANE_INIT_GROUPS -> "OP_LANE_INIT_GROUPS";
+			case OP_LANE_SET_EDGE_MASK -> "OP_LANE_SET_EDGE_MASK";
+			case OP_LANE_CSR_WALK -> "OP_LANE_CSR_WALK";
+			case OP_LANE_CSC_WALK -> "OP_LANE_CSC_WALK";
+			case OP_LANE_PRUNE_MASK -> "OP_LANE_PRUNE_MASK";
+			case OP_LANE_FILTER_QUORUM -> "OP_LANE_FILTER_QUORUM";
+			case OP_LANE_REDUCE_AND -> "OP_LANE_REDUCE_AND";
+			case OP_LANE_REDUCE_ATTR -> "OP_LANE_REDUCE_ATTR";
+			case OP_LANE_SET_COVER -> "OP_LANE_SET_COVER";
+			case OP_VECTOR_ANN_SEARCH -> "OP_VECTOR_ANN_SEARCH";
+			case OP_VECTOR_RERANK_DOT -> "OP_VECTOR_RERANK_DOT";
 			case OP_HALT -> "OP_HALT";
 			case OP_COO_WALK_STREAM -> "OP_COO_WALK_STREAM";
 			case OP_STREAM_FUNC_BEGIN -> "OP_STREAM_FUNC_BEGIN";

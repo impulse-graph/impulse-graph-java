@@ -71,7 +71,10 @@ public class MockRelationSnapshot implements RelationSnapshot {
 	}
 	@Override
 	public int getInDegree(int nodeId) {
-		if (cscRowOffsets == null || nodeId < 0 || nodeId >= nodeCount)
+		if (cscRowOffsets == null)
+			return 0;
+		int cscNodeCount = Math.max(0, (int) (cscRowOffsets.byteSize() / 4) - 1);
+		if (nodeId < 0 || nodeId >= cscNodeCount)
 			return 0;
 		int start = cscRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) nodeId);
 		int end = cscRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) (nodeId + 1));
@@ -79,7 +82,16 @@ public class MockRelationSnapshot implements RelationSnapshot {
 	}
 	@Override
 	public int[] getTargets(int nodeId) {
-		return new int[0];
+		if (rowOffsets == null || colTargets == null || nodeId < 0 || nodeId >= nodeCount)
+			return new int[0];
+		int start = rowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) nodeId);
+		int end = rowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) (nodeId + 1));
+		int len = Math.max(0, end - start);
+		int[] out = new int[len];
+		for (int i = 0; i < len; i++) {
+			out[i] = colTargets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) (start + i));
+		}
+		return out;
 	}
 	@Override
 	public void copyTargetsSimd(int nodeId, ImpulseBitSet frontier) {
@@ -94,7 +106,10 @@ public class MockRelationSnapshot implements RelationSnapshot {
 	}
 	@Override
 	public void copyInTargetsSimd(int nodeId, ImpulseBitSet frontier) {
-		if (cscRowOffsets == null || cscColTargets == null || nodeId < 0 || nodeId >= nodeCount)
+		if (cscRowOffsets == null || cscColTargets == null)
+			return;
+		int cscNodeCount = Math.max(0, (int) (cscRowOffsets.byteSize() / 4) - 1);
+		if (nodeId < 0 || nodeId >= cscNodeCount)
 			return;
 		int start = cscRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) nodeId);
 		int end = cscRowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) (nodeId + 1));

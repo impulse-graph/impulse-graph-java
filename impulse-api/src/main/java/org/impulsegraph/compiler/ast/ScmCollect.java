@@ -8,7 +8,7 @@ import java.util.Objects;
 public record ScmCollect(Format format) implements ImpScmNode {
 
 	public enum Format {
-		BITSET, VECTOR, LIST, SCALAR, DISTINCT
+		BITSET, VECTOR, LIST, SCALAR, DISTINCT, KEYS, VALUE_MAP
 	}
 
 	public ScmCollect {
@@ -29,6 +29,12 @@ public record ScmCollect(Format format) implements ImpScmNode {
 	}
 	public static ScmCollect distinct() {
 		return new ScmCollect(Format.DISTINCT);
+	}
+	public static ScmCollect keys() {
+		return new ScmCollect(Format.KEYS);
+	}
+	public static ScmCollect valueMap() {
+		return new ScmCollect(Format.VALUE_MAP);
 	}
 
 	@Override

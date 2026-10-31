@@ -70,17 +70,23 @@ public final class QueryCompilerEngine {
 		Objects.requireNonNull(snapshot, "snapshot must not be null");
 		Objects.requireNonNull(arena, "arena must not be null");
 
-		// 1. Fast path: check compiled plan cache
-		CompiledQuery cached = queryObject.getCompiledPlan(snapshot);
-		if (cached != null) {
-			planCacheMetrics.recordHit();
-			return cached;
+		CompilerOptions opts = options != null ? options : CompilerOptions.DEFAULT;
+
+		// 1. Fast path: check compiled plan cache (when standard optimizations are at
+		// default mask)
+		boolean isDefaultCacheable = opts.effectiveDisabledPassesMask() == CompilerOptions.DEFAULT
+				.effectiveDisabledPassesMask();
+		if (isDefaultCacheable) {
+			CompiledQuery cached = queryObject.getCompiledPlan(snapshot);
+			if (cached != null) {
+				planCacheMetrics.recordHit();
+				return cached;
+			}
 		}
 
 		planCacheMetrics.recordMiss();
 
 		// 2. Slow path: run Stage 2 optimization passes
-		CompilerOptions opts = options != null ? options : CompilerOptions.DEFAULT;
 		PassTracer tracer = new PassTracer(opts);
 		CompilerContext ctx = new CompilerContext(snapshot, opts, tracer);
 
@@ -101,8 +107,10 @@ public final class QueryCompilerEngine {
 			long duration = System.nanoTime() - start;
 			compilerMetrics.recordStage2(duration);
 
-			queryObject.cacheCompiledPlan(snapshot, compiled);
-			planCacheMetrics.setPlanCount(planCacheMetrics.activePlans() + 1);
+			if (isDefaultCacheable) {
+				queryObject.cacheCompiledPlan(snapshot, compiled);
+				planCacheMetrics.setPlanCount(planCacheMetrics.activePlans() + 1);
+			}
 
 			return compiled;
 		} catch (Exception e) {

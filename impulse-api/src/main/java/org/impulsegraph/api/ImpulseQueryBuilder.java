@@ -200,6 +200,79 @@ public class ImpulseQueryBuilder<R> {
 	}
 
 	/**
+	 * Walk both outgoing (CSR) and incoming (CSC) edges over the relation name.
+	 */
+	public ImpulseQueryBuilder<R> walkBoth(String relationName) {
+		Objects.requireNonNull(relationName, "relationName must not be null");
+		steps.add(ScmSetOp.union(ScmWalk.forward(relationName), ScmWalk.reverse(relationName)));
+		return this;
+	}
+
+	/**
+	 * Walk outgoing edges across the union of multiple relation names.
+	 */
+	public ImpulseQueryBuilder<R> walkOutUnion(String... relationNames) {
+		Objects.requireNonNull(relationNames, "relationNames must not be null");
+		if (relationNames.length == 0) {
+			return this;
+		}
+		ImpScmNode acc = ScmWalk.forward(relationNames[0]);
+		for (int i = 1; i < relationNames.length; i++) {
+			acc = ScmSetOp.union(acc, ScmWalk.forward(relationNames[i]));
+		}
+		steps.add(acc);
+		return this;
+	}
+
+	/**
+	 * Walk incoming edges across the union of multiple relation names.
+	 */
+	public ImpulseQueryBuilder<R> walkInUnion(String... relationNames) {
+		Objects.requireNonNull(relationNames, "relationNames must not be null");
+		if (relationNames.length == 0) {
+			return this;
+		}
+		ImpScmNode acc = ScmWalk.reverse(relationNames[0]);
+		for (int i = 1; i < relationNames.length; i++) {
+			acc = ScmSetOp.union(acc, ScmWalk.reverse(relationNames[i]));
+		}
+		steps.add(acc);
+		return this;
+	}
+
+	/**
+	 * Walk both outgoing and incoming edges across the union of multiple relation
+	 * names.
+	 */
+	public ImpulseQueryBuilder<R> walkBothUnion(String... relationNames) {
+		Objects.requireNonNull(relationNames, "relationNames must not be null");
+		if (relationNames.length == 0) {
+			return this;
+		}
+		ImpScmNode acc = ScmSetOp.union(ScmWalk.forward(relationNames[0]), ScmWalk.reverse(relationNames[0]));
+		for (int i = 1; i < relationNames.length; i++) {
+			ImpScmNode bothI = ScmSetOp.union(ScmWalk.forward(relationNames[i]), ScmWalk.reverse(relationNames[i]));
+			acc = ScmSetOp.union(acc, bothI);
+		}
+		steps.add(acc);
+		return this;
+	}
+
+	/**
+	 * Append a vector rerank step (`OP_VECTOR_RERANK_DOT`) over the active
+	 * frontier.
+	 */
+	public ImpulseQueryBuilder<R> vectorRerank(float[] queryVector, int attrId, int metric) {
+		Objects.requireNonNull(queryVector, "queryVector must not be null");
+		List<Float> qList = new ArrayList<>(queryVector.length);
+		for (float v : queryVector) {
+			qList.add(v);
+		}
+		steps.add(ScmVectorRerankDot.fromInlineVector(qList, attrId, metric));
+		return this;
+	}
+
+	/**
 	 * Add a reverse (CSC) edge walk step with an embedded CEL expression.
 	 *
 	 * @param relationName

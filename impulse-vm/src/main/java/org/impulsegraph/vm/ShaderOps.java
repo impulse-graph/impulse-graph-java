@@ -31,6 +31,11 @@ public class ShaderOps {
 		regs[sDst] = (regs[low] == regs[high]) ? 1.0f : 0.0f;
 	}
 
+	public static void commitTarget(VmQueryContext ctx, MemorySegment state, int src, int tgt, int eIdx, float[] regs,
+			ImpulseBitSet outBs) {
+		outBs.set(tgt);
+	}
+
 	public static void filter(int sDst, VmQueryContext ctx, MemorySegment state, int src, int tgt, int eIdx,
 			float[] regs, ImpulseBitSet outBs) {
 		if (regs[sDst] == 0.0f) {
@@ -40,6 +45,11 @@ public class ShaderOps {
 
 	public static void reduce(int sDst, int globalReg, int monoid, VmQueryContext ctx, MemorySegment state, int src,
 			int tgt, int eIdx, float[] regs, ImpulseBitSet outBs) {
+		reduce(sDst, globalReg, monoid, null, ctx, state, src, tgt, eIdx, regs, outBs);
+	}
+
+	public static void reduce(int sDst, int globalReg, int monoid, java.util.Set<Long> ignored, VmQueryContext ctx,
+			MemorySegment state, int src, int tgt, int eIdx, float[] regs, ImpulseBitSet outBs) {
 		float val = regs[sDst];
 		byte rType = VmHandlers.getRegisterType(state, globalReg);
 		int handle;
@@ -48,20 +58,67 @@ public class ShaderOps {
 			handle = (int) VmHandlers.getRegisterValue(state, globalReg);
 			vec = ctx.getFloatVector(handle);
 		} else {
-			// simplified for demo
-			vec = new float[65536];
-			handle = ctx.registerFloatVector(vec);
+			handle = ctx.acquireFloatVector(65536);
+			vec = ctx.getFloatVector(handle);
 			VmHandlers.setRegister(state, globalReg, handle, VmRegisterType.TYPE_FLOAT_VECTOR);
 		}
-		if (vec != null && tgt < vec.length) {
+		if (vec != null && tgt >= 0 && tgt < vec.length) {
+			long[] touched = ctx.currentStreamTouchedMask();
+			long bit = 1L << (globalReg & 63);
+			boolean firstTouch = (tgt < touched.length) && ((touched[tgt] & bit) == 0L);
+			if (tgt < touched.length) {
+				touched[tgt] |= bit;
+			}
 			float current = vec[tgt];
 			float next = current;
 			switch (monoid) {
 				case 0 -> next = current + val;
-				case 1 -> next = Math.max(current, val);
-				case 2 -> next = Math.min(current, val);
+				case 1 -> next = firstTouch ? val : Math.max(current, val);
+				case 2 -> next = firstTouch ? val : Math.min(current, val);
 			}
 			vec[tgt] = next;
+		}
+	}
+
+	public static void reduceArgMin(int sDst, int valReg, int argReg, java.util.Set<Long> ignored, VmQueryContext ctx,
+			MemorySegment state, int src, int tgt, int eIdx, float[] regs, ImpulseBitSet outBs) {
+		reduceArgExtremum(sDst, valReg, argReg, true, ctx, state, src, tgt, regs);
+	}
+
+	public static void reduceArgMax(int sDst, int valReg, int argReg, java.util.Set<Long> ignored, VmQueryContext ctx,
+			MemorySegment state, int src, int tgt, int eIdx, float[] regs, ImpulseBitSet outBs) {
+		reduceArgExtremum(sDst, valReg, argReg, false, ctx, state, src, tgt, regs);
+	}
+
+	private static void reduceArgExtremum(int sDst, int valReg, int argReg, boolean isMin, VmQueryContext ctx,
+			MemorySegment state, int src, int tgt, float[] regs) {
+		float val = regs[sDst];
+		byte rType = VmHandlers.getRegisterType(state, valReg);
+		int handle;
+		float[] vec;
+		if (rType == VmRegisterType.TYPE_FLOAT_VECTOR) {
+			handle = (int) VmHandlers.getRegisterValue(state, valReg);
+			vec = ctx.getFloatVector(handle);
+		} else {
+			handle = ctx.acquireFloatVector(65536);
+			vec = ctx.getFloatVector(handle);
+			VmHandlers.setRegister(state, valReg, handle, VmRegisterType.TYPE_FLOAT_VECTOR);
+		}
+		if (vec != null && tgt >= 0 && tgt < vec.length) {
+			long[] touched = ctx.currentStreamTouchedMask();
+			long bit = 1L << (valReg & 63);
+			boolean firstTouch = (tgt < touched.length) && ((touched[tgt] & bit) == 0L);
+			float current = vec[tgt];
+			boolean isBetter = firstTouch || (isMin ? (val < current) : (val > current));
+			if (isBetter) {
+				if (tgt < touched.length) {
+					touched[tgt] |= bit;
+				}
+				vec[tgt] = val;
+				if (argReg < 64) {
+					VmHandlers.setRegister(state, argReg, src, VmRegisterType.TYPE_NODE_ID);
+				}
+			}
 		}
 	}
 

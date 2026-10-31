@@ -155,7 +155,7 @@ public class ImpulseVmInterpreterComprehensiveTest {
 			INSTR_DST_REG_HANDLE.set(unknownSeg, 0L, (short) 0);
 			INSTR_PAYLOAD_HANDLE.set(unknownSeg, 0L, 0);
 			assertThatThrownBy(() -> ImpulseVmInterpreter.execute(unknownSeg, 1, snap, 1L, arena, List.of()))
-					.isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Unknown opcode");
+					.isInstanceOf(IllegalArgumentException.class).hasMessageContaining("IMPULSE_VM_ERR_INVALID_OPCODE");
 		}
 	}
 
@@ -268,9 +268,9 @@ public class ImpulseVmInterpreterComprehensiveTest {
 						new VmHandlers.Instruction(OP_VEC_MATH_UNARY, (byte) 0, (short) 11, (funcId << 8) | 2));
 			}
 
-			// Invalid register type check
+			// Invalid register type check (R5 has TYPE_INT64)
 			assertThatThrownBy(() -> VmHandlers.handleVecMathUnary(state, ctx,
-					new VmHandlers.Instruction(OP_VEC_MATH_UNARY, (byte) 0, (short) 12, 3)))
+					new VmHandlers.Instruction(OP_VEC_MATH_UNARY, (byte) 0, (short) 12, 5)))
 					.isInstanceOf(IllegalArgumentException.class);
 
 			int[] binaryFuncs = {0, 1, 2, 3, 4, 5, 6, 22, 35, 36, 38, 51, 100, 101, 102, 103, 999};

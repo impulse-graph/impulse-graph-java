@@ -41,7 +41,15 @@ public final class RegisterAllocationPass implements CompilerPass {
 
 		if (ast instanceof ScmProgram prog) {
 			for (ImpScmNode step : prog.steps()) {
-				if (step instanceof ScmWalk || step instanceof ScmWalk2Hop || step instanceof ScmVectorFilter) {
+				if (step instanceof ScmLaneInitSeeds || step instanceof ScmLaneInitGroups
+						|| step instanceof ScmVectorAnnSearch) {
+					srcMap.put(step, currentReg);
+					dstMap.put(step, currentReg);
+				} else if (step instanceof ScmWalk || step instanceof ScmWalk2Hop || step instanceof ScmVectorFilter
+						|| step instanceof ScmLaneWalk || step instanceof ScmLanePruneMask
+						|| step instanceof ScmLaneFilterQuorum || step instanceof ScmLaneReduceAnd
+						|| step instanceof ScmLaneReduceAttr || step instanceof ScmLaneSetCover
+						|| step instanceof ScmVectorRerankDot || step instanceof ScmSetOp) {
 					short src = currentReg;
 					// Ping-pong between register 0 and 1 for linear traversal chains
 					short dst = (short) (1 - currentReg);
@@ -49,7 +57,8 @@ public final class RegisterAllocationPass implements CompilerPass {
 					dstMap.put(step, dst);
 					currentReg = dst;
 					maxReg = Math.max(maxReg, 2);
-				} else if (step instanceof ScmReduce || step instanceof ScmCollect) {
+				} else if (step instanceof ScmReduce || step instanceof ScmCollect || step instanceof ScmLaneSetEdgeMask
+						|| step instanceof ScmFixpoint) {
 					srcMap.put(step, currentReg);
 					dstMap.put(step, currentReg);
 				} else {
