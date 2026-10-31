@@ -441,14 +441,10 @@ public class JavaVmJsonRunner {
 									byte t2 = VmHandlers.getRegisterType(state, 14);
 									byte t3 = VmHandlers.getRegisterType(state, 15);
 
-									VmHandlers.setRegister(state, 0, arg0,
-											t0 != VmRegisterType.TYPE_NULL ? t0 : VmRegisterType.TYPE_INT64);
-									VmHandlers.setRegister(state, 1, arg1,
-											t1 != VmRegisterType.TYPE_NULL ? t1 : VmRegisterType.TYPE_INT64);
-									VmHandlers.setRegister(state, 2, arg2,
-											t2 != VmRegisterType.TYPE_NULL ? t2 : VmRegisterType.TYPE_INT64);
-									VmHandlers.setRegister(state, 3, arg3,
-											t3 != VmRegisterType.TYPE_NULL ? t3 : VmRegisterType.TYPE_INT64);
+									VmHandlers.setRegister(state, 0, arg0, t0);
+									VmHandlers.setRegister(state, 1, arg1, t1);
+									VmHandlers.setRegister(state, 2, arg2, t2);
+									VmHandlers.setRegister(state, 3, arg3, t3);
 
 									if (target >= 0 && target < instructionCount)
 										pc = target;
@@ -759,6 +755,15 @@ public class JavaVmJsonRunner {
 				for (int r = 0; r < 64; r++) {
 					long val = VmHandlers.getRegisterValue(state, r);
 					System.out.print("\"R" + r + "\":" + val);
+					if (r < 63)
+						System.out.print(",");
+				}
+				System.out.print("},");
+
+				System.out.print("\"register_types\":{");
+				for (int r = 0; r < 64; r++) {
+					byte t = VmHandlers.getRegisterType(state, r);
+					System.out.print("\"R" + r + "\":" + (t & 0xFF));
 					if (r < 63)
 						System.out.print(",");
 				}

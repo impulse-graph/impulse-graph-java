@@ -8,7 +8,8 @@ import org.impulsegraph.api.bitset.ImpulseBitSet;
 
 /**
  * Deterministic VM Execution State & Context Hash (ICTX v1) for cross-language
- * polyglot differential testing. Aligned bit-for-bit with impulse_vm_state_hash in C++.
+ * polyglot differential testing. Aligned bit-for-bit with impulse_vm_state_hash
+ * in C++.
  */
 public final class VmContextHash {
 
@@ -136,11 +137,12 @@ public final class VmContextHash {
 		long flags = (state != null) ? (long) VmStateLayout.FLAGS_HANDLE.get(state, 0L) : 0L;
 		hs.writeU64LE(flags);
 
-		// 3. Subroutine call stack: call_stack_depth (uint32_t), call_stack[8]
+		// 3. Subroutine call stack: call_stack_depth (uint32_t), 8 slots with inactive
+		// zeroed
 		int depth = (state != null) ? (int) VmStateLayout.CALL_STACK_DEPTH_HANDLE.get(state, 0L) : 0;
 		hs.writeU32LE(Integer.toUnsignedLong(depth));
 		for (long i = 0; i < 8; i++) {
-			int cs = (state != null) ? (int) VmStateLayout.CALL_STACK_ELEMENT_HANDLE.get(state, 0L, i) : 0;
+			int cs = (state != null && i < depth) ? (int) VmStateLayout.CALL_STACK_ELEMENT_HANDLE.get(state, 0L, i) : 0;
 			hs.writeU32LE(Integer.toUnsignedLong(cs));
 		}
 

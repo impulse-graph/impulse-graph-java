@@ -29,7 +29,7 @@ public class MockImpulseGraphSnapshot implements ImpulseGraphSnapshot {
 			int maxNodes = 0;
 			for (RelationSnapshot rel : this.relations.values()) {
 				if (rel != null) {
-					maxNodes = Math.max(maxNodes, rel.getNodeCount());
+					maxNodes = Math.max(maxNodes, relationMaxNodes(rel));
 				}
 				if (i < arr.length) {
 					arr[i++] = rel;
@@ -45,7 +45,7 @@ public class MockImpulseGraphSnapshot implements ImpulseGraphSnapshot {
 				}
 			}
 			this.relationsById = arr;
-			this.maxNodeCount = maxNodes > 0 ? maxNodes : 1024 * 1024;
+			this.maxNodeCount = maxNodes;
 		}
 	}
 
@@ -73,11 +73,23 @@ public class MockImpulseGraphSnapshot implements ImpulseGraphSnapshot {
 				nextArr[1] = rel;
 			}
 		}
-		int nextMaxNodes = Math.max(this.maxNodeCount, 65536);
-		if (rel != null && rel.getNodeCount() > nextMaxNodes) {
-			nextMaxNodes = rel.getNodeCount();
-		}
+		int relMax = relationMaxNodes(rel);
+		int nextMaxNodes = this.relations.isEmpty() ? relMax : Math.max(this.maxNodeCount, relMax);
 		return new MockImpulseGraphSnapshot(nextMap, nextArr, nextMaxNodes);
+	}
+
+	private static int relationMaxNodes(RelationSnapshot rel) {
+		if (rel == null) {
+			return 0;
+		}
+		int max = rel.getNodeCount();
+		if (rel.getCscRowOffsetsSegment() != null) {
+			int cscNodes = Math.max(0, (int) (rel.getCscRowOffsetsSegment().byteSize() / 4L) - 1);
+			if (cscNodes > max) {
+				max = cscNodes;
+			}
+		}
+		return max;
 	}
 
 	private static int parseNonNegativeSlot(String s) {
