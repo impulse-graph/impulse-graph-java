@@ -55,11 +55,13 @@ public final class VmMultiLaneHandlers {
 				best = Math.max(best, rel0.getNodeCount());
 			}
 		}
-		Object attr0 = ctx.getMockAttribute(0);
-		if (attr0 instanceof int[] ia) {
-			best = Math.max(best, ia.length);
-		} else if (attr0 instanceof float[] fa) {
-			best = Math.max(best, fa.length);
+		if (best == 0) {
+			Object attr0 = ctx.getMockAttribute(0);
+			if (attr0 instanceof int[] ia) {
+				best = Math.max(best, ia.length);
+			} else if (attr0 instanceof float[] fa) {
+				best = Math.max(best, fa.length);
+			}
 		}
 		if (best > 0) {
 			return Math.max(best, minNeeded);

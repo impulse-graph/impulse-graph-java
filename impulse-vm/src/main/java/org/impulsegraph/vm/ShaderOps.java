@@ -58,7 +58,10 @@ public class ShaderOps {
 			handle = (int) VmHandlers.getRegisterValue(state, globalReg);
 			vec = ctx.getFloatVector(handle);
 		} else {
-			handle = ctx.acquireFloatVector(65536);
+			int size = (ctx.getSnapshot() != null && ctx.getSnapshot().getMaxNodeCount() > 0)
+					? ctx.getSnapshot().getMaxNodeCount()
+					: 65536;
+			handle = ctx.acquireFloatVector(size);
 			vec = ctx.getFloatVector(handle);
 			VmHandlers.setRegister(state, globalReg, handle, VmRegisterType.TYPE_FLOAT_VECTOR);
 		}
@@ -100,7 +103,10 @@ public class ShaderOps {
 			handle = (int) VmHandlers.getRegisterValue(state, valReg);
 			vec = ctx.getFloatVector(handle);
 		} else {
-			handle = ctx.acquireFloatVector(65536);
+			int size = (ctx.getSnapshot() != null && ctx.getSnapshot().getMaxNodeCount() > 0)
+					? ctx.getSnapshot().getMaxNodeCount()
+					: 65536;
+			handle = ctx.acquireFloatVector(size);
 			vec = ctx.getFloatVector(handle);
 			VmHandlers.setRegister(state, valReg, handle, VmRegisterType.TYPE_FLOAT_VECTOR);
 		}

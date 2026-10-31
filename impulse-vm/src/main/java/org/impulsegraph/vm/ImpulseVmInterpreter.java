@@ -296,10 +296,15 @@ public final class ImpulseVmInterpreter {
 						long arg2 = VmHandlers.getRegisterValue(state, 14);
 						long arg3 = VmHandlers.getRegisterValue(state, 15);
 
-						VmHandlers.setRegister(state, 0, arg0, TYPE_INT64);
-						VmHandlers.setRegister(state, 1, arg1, TYPE_INT64);
-						VmHandlers.setRegister(state, 2, arg2, TYPE_INT64);
-						VmHandlers.setRegister(state, 3, arg3, TYPE_INT64);
+						byte t0 = VmHandlers.getRegisterType(state, 12);
+						byte t1 = VmHandlers.getRegisterType(state, 13);
+						byte t2 = VmHandlers.getRegisterType(state, 14);
+						byte t3 = VmHandlers.getRegisterType(state, 15);
+
+						VmHandlers.setRegister(state, 0, arg0, t0);
+						VmHandlers.setRegister(state, 1, arg1, t1);
+						VmHandlers.setRegister(state, 2, arg2, t2);
+						VmHandlers.setRegister(state, 3, arg3, t3);
 
 						if (target >= 0 && target < instructionCount)
 							pc = target;

@@ -1372,6 +1372,7 @@ public final class VmHandlers {
 		if (depth <= 0)
 			return -1;
 		int returnPc = (int) CALL_STACK_ELEMENT_HANDLE.get(state, 0L, (long) (depth - 1));
+		CALL_STACK_ELEMENT_HANDLE.set(state, 0L, (long) (depth - 1), 0);
 		CALL_STACK_DEPTH_HANDLE.set(state, 0L, depth - 1);
 		return returnPc;
 	}
@@ -1809,12 +1810,17 @@ public final class VmHandlers {
 	}
 
 	public static void handleNodeFilter(MemorySegment state, VmQueryContext ctx, Instruction instr, Object input) {
-		int srcReg = instr.payload() & 0xFFFF;
+		int srcReg = instr.payload() & 0xFF;
+		int valReg = (instr.payload() >> 8) & 0xFF;
+		int attrId = (instr.payload() >> 16) & 0xFF;
+		int relId = (instr.payload() >> 24) & 0xFF;
 		int dstReg = instr.dstReg();
 		validateReg(dstReg);
 		validateReg(srcReg);
+		validateReg(valReg);
 		byte type = getRegisterType(state, srcReg);
 		long val = getRegisterValue(state, srcReg);
+		long matchVal = getRegisterValue(state, valReg);
 
 		if ((instr.flags() & FLAG_INPUT_SEED) != 0 && input != null) {
 			if (input instanceof Number n) {
@@ -1834,24 +1840,35 @@ public final class VmHandlers {
 		ImpulseBitSet outBs = ctx.getBitset(outHandle);
 		outBs.clear();
 
+		Object mock = ctx.getMockAttribute(attrId);
+		java.util.function.IntPredicate matcher = (u) -> {
+			if (mock instanceof int[] intArr) {
+				return u >= 0 && u < intArr.length && intArr[u] == (int) matchVal;
+			}
+			if (mock instanceof float[] floatArr) {
+				float expF = Float.intBitsToFloat((int) matchVal);
+				return u >= 0 && u < floatArr.length && floatArr[u] == expF;
+			}
+			return true;
+		};
+
 		if (type == TYPE_BITSET_HANDLE) {
 			int handle = (int) val;
 			ImpulseBitSet inBs = ctx.getBitset(handle);
 			if (inBs != null) {
-				int cmpReg = (instr.payload() >> 16) & 0xFFFF;
-				if (cmpReg < 64 && getRegisterType(state, cmpReg) != TYPE_NULL && inBs.cardinality() > 1) {
-					int first = inBs.nextSetBit(0);
-					int second = inBs.nextSetBit(first + 1);
-					outBs.set(second >= 0 ? second : first);
-				} else {
-					outBs.or(inBs);
+				for (int u = inBs.nextSetBit(0); u >= 0; u = inBs.nextSetBit(u + 1)) {
+					if (matcher.test(u)) {
+						outBs.set(u);
+					}
 				}
 			}
 		} else if (type == TYPE_NODE_ID || type == TYPE_INT64) {
-			outBs.set((int) val);
-		} else {
-			outBs.set(0);
+			int u = (int) val;
+			if (matcher.test(u)) {
+				outBs.set(u);
+			}
 		}
+
 		setRegister(state, dstReg, outHandle, TYPE_BITSET_HANDLE);
 		setFlag(state, FLAG_ZF, outBs.isEmpty());
 	}
@@ -2523,8 +2540,14 @@ public final class VmHandlers {
 		int attrId = instr.dstReg();
 		int srcReg = instr.payload() & 0xFFFF;
 		int handle = (int) getRegisterValue(state, srcReg);
-		float[] arr = ctx.getFloatVector(handle);
-		ctx.setMockAttribute(attrId, arr);
+		byte type = getRegisterType(state, srcReg);
+		if (type == TYPE_FLOAT_VECTOR) {
+			float[] arr = ctx.getFloatVector(handle);
+			ctx.setMockAttribute(attrId, arr);
+		} else if (type == TYPE_NODE_VECTOR) {
+			int[] arr = ctx.getNodeVector(handle);
+			ctx.setMockAttribute(attrId, arr);
+		}
 	}
 
 	public static void handleInitMockGraph(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -3080,12 +3103,10 @@ public final class VmHandlers {
 			double val = Double.longBitsToDouble(getRegisterValue(state, src));
 			double res = applyMathUnary(funcId, val);
 			setRegister(state, dst, Double.doubleToRawLongBits(res), TYPE_DOUBLE);
-			setFlag(state, FLAG_ZF, res == 0.0);
 		} else if (type == TYPE_FLOAT) {
 			float val = Float.intBitsToFloat((int) getRegisterValue(state, src));
 			float res = (float) applyMathUnary(funcId, val);
 			setRegister(state, dst, Integer.toUnsignedLong(Float.floatToRawIntBits(res)), TYPE_FLOAT);
-			setFlag(state, FLAG_ZF, res == 0.0f);
 		} else if (type == TYPE_DOUBLE_VECTOR) {
 			double[] v = ctx.getDoubleVector((int) getRegisterValue(state, src));
 			int len = (v != null) ? v.length : 1024;
@@ -3096,7 +3117,6 @@ public final class VmHandlers {
 				out[i] = applyMathUnary(funcId, val);
 			}
 			setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
-			setFlag(state, FLAG_ZF, false);
 		} else if (type == TYPE_FLOAT_VECTOR) {
 			float[] v = ctx.getFloatVector((int) getRegisterValue(state, src));
 			int len = (v != null) ? v.length : 1024;
@@ -3107,7 +3127,6 @@ public final class VmHandlers {
 				out[i] = (float) applyMathUnary(funcId, val);
 			}
 			setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
-			setFlag(state, FLAG_ZF, false);
 		} else {
 			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
 		}
@@ -4377,7 +4396,7 @@ public final class VmHandlers {
 								handle = (int) getRegisterValue(state, globalReg);
 								vec = ctx.getFloatVector(handle);
 							} else {
-								int size = Math.max(rel.getNodeCount(), 65536);
+								int size = (rel != null && rel.getNodeCount() > 0) ? rel.getNodeCount() : 65536;
 								handle = ctx.acquireFloatVector(size);
 								vec = ctx.getFloatVector(handle);
 								setRegister(state, globalReg, handle, TYPE_FLOAT_VECTOR);
@@ -4412,7 +4431,7 @@ public final class VmHandlers {
 								handle = (int) getRegisterValue(state, valReg);
 								vec = ctx.getFloatVector(handle);
 							} else {
-								int size = Math.max(rel.getNodeCount(), 65536);
+								int size = (rel != null && rel.getNodeCount() > 0) ? rel.getNodeCount() : 65536;
 								handle = ctx.acquireFloatVector(size);
 								vec = ctx.getFloatVector(handle);
 								setRegister(state, valReg, handle, TYPE_FLOAT_VECTOR);

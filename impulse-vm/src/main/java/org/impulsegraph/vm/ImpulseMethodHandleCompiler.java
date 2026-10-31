@@ -452,14 +452,10 @@ public final class ImpulseMethodHandleCompiler {
 					byte t2 = VmHandlers.getRegisterType(state, 14);
 					byte t3 = VmHandlers.getRegisterType(state, 15);
 
-					VmHandlers.setRegister(state, 0, arg0,
-							t0 != VmRegisterType.TYPE_NULL ? t0 : VmRegisterType.TYPE_INT64);
-					VmHandlers.setRegister(state, 1, arg1,
-							t1 != VmRegisterType.TYPE_NULL ? t1 : VmRegisterType.TYPE_INT64);
-					VmHandlers.setRegister(state, 2, arg2,
-							t2 != VmRegisterType.TYPE_NULL ? t2 : VmRegisterType.TYPE_INT64);
-					VmHandlers.setRegister(state, 3, arg3,
-							t3 != VmRegisterType.TYPE_NULL ? t3 : VmRegisterType.TYPE_INT64);
+					VmHandlers.setRegister(state, 0, arg0, t0);
+					VmHandlers.setRegister(state, 1, arg1, t1);
+					VmHandlers.setRegister(state, 2, arg2, t2);
+					VmHandlers.setRegister(state, 3, arg3, t3);
 
 					if (target >= 0 && target < instructionCount)
 						nextPc = target;
