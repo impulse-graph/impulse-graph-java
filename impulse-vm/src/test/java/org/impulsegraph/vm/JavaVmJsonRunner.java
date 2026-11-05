@@ -57,7 +57,8 @@ public class JavaVmJsonRunner {
 					ImpulseGraphSnapshot graph = new MockImpulseGraphSnapshot(Map.of("connectedTo", rel, "rel_0", rel));
 					ctx.setSnapshot(graph);
 				} else if (!impasFile.getFileName().toString().contains("null_snapshot")
-						&& !impasFile.getFileName().toString().contains("cov_0x24_mask_ops_pos")) {
+						&& !impasFile.getFileName().toString().contains("cov_0x24_mask_ops_pos")
+						&& !impasFile.getFileName().toString().contains("tc_mask_blend")) {
 					int[] offsets = new int[]{0, 2, 3, 3};
 					int[] targets = new int[]{1, 2, 2};
 					MockRelationSnapshot rel = new MockRelationSnapshot(arena, 3, 3, offsets, targets);
