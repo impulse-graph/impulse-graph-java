@@ -1178,15 +1178,20 @@ public final class VmHandlers {
 				|| tag2 == VmRegType.T_UINT64_VECTOR) {
 			int tmp1Handle = ctx.acquireBitset();
 			int tmp2Handle = ctx.acquireBitset();
-			ImpulseBitSet tmp1 = ctx.getBitset(tmp1Handle);
-			ImpulseBitSet tmp2 = ctx.getBitset(tmp2Handle);
-			tmp1.clear();
-			tmp2.clear();
-			addRegisterNodesToBitSet(state, ctx, srcReg1, tmp1);
-			addRegisterNodesToBitSet(state, ctx, srcReg2, tmp2);
-			tmp1.and(tmp2);
-			outBs.clear();
-			outBs.or(tmp1);
+			try {
+				ImpulseBitSet tmp1 = ctx.getBitset(tmp1Handle);
+				ImpulseBitSet tmp2 = ctx.getBitset(tmp2Handle);
+				tmp1.clear();
+				tmp2.clear();
+				addRegisterNodesToBitSet(state, ctx, srcReg1, tmp1);
+				addRegisterNodesToBitSet(state, ctx, srcReg2, tmp2);
+				tmp1.and(tmp2);
+				outBs.clear();
+				outBs.or(tmp1);
+			} finally {
+				ctx.releaseBitset(tmp1Handle);
+				ctx.releaseBitset(tmp2Handle);
+			}
 		} else if (dstReg == srcReg1 && type1 == TYPE_BITSET_HANDLE) {
 			if (type2 == TYPE_BITSET_HANDLE) {
 				ImpulseBitSet bs2 = ctx.getBitset((int) getRegisterValue(state, srcReg2));
@@ -1271,15 +1276,20 @@ public final class VmHandlers {
 				|| tag2 == VmRegType.T_UINT64_VECTOR) {
 			int tmp1Handle = ctx.acquireBitset();
 			int tmp2Handle = ctx.acquireBitset();
-			ImpulseBitSet tmp1 = ctx.getBitset(tmp1Handle);
-			ImpulseBitSet tmp2 = ctx.getBitset(tmp2Handle);
-			tmp1.clear();
-			tmp2.clear();
-			addRegisterNodesToBitSet(state, ctx, srcReg1, tmp1);
-			addRegisterNodesToBitSet(state, ctx, srcReg2, tmp2);
-			tmp1.andNot(tmp2);
-			outBs.clear();
-			outBs.or(tmp1);
+			try {
+				ImpulseBitSet tmp1 = ctx.getBitset(tmp1Handle);
+				ImpulseBitSet tmp2 = ctx.getBitset(tmp2Handle);
+				tmp1.clear();
+				tmp2.clear();
+				addRegisterNodesToBitSet(state, ctx, srcReg1, tmp1);
+				addRegisterNodesToBitSet(state, ctx, srcReg2, tmp2);
+				tmp1.andNot(tmp2);
+				outBs.clear();
+				outBs.or(tmp1);
+			} finally {
+				ctx.releaseBitset(tmp1Handle);
+				ctx.releaseBitset(tmp2Handle);
+			}
 		} else if (dstReg == srcReg1 && type1 == TYPE_BITSET_HANDLE) {
 			if (type2 == TYPE_BITSET_HANDLE) {
 				ImpulseBitSet bs2 = ctx.getBitset((int) getRegisterValue(state, srcReg2));
@@ -1349,10 +1359,14 @@ public final class VmHandlers {
 			}
 			case T_NODE_VECTOR, T_UINT64_VECTOR -> {
 				int tmpHandle = ctx.acquireBitset();
-				ImpulseBitSet tmp = ctx.getBitset(tmpHandle);
-				tmp.clear();
-				addRegisterNodesToBitSet(state, ctx, srcReg, tmp);
-				yield tmp.cardinality();
+				try {
+					ImpulseBitSet tmp = ctx.getBitset(tmpHandle);
+					tmp.clear();
+					addRegisterNodesToBitSet(state, ctx, srcReg, tmp);
+					yield tmp.cardinality();
+				} finally {
+					ctx.releaseBitset(tmpHandle);
+				}
 			}
 			case T_RELATION_ID, T_CSR_SPAN, T_BOOLEAN, T_FLOAT, T_DOUBLE, T_VALUE_MAP, T_STRING_VECTOR, T_FLOAT_VECTOR,
 					T_DOUBLE_VECTOR, T_FRONTIER_STATE, T_LANE_FRONTIER ->
@@ -1597,6 +1611,9 @@ public final class VmHandlers {
 
 	public static void handleFloatVectorScale(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int reg = instr.dstReg();
+		if (getRegisterType(state, reg) != TYPE_FLOAT_VECTOR) {
+			return;
+		}
 		float alpha = Float.intBitsToFloat(instr.payload());
 		int handle = (int) getRegisterValue(state, reg);
 		float[] vec = ctx.getFloatVector(handle);
@@ -2043,7 +2060,7 @@ public final class VmHandlers {
 				}
 			}
 		} else {
-			bs.set(0);
+			throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_REGISTER");
 		}
 		setRegister(state, dst, handle, TYPE_BITSET_HANDLE);
 		setFlag(state, FLAG_ZF, bs.isEmpty());
@@ -3248,13 +3265,11 @@ public final class VmHandlers {
 			float b = Float.intBitsToFloat((int) getRegisterValue(state, src2));
 			float res = (float) applyMathBinary(funcId, a, b);
 			setRegister(state, dst, Integer.toUnsignedLong(Float.floatToRawIntBits(res)), TYPE_FLOAT);
-			setFlag(state, FLAG_ZF, res == 0.0f);
 		} else if (type1 == TYPE_DOUBLE && type2 == TYPE_DOUBLE) {
 			double a = Double.longBitsToDouble(getRegisterValue(state, src1));
 			double b = Double.longBitsToDouble(getRegisterValue(state, src2));
 			double res = applyMathBinary(funcId, a, b);
 			setRegister(state, dst, Double.doubleToRawLongBits(res), TYPE_DOUBLE);
-			setFlag(state, FLAG_ZF, res == 0.0);
 		} else if ((type1 == TYPE_DOUBLE_VECTOR || type2 == TYPE_DOUBLE_VECTOR)
 				&& (type1 == TYPE_DOUBLE_VECTOR || type1 == TYPE_DOUBLE || type1 == TYPE_FLOAT)
 				&& (type2 == TYPE_DOUBLE_VECTOR || type2 == TYPE_DOUBLE || type2 == TYPE_FLOAT)) {
@@ -3287,7 +3302,6 @@ public final class VmHandlers {
 				out[i] = applyMathBinary(funcId, a, b);
 			}
 			setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
-			setFlag(state, FLAG_ZF, false);
 		} else if ((type1 == TYPE_FLOAT_VECTOR || type2 == TYPE_FLOAT_VECTOR)
 				&& (type1 == TYPE_FLOAT_VECTOR || type1 == TYPE_FLOAT)
 				&& (type2 == TYPE_FLOAT_VECTOR || type2 == TYPE_FLOAT)) {
@@ -3316,7 +3330,6 @@ public final class VmHandlers {
 				out[i] = (float) applyMathBinary(funcId, a, b);
 			}
 			setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
-			setFlag(state, FLAG_ZF, false);
 		} else {
 			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
 		}
@@ -3410,7 +3423,6 @@ public final class VmHandlers {
 				out[i] = (float) applyMathTernary(funcId, a, b, c);
 			}
 			setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
-			setFlag(state, FLAG_ZF, false);
 		} else {
 			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
 		}
@@ -3761,9 +3773,53 @@ public final class VmHandlers {
 
 	public static void handleLoadColumnVector(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int dst = instr.dstReg();
-		int colIdx = instr.payload() & 0xFFFF;
+		int domainOrRel = instr.payload() & 0xFFFF;
+		int attrIdx = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		handleVectorLoadAttr(state, ctx, instr);
+
+		Object mockObj = ctx.getMockAttribute(attrIdx);
+		if (mockObj == null) {
+			mockObj = ctx.getMockAttribute(domainOrRel);
+		}
+		if (mockObj instanceof float[] farr) {
+			int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
+					? (int) getRegisterValue(state, dst)
+					: ctx.acquireFloatVector(farr.length);
+			ctx.setFloatVectorLength(h, farr.length);
+			float[] vec = ctx.getFloatVector(h);
+			System.arraycopy(farr, 0, vec, 0, farr.length);
+			setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
+			return;
+		}
+
+		if (ctx.getSnapshot() != null) {
+			for (org.impulsegraph.api.RelationSnapshot rel : ctx.getSnapshot().getAllRelationSnapshots().values()) {
+				if (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot csrRel) {
+					String attrName = ctx.getString(attrIdx);
+					int idx = csrRel.findAttributeIndex(attrName);
+					if (idx >= 0 && csrRel.getAttributeSegments().size() > idx) {
+						long count = rel.getEdgeCount() > 0 ? rel.getEdgeCount() : rel.getNodeCount();
+						int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
+								? (int) getRegisterValue(state, dst)
+								: ctx.acquireFloatVector((int) count);
+						ctx.setFloatVectorLength(h, (int) count);
+						float[] vec = ctx.getFloatVector(h);
+						java.lang.foreign.MemorySegment dataSeg = csrRel.getAttributeSegments().get(idx);
+						for (int i = 0; i < count; i++) {
+							vec[i] = dataSeg.get(java.lang.foreign.ValueLayout.JAVA_FLOAT, i * 4L);
+						}
+						setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
+						return;
+					}
+				}
+			}
+		}
+
+		int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
+				? (int) getRegisterValue(state, dst)
+				: ctx.acquireFloatVector(0);
+		ctx.setFloatVectorLength(h, 0);
+		setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
 	}
 
 	public static void handleInitMockAttr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -4093,6 +4149,7 @@ public final class VmHandlers {
 		if (count > 0 && outArr != null) {
 			System.arraycopy(scratch, 0, outArr, 0, count);
 		}
+		ctx.setNodeVectorLength(handle, count);
 		setRegister(state, dst, handle, TYPE_NODE_VECTOR);
 		ctx.setFinalResult(outArr);
 		boolean isEmpty = (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) ? false : (count == 0);
