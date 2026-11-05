@@ -340,7 +340,9 @@ public final class VmHandlers {
 				int[] arr = ctx.getNodeVector((int) srcVal);
 				if (arr != null) {
 					for (int u : arr) {
-						rel.copyTargetsSimd(u, outBs);
+						if (u >= 0) {
+							rel.copyTargetsSimd(u, outBs);
+						}
 					}
 				}
 			} else if (srcType == TYPE_BITSET_HANDLE) {
@@ -595,7 +597,9 @@ public final class VmHandlers {
 				int[] arr = ctx.getNodeVector((int) srcVal);
 				if (arr != null) {
 					for (int v : arr) {
-						rel.copyInTargetsSimd(v, outBs);
+						if (v >= 0) {
+							rel.copyInTargetsSimd(v, outBs);
+						}
 					}
 				}
 			} else if (srcType == TYPE_BITSET_HANDLE) {
@@ -2465,10 +2469,6 @@ public final class VmHandlers {
 	}
 
 	public static void handleLoadInlineArray(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-		if ((instr.flags() & 0x01) != 0) {
-			handleLoadInlineIntArray(state, ctx, instr);
-			return;
-		}
 		MemorySegment inlineSeg = ctx.inlineDataSegment();
 		if (inlineSeg == null) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
@@ -2479,37 +2479,35 @@ public final class VmHandlers {
 		int offset = payload & 0xFFFF;
 		int count = (payload >> 16) & 0xFFFF;
 
-		int handle = ctx.acquireFloatVector(count);
-		float[] vec = ctx.getFloatVector(handle);
+		int hFloat = ctx.acquireFloatVector(count);
+		int hNode = ctx.acquireNodeVector(count);
+		int handle = Math.max(hFloat, hNode);
+		while (ctx.floatVectorCount() <= handle) {
+			ctx.acquireFloatVector(count);
+		}
+		while (ctx.intVectorCount() <= handle) {
+			ctx.acquireNodeVector(count);
+		}
+
+		float[] fvec = ctx.getFloatVector(handle);
+		int[] nvec = ctx.getNodeVector(handle);
+
 		java.lang.foreign.ValueLayout.OfFloat layoutFloat = java.lang.foreign.ValueLayout.JAVA_FLOAT
 				.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN);
-		for (int i = 0; i < count; i++) {
-			vec[i] = inlineSeg.get(layoutFloat, offset + i * 4L);
-		}
-
-		setRegister(state, dst, handle, TYPE_FLOAT_VECTOR);
-	}
-
-	public static void handleLoadInlineIntArray(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-		MemorySegment inlineSeg = ctx.inlineDataSegment();
-		if (inlineSeg == null) {
-			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
-		}
-
-		int dst = instr.dstReg();
-		int payload = instr.payload();
-		int offset = payload & 0xFFFF;
-		int count = (payload >> 16) & 0xFFFF;
-
-		int handle = ctx.acquireNodeVector(count);
-		int[] vec = ctx.getNodeVector(handle);
 		java.lang.foreign.ValueLayout.OfInt layoutInt = java.lang.foreign.ValueLayout.JAVA_INT
 				.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN);
 		for (int i = 0; i < count; i++) {
-			vec[i] = inlineSeg.get(layoutInt, offset + i * 4L);
+			fvec[i] = inlineSeg.get(layoutFloat, offset + i * 4L);
+			nvec[i] = inlineSeg.get(layoutInt, offset + i * 4L);
 		}
 
-		setRegister(state, dst, handle, TYPE_NODE_VECTOR);
+		boolean isNode = (instr.flags() & 0x01) != 0;
+		setRegister(state, dst, handle, isNode ? TYPE_NODE_VECTOR : TYPE_FLOAT_VECTOR);
+		setFlag(state, FLAG_ZF, false);
+	}
+
+	public static void handleLoadInlineIntArray(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		handleLoadInlineArray(state, ctx, instr);
 	}
 
 	public static void handleLoadInlineSet(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -3702,13 +3700,7 @@ public final class VmHandlers {
 		}
 		if (valReg > 0 && valReg < 64 && getRegisterType(state, valReg) == TYPE_BITSET_HANDLE) {
 			ImpulseBitSet valBs = ctx.getBitset((int) getRegisterValue(state, valReg));
-			if (valBs != null) {
-				int copyH = ctx.acquireBitset();
-				ImpulseBitSet copyBs = ctx.getBitset(copyH);
-				copyBs.clear();
-				copyBs.or(valBs);
-				ctx.setMockAttribute(-attrId - 1, copyBs);
-			}
+			ctx.setMockAttribute(-attrId - 1, valBs);
 		} else {
 			ctx.setMockAttribute(-attrId - 1, null);
 		}
