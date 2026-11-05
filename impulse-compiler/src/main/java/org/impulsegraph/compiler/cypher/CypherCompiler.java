@@ -21,6 +21,8 @@ import java.util.Objects;
  */
 public final class CypherCompiler {
 
+	public static final int MAX_UNROLLED_PATH_HOPS = 64;
+
 	public record CompilationResult(ScmProgram ast, String seedVariable, String seedParameterOrValue) {
 	}
 
@@ -84,6 +86,17 @@ public final class CypherCompiler {
 		// 2. Lower Path Steps
 		for (CypherParser.PathStep step : query.path().steps()) {
 			CypherParser.EdgePattern edge = step.edge();
+			if (edge.minHops() < 0) {
+				throw new IllegalArgumentException("Variable-length path minHops cannot be negative: " + edge.minHops());
+			}
+			if (!edge.isUnbounded() && edge.maxHops() < edge.minHops()) {
+				throw new IllegalArgumentException("Variable-length path maxHops (" + edge.maxHops()
+						+ ") cannot be less than minHops (" + edge.minHops() + ")");
+			}
+			if (!edge.isUnbounded() && edge.maxHops() > MAX_UNROLLED_PATH_HOPS) {
+				throw new IllegalArgumentException("Variable-length path maxHops exceeds limit ("
+						+ MAX_UNROLLED_PATH_HOPS + "): " + edge.maxHops());
+			}
 
 			if (multiLaneMode) {
 				List<String> rels = edge.relationNames().isEmpty()

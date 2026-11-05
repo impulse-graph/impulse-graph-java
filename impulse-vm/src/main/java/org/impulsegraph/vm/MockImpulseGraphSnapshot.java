@@ -74,7 +74,7 @@ public class MockImpulseGraphSnapshot implements ImpulseGraphSnapshot {
 			}
 		}
 		int relMax = relationMaxNodes(rel);
-		int nextMaxNodes = this.relations.isEmpty() ? relMax : Math.max(this.maxNodeCount, relMax);
+		int nextMaxNodes = Math.max(this.maxNodeCount, relMax);
 		return new MockImpulseGraphSnapshot(nextMap, nextArr, nextMaxNodes);
 	}
 

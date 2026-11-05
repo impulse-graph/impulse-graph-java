@@ -38,9 +38,12 @@ public final class StratificationValidator {
 
 		Set<String> inStack = new HashSet<>();
 		List<DependencyEdge> path = new ArrayList<>();
+		Set<String> memo = new HashSet<>();
 
 		for (String pred : predicates) {
-			dfsCheck(pred, adj, inStack, path);
+			if (!memo.contains(pred)) {
+				dfsCheck(pred, adj, inStack, path, memo);
+			}
 		}
 	}
 
@@ -65,15 +68,20 @@ public final class StratificationValidator {
 		return false;
 	}
 
-	private static void dfsCheck(String current, Map<String, List<DependencyEdge>> adj, Set<String> inStack,
-			List<DependencyEdge> path) {
+	private static boolean dfsCheck(String current, Map<String, List<DependencyEdge>> adj, Set<String> inStack,
+			List<DependencyEdge> path, Set<String> memo) {
+		if (memo.contains(current)) {
+			return false;
+		}
 		inStack.add(current);
+		boolean reachesStack = false;
 		List<DependencyEdge> outgoing = adj.get(current);
 		if (outgoing != null) {
 			for (DependencyEdge edge : outgoing) {
 				String next = edge.to();
 				path.add(edge);
 				if (inStack.contains(next)) {
+					reachesStack = true;
 					boolean inCycle = false;
 					boolean hasNegation = false;
 					for (DependencyEdge p : path) {
@@ -91,11 +99,18 @@ public final class StratificationValidator {
 										+ next);
 					}
 				} else {
-					dfsCheck(next, adj, inStack, path);
+					boolean childReachesStack = dfsCheck(next, adj, inStack, path, memo);
+					if (childReachesStack) {
+						reachesStack = true;
+					}
 				}
 				path.remove(path.size() - 1);
 			}
 		}
 		inStack.remove(current);
+		if (!reachesStack) {
+			memo.add(current);
+		}
+		return reachesStack;
 	}
 }

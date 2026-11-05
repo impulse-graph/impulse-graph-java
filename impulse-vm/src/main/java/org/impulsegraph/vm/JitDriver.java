@@ -26,6 +26,7 @@ public class JitDriver {
 		final MethodHandle[] mhArr = this.handlers;
 		try {
 			while (pc >= 0 && pc < maxPc) {
+				ctx.consumeFuel();
 				lastPc = pc;
 				int nextPc;
 				if (decoded != null && (mhArr == null || mhArr[pc] == null)) {

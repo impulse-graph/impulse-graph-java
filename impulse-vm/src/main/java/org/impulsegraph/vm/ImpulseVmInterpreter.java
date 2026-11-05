@@ -38,6 +38,9 @@ public final class ImpulseVmInterpreter {
 		if (programSeg == null || instructionCount <= 0) {
 			return new OffHeapBitSet(arena, 1000);
 		}
+		if (programSeg.byteSize() < (long) instructionCount * 8L) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
 
 		try (VmQueryContext ctx = VmQueryContext.acquire(snapshot, arena)) {
 			ctx.setStringPool(stringPool);
@@ -49,6 +52,7 @@ public final class ImpulseVmInterpreter {
 
 			long pc = 0;
 			while (pc >= 0 && pc < instructionCount) {
+				ctx.consumeFuel();
 				VmHandlers.Instruction instr = VmHandlers.decodeInstruction(programSeg, pc);
 				if (DEBUG_MODE) {
 					LOG.info("EXEC: pc=" + pc + ", op=0x" + Integer.toHexString(instr.opcode() & 0xFF));

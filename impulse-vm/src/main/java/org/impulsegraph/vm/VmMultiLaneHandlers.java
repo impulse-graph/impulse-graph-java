@@ -508,6 +508,7 @@ public final class VmMultiLaneHandlers {
 						}
 					}
 					while (hasDelta) {
+						ctx.consumeFuel();
 						stepLanesOnce(ctx, lfSrc, delta, outLen, stepOut, outLen, relId, isCsc, false);
 						hasDelta = false;
 						for (int v = 0; v < outLen; v++) {
