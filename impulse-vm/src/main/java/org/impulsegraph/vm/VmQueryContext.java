@@ -704,6 +704,13 @@ public final class VmQueryContext implements AutoCloseable {
 		return acquireIntVector(capacity);
 	}
 
+	public int acquireNodeVectorWithLong(int capacity) {
+		int handle = acquireIntVector(capacity);
+		long[] l = TL_BUFFER_POOL.get().acquireLong(capacity);
+		setLongVector(handle, l);
+		return handle;
+	}
+
 	public int[] getIntVector(int handle) {
 		return (intVectors != null && handle >= 0 && handle < intVectors.size()) ? intVectors.get(handle) : null;
 	}
@@ -786,6 +793,16 @@ public final class VmQueryContext implements AutoCloseable {
 
 	public int longVectorCount() {
 		return longVectors != null ? longVectors.size() : 0;
+	}
+
+	public void setLongVector(int handle, long[] vec) {
+		if (longVectors == null) {
+			longVectors = new ArrayList<>(4);
+		}
+		while (longVectors.size() <= handle) {
+			longVectors.add(null);
+		}
+		longVectors.set(handle, vec);
 	}
 
 	public long[] getLongVector(int handle) {

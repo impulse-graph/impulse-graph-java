@@ -696,10 +696,9 @@ public final class VmMultiLaneHandlers {
 				int attrLen = attrFloats.length;
 				if (redOp == 6 || redOp == 7) { // ARGMIN / ARGMAX
 					boolean isMin = (redOp == 6);
-					int h = ctx.acquireLongVector(k);
+					int h = ctx.acquireNodeVectorWithLong(k);
 					long[] outIds = ctx.getLongVector(h);
-					int hInt = ctx.acquireIntVector(k);
-					int[] outInts = ctx.getIntVector(hInt);
+					int[] outInts = ctx.getNodeVector(h);
 					Arrays.fill(outIds, -1L);
 					Arrays.fill(outInts, -1);
 					float[] laneSlice = ImpulseAssert.isAuditEnabled() ? ctx.scratchFloat(0, nCnt) : null;
