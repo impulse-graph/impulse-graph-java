@@ -747,6 +747,7 @@ public class JavaVmJsonRunner {
 				boolean st = VmHandlers.checkFlag(state, VmRegisterType.FLAG_ST);
 				System.out.print("\"flags\":{\"zf\":" + zf + ",\"st\":" + st + "},");
 
+				VmStateLayout.PC_HANDLE.set(state, 0L, (int) pc);
 				int statusCode = VmContextHash.statusCodeFromString(actualStatus);
 				String contextHash = VmContextHash.computeStateHashHex(state, statusCode, ctx);
 				System.out.print("\"context_hash\":\"" + contextHash + "\",");

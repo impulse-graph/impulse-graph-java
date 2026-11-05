@@ -3145,20 +3145,36 @@ public final class VmHandlers {
 			float res = (float) applyMathUnary(funcId, val);
 			setRegister(state, dst, Integer.toUnsignedLong(Float.floatToRawIntBits(res)), TYPE_FLOAT);
 		} else if (type == TYPE_DOUBLE_VECTOR) {
-			double[] v = ctx.getDoubleVector((int) getRegisterValue(state, src));
-			int len = (v != null) ? v.length : 1024;
-			int h = ctx.acquireDoubleVector(len);
+			int srcH = (int) getRegisterValue(state, src);
+			double[] v = ctx.getDoubleVector(srcH);
+			int len = (ctx != null) ? ctx.getDoubleVectorLength(srcH) : (v != null ? v.length : 1024);
+			int h = (getRegisterType(state, dst) == TYPE_DOUBLE_VECTOR)
+					? (int) getRegisterValue(state, dst)
+					: ctx.acquireDoubleVector(len);
+			ctx.setDoubleVectorLength(h, len);
 			double[] out = ctx.getDoubleVector(h);
+			if (out == null || out.length < len) {
+				h = ctx.acquireDoubleVector(len);
+				out = ctx.getDoubleVector(h);
+			}
 			for (int i = 0; i < len; i++) {
 				double val = (v != null && i < v.length) ? v[i] : 0.0;
 				out[i] = applyMathUnary(funcId, val);
 			}
 			setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
 		} else if (type == TYPE_FLOAT_VECTOR) {
-			float[] v = ctx.getFloatVector((int) getRegisterValue(state, src));
-			int len = (v != null) ? v.length : 1024;
-			int h = ctx.acquireFloatVector(len);
+			int srcH = (int) getRegisterValue(state, src);
+			float[] v = ctx.getFloatVector(srcH);
+			int len = (ctx != null) ? ctx.getFloatVectorLength(srcH) : (v != null ? v.length : 1024);
+			int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
+					? (int) getRegisterValue(state, dst)
+					: ctx.acquireFloatVector(len);
+			ctx.setFloatVectorLength(h, len);
 			float[] out = ctx.getFloatVector(h);
+			if (out == null || out.length < len) {
+				h = ctx.acquireFloatVector(len);
+				out = ctx.getFloatVector(h);
+			}
 			for (int i = 0; i < len; i++) {
 				float val = (v != null && i < v.length) ? v[i] : 0.0f;
 				out[i] = (float) applyMathUnary(funcId, val);
@@ -3242,21 +3258,29 @@ public final class VmHandlers {
 		} else if ((type1 == TYPE_DOUBLE_VECTOR || type2 == TYPE_DOUBLE_VECTOR)
 				&& (type1 == TYPE_DOUBLE_VECTOR || type1 == TYPE_DOUBLE || type1 == TYPE_FLOAT)
 				&& (type2 == TYPE_DOUBLE_VECTOR || type2 == TYPE_DOUBLE || type2 == TYPE_FLOAT)) {
-			double[] v1 = (type1 == TYPE_DOUBLE_VECTOR)
-					? ctx.getDoubleVector((int) getRegisterValue(state, src1))
-					: null;
-			double[] v2 = (type2 == TYPE_DOUBLE_VECTOR)
-					? ctx.getDoubleVector((int) getRegisterValue(state, src2))
-					: null;
+			int h1 = (type1 == TYPE_DOUBLE_VECTOR) ? (int) getRegisterValue(state, src1) : -1;
+			int h2 = (type2 == TYPE_DOUBLE_VECTOR) ? (int) getRegisterValue(state, src2) : -1;
+			double[] v1 = (h1 >= 0) ? ctx.getDoubleVector(h1) : null;
+			double[] v2 = (h2 >= 0) ? ctx.getDoubleVector(h2) : null;
 			double s1 = (type1 == TYPE_DOUBLE)
 					? Double.longBitsToDouble(getRegisterValue(state, src1))
 					: (type1 == TYPE_FLOAT ? Float.intBitsToFloat((int) getRegisterValue(state, src1)) : 0.0);
 			double s2 = (type2 == TYPE_DOUBLE)
 					? Double.longBitsToDouble(getRegisterValue(state, src2))
 					: (type2 == TYPE_FLOAT ? Float.intBitsToFloat((int) getRegisterValue(state, src2)) : 0.0);
-			int len = (v1 != null) ? v1.length : ((v2 != null) ? v2.length : 1024);
-			int h = ctx.acquireDoubleVector(len);
+			int len1 = (h1 >= 0 && ctx != null) ? ctx.getDoubleVectorLength(h1) : 0;
+			int len2 = (h2 >= 0 && ctx != null) ? ctx.getDoubleVectorLength(h2) : 0;
+			int len = (len1 > 0 && len2 > 0) ? Math.min(len1, len2) : Math.max(len1, len2);
+			if (len == 0) len = (v1 != null) ? v1.length : ((v2 != null) ? v2.length : 1024);
+			int h = (getRegisterType(state, dst) == TYPE_DOUBLE_VECTOR)
+					? (int) getRegisterValue(state, dst)
+					: ctx.acquireDoubleVector(len);
+			ctx.setDoubleVectorLength(h, len);
 			double[] out = ctx.getDoubleVector(h);
+			if (out == null || out.length < len) {
+				h = ctx.acquireDoubleVector(len);
+				out = ctx.getDoubleVector(h);
+			}
 			for (int i = 0; i < len; i++) {
 				double a = (v1 != null) ? ((i < v1.length) ? v1[i] : 0.0) : s1;
 				double b = (v2 != null) ? ((i < v2.length) ? v2[i] : 0.0) : s2;
@@ -3267,13 +3291,25 @@ public final class VmHandlers {
 		} else if ((type1 == TYPE_FLOAT_VECTOR || type2 == TYPE_FLOAT_VECTOR)
 				&& (type1 == TYPE_FLOAT_VECTOR || type1 == TYPE_FLOAT)
 				&& (type2 == TYPE_FLOAT_VECTOR || type2 == TYPE_FLOAT)) {
-			float[] v1 = (type1 == TYPE_FLOAT_VECTOR) ? ctx.getFloatVector((int) getRegisterValue(state, src1)) : null;
-			float[] v2 = (type2 == TYPE_FLOAT_VECTOR) ? ctx.getFloatVector((int) getRegisterValue(state, src2)) : null;
+			int h1 = (type1 == TYPE_FLOAT_VECTOR) ? (int) getRegisterValue(state, src1) : -1;
+			int h2 = (type2 == TYPE_FLOAT_VECTOR) ? (int) getRegisterValue(state, src2) : -1;
+			float[] v1 = (h1 >= 0) ? ctx.getFloatVector(h1) : null;
+			float[] v2 = (h2 >= 0) ? ctx.getFloatVector(h2) : null;
 			float s1 = (type1 == TYPE_FLOAT) ? Float.intBitsToFloat((int) getRegisterValue(state, src1)) : 0.0f;
 			float s2 = (type2 == TYPE_FLOAT) ? Float.intBitsToFloat((int) getRegisterValue(state, src2)) : 0.0f;
-			int len = (v1 != null) ? v1.length : ((v2 != null) ? v2.length : 1024);
-			int h = ctx.acquireFloatVector(len);
+			int len1 = (h1 >= 0 && ctx != null) ? ctx.getFloatVectorLength(h1) : 0;
+			int len2 = (h2 >= 0 && ctx != null) ? ctx.getFloatVectorLength(h2) : 0;
+			int len = (len1 > 0 && len2 > 0) ? Math.min(len1, len2) : Math.max(len1, len2);
+			if (len == 0) len = (v1 != null) ? v1.length : ((v2 != null) ? v2.length : 1024);
+			int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
+					? (int) getRegisterValue(state, dst)
+					: ctx.acquireFloatVector(len);
+			ctx.setFloatVectorLength(h, len);
 			float[] out = ctx.getFloatVector(h);
+			if (out == null || out.length < len) {
+				h = ctx.acquireFloatVector(len);
+				out = ctx.getFloatVector(h);
+			}
 			for (int i = 0; i < len; i++) {
 				float a = (v1 != null) ? ((i < v1.length) ? v1[i] : 0.0f) : s1;
 				float b = (v2 != null) ? ((i < v2.length) ? v2[i] : 0.0f) : s2;
@@ -3324,12 +3360,23 @@ public final class VmHandlers {
 
 		byte type = getRegisterType(state, src1);
 		if (type == TYPE_DOUBLE_VECTOR) {
-			double[] v1 = ctx.getDoubleVector((int) getRegisterValue(state, src1));
-			double[] v2 = ctx.getDoubleVector((int) getRegisterValue(state, src2));
-			double[] v3 = ctx.getDoubleVector((int) getRegisterValue(state, src3));
-			int len = (v1 != null) ? v1.length : 1024;
-			int h = ctx.acquireDoubleVector(len);
+			int h1 = (int) getRegisterValue(state, src1);
+			int h2 = (int) getRegisterValue(state, src2);
+			int h3 = (int) getRegisterValue(state, src3);
+			double[] v1 = ctx.getDoubleVector(h1);
+			double[] v2 = ctx.getDoubleVector(h2);
+			double[] v3 = ctx.getDoubleVector(h3);
+			int len = (ctx != null) ? ctx.getDoubleVectorLength(h1) : 0;
+			if (len == 0) len = (v1 != null) ? v1.length : 1024;
+			int h = (getRegisterType(state, dst) == TYPE_DOUBLE_VECTOR)
+					? (int) getRegisterValue(state, dst)
+					: ctx.acquireDoubleVector(len);
+			ctx.setDoubleVectorLength(h, len);
 			double[] out = ctx.getDoubleVector(h);
+			if (out == null || out.length < len) {
+				h = ctx.acquireDoubleVector(len);
+				out = ctx.getDoubleVector(h);
+			}
 			for (int i = 0; i < len; i++) {
 				double a = (v1 != null && i < v1.length) ? v1[i] : 0.0;
 				double b = (v2 != null && i < v2.length) ? v2[i] : 0.0;
@@ -3339,12 +3386,23 @@ public final class VmHandlers {
 			setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
 			setFlag(state, FLAG_ZF, false);
 		} else if (type == TYPE_FLOAT_VECTOR) {
-			float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, src1));
-			float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, src2));
-			float[] v3 = ctx.getFloatVector((int) getRegisterValue(state, src3));
-			int len = (v1 != null) ? v1.length : 1024;
-			int h = ctx.acquireFloatVector(len);
+			int h1 = (int) getRegisterValue(state, src1);
+			int h2 = (int) getRegisterValue(state, src2);
+			int h3 = (int) getRegisterValue(state, src3);
+			float[] v1 = ctx.getFloatVector(h1);
+			float[] v2 = ctx.getFloatVector(h2);
+			float[] v3 = ctx.getFloatVector(h3);
+			int len = (ctx != null) ? ctx.getFloatVectorLength(h1) : 0;
+			if (len == 0) len = (v1 != null) ? v1.length : 1024;
+			int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
+					? (int) getRegisterValue(state, dst)
+					: ctx.acquireFloatVector(len);
+			ctx.setFloatVectorLength(h, len);
 			float[] out = ctx.getFloatVector(h);
+			if (out == null || out.length < len) {
+				h = ctx.acquireFloatVector(len);
+				out = ctx.getFloatVector(h);
+			}
 			for (int i = 0; i < len; i++) {
 				float a = (v1 != null && i < v1.length) ? v1[i] : 0.0f;
 				float b = (v2 != null && i < v2.length) ? v2[i] : 0.0f;
