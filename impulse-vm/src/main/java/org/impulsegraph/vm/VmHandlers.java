@@ -2070,7 +2070,9 @@ public final class VmHandlers {
 			int handle = (int) getRegisterValue(state, src);
 			float[] vec = ctx.getFloatVector(handle);
 			if (vec != null) {
-				for (float v : vec) {
+				int len = Math.min(vec.length, ctx.getFloatVectorLength(handle));
+				for (int i = 0; i < len; i++) {
+					float v = vec[i];
 					if (!Float.isNaN(v)) {
 						fsum += v;
 					}
@@ -2084,7 +2086,9 @@ public final class VmHandlers {
 			int handle = (int) getRegisterValue(state, src);
 			double[] vec = ctx.getDoubleVector(handle);
 			if (vec != null) {
-				for (double v : vec) {
+				int len = Math.min(vec.length, ctx.getDoubleVectorLength(handle));
+				for (int i = 0; i < len; i++) {
+					double v = vec[i];
 					if (!Double.isNaN(v)) {
 						totalSum += v;
 					}
@@ -2099,8 +2103,9 @@ public final class VmHandlers {
 			int[] vec = ctx.getNodeVector(handle);
 			long isum = 0L;
 			if (vec != null) {
-				for (int v : vec) {
-					isum += v;
+				int len = Math.min(vec.length, ctx.getNodeVectorLength(handle));
+				for (int i = 0; i < len; i++) {
+					isum += vec[i];
 				}
 			}
 			setRegister(state, dst, isum, TYPE_INT64);
@@ -2211,10 +2216,13 @@ public final class VmHandlers {
 		int srcReg = resolveReduceSrcReg(state, instr);
 		byte type = getRegisterType(state, srcReg);
 		if (type == TYPE_NODE_VECTOR || type == TYPE_UINT64_VECTOR) {
-			int[] vec = ctx.getNodeVector((int) getRegisterValue(state, srcReg));
+			int handle = (int) getRegisterValue(state, srcReg);
+			int[] vec = ctx.getNodeVector(handle);
 			long maxVal = Long.MIN_VALUE;
 			if (vec != null) {
-				for (int v : vec) {
+				int len = Math.min(vec.length, ctx.getNodeVectorLength(handle));
+				for (int i = 0; i < len; i++) {
+					int v = vec[i];
 					if (v > maxVal) {
 						maxVal = v;
 					}
@@ -2227,9 +2235,12 @@ public final class VmHandlers {
 		}
 		if (type == TYPE_DOUBLE_VECTOR) {
 			double maxVal = Double.NEGATIVE_INFINITY;
-			double[] vec = ctx.getDoubleVector((int) getRegisterValue(state, srcReg));
+			int handle = (int) getRegisterValue(state, srcReg);
+			double[] vec = ctx.getDoubleVector(handle);
 			if (vec != null) {
-				for (double v : vec) {
+				int len = Math.min(vec.length, ctx.getDoubleVectorLength(handle));
+				for (int i = 0; i < len; i++) {
+					double v = vec[i];
 					if (!Double.isNaN(v) && v > maxVal) {
 						maxVal = v;
 					}
@@ -2242,9 +2253,12 @@ public final class VmHandlers {
 		}
 		float maxVal = Float.NEGATIVE_INFINITY;
 		if (type == TYPE_FLOAT_VECTOR) {
-			float[] vec = ctx.getFloatVector((int) getRegisterValue(state, srcReg));
+			int handle = (int) getRegisterValue(state, srcReg);
+			float[] vec = ctx.getFloatVector(handle);
 			if (vec != null) {
-				for (float v : vec) {
+				int len = Math.min(vec.length, ctx.getFloatVectorLength(handle));
+				for (int i = 0; i < len; i++) {
+					float v = vec[i];
 					if (!Float.isNaN(v) && v > maxVal) {
 						maxVal = v;
 					}
@@ -2262,10 +2276,13 @@ public final class VmHandlers {
 		int srcReg = resolveReduceSrcReg(state, instr);
 		byte type = getRegisterType(state, srcReg);
 		if (type == TYPE_NODE_VECTOR || type == TYPE_UINT64_VECTOR) {
-			int[] vec = ctx.getNodeVector((int) getRegisterValue(state, srcReg));
+			int handle = (int) getRegisterValue(state, srcReg);
+			int[] vec = ctx.getNodeVector(handle);
 			long minVal = Long.MAX_VALUE;
 			if (vec != null) {
-				for (int v : vec) {
+				int len = Math.min(vec.length, ctx.getNodeVectorLength(handle));
+				for (int i = 0; i < len; i++) {
+					int v = vec[i];
 					if (v < minVal) {
 						minVal = v;
 					}
@@ -2278,9 +2295,12 @@ public final class VmHandlers {
 		}
 		if (type == TYPE_DOUBLE_VECTOR) {
 			double minVal = Double.POSITIVE_INFINITY;
-			double[] vec = ctx.getDoubleVector((int) getRegisterValue(state, srcReg));
+			int handle = (int) getRegisterValue(state, srcReg);
+			double[] vec = ctx.getDoubleVector(handle);
 			if (vec != null) {
-				for (double v : vec) {
+				int len = Math.min(vec.length, ctx.getDoubleVectorLength(handle));
+				for (int i = 0; i < len; i++) {
+					double v = vec[i];
 					if (!Double.isNaN(v) && v < minVal) {
 						minVal = v;
 					}
@@ -2293,9 +2313,12 @@ public final class VmHandlers {
 		}
 		float minVal = Float.POSITIVE_INFINITY;
 		if (type == TYPE_FLOAT_VECTOR) {
-			float[] vec = ctx.getFloatVector((int) getRegisterValue(state, srcReg));
+			int handle = (int) getRegisterValue(state, srcReg);
+			float[] vec = ctx.getFloatVector(handle);
 			if (vec != null) {
-				for (float v : vec) {
+				int len = Math.min(vec.length, ctx.getFloatVectorLength(handle));
+				for (int i = 0; i < len; i++) {
+					float v = vec[i];
 					if (!Float.isNaN(v) && v < minVal) {
 						minVal = v;
 					}
@@ -2313,11 +2336,13 @@ public final class VmHandlers {
 		int srcReg = resolveReduceSrcReg(state, instr);
 		byte type = getRegisterType(state, srcReg);
 		if (type == TYPE_NODE_VECTOR || type == TYPE_UINT64_VECTOR) {
-			int[] vec = ctx.getNodeVector((int) getRegisterValue(state, srcReg));
+			int handle = (int) getRegisterValue(state, srcReg);
+			int[] vec = ctx.getNodeVector(handle);
 			long prod = 0L;
 			if (vec != null) {
-				for (int v : vec) {
-					prod *= v;
+				int len = Math.min(vec.length, ctx.getNodeVectorLength(handle));
+				for (int i = 0; i < len; i++) {
+					prod *= vec[i];
 				}
 			}
 			setRegister(state, dstReg, prod, TYPE_INT64);
@@ -2326,11 +2351,13 @@ public final class VmHandlers {
 			return Boolean.TRUE;
 		}
 		if (type == TYPE_DOUBLE_VECTOR) {
-			double[] vec = ctx.getDoubleVector((int) getRegisterValue(state, srcReg));
-			double prod = (vec != null && vec.length > 0) ? 1.0 : 0.0;
+			int handle = (int) getRegisterValue(state, srcReg);
+			double[] vec = ctx.getDoubleVector(handle);
+			int len = (vec != null) ? Math.min(vec.length, ctx.getDoubleVectorLength(handle)) : 0;
+			double prod = (len > 0) ? 1.0 : 0.0;
 			if (vec != null) {
-				for (double v : vec) {
-					prod *= v;
+				for (int i = 0; i < len; i++) {
+					prod *= vec[i];
 				}
 			}
 			setRegister(state, dstReg, Double.doubleToRawLongBits(prod), TYPE_DOUBLE);
@@ -2338,11 +2365,13 @@ public final class VmHandlers {
 			ctx.setFinalResultDouble(prod);
 			return Boolean.TRUE;
 		}
-		float[] vec = (type == TYPE_FLOAT_VECTOR) ? ctx.getFloatVector((int) getRegisterValue(state, srcReg)) : null;
-		float prod = (vec != null && vec.length > 0) ? 1.0f : 0.0f;
+		int handle = (int) getRegisterValue(state, srcReg);
+		float[] vec = (type == TYPE_FLOAT_VECTOR) ? ctx.getFloatVector(handle) : null;
+		int len = (vec != null) ? Math.min(vec.length, ctx.getFloatVectorLength(handle)) : 0;
+		float prod = (len > 0) ? 1.0f : 0.0f;
 		if (vec != null) {
-			for (float v : vec) {
-				prod *= v;
+			for (int i = 0; i < len; i++) {
+				prod *= vec[i];
 			}
 		}
 		setRegister(state, dstReg, Integer.toUnsignedLong(Float.floatToRawIntBits(prod)), TYPE_FLOAT);
@@ -2358,9 +2387,11 @@ public final class VmHandlers {
 		double maxVal = Double.NEGATIVE_INFINITY;
 		int argMax = -1;
 		if (type == TYPE_DOUBLE_VECTOR) {
-			double[] vec = ctx.getDoubleVector((int) getRegisterValue(state, srcReg));
+			int handle = (int) getRegisterValue(state, srcReg);
+			double[] vec = ctx.getDoubleVector(handle);
 			if (vec != null) {
-				for (int i = 0; i < vec.length; i++) {
+				int len = Math.min(vec.length, ctx.getDoubleVectorLength(handle));
+				for (int i = 0; i < len; i++) {
 					double v = vec[i];
 					if (!Double.isNaN(v) && v > maxVal) {
 						maxVal = v;
@@ -2369,9 +2400,11 @@ public final class VmHandlers {
 				}
 			}
 		} else if (type == TYPE_FLOAT_VECTOR) {
-			float[] vec = ctx.getFloatVector((int) getRegisterValue(state, srcReg));
+			int handle = (int) getRegisterValue(state, srcReg);
+			float[] vec = ctx.getFloatVector(handle);
 			if (vec != null) {
-				for (int i = 0; i < vec.length; i++) {
+				int len = Math.min(vec.length, ctx.getFloatVectorLength(handle));
+				for (int i = 0; i < len; i++) {
 					float v = vec[i];
 					if (!Float.isNaN(v) && v > maxVal) {
 						maxVal = v;
@@ -2393,9 +2426,11 @@ public final class VmHandlers {
 		double minVal = Double.POSITIVE_INFINITY;
 		int argMin = -1;
 		if (type == TYPE_DOUBLE_VECTOR) {
-			double[] vec = ctx.getDoubleVector((int) getRegisterValue(state, srcReg));
+			int handle = (int) getRegisterValue(state, srcReg);
+			double[] vec = ctx.getDoubleVector(handle);
 			if (vec != null) {
-				for (int i = 0; i < vec.length; i++) {
+				int len = Math.min(vec.length, ctx.getDoubleVectorLength(handle));
+				for (int i = 0; i < len; i++) {
 					double v = vec[i];
 					if (!Double.isNaN(v) && v < minVal) {
 						minVal = v;
@@ -2404,9 +2439,11 @@ public final class VmHandlers {
 				}
 			}
 		} else if (type == TYPE_FLOAT_VECTOR) {
-			float[] vec = ctx.getFloatVector((int) getRegisterValue(state, srcReg));
+			int handle = (int) getRegisterValue(state, srcReg);
+			float[] vec = ctx.getFloatVector(handle);
 			if (vec != null) {
-				for (int i = 0; i < vec.length; i++) {
+				int len = Math.min(vec.length, ctx.getFloatVectorLength(handle));
+				for (int i = 0; i < len; i++) {
 					float v = vec[i];
 					if (!Float.isNaN(v) && v < minVal) {
 						minVal = v;
@@ -2500,6 +2537,8 @@ public final class VmHandlers {
 			fvec[i] = inlineSeg.get(layoutFloat, offset + i * 4L);
 			nvec[i] = inlineSeg.get(layoutInt, offset + i * 4L);
 		}
+		ctx.setFloatVectorLength(handle, count);
+		ctx.setNodeVectorLength(handle, count);
 
 		boolean isNode = (instr.flags() & 0x01) != 0;
 		setRegister(state, dst, handle, isNode ? TYPE_NODE_VECTOR : TYPE_FLOAT_VECTOR);
@@ -4111,7 +4150,9 @@ public final class VmHandlers {
 			colIdx = rel.getColumnTargetsSegment();
 
 		float[] s_regs = ctx.scratchFloat(0, 16);
-		ctx.initStreamTouchedMask(Math.max(rel.getNodeCount(), 65536));
+		int targetNodeBound = (rel != null) ? Math.max(rel.getNodeCount(), rel.getCscNodeCount()) : 0;
+		ctx.setStreamTargetNodeBound(targetNodeBound);
+		ctx.initStreamTouchedMask(Math.max(targetNodeBound, 65536));
 
 		try {
 			for (int srcIdx = 0; srcIdx < activeCount; srcIdx++) {
@@ -4187,7 +4228,8 @@ public final class VmHandlers {
 		if (colIdx == null)
 			colIdx = rel.getColumnTargetsSegment();
 
-		long[] touchedMask = ctx.initStreamTouchedMask(Math.max(rel.getNodeCount(), 65536));
+		int targetDomainBound = (rel != null) ? Math.max(rel.getNodeCount(), rel.getCscNodeCount()) : 0;
+		long[] touchedMask = ctx.initStreamTouchedMask(Math.max(targetDomainBound, 65536));
 		float[] s_regs = ctx.scratchFloat(0, 16);
 
 		for (int srcIdx = 0; srcIdx < activeCount; srcIdx++) {
@@ -4388,8 +4430,11 @@ public final class VmHandlers {
 								handle = (int) getRegisterValue(state, globalReg);
 								vec = ctx.getFloatVector(handle);
 							} else {
-								int size = (rel != null && rel.getNodeCount() > 0) ? rel.getNodeCount() : 65536;
-								handle = ctx.acquireFloatVector(size);
+								int capacity = Math.max(targetDomainBound, 65536);
+								handle = ctx.acquireFloatVector(capacity);
+								if (targetDomainBound > 0) {
+									ctx.setFloatVectorLength(handle, targetDomainBound);
+								}
 								vec = ctx.getFloatVector(handle);
 								setRegister(state, globalReg, handle, TYPE_FLOAT_VECTOR);
 							}
@@ -4423,8 +4468,11 @@ public final class VmHandlers {
 								handle = (int) getRegisterValue(state, valReg);
 								vec = ctx.getFloatVector(handle);
 							} else {
-								int size = (rel != null && rel.getNodeCount() > 0) ? rel.getNodeCount() : 65536;
-								handle = ctx.acquireFloatVector(size);
+								int capacity = Math.max(targetDomainBound, 65536);
+								handle = ctx.acquireFloatVector(capacity);
+								if (targetDomainBound > 0) {
+									ctx.setFloatVectorLength(handle, targetDomainBound);
+								}
 								vec = ctx.getFloatVector(handle);
 								setRegister(state, valReg, handle, TYPE_FLOAT_VECTOR);
 							}

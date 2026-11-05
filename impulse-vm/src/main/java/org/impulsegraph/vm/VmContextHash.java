@@ -177,9 +177,14 @@ public final class VmContextHash {
 					int handle = (int) val;
 					float[] fvec = (ctx != null) ? ctx.getFloatVector(handle) : null;
 					if (fvec != null) {
-						hs.writeU32LE(Integer.toUnsignedLong(fvec.length));
-						for (float f : fvec) {
-							hs.writeF32LE(f);
+						int len = (ctx != null) ? ctx.getFloatVectorLength(handle) : fvec.length;
+						hs.writeU32LE(Integer.toUnsignedLong(len));
+						int limit = Math.min(len, fvec.length);
+						for (int i = 0; i < limit; i++) {
+							hs.writeF32LE(fvec[i]);
+						}
+						for (int i = limit; i < len; i++) {
+							hs.writeF32LE(0.0f);
 						}
 					} else {
 						hs.writeU32LE(0L);
@@ -189,9 +194,14 @@ public final class VmContextHash {
 					int handle = (int) val;
 					double[] dvec = (ctx != null) ? ctx.getDoubleVector(handle) : null;
 					if (dvec != null) {
-						hs.writeU32LE(Integer.toUnsignedLong(dvec.length));
-						for (double d : dvec) {
-							hs.writeF64LE(d);
+						int len = (ctx != null) ? ctx.getDoubleVectorLength(handle) : dvec.length;
+						hs.writeU32LE(Integer.toUnsignedLong(len));
+						int limit = Math.min(len, dvec.length);
+						for (int i = 0; i < limit; i++) {
+							hs.writeF64LE(dvec[i]);
+						}
+						for (int i = limit; i < len; i++) {
+							hs.writeF64LE(0.0);
 						}
 					} else {
 						hs.writeU32LE(0L);
@@ -201,9 +211,14 @@ public final class VmContextHash {
 					int handle = (int) val;
 					int[] nvec = (ctx != null) ? ctx.getNodeVector(handle) : null;
 					if (nvec != null) {
-						hs.writeU32LE(Integer.toUnsignedLong(nvec.length));
-						for (int n : nvec) {
-							hs.writeU64LE(Integer.toUnsignedLong(n));
+						int len = (ctx != null) ? ctx.getNodeVectorLength(handle) : nvec.length;
+						hs.writeU32LE(Integer.toUnsignedLong(len));
+						int limit = Math.min(len, nvec.length);
+						for (int i = 0; i < limit; i++) {
+							hs.writeU64LE(Integer.toUnsignedLong(nvec[i]));
+						}
+						for (int i = limit; i < len; i++) {
+							hs.writeU64LE(0L);
 						}
 					} else {
 						hs.writeU32LE(0L);
@@ -213,16 +228,26 @@ public final class VmContextHash {
 					int handle = (int) val;
 					long[] lvec = (ctx != null) ? ctx.getLongVector(handle) : null;
 					if (lvec != null) {
-						hs.writeU32LE(Integer.toUnsignedLong(lvec.length));
-						for (long l : lvec) {
-							hs.writeU64LE(l);
+						int len = (ctx != null) ? ctx.getNodeVectorLength(handle) : lvec.length;
+						hs.writeU32LE(Integer.toUnsignedLong(len));
+						int limit = Math.min(len, lvec.length);
+						for (int i = 0; i < limit; i++) {
+							hs.writeU64LE(lvec[i]);
+						}
+						for (int i = limit; i < len; i++) {
+							hs.writeU64LE(0L);
 						}
 					} else {
 						int[] nvec = (ctx != null) ? ctx.getNodeVector(handle) : null;
 						if (nvec != null) {
-							hs.writeU32LE(Integer.toUnsignedLong(nvec.length));
-							for (int n : nvec) {
-								hs.writeU64LE(Integer.toUnsignedLong(n));
+							int len = (ctx != null) ? ctx.getNodeVectorLength(handle) : nvec.length;
+							hs.writeU32LE(Integer.toUnsignedLong(len));
+							int limit = Math.min(len, nvec.length);
+							for (int i = 0; i < limit; i++) {
+								hs.writeU64LE(Integer.toUnsignedLong(nvec[i]));
+							}
+							for (int i = limit; i < len; i++) {
+								hs.writeU64LE(0L);
 							}
 						} else {
 							hs.writeU32LE(0L);

@@ -62,6 +62,13 @@ public class MockRelationSnapshot implements RelationSnapshot {
 		return nodeCount;
 	}
 	@Override
+	public int getCscNodeCount() {
+		if (cscRowOffsets != null && !cscRowOffsets.equals(MemorySegment.NULL) && cscRowOffsets.byteSize() >= 4) {
+			return Math.max(0, (int) (cscRowOffsets.byteSize() / 4) - 1);
+		}
+		return nodeCount;
+	}
+	@Override
 	public int getDegree(int nodeId) {
 		if (rowOffsets == null || nodeId < 0 || nodeId >= nodeCount)
 			return 0;

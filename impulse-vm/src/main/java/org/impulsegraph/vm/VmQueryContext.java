@@ -96,6 +96,74 @@ public final class VmQueryContext implements AutoCloseable {
 	private VmBranchCoverageRecorder coverageRecorder;
 	private VmFaultInjector faultInjector;
 
+	private int[] floatVectorLengths = new int[64];
+	private int[] doubleVectorLengths = new int[64];
+	private int[] nodeVectorLengths = new int[64];
+	private int streamTargetNodeBound;
+
+	public void setStreamTargetNodeBound(int bound) {
+		this.streamTargetNodeBound = bound;
+	}
+
+	public int getStreamTargetNodeBound() {
+		return streamTargetNodeBound;
+	}
+
+	private static int[] ensureLengthCapacity(int[] arr, int handle) {
+		if (handle < arr.length) return arr;
+		int newCap = Math.max(arr.length * 2, handle + 1);
+		int[] next = new int[newCap];
+		System.arraycopy(arr, 0, next, 0, arr.length);
+		return next;
+	}
+
+	public void setFloatVectorLength(int handle, int len) {
+		if (handle >= 0) {
+			floatVectorLengths = ensureLengthCapacity(floatVectorLengths, handle);
+			floatVectorLengths[handle] = len;
+		}
+	}
+
+	public int getFloatVectorLength(int handle) {
+		if (handle >= 0 && handle < floatVectorLengths.length && floatVectorLengths[handle] > 0) {
+			return floatVectorLengths[handle];
+		}
+		float[] vec = getFloatVector(handle);
+		return vec != null ? vec.length : 0;
+	}
+
+	public void setDoubleVectorLength(int handle, int len) {
+		if (handle >= 0) {
+			doubleVectorLengths = ensureLengthCapacity(doubleVectorLengths, handle);
+			doubleVectorLengths[handle] = len;
+		}
+	}
+
+	public int getDoubleVectorLength(int handle) {
+		if (handle >= 0 && handle < doubleVectorLengths.length && doubleVectorLengths[handle] > 0) {
+			return doubleVectorLengths[handle];
+		}
+		double[] vec = getDoubleVector(handle);
+		return vec != null ? vec.length : 0;
+	}
+
+	public void setNodeVectorLength(int handle, int len) {
+		if (handle >= 0) {
+			nodeVectorLengths = ensureLengthCapacity(nodeVectorLengths, handle);
+			nodeVectorLengths[handle] = len;
+		}
+	}
+
+	public int getNodeVectorLength(int handle) {
+		if (handle >= 0 && handle < nodeVectorLengths.length && nodeVectorLengths[handle] > 0) {
+			return nodeVectorLengths[handle];
+		}
+		int[] vec = getNodeVector(handle);
+		if (vec != null) return vec.length;
+		long[] lvec = getLongVector(handle);
+		return lvec != null ? lvec.length : 0;
+	}
+
 	public VmBranchCoverageRecorder getCoverageRecorder() {
 		if (coverageRecorder == null) {
 			coverageRecorder = new VmBranchCoverageRecorder();
@@ -685,11 +753,14 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 		int handle = intVectors.size();
 		intVectors.add(vec);
+		setNodeVectorLength(handle, vec != null ? vec.length : 0);
 		return handle;
 	}
 
 	public int acquireIntVector(int capacity) {
-		return registerIntVector(TL_BUFFER_POOL.get().acquireInt(capacity));
+		int handle = registerIntVector(TL_BUFFER_POOL.get().acquireInt(capacity));
+		setNodeVectorLength(handle, capacity);
+		return handle;
 	}
 
 	public int intVectorCount() {
@@ -708,6 +779,7 @@ public final class VmQueryContext implements AutoCloseable {
 		int handle = acquireIntVector(capacity);
 		long[] l = TL_BUFFER_POOL.get().acquireLong(capacity);
 		setLongVector(handle, l);
+		setNodeVectorLength(handle, capacity);
 		return handle;
 	}
 
@@ -726,6 +798,7 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 		int handle = floatVectors.size();
 		floatVectors.add(vec);
+		setFloatVectorLength(handle, vec != null ? vec.length : 0);
 		return handle;
 	}
 
@@ -740,7 +813,9 @@ public final class VmQueryContext implements AutoCloseable {
 	}
 
 	public int acquireFloatVector(int capacity) {
-		return registerFloatVector(TL_BUFFER_POOL.get().acquireFloat(capacity));
+		int handle = registerFloatVector(TL_BUFFER_POOL.get().acquireFloat(capacity));
+		setFloatVectorLength(handle, capacity);
+		return handle;
 	}
 
 	public float[] getFloatVector(int handle) {
@@ -754,11 +829,14 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 		int handle = doubleVectors.size();
 		doubleVectors.add(vec);
+		setDoubleVectorLength(handle, vec != null ? vec.length : 0);
 		return handle;
 	}
 
 	public int acquireDoubleVector(int capacity) {
-		return registerDoubleVector(TL_BUFFER_POOL.get().acquireDouble(capacity));
+		int handle = registerDoubleVector(TL_BUFFER_POOL.get().acquireDouble(capacity));
+		setDoubleVectorLength(handle, capacity);
+		return handle;
 	}
 
 	public int doubleVectorCount() {
@@ -784,11 +862,14 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 		int handle = longVectors.size();
 		longVectors.add(vec);
+		setNodeVectorLength(handle, vec != null ? vec.length : 0);
 		return handle;
 	}
 
 	public int acquireLongVector(int capacity) {
-		return registerLongVector(TL_BUFFER_POOL.get().acquireLong(capacity));
+		int handle = registerLongVector(TL_BUFFER_POOL.get().acquireLong(capacity));
+		setNodeVectorLength(handle, capacity);
+		return handle;
 	}
 
 	public int longVectorCount() {
@@ -1125,6 +1206,10 @@ public final class VmQueryContext implements AutoCloseable {
 			}
 			laneFrontiers.clear();
 		}
+		Arrays.fill(floatVectorLengths, 0);
+		Arrays.fill(doubleVectorLengths, 0);
+		Arrays.fill(nodeVectorLengths, 0);
+		this.streamTargetNodeBound = 0;
 		this.mockAttrCount = 0;
 		this.finalResult = null;
 		this.finalScalarKind = 0;
