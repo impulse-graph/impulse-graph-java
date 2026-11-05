@@ -4019,8 +4019,7 @@ public final class VmHandlers {
 		}
 		setRegister(state, dst, handle, TYPE_STRING_VECTOR);
 		ctx.setFinalResult(java.util.Arrays.asList(keys));
-		boolean isEmpty = (srcType == TYPE_BITSET_HANDLE || srcType == TYPE_LANE_FRONTIER || srcType == TYPE_NODE_VECTOR
-				|| srcType == TYPE_UINT64_VECTOR) && (count == 0);
+		boolean isEmpty = (count == 0);
 		setFlag(state, FLAG_ZF, isEmpty);
 	}
 
