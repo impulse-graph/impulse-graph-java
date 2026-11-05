@@ -13,6 +13,9 @@ import java.util.Objects;
  */
 public final class CypherParser {
 
+	public static final int MAX_PARSE_DEPTH = 256;
+	public static final int MAX_UNROLLED_PATH_HOPS = 64;
+
 	public record NodePattern(String variable, String label) {
 	}
 
@@ -173,6 +176,19 @@ public final class CypherParser {
 					minHops = 1;
 					maxHops = -1;
 				}
+				if (!isUnbounded) {
+					if (minHops < 0) {
+						throw new IllegalArgumentException("Variable-length path minHops cannot be negative: " + minHops);
+					}
+					if (maxHops < minHops) {
+						throw new IllegalArgumentException("Variable-length path maxHops (" + maxHops
+								+ ") cannot be less than minHops (" + minHops + ")");
+					}
+					if (maxHops > MAX_UNROLLED_PATH_HOPS) {
+						throw new IllegalArgumentException("Variable-length path maxHops exceeds limit ("
+								+ MAX_UNROLLED_PATH_HOPS + "): " + maxHops);
+					}
+				}
 			}
 
 			consume(CypherTokenType.RBRACKET, "Expected ']' at end of relationship pattern");
@@ -219,88 +235,110 @@ public final class CypherParser {
 	private List<WherePredicate> parseWhereClause() {
 		List<WherePredicate> predicates = new ArrayList<>();
 		do {
-			if (match(CypherTokenType.KW_COUNT)) {
-				consume(CypherTokenType.LPAREN, "Expected '(' after count");
-				String var = curr.lexeme();
-				consume(CypherTokenType.IDENTIFIER, "Expected identifier in count(...)");
-				consume(CypherTokenType.RPAREN, "Expected ')' after count(...)");
-				String op = consumeComparisonOperator();
-				int k = parseSignedInt();
-				predicates
-						.add(new WherePredicate(var, "quorum", op, String.valueOf(k), List.of((long) k), List.of(), k));
-				continue;
-			}
-
-			if (curr.type() != CypherTokenType.IDENTIFIER) {
-				throw new IllegalArgumentException("Expected identifier in WHERE clause, got: " + curr.lexeme());
-			}
-			String firstIdent = curr.lexeme();
-			advance();
-
-			if (firstIdent.equalsIgnoreCase("vector_ann") && match(CypherTokenType.LPAREN)) {
-				String var = curr.lexeme();
-				consume(CypherTokenType.IDENTIFIER, "Expected variable in vector_ann(...)");
-				if (match(CypherTokenType.DOT)) {
-					consume(CypherTokenType.IDENTIFIER, "Expected property after '.' in vector_ann");
-				}
-				consume(CypherTokenType.COMMA, "Expected ',' after variable in vector_ann");
-				List<Float> qVec = parseFloatList();
-				int k = 10;
-				if (match(CypherTokenType.COMMA)) {
-					k = parseSignedInt();
-				}
-				consume(CypherTokenType.RPAREN, "Expected ')' at end of vector_ann(...)");
-				predicates.add(new WherePredicate(var, "vector_ann", "ANN", String.valueOf(k), List.of(), qVec, k));
-				continue;
-			}
-
-			if (firstIdent.equalsIgnoreCase("quorum")) {
-				String targetVar = firstIdent;
-				if (match(CypherTokenType.LPAREN)) {
-					targetVar = curr.lexeme();
-					consume(CypherTokenType.IDENTIFIER, "Expected variable inside quorum(...)");
-					consume(CypherTokenType.RPAREN, "Expected ')' after quorum(...)");
-				}
-				String op = consumeComparisonOperator();
-				int k = parseSignedInt();
-				predicates.add(new WherePredicate(targetVar, "quorum", op, String.valueOf(k), List.of((long) k),
-						List.of(), k));
-				continue;
-			}
-
-			consume(CypherTokenType.DOT, "Expected '.' after variable in WHERE predicate");
-			if (curr.type() != CypherTokenType.IDENTIFIER) {
-				throw new IllegalArgumentException("Expected property name after '.', got: " + curr.lexeme());
-			}
-			String prop = curr.lexeme();
-			advance();
-
-			if (match(CypherTokenType.KW_IN)) {
-				List<Long> inValues = parseLongList();
-				predicates.add(new WherePredicate(firstIdent, prop, "IN", inValues.toString(), inValues, List.of(), 0));
-				continue;
-			}
-
-			String op = consumeComparisonOperator();
-
-			String valOrParam = curr.lexeme();
-			if (curr.type() == CypherTokenType.PARAM || curr.type() == CypherTokenType.NUMBER_LITERAL
-					|| curr.type() == CypherTokenType.STRING_LITERAL || curr.type() == CypherTokenType.IDENTIFIER) {
-				advance();
-			} else {
-				throw new IllegalArgumentException(
-						"Expected parameter ($param) or literal in WHERE predicate, got: " + curr.lexeme());
-			}
-
-			if (prop.equalsIgnoreCase("quorum")) {
-				int k = Integer.parseInt(valOrParam);
-				predicates
-						.add(new WherePredicate(firstIdent, "quorum", op, valOrParam, List.of((long) k), List.of(), k));
-			} else {
-				predicates.add(new WherePredicate(firstIdent, prop, op, valOrParam));
-			}
+			predicates.addAll(parseWhereExpr(0));
 		} while (match(CypherTokenType.KW_AND));
 
+		return predicates;
+	}
+
+	public List<WherePredicate> parseWhereExpr() {
+		return parseWhereExpr(0);
+	}
+
+	public List<WherePredicate> parseWhereExpr(int depth) {
+		if (depth > MAX_PARSE_DEPTH) {
+			throw new IllegalArgumentException("Cypher WHERE max nesting depth (256) exceeded");
+		}
+		if (match(CypherTokenType.LPAREN)) {
+			List<WherePredicate> inner = new ArrayList<>();
+			do {
+				inner.addAll(parseWhereExpr(depth + 1));
+			} while (match(CypherTokenType.KW_AND));
+			consume(CypherTokenType.RPAREN, "Expected ')' after nested WHERE expression");
+			return inner;
+		}
+
+		List<WherePredicate> predicates = new ArrayList<>();
+		if (match(CypherTokenType.KW_COUNT)) {
+			consume(CypherTokenType.LPAREN, "Expected '(' after count");
+			String var = curr.lexeme();
+			consume(CypherTokenType.IDENTIFIER, "Expected identifier in count(...)");
+			consume(CypherTokenType.RPAREN, "Expected ')' after count(...)");
+			String op = consumeComparisonOperator();
+			int k = parseSignedInt();
+			predicates
+					.add(new WherePredicate(var, "quorum", op, String.valueOf(k), List.of((long) k), List.of(), k));
+			return predicates;
+		}
+
+		if (curr.type() != CypherTokenType.IDENTIFIER) {
+			throw new IllegalArgumentException("Expected identifier in WHERE clause, got: " + curr.lexeme());
+		}
+		String firstIdent = curr.lexeme();
+		advance();
+
+		if (firstIdent.equalsIgnoreCase("vector_ann") && match(CypherTokenType.LPAREN)) {
+			String var = curr.lexeme();
+			consume(CypherTokenType.IDENTIFIER, "Expected variable in vector_ann(...)");
+			if (match(CypherTokenType.DOT)) {
+				consume(CypherTokenType.IDENTIFIER, "Expected property after '.' in vector_ann");
+			}
+			consume(CypherTokenType.COMMA, "Expected ',' after variable in vector_ann");
+			List<Float> qVec = parseFloatList();
+			int k = 10;
+			if (match(CypherTokenType.COMMA)) {
+				k = parseSignedInt();
+			}
+			consume(CypherTokenType.RPAREN, "Expected ')' at end of vector_ann(...)");
+			predicates.add(new WherePredicate(var, "vector_ann", "ANN", String.valueOf(k), List.of(), qVec, k));
+			return predicates;
+		}
+
+		if (firstIdent.equalsIgnoreCase("quorum")) {
+			String targetVar = firstIdent;
+			if (match(CypherTokenType.LPAREN)) {
+				targetVar = curr.lexeme();
+				consume(CypherTokenType.IDENTIFIER, "Expected variable inside quorum(...)");
+				consume(CypherTokenType.RPAREN, "Expected ')' after quorum(...)");
+			}
+			String op = consumeComparisonOperator();
+			int k = parseSignedInt();
+			predicates.add(new WherePredicate(targetVar, "quorum", op, String.valueOf(k), List.of((long) k),
+					List.of(), k));
+			return predicates;
+		}
+
+		consume(CypherTokenType.DOT, "Expected '.' after variable in WHERE predicate");
+		if (curr.type() != CypherTokenType.IDENTIFIER) {
+			throw new IllegalArgumentException("Expected property name after '.', got: " + curr.lexeme());
+		}
+		String prop = curr.lexeme();
+		advance();
+
+		if (match(CypherTokenType.KW_IN)) {
+			List<Long> inValues = parseLongList();
+			predicates.add(new WherePredicate(firstIdent, prop, "IN", inValues.toString(), inValues, List.of(), 0));
+			return predicates;
+		}
+
+		String op = consumeComparisonOperator();
+
+		String valOrParam = curr.lexeme();
+		if (curr.type() == CypherTokenType.PARAM || curr.type() == CypherTokenType.NUMBER_LITERAL
+				|| curr.type() == CypherTokenType.STRING_LITERAL || curr.type() == CypherTokenType.IDENTIFIER) {
+			advance();
+		} else {
+			throw new IllegalArgumentException(
+					"Expected parameter ($param) or literal in WHERE predicate, got: " + curr.lexeme());
+		}
+
+		if (prop.equalsIgnoreCase("quorum")) {
+			int k = Integer.parseInt(valOrParam);
+			predicates
+					.add(new WherePredicate(firstIdent, "quorum", op, valOrParam, List.of((long) k), List.of(), k));
+		} else {
+			predicates.add(new WherePredicate(firstIdent, prop, op, valOrParam));
+		}
 		return predicates;
 	}
 

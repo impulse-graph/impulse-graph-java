@@ -245,6 +245,50 @@ public final class VmQueryContext implements AutoCloseable {
 		this.allocatedScratchBytes = DEFAULT_SCRATCH_BYTES;
 		this.maxThreads = DEFAULT_MAX_THREADS;
 		this.mockAttrCount = 0;
+		this.fuelEnabled = false;
+		this.maxSteps = 0L;
+		this.fuelRemaining = 0L;
+	}
+
+	private boolean fuelEnabled = false;
+	private long maxSteps = 0L;
+	private long fuelRemaining = 0L;
+
+	public void setFuel(long maxSteps) {
+		this.fuelEnabled = (maxSteps > 0);
+		this.maxSteps = maxSteps;
+		this.fuelRemaining = maxSteps;
+	}
+
+	public boolean isFuelEnabled() {
+		return fuelEnabled;
+	}
+
+	public long getMaxSteps() {
+		return maxSteps;
+	}
+
+	public long getFuelRemaining() {
+		return fuelRemaining;
+	}
+
+	public void consumeFuel(long steps) {
+		if (fuelEnabled) {
+			fuelRemaining -= steps;
+			if (fuelRemaining <= 0) {
+				fuelRemaining = 0;
+				throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_FUEL");
+			}
+		}
+	}
+
+	public void consumeFuel() {
+		if (fuelEnabled) {
+			if (--fuelRemaining <= 0) {
+				fuelRemaining = 0;
+				throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_FUEL");
+			}
+		}
 	}
 
 	public boolean isInUse() {
@@ -899,20 +943,44 @@ public final class VmQueryContext implements AutoCloseable {
 	 * 0x09 OP_INIT_MOCK_GRAPH).
 	 */
 	public void initMockGraph(int slotId, int offset, int nodeCount) {
+		if (nodeCount < 0 || nodeCount > 1_048_576) {
+			throw new IllegalArgumentException("Invalid nodeCount in initMockGraph: " + nodeCount);
+		}
 		MemorySegment inlineSeg = inlineDataSegment();
 		if (inlineSeg == null) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
+		if (offset < 0 || (long) offset + (long) (nodeCount + 1) * 4L > inlineSeg.byteSize()) {
+			throw new IllegalArgumentException("Offsets buffer out of bounds in initMockGraph");
 		}
 		int[] offsets = new int[nodeCount + 1];
 		ValueLayout.OfInt layoutInt = ValueLayout.JAVA_INT.withOrder(ByteOrder.LITTLE_ENDIAN);
 		for (int i = 0; i <= nodeCount; i++) {
 			offsets[i] = inlineSeg.get(layoutInt, offset + i * 4L);
 		}
+		if (offsets[0] != 0) {
+			throw new IllegalArgumentException("offsets[0] must be 0 in initMockGraph, got " + offsets[0]);
+		}
 		int numTargets = offsets[nodeCount];
+		if (numTargets < 0) {
+			throw new IllegalArgumentException("Negative total edge count in initMockGraph: " + numTargets);
+		}
+		for (int u = 0; u < nodeCount; u++) {
+			if (offsets[u] > offsets[u + 1] || offsets[u + 1] > numTargets) {
+				throw new IllegalArgumentException("Non-monotonic offsets at u=" + u + " in initMockGraph");
+			}
+		}
+		long targetsOffset = (long) offset + (long) (nodeCount + 1) * 4L;
+		if (targetsOffset + (long) numTargets * 4L > inlineSeg.byteSize()) {
+			throw new IllegalArgumentException("Targets buffer out of bounds in initMockGraph");
+		}
 		int[] targets = new int[numTargets];
-		long targetsOffset = offset + (nodeCount + 1) * 4L;
 		for (int i = 0; i < numTargets; i++) {
-			targets[i] = inlineSeg.get(layoutInt, targetsOffset + i * 4L);
+			int tgt = inlineSeg.get(layoutInt, targetsOffset + i * 4L);
+			if (tgt < 0 || tgt >= 1_048_576) {
+				throw new IllegalArgumentException("Target node ID out of bounds [0, 1048576) in initMockGraph: " + tgt);
+			}
+			targets[i] = tgt;
 		}
 		RelationSnapshot rel = new MockRelationSnapshot(Arena.ofAuto(), nodeCount, numTargets, offsets, targets);
 		int targetDomainCount = nodeCount;

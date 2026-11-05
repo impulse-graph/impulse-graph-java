@@ -31,6 +31,9 @@ public final class ImpulseMethodHandleCompiler {
 	}
 
 	public static JitDriver compileDriver(MemorySegment programSeg, long instructionCount) throws Exception {
+		if (instructionCount > 0 && (programSeg == null || programSeg.byteSize() < instructionCount * 8L)) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
 		MethodHandle[] handlers = new MethodHandle[(int) instructionCount];
 		VmHandlers.Instruction[] decoded = new VmHandlers.Instruction[(int) instructionCount];
 		for (int pc = 0; pc < instructionCount; pc++) {
@@ -245,11 +248,11 @@ public final class ImpulseMethodHandleCompiler {
 					nextPc++;
 				}
 				case 0x14 -> {
-					VmHandlers.handleNodeFilter(state, ctx, instr);
+					VmHandlers.handleNodeFilter(state, ctx, instr, input);
 					nextPc++;
 				}
 				case 0x15 -> {
-					VmHandlers.handleNodeFilter(state, ctx, instr);
+					VmHandlers.handleNodeFilter(state, ctx, instr, input);
 					nextPc++;
 				} // OP_NODE_FILTER_STR_PREFIX
 				case 0x16 -> {

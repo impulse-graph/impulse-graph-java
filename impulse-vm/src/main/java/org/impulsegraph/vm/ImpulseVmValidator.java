@@ -135,7 +135,7 @@ public final class ImpulseVmValidator {
 	 * {@code classify_opcode}).
 	 */
 	public static OpcodeClass classifyOpcode(int op) {
-		if (op < 0 || op > 0xFF || op == 0x0C || (op >= 0x96 && op <= 0x9F) || op == 0xBF || op >= 0xCC) {
+		if (op < 0 || op > 0xFF || op == 0x0C || (op >= 0x96 && op <= 0x9F) || op >= 0xCC) {
 			return OpcodeClass.INVALID;
 		}
 		if (op == 0x0D || op == 0x28 || op == 0x29 || op == 0x2B || op == 0x2C || op == 0x3E || op == 0x3F || op == 0x4F
@@ -290,6 +290,42 @@ public final class ImpulseVmValidator {
 						return "IMPULSE_VM_ERR_INVALID_REGISTER";
 					}
 					abstractTypes[dst] = VmRegType.T_FLOAT_VECTOR;
+				}
+				// Edge Stream Shader Sub-Opcodes (0xA1..0xBF except walks 0xA9, 0xAA)
+				case 0xA3, 0xA4, 0xAB -> { // OP_STREAM_LOAD_SRC / LOAD_EDGE / LOAD_TGT
+					if (dst < 0 || dst >= 16 || pU16Low >= 64) {
+						return "IMPULSE_VM_ERR_INVALID_REGISTER";
+					}
+				}
+				case 0xA5, 0xA6, 0xAC, 0xAD, 0xAE, 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB7 -> { // Math / Cmp / Logic / Select
+					if (dst < 0 || dst >= 16 || pU16Low >= 16 || pU16High >= 16) {
+						return "IMPULSE_VM_ERR_INVALID_REGISTER";
+					}
+				}
+				case 0xAF, 0xB6 -> { // OP_STREAM_MATH_UNARY / LOGIC_NOT
+					if (dst < 0 || dst >= 16 || pU16Low >= 16) {
+						return "IMPULSE_VM_ERR_INVALID_REGISTER";
+					}
+				}
+				case 0xA7, 0xBA, 0xBB, 0xBC, 0xBD -> { // FILTER / LOAD_*_ID / LOAD_CONST
+					if (dst < 0 || dst >= 16) {
+						return "IMPULSE_VM_ERR_INVALID_REGISTER";
+					}
+				}
+				case 0xA8 -> { // OP_STREAM_REDUCE (sDst, globalReg, monoid)
+					if (dst < 0 || dst >= 16 || pU16Low >= 64) {
+						return "IMPULSE_VM_ERR_INVALID_REGISTER";
+					}
+				}
+				case 0xBF -> { // OP_STREAM_SCATTER_REDUCE (sDst, attrId, monoid)
+					if (dst < 0 || dst >= 16 || pU16Low >= 64) {
+						return "IMPULSE_VM_ERR_INVALID_REGISTER";
+					}
+				}
+				case 0xB8, 0xB9 -> { // OP_STREAM_REDUCE_ARGMIN / ARGMAX
+					if (dst < 0 || dst >= 16 || pU16Low >= 64 || pU16High >= 64) {
+						return "IMPULSE_VM_ERR_INVALID_REGISTER";
+					}
 				}
 				default -> {
 				}

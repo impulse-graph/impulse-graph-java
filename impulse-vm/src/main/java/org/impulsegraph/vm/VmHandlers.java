@@ -3479,6 +3479,7 @@ public final class VmHandlers {
 
 		int maxIter = 1000;
 		while (!currentFrontier.isEmpty() && maxIter-- > 0) {
+			ctx.consumeFuel();
 			nextFrontier.clear();
 			if (relSnap != null) {
 				for (int u = currentFrontier.nextSetBit(0); u >= 0; u = currentFrontier.nextSetBit(u + 1)) {

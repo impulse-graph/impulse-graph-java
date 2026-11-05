@@ -18,12 +18,21 @@ public final class ImpScmParser {
 		this.cursor = 0;
 	}
 
+	public static final int MAX_PARSE_DEPTH = 256;
+
 	public static ImpScmNode parse(String source) {
 		ImpScmParser parser = new ImpScmParser(source);
 		return parser.parseNode();
 	}
 
 	public ImpScmNode parseNode() {
+		return parseNode(0);
+	}
+
+	public ImpScmNode parseNode(int depth) {
+		if (depth > MAX_PARSE_DEPTH) {
+			throw new IllegalArgumentException("ImpScheme max nesting depth (256) exceeded");
+		}
 		skipWhitespaceAndComments();
 		if (cursor >= src.length()) {
 			return null;
@@ -31,7 +40,7 @@ public final class ImpScmParser {
 
 		char c = src.charAt(cursor);
 		if (c == '(') {
-			return parseList();
+			return parseList(depth);
 		}
 		if (c == '"' || c == '\'') {
 			return parseString();
@@ -62,7 +71,10 @@ public final class ImpScmParser {
 		}
 	}
 
-	private ImpScmNode parseList() {
+	private ImpScmNode parseList(int depth) {
+		if (depth > MAX_PARSE_DEPTH) {
+			throw new IllegalArgumentException("ImpScheme max nesting depth (256) exceeded");
+		}
 		cursor++; // skip '('
 		List<ImpScmNode> elements = new ArrayList<>();
 
@@ -75,7 +87,7 @@ public final class ImpScmParser {
 				cursor++; // skip ')'
 				break;
 			}
-			ImpScmNode elem = parseNode();
+			ImpScmNode elem = parseNode(depth + 1);
 			if (elem != null) {
 				elements.add(elem);
 			}

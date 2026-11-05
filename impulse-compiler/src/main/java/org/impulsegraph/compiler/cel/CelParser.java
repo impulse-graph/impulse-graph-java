@@ -33,13 +33,22 @@ public final class CelParser {
 		advance();
 	}
 
+	public static final int MAX_PARSE_DEPTH = 256;
+
 	public static CelAstNode parse(String source) {
 		CelParser parser = new CelParser(source);
 		return parser.parseExpression();
 	}
 
 	public CelAstNode parseExpression() {
-		return parsePrecedence(Precedence.PREC_CONDITIONAL);
+		return parseExpression(0);
+	}
+
+	public CelAstNode parseExpression(int depth) {
+		if (depth > MAX_PARSE_DEPTH) {
+			throw new IllegalArgumentException("CEL max nesting depth (256) exceeded");
+		}
+		return parsePrecedence(Precedence.PREC_CONDITIONAL, depth);
 	}
 
 	private void advance() {
@@ -71,7 +80,10 @@ public final class CelParser {
 		};
 	}
 
-	private CelAstNode parsePrefix() {
+	private CelAstNode parsePrefix(int depth) {
+		if (depth > MAX_PARSE_DEPTH) {
+			throw new IllegalArgumentException("CEL max nesting depth (256) exceeded");
+		}
 		CelToken t = curr;
 		advance();
 
@@ -83,20 +95,20 @@ public final class CelParser {
 			case IDENTIFIER -> CelAstNode.makeIdent(t.text());
 			case PARAMETER_REF -> CelAstNode.makeParam(t.text());
 			case BANG, MINUS, PLUS, TILDE -> {
-				CelAstNode operand = parsePrecedence(Precedence.PREC_UNARY);
+				CelAstNode operand = parsePrecedence(Precedence.PREC_UNARY, depth + 1);
 				yield CelAstNode.makeUnary(t.text(), operand);
 			}
 			case LPAREN -> {
-				CelAstNode expr = parseExpression();
+				CelAstNode expr = parseExpression(depth + 1);
 				match(CelTokenType.RPAREN);
 				yield expr;
 			}
 			case LBRACKET -> {
 				List<CelAstNode> elements = new ArrayList<>();
 				if (curr.type() != CelTokenType.RBRACKET) {
-					elements.add(parseExpression());
+					elements.add(parseExpression(depth + 1));
 					while (match(CelTokenType.COMMA)) {
-						elements.add(parseExpression());
+						elements.add(parseExpression(depth + 1));
 					}
 				}
 				match(CelTokenType.RBRACKET);
@@ -106,8 +118,11 @@ public final class CelParser {
 		};
 	}
 
-	private CelAstNode parsePrecedence(Precedence prec) {
-		CelAstNode left = parsePrefix();
+	private CelAstNode parsePrecedence(Precedence prec, int depth) {
+		if (depth > MAX_PARSE_DEPTH) {
+			throw new IllegalArgumentException("CEL max nesting depth (256) exceeded");
+		}
+		CelAstNode left = parsePrefix(depth);
 		if (left == null)
 			return null;
 
@@ -117,9 +132,9 @@ public final class CelParser {
 
 			if (op.type() == CelTokenType.QUESTION) {
 				// Ternary conditional ? :
-				CelAstNode thenBranch = parseExpression();
+				CelAstNode thenBranch = parseExpression(depth + 1);
 				match(CelTokenType.COLON);
-				CelAstNode elseBranch = parsePrecedence(Precedence.PREC_CONDITIONAL);
+				CelAstNode elseBranch = parsePrecedence(Precedence.PREC_CONDITIONAL, depth + 1);
 				left = CelAstNode.makeTernary(left, thenBranch, elseBranch);
 			} else if (op.type() == CelTokenType.DOT) {
 				// Field access target.field
@@ -131,9 +146,9 @@ public final class CelParser {
 						List<CelAstNode> args = new ArrayList<>();
 						args.add(left); // receiver is first arg
 						if (curr.type() != CelTokenType.RPAREN) {
-							args.add(parseExpression());
+							args.add(parseExpression(depth + 1));
 							while (match(CelTokenType.COMMA)) {
-								args.add(parseExpression());
+								args.add(parseExpression(depth + 1));
 							}
 						}
 						match(CelTokenType.RPAREN);
@@ -146,9 +161,9 @@ public final class CelParser {
 				// Function call ident(args)
 				List<CelAstNode> args = new ArrayList<>();
 				if (curr.type() != CelTokenType.RPAREN) {
-					args.add(parseExpression());
+					args.add(parseExpression(depth + 1));
 					while (match(CelTokenType.COMMA)) {
-						args.add(parseExpression());
+						args.add(parseExpression(depth + 1));
 					}
 				}
 				match(CelTokenType.RPAREN);
@@ -161,7 +176,7 @@ public final class CelParser {
 				Precedence nextPrec = nextPrecOrd < Precedence.values().length
 						? Precedence.values()[nextPrecOrd]
 						: Precedence.PREC_CALL_MEMBER;
-				CelAstNode right = parsePrecedence(nextPrec);
+				CelAstNode right = parsePrecedence(nextPrec, depth + 1);
 				left = CelAstNode.makeBinary(op.text(), left, right);
 			}
 		}
