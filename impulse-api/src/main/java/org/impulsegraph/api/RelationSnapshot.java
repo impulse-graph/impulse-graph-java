@@ -24,6 +24,14 @@ public interface RelationSnapshot {
 	boolean hasCsc();
 	boolean hasCsr();
 	int getNodeCount();
+	default int getCscNodeCount() {
+		MemorySegment cscOff = getCscRowOffsetsSegment();
+		if (cscOff != null && !cscOff.equals(MemorySegment.NULL) && cscOff.byteSize() >= 4) {
+			int width = getEdgeIndexWidth() > 0 ? getEdgeIndexWidth() : 4;
+			return (int) (cscOff.byteSize() / width - 1);
+		}
+		return 0;
+	}
 	int getDegree(int nodeId);
 	int getInDegree(int nodeId);
 	int[] getTargets(int nodeId);

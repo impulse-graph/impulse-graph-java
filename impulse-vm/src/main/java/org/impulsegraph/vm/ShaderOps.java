@@ -58,10 +58,18 @@ public class ShaderOps {
 			handle = (int) VmHandlers.getRegisterValue(state, globalReg);
 			vec = ctx.getFloatVector(handle);
 		} else {
-			int size = (ctx.getSnapshot() != null && ctx.getSnapshot().getMaxNodeCount() > 0)
-					? ctx.getSnapshot().getMaxNodeCount()
-					: 65536;
-			handle = ctx.acquireFloatVector(size);
+			int targetNodeBound = ctx.getStreamTargetNodeBound();
+			if (targetNodeBound <= 0 && ctx.getSnapshot() != null && ctx.getSnapshot().getMaxNodeCount() > 0) {
+				targetNodeBound = ctx.getSnapshot().getMaxNodeCount();
+			}
+			int capacity = (ctx.getSnapshot() != null && ctx.getSnapshot().getMaxNodeCount() > 0)
+					? Math.max(targetNodeBound, ctx.getSnapshot().getMaxNodeCount())
+					: Math.max(targetNodeBound, 65536);
+			capacity = Math.max(capacity, 65536);
+			handle = ctx.acquireFloatVector(capacity);
+			if (targetNodeBound > 0) {
+				ctx.setFloatVectorLength(handle, targetNodeBound);
+			}
 			vec = ctx.getFloatVector(handle);
 			VmHandlers.setRegister(state, globalReg, handle, VmRegisterType.TYPE_FLOAT_VECTOR);
 		}
@@ -103,10 +111,18 @@ public class ShaderOps {
 			handle = (int) VmHandlers.getRegisterValue(state, valReg);
 			vec = ctx.getFloatVector(handle);
 		} else {
-			int size = (ctx.getSnapshot() != null && ctx.getSnapshot().getMaxNodeCount() > 0)
-					? ctx.getSnapshot().getMaxNodeCount()
-					: 65536;
-			handle = ctx.acquireFloatVector(size);
+			int targetNodeBound = ctx.getStreamTargetNodeBound();
+			if (targetNodeBound <= 0 && ctx.getSnapshot() != null && ctx.getSnapshot().getMaxNodeCount() > 0) {
+				targetNodeBound = ctx.getSnapshot().getMaxNodeCount();
+			}
+			int capacity = (ctx.getSnapshot() != null && ctx.getSnapshot().getMaxNodeCount() > 0)
+					? Math.max(targetNodeBound, ctx.getSnapshot().getMaxNodeCount())
+					: Math.max(targetNodeBound, 65536);
+			capacity = Math.max(capacity, 65536);
+			handle = ctx.acquireFloatVector(capacity);
+			if (targetNodeBound > 0) {
+				ctx.setFloatVectorLength(handle, targetNodeBound);
+			}
 			vec = ctx.getFloatVector(handle);
 			VmHandlers.setRegister(state, valReg, handle, VmRegisterType.TYPE_FLOAT_VECTOR);
 		}
