@@ -69,6 +69,7 @@ public final class VmQueryContext implements AutoCloseable {
 	}
 
 	private long inlineDataBytes = 0;
+	private final boolean[] mockSlots = new boolean[16];
 
 	// Bitset Pool
 	private final List<ImpulseBitSet> bitsets = new ArrayList<>(4);
@@ -96,10 +97,16 @@ public final class VmQueryContext implements AutoCloseable {
 	private VmBranchCoverageRecorder coverageRecorder;
 	private VmFaultInjector faultInjector;
 
-	private int[] floatVectorLengths = new int[64];
-	private int[] doubleVectorLengths = new int[64];
-	private int[] nodeVectorLengths = new int[64];
+	private int[] floatVectorLengths = initLengthsArray();
+	private int[] doubleVectorLengths = initLengthsArray();
+	private int[] nodeVectorLengths = initLengthsArray();
 	private int streamTargetNodeBound;
+
+	private static int[] initLengthsArray() {
+		int[] arr = new int[64];
+		Arrays.fill(arr, -1);
+		return arr;
+	}
 
 	public void setStreamTargetNodeBound(int bound) {
 		this.streamTargetNodeBound = bound;
@@ -114,6 +121,7 @@ public final class VmQueryContext implements AutoCloseable {
 		int newCap = Math.max(arr.length * 2, handle + 1);
 		int[] next = new int[newCap];
 		System.arraycopy(arr, 0, next, 0, arr.length);
+		Arrays.fill(next, arr.length, next.length, -1);
 		return next;
 	}
 
@@ -125,7 +133,7 @@ public final class VmQueryContext implements AutoCloseable {
 	}
 
 	public int getFloatVectorLength(int handle) {
-		if (handle >= 0 && handle < floatVectorLengths.length && floatVectorLengths[handle] > 0) {
+		if (handle >= 0 && handle < floatVectorLengths.length && floatVectorLengths[handle] >= 0) {
 			return floatVectorLengths[handle];
 		}
 		float[] vec = getFloatVector(handle);
@@ -140,7 +148,7 @@ public final class VmQueryContext implements AutoCloseable {
 	}
 
 	public int getDoubleVectorLength(int handle) {
-		if (handle >= 0 && handle < doubleVectorLengths.length && doubleVectorLengths[handle] > 0) {
+		if (handle >= 0 && handle < doubleVectorLengths.length && doubleVectorLengths[handle] >= 0) {
 			return doubleVectorLengths[handle];
 		}
 		double[] vec = getDoubleVector(handle);
@@ -155,7 +163,7 @@ public final class VmQueryContext implements AutoCloseable {
 	}
 
 	public int getNodeVectorLength(int handle) {
-		if (handle >= 0 && handle < nodeVectorLengths.length && nodeVectorLengths[handle] > 0) {
+		if (handle >= 0 && handle < nodeVectorLengths.length && nodeVectorLengths[handle] >= 0) {
 			return nodeVectorLengths[handle];
 		}
 		int[] vec = getNodeVector(handle);
@@ -1080,13 +1088,19 @@ public final class VmQueryContext implements AutoCloseable {
 			}
 			targets[i] = tgt;
 		}
-		RelationSnapshot rel = new MockRelationSnapshot(Arena.ofAuto(), nodeCount, numTargets, offsets, targets);
 		int targetDomainCount = nodeCount;
 		for (int t : targets) {
 			if (t >= targetDomainCount) {
 				targetDomainCount = t + 1;
 			}
 		}
+		int totalNodeCount = Math.max(nodeCount, targetDomainCount);
+		int[] fullOffsets = new int[totalNodeCount + 1];
+		System.arraycopy(offsets, 0, fullOffsets, 0, nodeCount + 1);
+		for (int i = nodeCount + 1; i <= totalNodeCount; i++) {
+			fullOffsets[i] = numTargets;
+		}
+		RelationSnapshot rel = new MockRelationSnapshot(Arena.ofAuto(), nodeCount, numTargets, offsets, targets);
 		int[] inDegrees = new int[targetDomainCount];
 		for (int t : targets) {
 			if (t >= 0 && t < targetDomainCount) {
@@ -1119,11 +1133,18 @@ public final class VmQueryContext implements AutoCloseable {
 			cscTargetsSeg.setAtIndex(ValueLayout.JAVA_INT, i, cscTargets[i]);
 		}
 		rel.setCscSegments(cscOffsetsSeg, cscTargetsSeg);
+		if (slotId >= 0 && slotId < mockSlots.length) {
+			mockSlots[slotId] = true;
+		}
 		if (getSnapshot() instanceof MockImpulseGraphSnapshot mockSnap) {
 			setSnapshot(mockSnap.withSlot(slotId, rel));
 		} else {
 			setSnapshot(new MockImpulseGraphSnapshot(Map.of()).withSlot(slotId, rel));
 		}
+	}
+
+	public boolean hasMockSlot(int slotId) {
+		return slotId >= 0 && slotId < mockSlots.length && mockSlots[slotId];
 	}
 
 	@Override
@@ -1206,9 +1227,9 @@ public final class VmQueryContext implements AutoCloseable {
 			}
 			laneFrontiers.clear();
 		}
-		Arrays.fill(floatVectorLengths, 0);
-		Arrays.fill(doubleVectorLengths, 0);
-		Arrays.fill(nodeVectorLengths, 0);
+		Arrays.fill(floatVectorLengths, -1);
+		Arrays.fill(doubleVectorLengths, -1);
+		Arrays.fill(nodeVectorLengths, -1);
 		this.streamTargetNodeBound = 0;
 		this.mockAttrCount = 0;
 		this.finalResult = null;
