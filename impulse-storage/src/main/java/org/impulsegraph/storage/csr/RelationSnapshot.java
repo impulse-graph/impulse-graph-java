@@ -50,6 +50,8 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 	private final java.util.List<MemorySegment> attributeSegments = new java.util.ArrayList<>();
 	private final java.util.List<MemorySegment> validitySegments = new java.util.ArrayList<>();
 	private final java.util.List<String> attributeNames = new java.util.ArrayList<>();
+	private final java.util.List<Byte> attributeTypeCodes = new java.util.ArrayList<>();
+	private int targetNodeCount = 0;
 
 	public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment,
 			MemorySegment columnTargetsSegment, java.util.List<MemorySegment> attributeSegments) {
@@ -68,9 +70,43 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			this.attributeNames.addAll(names);
 	}
 
+	public void setAttributeTypeCodes(java.util.List<Byte> typeCodes) {
+		this.attributeTypeCodes.clear();
+		if (typeCodes != null)
+			this.attributeTypeCodes.addAll(typeCodes);
+	}
+
+	public String getAttributeName(int index) {
+		return (index >= 0 && index < attributeNames.size()) ? attributeNames.get(index) : null;
+	}
+
+	public byte getAttributeTypeCode(int index) {
+		return (index >= 0 && index < attributeTypeCodes.size()) ? attributeTypeCodes.get(index) : (byte) 0;
+	}
+
+	public void setTargetNodeCount(int targetNodeCount) {
+		this.targetNodeCount = targetNodeCount;
+	}
+
+	@Override
+	public int getCscNodeCount() {
+		int cscFromOffsets = org.impulsegraph.api.RelationSnapshot.super.getCscNodeCount();
+		if (cscFromOffsets > 0) {
+			return cscFromOffsets;
+		}
+		return targetNodeCount;
+	}
+
 	public int findAttributeIndex(String name) {
+		if (name == null)
+			return -1;
 		for (int i = 0; i < attributeNames.size(); i++) {
 			if (attributeNames.get(i).equalsIgnoreCase(name))
+				return i;
+		}
+		String suffix = "." + name.toLowerCase();
+		for (int i = 0; i < attributeNames.size(); i++) {
+			if (attributeNames.get(i).toLowerCase().endsWith(suffix))
 				return i;
 		}
 		return -1;
@@ -346,7 +382,8 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 	 * off-heap memory.
 	 */
 	public int getInDegree(int nodeId) {
-		if (nodeId < 0 || nodeId >= nodeCount)
+		int cscBound = getCscNodeCount() > 0 ? getCscNodeCount() : nodeCount;
+		if (nodeId < 0 || nodeId >= cscBound)
 			return 0;
 		if (cscRowOffsetsSegment == null || cscRowOffsetsSegment.equals(MemorySegment.NULL))
 			return 0;
@@ -360,7 +397,8 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 	 * destination node ID zero-copy from off-heap memory.
 	 */
 	public int[] getInTargets(int nodeId) {
-		if (nodeId < 0 || nodeId >= nodeCount)
+		int cscBound = getCscNodeCount() > 0 ? getCscNodeCount() : nodeCount;
+		if (nodeId < 0 || nodeId >= cscBound)
 			return new int[0];
 		if (cscRowOffsetsSegment == null || cscRowOffsetsSegment.equals(MemorySegment.NULL))
 			return new int[0];
@@ -476,7 +514,8 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 	 * ImpulseBitSet zero-allocation.
 	 */
 	public void copyInTargetsSimd(int nodeId, ImpulseBitSet outBs) {
-		if (nodeId < 0 || nodeId >= nodeCount || outBs == null)
+		int cscBound = getCscNodeCount() > 0 ? getCscNodeCount() : nodeCount;
+		if (nodeId < 0 || nodeId >= cscBound || outBs == null)
 			return;
 		if (cscRowOffsetsSegment == null || cscRowOffsetsSegment.equals(MemorySegment.NULL))
 			return;

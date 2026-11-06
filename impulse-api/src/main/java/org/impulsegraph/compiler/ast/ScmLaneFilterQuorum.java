@@ -24,7 +24,7 @@ public record ScmLaneFilterQuorum(int minQuorum, boolean invert) implements ImpS
 		if (invert) {
 			return "(lane-filter-quorum " + minQuorum + " #t)";
 		}
-		return "(lane-filter-quorum " + minQuorum + ")";
+		return "(lane-filter-quorum " + minQuorum + " 255)";
 	}
 
 	@Override

@@ -48,7 +48,7 @@ public record ScmSetOp(Kind kind, ImpScmNode lhs, ImpScmNode rhs) implements Imp
 	@Override
 	public String toScmString() {
 		String opName = switch (kind) {
-			case UNION -> "set-union";
+			case UNION -> "set:union";
 			case INTERSECT -> "set-intersect";
 			case DIFF -> "set-diff";
 		};

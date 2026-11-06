@@ -34,8 +34,10 @@ public record ScmLaneSetCover(int maxNodes, long targetMask, boolean pairMode) i
 
 	@Override
 	public String toScmString() {
-		return "(lane-set-cover " + maxNodes + " " + Long.toUnsignedString(targetMask) + (pairMode ? " #t" : " #f")
-				+ ")";
+		if (maxNodes == 0) {
+			return "(lane-set-cover " + Long.toUnsignedString(targetMask) + " " + mode() + ")";
+		}
+		return "(lane-set-cover " + maxNodes + " " + Long.toUnsignedString(targetMask) + (pairMode ? " #t" : "") + ")";
 	}
 
 	@Override

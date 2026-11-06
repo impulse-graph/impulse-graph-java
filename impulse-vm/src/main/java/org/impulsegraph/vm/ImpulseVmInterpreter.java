@@ -658,8 +658,23 @@ public final class ImpulseVmInterpreter {
 						pc++;
 					}
 
+					case OP_RESERVED_3B -> {
+						VmHandlers.handleCoalesce(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_RESERVED_3C -> {
+						VmHandlers.handleExtractValidity(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_KCORE_DECOMPOSITION -> {
+						VmHandlers.handleKcoreDecomposition(state, ctx, instr);
+						pc++;
+					}
+
 					case OP_SAMPLE_NEIGHBORS, OP_RANDOM_WALK, OP_SCATTER_GATHER, OP_REBAC_CHECK, OP_SPARSE_MATVEC,
-							OP_LOUVAIN_MODULARITY, OP_KCORE_DECOMPOSITION, OP_MOTIF_MATCH_3, OP_GRAPH_ISOMORPHISM -> {
+							OP_LOUVAIN_MODULARITY, OP_MOTIF_MATCH_3, OP_GRAPH_ISOMORPHISM -> {
 						VmHandlers.validateReg(instr.dstReg());
 						pc++;
 					}

@@ -630,6 +630,9 @@ public final class VmMultiLaneHandlers {
 			case 0xC6 -> { // OP_LANE_FILTER_QUORUM
 				int srcReg = ((flags & 1) != 0) ? pU8_0 : pU16Low;
 				int minK = ((flags & 1) != 0) ? pU8_1 : (pU16High > 0 ? pU16High : 1);
+				if ((flags & 1) != 0 && (pU8_2 >= 64 || pU8_3 >= 64)) {
+					throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_REGISTER");
+				}
 				VmLaneFrontier lfSrc = requireLaneFrontier(state, ctx, srcReg);
 				long reqMask = ((flags & 1) != 0 && pU8_2 > 0 && pU8_2 < 64
 						&& VmHandlers.getRegisterType(state, pU8_2) == TYPE_INT64)
