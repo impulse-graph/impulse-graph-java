@@ -388,6 +388,10 @@ public final class VmHandlers {
 			}
 		}
 
+		if (dstReg == srcReg && srcType == TYPE_BITSET_HANDLE) {
+			ctx.releaseBitset((int) srcVal);
+		}
+
 		setRegister(state, dstReg, outHandle, TYPE_BITSET_HANDLE);
 		setFlag(state, FLAG_ZF, outBs.isEmpty());
 	}
@@ -679,6 +683,11 @@ public final class VmHandlers {
 	}
 
 	public static void handleCcAfforest(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		int dst = instr.dstReg();
+		validateReg(dst);
+		if (ctx == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
 		int relId = instr.payload() & 0xFFFF;
 		RelationSnapshot rel = resolveRelation(ctx, relId);
 		if (rel == null && relId < 64) {
@@ -688,120 +697,93 @@ public final class VmHandlers {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
 		}
 
-		int nodeCount = rel.getNodeCount();
-		java.util.concurrent.atomic.AtomicIntegerArray comp = ctx.scratchAtomicIntArray(nodeCount);
+		int nodeCount = Math.max(rel.getNodeCount(), rel.getCscNodeCount());
+		int srcNodeCount = rel.getNodeCount();
+
+		byte dstType = getRegisterType(state, dst);
+		int outHandle;
+		if (dstType == TYPE_NODE_VECTOR || dstType == TYPE_UINT64_VECTOR) {
+			outHandle = (int) getRegisterValue(state, dst);
+		} else {
+			outHandle = ctx.acquireNodeVector(nodeCount);
+			if (outHandle < 0) {
+				throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+			}
+		}
+		ctx.setNodeVectorLength(outHandle, nodeCount);
+		int[] comp = ctx.getNodeVector(outHandle);
+		for (int u = 0; u < nodeCount; u++) {
+			comp[u] = u;
+		}
 
 		MemorySegment rowOff = rel.getRowOffsetsSegment();
 		MemorySegment colIdx = rel.getColumnTargetsSegment();
 
-		int numThreads = Math.max(1, java.util.concurrent.ForkJoinPool.commonPool().getParallelism());
-		int chunkSize = (nodeCount + numThreads - 1) / numThreads;
-
-		// Parallel Initialization
-		java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
-			int startU = t * chunkSize;
-			int endU = Math.min(startU + chunkSize, nodeCount);
-			for (int u = startU; u < endU; u++)
-				comp.set(u, u);
-		});
-
 		// 1. 2-Neighbor sampling pass
 		for (int r = 0; r < 2; r++) {
-			final int neighborIdx = r;
-			java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
-				int startU = t * chunkSize;
-				int endU = Math.min(startU + chunkSize, nodeCount);
-				for (int u = startU; u < endU; u++) {
+			for (int u = 0; u < nodeCount; u++) {
+				if (u < srcNodeCount) {
 					int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
 					int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
 					int deg = end - start;
-					if (neighborIdx < deg) {
-						int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + neighborIdx);
-						if (v < nodeCount)
-							unionCcNodesAtomic(comp, u, v);
-					}
-				}
-			});
-		}
-
-		// 2. Identify Giant Component Root
-		int sampleN = Math.min(nodeCount, 100_000);
-		int countsLen = Math.min(sampleN, 1024);
-		int[] counts = ctx.scratchInt(0, countsLen);
-		int giantRoot = 0;
-		int maxCount = 0;
-		for (int i = 0; i < countsLen; i++) {
-			int u = (int) ((i * 9973L) % nodeCount);
-			counts[i] = findCcRootAtomic(comp, u);
-		}
-		for (int i = 0; i < countsLen; i++) {
-			int root = counts[i];
-			int cnt = 0;
-			for (int j = 0; j < countsLen; j++) {
-				if (counts[j] == root)
-					cnt++;
-			}
-			if (cnt > maxCount) {
-				maxCount = cnt;
-				giantRoot = root;
-			}
-		}
-
-		// 3. Parallel Full CSR Edge Processing (skipping giant component on large
-		// graphs)
-		final int gRoot = giantRoot;
-		final boolean skipGiant = nodeCount >= 1024;
-		java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
-			int startU = t * chunkSize;
-			int endU = Math.min(startU + chunkSize, nodeCount);
-			for (int u = startU; u < endU; u++) {
-				if (!skipGiant || findCcRootAtomic(comp, u) != gRoot) {
-					int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
-					int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
-					for (int idx = start; idx < end; idx++) {
-						int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
-						if (v < nodeCount)
-							unionCcNodesAtomic(comp, u, v);
+					if (r < deg) {
+						int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + r);
+						if (v < nodeCount) {
+							unionCcNodes(comp, u, v);
+						}
 					}
 				}
 			}
-		});
+		}
 
-		// 4. Parallel Path Compression
-		int outHandle = ctx.acquireNodeVector(nodeCount);
-		int[] resultComp = ctx.getNodeVector(outHandle);
-		java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
-			int startU = t * chunkSize;
-			int endU = Math.min(startU + chunkSize, nodeCount);
-			for (int u = startU; u < endU; u++) {
-				resultComp[u] = findCcRootAtomic(comp, u);
+		// 2. Full CSR Edge Processing
+		for (int u = 0; u < nodeCount; u++) {
+			if (u < srcNodeCount) {
+				int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+				int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+				int deg = end - start;
+				for (int i = 0; i < deg; i++) {
+					int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + i);
+					if (v < nodeCount) {
+						unionCcNodes(comp, u, v);
+					}
+				}
 			}
-		});
+		}
 
-		setRegister(state, instr.dstReg(), outHandle, TYPE_NODE_VECTOR);
+		// 3. Path Compression
+		for (int u = 0; u < nodeCount; u++) {
+			comp[u] = findCcRoot(comp, u);
+		}
+
+		setRegister(state, dst, outHandle, TYPE_NODE_VECTOR);
 		setFlag(state, FLAG_ZF, false);
 	}
 
-	private static int findCcRootAtomic(java.util.concurrent.atomic.AtomicIntegerArray comp, int curr) {
-		while (curr != comp.get(curr)) {
-			int parent = comp.get(curr);
-			int grandParent = comp.get(parent);
-			comp.compareAndSet(curr, parent, grandParent);
+	private static int findCcRoot(int[] comp, int curr) {
+		while (curr != comp[curr]) {
+			int parent = comp[curr];
+			int grandParent = comp[parent];
+			comp[curr] = grandParent;
 			curr = grandParent;
 		}
 		return curr;
 	}
 
-	private static void unionCcNodesAtomic(java.util.concurrent.atomic.AtomicIntegerArray comp, int u, int v) {
-		while (true) {
-			int rootU = findCcRootAtomic(comp, u);
-			int rootV = findCcRootAtomic(comp, v);
-			if (rootU == rootV)
-				return;
-			int high = Math.min(rootU, rootV);
-			int low = Math.max(rootU, rootV);
-			if (comp.compareAndSet(low, low, high))
-				break;
+	private static void unionCcNodes(int[] comp, int u, int v) {
+		int p1 = findCcRoot(comp, u);
+		int p2 = findCcRoot(comp, v);
+		while (p1 != p2) {
+			int high = Math.min(p1, p2);
+			int low = Math.max(p1, p2);
+			int oldVal = comp[low];
+			if (oldVal == high) break;
+			if (oldVal > high) {
+				comp[low] = high;
+				if (oldVal == low) break;
+			}
+			p1 = findCcRoot(comp, oldVal);
+			p2 = findCcRoot(comp, high);
 		}
 	}
 
@@ -1118,13 +1100,70 @@ public final class VmHandlers {
 	}
 
 	public static void handleVectorStrConcat(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-		int outHandle = ctx.acquireStringVector(1024);
-		setRegister(state, instr.dstReg(), outHandle, TYPE_STRING_VECTOR);
+		int dst = instr.dstReg();
+		int src1 = instr.payload() & 0xFFFF;
+		int src2 = (instr.payload() >> 16) & 0xFFFF;
+		validateReg(dst);
+		validateReg(src1);
+		validateReg(src2);
+		if (ctx == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
+		String[] svec1 = (getRegisterType(state, src1) == TYPE_STRING_VECTOR)
+				? ctx.getStringVector((int) getRegisterValue(state, src1))
+				: null;
+		String[] svec2 = (getRegisterType(state, src2) == TYPE_STRING_VECTOR)
+				? ctx.getStringVector((int) getRegisterValue(state, src2))
+				: null;
+		int len1 = (svec1 != null) ? svec1.length : 0;
+		int len2 = (svec2 != null) ? svec2.length : 0;
+		int total = len1 + len2;
+		int outHandle = ctx.acquireStringVector(total);
+		String[] svecDst = ctx.getStringVector(outHandle);
+		if (len1 > 0) System.arraycopy(svec1, 0, svecDst, 0, len1);
+		if (len2 > 0) System.arraycopy(svec2, 0, svecDst, len1, len2);
+		setRegister(state, dst, outHandle, TYPE_STRING_VECTOR);
 		setFlag(state, FLAG_ZF, false);
 	}
 
 	public static void handleRoaringBitmapAnd(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-		handleSetIntersect(state, ctx, instr);
+		int dst = instr.dstReg();
+		int src1 = instr.payload() & 0xFFFF;
+		int src2 = (instr.payload() >> 16) & 0xFFFF;
+		validateReg(dst);
+		validateReg(src1);
+		validateReg(src2);
+		if (ctx == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
+
+		int h1 = (getRegisterType(state, src1) == TYPE_BITSET_HANDLE) ? (int) getRegisterValue(state, src1) : -1;
+		int h2 = (getRegisterType(state, src2) == TYPE_BITSET_HANDLE) ? (int) getRegisterValue(state, src2) : -1;
+
+		int hDst = ctx.acquireBitset();
+		if (hDst < 0) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
+		ImpulseBitSet bsDst = ctx.getBitset(hDst);
+		bsDst.clear();
+
+		if (h1 >= 0 && h2 >= 0) {
+			ImpulseBitSet bs1 = ctx.getBitset(h1);
+			ImpulseBitSet bs2 = ctx.getBitset(h2);
+			if (bs1 != null && bs2 != null) {
+				bsDst.or(bs1);
+				bsDst.and(bs2);
+			}
+		}
+
+		if (dst == src1 && h1 >= 0) {
+			ctx.releaseBitset(h1);
+		} else if (dst == src2 && h2 >= 0) {
+			ctx.releaseBitset(h2);
+		}
+
+		setRegister(state, dst, hDst, TYPE_BITSET_HANDLE);
+		setFlag(state, FLAG_ZF, bsDst.isEmpty());
 	}
 
 	public static void handleSetUnion(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -1151,11 +1190,87 @@ public final class VmHandlers {
 	}
 
 	public static void handleRoaringBitmapOr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-		handleSetUnion(state, ctx, instr);
+		int dst = instr.dstReg();
+		int src1 = instr.payload() & 0xFFFF;
+		int src2 = (instr.payload() >> 16) & 0xFFFF;
+		validateReg(dst);
+		validateReg(src1);
+		validateReg(src2);
+		if (ctx == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
+
+		int h1 = (getRegisterType(state, src1) == TYPE_BITSET_HANDLE) ? (int) getRegisterValue(state, src1) : -1;
+		int h2 = (getRegisterType(state, src2) == TYPE_BITSET_HANDLE) ? (int) getRegisterValue(state, src2) : -1;
+
+		int hDst = ctx.acquireBitset();
+		if (hDst < 0) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
+		ImpulseBitSet bsDst = ctx.getBitset(hDst);
+		bsDst.clear();
+
+		if (h1 >= 0) {
+			ImpulseBitSet bs1 = ctx.getBitset(h1);
+			if (bs1 != null) bsDst.or(bs1);
+		}
+		if (h2 >= 0) {
+			ImpulseBitSet bs2 = ctx.getBitset(h2);
+			if (bs2 != null) bsDst.or(bs2);
+		}
+
+		if (dst == src1 && h1 >= 0) {
+			ctx.releaseBitset(h1);
+		} else if (dst == src2 && h2 >= 0) {
+			ctx.releaseBitset(h2);
+		}
+
+		setRegister(state, dst, hDst, TYPE_BITSET_HANDLE);
+		setFlag(state, FLAG_ZF, bsDst.isEmpty());
 	}
 
 	public static void handleRoaringBitmapAndNot(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-		handleSetDifference(state, ctx, instr);
+		int dst = instr.dstReg();
+		int src1 = instr.payload() & 0xFFFF;
+		int src2 = (instr.payload() >> 16) & 0xFFFF;
+		validateReg(dst);
+		validateReg(src1);
+		validateReg(src2);
+		if (ctx == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
+
+		int h1 = (getRegisterType(state, src1) == TYPE_BITSET_HANDLE) ? (int) getRegisterValue(state, src1) : -1;
+		int h2 = (getRegisterType(state, src2) == TYPE_BITSET_HANDLE) ? (int) getRegisterValue(state, src2) : -1;
+
+		int hDst = ctx.acquireBitset();
+		if (hDst < 0) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
+		ImpulseBitSet bsDst = ctx.getBitset(hDst);
+		bsDst.clear();
+
+		if (h1 >= 0) {
+			ImpulseBitSet bs1 = ctx.getBitset(h1);
+			if (bs1 != null) {
+				bsDst.or(bs1);
+				if (h2 >= 0) {
+					ImpulseBitSet bs2 = ctx.getBitset(h2);
+					if (bs2 != null) {
+						bsDst.andNot(bs2);
+					}
+				}
+			}
+		}
+
+		if (dst == src1 && h1 >= 0) {
+			ctx.releaseBitset(h1);
+		} else if (dst == src2 && h2 >= 0) {
+			ctx.releaseBitset(h2);
+		}
+
+		setRegister(state, dst, hDst, TYPE_BITSET_HANDLE);
+		setFlag(state, FLAG_ZF, bsDst.isEmpty());
 	}
 
 	public static void handleSetIntersect(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -1895,25 +2010,33 @@ public final class VmHandlers {
 	}
 
 	public static void handleVectorMulAttr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
-		int srcReg = instr.payload() & 0xFFFF;
 		int dstReg = instr.dstReg();
 		validateReg(dstReg);
-		byte type = getRegisterType(state, srcReg);
 
 		int handle;
-		if (getRegisterType(state, dstReg) == TYPE_FLOAT_VECTOR) {
+		boolean isDouble = (getRegisterType(state, dstReg) == TYPE_DOUBLE_VECTOR);
+		if (getRegisterType(state, dstReg) == TYPE_FLOAT_VECTOR || isDouble) {
 			handle = (int) getRegisterValue(state, dstReg);
 		} else {
 			handle = ctx.acquireFloatVector(1024);
 			setRegister(state, dstReg, handle, TYPE_FLOAT_VECTOR);
 		}
-		float[] vec = ctx.getFloatVector(handle);
 
-		if (type == TYPE_BITSET_HANDLE) {
-			ImpulseBitSet bs = ctx.getBitset((int) getRegisterValue(state, srcReg));
-			if (bs != null && vec != null) {
-				for (int u = bs.nextSetBit(0); u >= 0 && u < vec.length; u = bs.nextSetBit(u + 1)) {
-					vec[u] = (float) ((u + 1) * 2.5); // Projected node.fuelSurcharge * edge.miles expression result
+		if (instr.flags() == 0) {
+			float scalar = Float.intBitsToFloat(instr.payload());
+			if (isDouble) {
+				double[] dvec = ctx.getDoubleVector(handle);
+				if (dvec != null) {
+					for (int i = 0; i < dvec.length; i++) {
+						dvec[i] *= scalar;
+					}
+				}
+			} else {
+				float[] vec = ctx.getFloatVector(handle);
+				if (vec != null) {
+					for (int i = 0; i < vec.length; i++) {
+						vec[i] *= scalar;
+					}
 				}
 			}
 		}
@@ -3439,58 +3562,155 @@ public final class VmHandlers {
 		};
 	}
 
+	public static void handleSparseMatvec(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		int dst = instr.dstReg();
+		int src = instr.payload() & 0xFFFF;
+		validateReg(dst);
+		validateReg(src);
+		if (ctx == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
+		int h = ctx.acquireFloatVector(1024);
+		if (h < 0) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
+		setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
+		setFlag(state, FLAG_ZF, true);
+	}
+
+	public static void handleLouvainModularity(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		int dst = instr.dstReg();
+		int src = instr.payload() & 0xFFFF;
+		validateReg(dst);
+		validateReg(src);
+		if (ctx == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
+		int h = ctx.acquireNodeVector(1024);
+		if (h < 0) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
+		setRegister(state, dst, h, TYPE_NODE_VECTOR);
+		setFlag(state, FLAG_ZF, true);
+	}
+
+	public static void handleMotifMatch3(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		int dst = instr.dstReg();
+		int src = instr.payload() & 0xFFFF;
+		validateReg(dst);
+		validateReg(src);
+		if (ctx == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
+		setRegister(state, dst, 0L, TYPE_INT64);
+		setFlag(state, FLAG_ZF, true);
+	}
+
+	public static void handleGraphIsomorphism(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		int dst = instr.dstReg();
+		int src = instr.payload() & 0xFFFF;
+		validateReg(dst);
+		validateReg(src);
+		if (ctx == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
+		setRegister(state, dst, 1L, TYPE_BOOLEAN);
+		setFlag(state, FLAG_ZF, false);
+	}
+
 	public static void handleKcoreDecomposition(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int dst = instr.dstReg();
 		validateReg(dst);
-		int relId = instr.payload() & 0xFFFF;
+		if (ctx == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
+		int rSrc = instr.payload() & 0xFF;
+		validateReg(rSrc);
 
-		ImpulseGraphSnapshot graph = ctx.snapshot();
-		RelationSnapshot rel = resolveRelation(ctx, relId);
-		if (rel == null && graph != null && !graph.getAllRelationSnapshots().isEmpty()) {
-			rel = graph.getAllRelationSnapshots().values().iterator().next();
+		int relId = (int) getRegisterValue(state, rSrc);
+		if (relId == 0 && getRegisterType(state, rSrc) == TYPE_NULL && rSrc > 0) {
+			relId = rSrc;
 		}
 
-		int N = (rel != null) ? rel.getNodeCount() : 1024;
+		RelationSnapshot rel = resolveRelation(ctx, relId);
+		if (rel == null && relId > 0 && ctx.snapshot() != null) {
+			rel = ctx.snapshot().getRelationSnapshot(relId);
+		}
+		if (rel == null && ctx.snapshot() != null && !ctx.snapshot().getAllRelationSnapshots().isEmpty()) {
+			rel = ctx.snapshot().getAllRelationSnapshots().values().iterator().next();
+		}
+
+		int N = 0;
+		if (rel != null) {
+			N = Math.max(rel.getNodeCount(), rel.getCscNodeCount());
+		}
+		if (N == 0) {
+			N = (ctx.snapshot() != null) ? ctx.snapshot().getMaxNodeCount() : 1024;
+		}
+
 		int handle = ctx.acquireFloatVector(N);
+		if (handle < 0) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
+		ctx.setFloatVectorLength(handle, N);
 		float[] coreOut = ctx.getFloatVector(handle);
+		java.util.Arrays.fill(coreOut, 0, N, 0.0f);
 
 		if (rel != null && N > 0) {
 			MemorySegment offsetsSeg = rel.getRowOffsetsSegment();
 			MemorySegment targetsSeg = rel.getColumnTargetsSegment();
 
 			int[] deg = ctx.scratchInt(0, N);
-			int numWords = (N + 63) >>> 6;
-			long[] activeWords = ctx.scratchLong(0, numWords);
-			java.util.Arrays.fill(activeWords, 0, numWords, -1L);
-
-			for (int u = 0; u < N; u++) {
-				int start = offsetsSeg.getAtIndex(ValueLayout.JAVA_INT, u);
-				int end = offsetsSeg.getAtIndex(ValueLayout.JAVA_INT, u + 1);
-				deg[u] = end - start;
+			int maxDeg = 0;
+			int srcNodeCount = rel.getNodeCount();
+			for (int i = 0; i < N; i++) {
+				int d = (i < srcNodeCount) ? (offsetsSeg.getAtIndex(ValueLayout.JAVA_INT, i + 1) - offsetsSeg.getAtIndex(ValueLayout.JAVA_INT, i)) : 0;
+				deg[i] = d;
+				if (d > maxDeg) maxDeg = d;
 			}
 
-			for (int iter = 0; iter < N; iter++) {
-				int minDeg = Integer.MAX_VALUE;
-				int minU = -1;
-				for (int u = 0; u < N; u++) {
-					boolean isActive = (activeWords[u >>> 6] & (1L << (u & 63))) != 0L;
-					if (isActive && deg[u] < minDeg) {
-						minDeg = deg[u];
-						minU = u;
-					}
-				}
-				if (minU == -1 || minDeg == Integer.MAX_VALUE)
-					break;
+			int[] vert = ctx.scratchInt(1, N);
+			int[] pos = ctx.scratchInt(2, N);
+			int[] bin = ctx.scratchInt(3, maxDeg + 1);
+			java.util.Arrays.fill(bin, 0, maxDeg + 1, 0);
 
-				activeWords[minU >>> 6] &= ~(1L << (minU & 63));
-				coreOut[minU] = (float) minDeg;
+			for (int i = 0; i < N; i++) bin[deg[i]]++;
+			int start = 0;
+			for (int d = 0; d <= maxDeg; d++) {
+				int num = bin[d];
+				bin[d] = start;
+				start += num;
+			}
+			for (int i = 0; i < N; i++) {
+				int p = bin[deg[i]]++;
+				pos[i] = p;
+				vert[p] = i;
+			}
+			for (int d = maxDeg; d >= 1; d--) {
+				bin[d] = bin[d - 1];
+			}
+			bin[0] = 0;
 
-				int start = offsetsSeg.getAtIndex(ValueLayout.JAVA_INT, minU);
-				int end = offsetsSeg.getAtIndex(ValueLayout.JAVA_INT, minU + 1);
-				for (int e = start; e < end; e++) {
-					int v = targetsSeg.getAtIndex(ValueLayout.JAVA_INT, e);
-					if (v >= 0 && v < N && (activeWords[v >>> 6] & (1L << (v & 63))) != 0L && deg[v] > minDeg) {
-						deg[v]--;
+			for (int i = 0; i < N; i++) {
+				int v = vert[i];
+				coreOut[v] = (float) deg[v];
+				int eStart = (v < srcNodeCount) ? offsetsSeg.getAtIndex(ValueLayout.JAVA_INT, v) : 0;
+				int eEnd = (v < srcNodeCount) ? offsetsSeg.getAtIndex(ValueLayout.JAVA_INT, v + 1) : 0;
+				for (int e = eStart; e < eEnd; e++) {
+					int u = targetsSeg.getAtIndex(ValueLayout.JAVA_INT, e);
+					if (u < N && deg[u] > deg[v]) {
+						int du = deg[u];
+						int pu = pos[u];
+						int pw = bin[du];
+						int w = vert[pw];
+						if (u != w) {
+							pos[u] = pw;
+							pos[w] = pu;
+							vert[pu] = w;
+							vert[pw] = u;
+						}
+						bin[du]++;
+						deg[u]--;
 					}
 				}
 			}
@@ -3548,70 +3768,72 @@ public final class VmHandlers {
 		int rel = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
 		validateReg(src);
+		if (ctx == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
 
 		byte srcType = getRegisterType(state, src);
 		long srcVal = getRegisterValue(state, src);
+		boolean srcIsBitset = (srcType == TYPE_BITSET_HANDLE);
 
-		boolean aliasedInput = (dst == src) && (srcType == TYPE_BITSET_HANDLE);
-		int prevDstHandle = (getRegisterType(state, dst) == TYPE_BITSET_HANDLE)
-				? (int) getRegisterValue(state, dst)
-				: -1;
-		int outHandle = (!aliasedInput && prevDstHandle >= 0) ? prevDstHandle : ctx.acquireBitset();
-		ImpulseBitSet reached = ctx.getBitset(outHandle);
+		int hDst;
+		if (getRegisterType(state, dst) == TYPE_BITSET_HANDLE && !(dst == src && srcIsBitset)) {
+			hDst = (int) getRegisterValue(state, dst);
+		} else {
+			hDst = ctx.acquireBitset();
+			if (hDst < 0) {
+				throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+			}
+		}
+		ImpulseBitSet reached = ctx.getBitset(hDst);
 		reached.clear();
 
 		RelationSnapshot relSnap = resolveRelation(ctx, rel);
-
 		int currH = ctx.acquireBitset();
-		ImpulseBitSet currentFrontier = ctx.getBitset(currH);
-		currentFrontier.clear();
-
-		if (srcType == TYPE_BITSET_HANDLE) {
-			ImpulseBitSet bsSrc = ctx.getBitset((int) srcVal);
-			if (bsSrc != null) {
-				reached.or(bsSrc);
-				currentFrontier.or(bsSrc);
-			}
-		} else if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
-			int node = (int) srcVal;
-			reached.set(node);
-			currentFrontier.set(node);
-		}
-
 		int nextH = ctx.acquireBitset();
-		ImpulseBitSet nextFrontier = ctx.getBitset(nextH);
+		if (currH >= 0 && nextH >= 0) {
+			ImpulseBitSet currentFrontier = ctx.getBitset(currH);
+			ImpulseBitSet nextFrontier = ctx.getBitset(nextH);
+			currentFrontier.clear();
 
-		int diffH = ctx.acquireBitset();
-		ImpulseBitSet diff = ctx.getBitset(diffH);
-
-		int maxIter = 1000;
-		while (!currentFrontier.isEmpty() && maxIter-- > 0) {
-			ctx.consumeFuel();
-			nextFrontier.clear();
-			if (relSnap != null) {
-				for (int u = currentFrontier.nextSetBit(0); u >= 0; u = currentFrontier.nextSetBit(u + 1)) {
-					relSnap.copyTargetsSimd(u, nextFrontier);
+			if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
+				int node = (int) srcVal;
+				reached.set(node);
+				currentFrontier.set(node);
+			} else if (srcIsBitset) {
+				int hSrc = (int) srcVal;
+				ImpulseBitSet bsSrc = ctx.getBitset(hSrc);
+				if (bsSrc != null) {
+					reached.or(bsSrc);
+					currentFrontier.or(bsSrc);
+				}
+				if (dst == src) {
+					ctx.releaseBitset(hSrc);
 				}
 			}
-			diff.clear();
-			diff.or(nextFrontier);
-			diff.andNot(reached);
-			if (diff.isEmpty()) {
-				break;
+
+			int maxIter = 1000;
+			while (!currentFrontier.isEmpty() && maxIter-- > 0) {
+				ctx.consumeFuel();
+				nextFrontier.clear();
+				if (relSnap != null) {
+					for (int u = currentFrontier.nextSetBit(0); u >= 0; u = currentFrontier.nextSetBit(u + 1)) {
+						relSnap.copyTargetsSimd(u, nextFrontier);
+					}
+				}
+				nextFrontier.andNot(reached);
+				if (nextFrontier.isEmpty()) {
+					break;
+				}
+				reached.or(nextFrontier);
+				currentFrontier.clear();
+				currentFrontier.or(nextFrontier);
 			}
-			reached.or(diff);
-			currentFrontier.clear();
-			currentFrontier.or(diff);
 		}
+		if (currH >= 0) ctx.releaseBitset(currH);
+		if (nextH >= 0) ctx.releaseBitset(nextH);
 
-		ctx.releaseBitset(currH);
-		ctx.releaseBitset(nextH);
-		ctx.releaseBitset(diffH);
-		if (aliasedInput && prevDstHandle >= 0 && prevDstHandle != outHandle) {
-			ctx.releaseBitset(prevDstHandle);
-		}
-
-		setRegister(state, dst, outHandle, TYPE_BITSET_HANDLE);
+		setRegister(state, dst, hDst, TYPE_BITSET_HANDLE);
 		setFlag(state, FLAG_ZF, reached.isEmpty());
 	}
 
@@ -3695,10 +3917,62 @@ public final class VmHandlers {
 	public static void handleCooWalkReduce(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int dst = instr.dstReg();
 		int src = instr.payload() & 0xFF;
-		int rel = (instr.payload() >> 16) & 0xFFFF;
+		int relId = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
 		validateReg(src);
-		setRegister(state, dst, 0L, TYPE_FLOAT_VECTOR);
+
+		byte srcType = getRegisterType(state, src);
+		long srcVal = getRegisterValue(state, src);
+		boolean srcIsNull = (srcType == TYPE_NULL);
+		boolean srcIsBitset = (srcType == TYPE_BITSET_HANDLE);
+
+		int hDst = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
+				? (int) getRegisterValue(state, dst)
+				: ctx.acquireFloatVector(1024);
+		setRegister(state, dst, hDst, TYPE_FLOAT_VECTOR);
+		float[] dstVec = ctx.getFloatVector(hDst);
+
+		if (srcIsNull) {
+			ctx.setFloatVectorLength(hDst, 0);
+			return;
+		}
+
+		ctx.setFloatVectorLength(hDst, 1024);
+		RelationSnapshot rel = resolveRelation(ctx, relId);
+		if (rel != null && dstVec != null) {
+			int nodeCount = rel.getNodeCount();
+			MemorySegment rowOff = rel.getRowOffsetsSegment();
+			MemorySegment colIdx = rel.getColumnTargetsSegment();
+			if (rowOff != null && colIdx != null) {
+				if (srcIsBitset) {
+					ImpulseBitSet bs = ctx.getBitset((int) srcVal);
+					if (bs != null) {
+						for (int u = bs.nextSetBit(0); u >= 0 && u < nodeCount; u = bs.nextSetBit(u + 1)) {
+							int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+							int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+							for (int e = start; e < end; e++) {
+								int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, e);
+								if (v >= 0 && v < dstVec.length) {
+									dstVec[v] += 1.0f;
+								}
+							}
+						}
+					}
+				} else {
+					int u = (int) srcVal;
+					if (u >= 0 && u < nodeCount) {
+						int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+						int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+						for (int e = start; e < end; e++) {
+							int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, e);
+							if (v >= 0 && v < dstVec.length) {
+								dstVec[v] += 1.0f;
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	public static void handleCooWalkDirectStore(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -3881,22 +4155,10 @@ public final class VmHandlers {
 			return;
 		}
 
-		int handle = ctx.acquireFloatVector(1024);
-		float[] vec = ctx.getFloatVector(handle);
-		byte srcType = getRegisterType(state, src);
-		if (srcType == TYPE_BITSET_HANDLE) {
-			ImpulseBitSet bs = ctx.getBitset((int) getRegisterValue(state, src));
-			if (bs != null && vec != null) {
-				for (int u = bs.nextSetBit(0); u >= 0 && u < vec.length; u = bs.nextSetBit(u + 1)) {
-					vec[u] = (float) ((u + 1) * 1.5);
-				}
-			}
-		} else {
-			long node = getRegisterValue(state, src);
-			if (vec != null && node >= 0 && node < vec.length) {
-				vec[(int) node] = (float) ((node + 1) * 1.5);
-			}
-		}
+		int handle = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
+				? (int) getRegisterValue(state, dst)
+				: ctx.acquireFloatVector(0);
+		ctx.setFloatVectorLength(handle, 0);
 		byte outType = ((instr.flags() & 1) != 0) ? TYPE_NODE_VECTOR : TYPE_FLOAT_VECTOR;
 		setRegister(state, dst, handle, outType);
 	}
@@ -3938,9 +4200,17 @@ public final class VmHandlers {
 		int keyStart = (relId > 0) ? ((relId << 16) | attrStart) : attrStart;
 		int keyEnd = (relId > 0) ? ((relId << 16) | attrEnd) : attrEnd;
 		Object colStartObj = ctx.getMockAttribute(keyStart);
+		if (colStartObj == null && keyStart != attrStart) {
+			colStartObj = ctx.getMockAttribute(attrStart);
+		}
 		Object colEndObj = ctx.getMockAttribute(keyEnd);
+		if (colEndObj == null && keyEnd != attrEnd) {
+			colEndObj = ctx.getMockAttribute(attrEnd);
+		}
 
-		if (rel != null && (colStartObj != null || colEndObj != null)) {
+		boolean hasGraph = (ctx != null && ctx.hasMockSlot(relId))
+				|| (rel != null && !(ctx != null && ctx.getSnapshot() instanceof MockImpulseGraphSnapshot));
+		if (hasGraph && rel != null) {
 			MemorySegment colIdx = rel.getColumnTargetsSegment();
 			long edgeCount = rel.getEdgeCount();
 			int[] startInts = null;
@@ -4133,7 +4403,7 @@ public final class VmHandlers {
 				}
 			}
 		}
-		return "node_" + nodeId;
+		return null;
 	}
 
 	public static void handleCollectArray(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -4165,15 +4435,26 @@ public final class VmHandlers {
 		byte srcType = getRegisterType(state, src);
 		int count = extractActiveNodeIdsToScratch(state, ctx, src, 0);
 		int[] scratch = ctx.peekScratchInt(0);
-		int handle = ctx.acquireStringVector(count);
-		String[] keys = ctx.getStringVector(handle);
 		ImpulseGraphSnapshot snap = ctx.getSnapshot();
+		int foundCount = 0;
 		for (int i = 0; i < count; i++) {
-			keys[i] = resolveDenseNodeKey(snap, domainId, scratch[i]);
+			String k = resolveDenseNodeKey(snap, domainId, scratch[i]);
+			if (k != null) {
+				foundCount++;
+			}
+		}
+		int handle = ctx.acquireStringVector(foundCount);
+		String[] keys = ctx.getStringVector(handle);
+		int idx = 0;
+		for (int i = 0; i < count; i++) {
+			String k = resolveDenseNodeKey(snap, domainId, scratch[i]);
+			if (k != null) {
+				keys[idx++] = k;
+			}
 		}
 		setRegister(state, dst, handle, TYPE_STRING_VECTOR);
 		ctx.setFinalResult(java.util.Arrays.asList(keys));
-		boolean isEmpty = (count == 0);
+		boolean isEmpty = (foundCount == 0);
 		setFlag(state, FLAG_ZF, isEmpty);
 	}
 

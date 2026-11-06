@@ -549,8 +549,24 @@ public final class ImpulseMethodHandleCompiler {
 					VmHandlers.handleVectorTimeValidAt(state, ctx, instr);
 					nextPc++;
 				}
-				case 0x60, 0x61, 0x62, 0x63, 0x66, 0x67, 0x69, 0x6A -> {
+				case 0x60, 0x61, 0x62, 0x63 -> {
 					VmHandlers.validateReg(instr.dstReg());
+					nextPc++;
+				}
+				case 0x66 -> {
+					VmHandlers.handleSparseMatvec(state, ctx, instr);
+					nextPc++;
+				}
+				case 0x67 -> {
+					VmHandlers.handleLouvainModularity(state, ctx, instr);
+					nextPc++;
+				}
+				case 0x69 -> {
+					VmHandlers.handleMotifMatch3(state, ctx, instr);
+					nextPc++;
+				}
+				case 0x6A -> {
+					VmHandlers.handleGraphIsomorphism(state, ctx, instr);
 					nextPc++;
 				}
 				case 0x68 -> {
