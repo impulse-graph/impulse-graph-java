@@ -378,9 +378,10 @@ public class E2eCsvPipelineIntegrationTest {
 			int expectedCardinality = ((Number) entry.get("expected_cardinality")).intValue();
 			int expectedScalarInt = ((Number) entry.get("expected_scalar_int")).intValue();
 
-			String queryText = Files.readString(suiteDir.resolve(queryFileRel), StandardCharsets.UTF_8);
+			String queryText = Files.readString(suiteDir.resolve(queryFileRel), StandardCharsets.UTF_8).replace("\r\n",
+					"\n");
 			String expectedScmFileText = Files.readString(suiteDir.resolve(expectedScmFileRel), StandardCharsets.UTF_8)
-					.trim();
+					.replace("\r\n", "\n").trim();
 
 			queryChecks.add(() -> {
 				// -----------------------------------------------------------------

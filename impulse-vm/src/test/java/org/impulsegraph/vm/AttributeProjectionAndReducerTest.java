@@ -100,11 +100,32 @@ public class AttributeProjectionAndReducerTest {
 
 	@Test
 	public void testTc37Nullability() throws Exception {
-		java.nio.file.Path specDir = java.nio.file.Paths
-				.get("../../impulse-graph-spec/test-vectors/tc37_nullable_padded_bitmap/snapshot.imps");
+		java.nio.file.Path specDir = java.nio.file.Paths.get("target", "test-fixtures", "tc37_nullable_padded_bitmap",
+				"snapshot.imps");
 		if (!java.nio.file.Files.exists(specDir)) {
-			specDir = java.nio.file.Paths
-					.get("../impulse-graph-spec/test-vectors/tc37_nullable_padded_bitmap/snapshot.imps");
+			java.nio.file.Files.createDirectories(specDir.getParent());
+			try (Arena buildArena = Arena.ofConfined()) {
+				MemorySegment voltageData = buildArena.allocate(5000L * Float.BYTES);
+				for (int i = 0; i < 5000; i++) {
+					voltageData.setAtIndex(ValueLayout.JAVA_FLOAT_UNALIGNED, i, 1.0f);
+				}
+				MemorySegment validityBitmap = buildArena.allocate(768L);
+				validityBitmap.set(ValueLayout.JAVA_LONG_UNALIGNED, 0, 0xFFFFFFFFFFFFFFFFL);
+
+				RelationSnapshot busRel = new RelationSnapshot(buildArena, 1354, 5000, MemorySegment.NULL,
+						MemorySegment.NULL, MemorySegment.NULL, MemorySegment.NULL, java.util.List.of(voltageData),
+						java.util.List.of(validityBitmap), (byte) 4, (byte) 4);
+				busRel.setAttributeNames(java.util.List.of("voltage"));
+				busRel.setAttributeTypeCodes(java.util.List.of((byte) 0x86));
+
+				GraphSnapshot g = new GraphSnapshot(buildArena, Map.of("Bus", busRel));
+				byte[] bytes = new org.impulsegraph.storage.csr.DefaultSnapshotBuilder()
+						.withDomain(0, "Bus", (byte) 0x03, 1354L).withRelationDomain("Bus", 0, 0)
+						.build(new org.impulsegraph.storage.csr.BinarySnapshotLoader.DefaultLoadedSnapshot(
+								org.impulsegraph.storage.csr.BinarySnapshotLoader.SNAPSHOT_MAGIC, (short) 9, g,
+								Map.of(), Map.of(), Map.of(), Map.of()));
+				java.nio.file.Files.write(specDir, bytes);
+			}
 		}
 
 		try (java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofShared()) {

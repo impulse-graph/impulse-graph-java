@@ -202,6 +202,16 @@ public final class DefaultSnapshotBuilder {
 		List<Integer> relNameOffsets = new ArrayList<>();
 		for (String rName : relNames) {
 			relNameOffsets.add(getOrAddString.apply(rName));
+			RelationSnapshot relSnap = loaded != null && loaded.graph() != null
+					? loaded.graph().getRelationSnapshot(rName)
+					: null;
+			if (relSnap != null) {
+				int attrCount = relSnap.getAttributeSegments().size();
+				for (int a = 0; a < attrCount; a++) {
+					String attrName = relSnap.getAttributeName(a);
+					getOrAddString.apply(attrName != null ? attrName : ("attr_" + a));
+				}
+			}
 		}
 
 		ByteArrayOutputStream dirTableOut = new ByteArrayOutputStream();
@@ -235,7 +245,16 @@ public final class DefaultSnapshotBuilder {
 		}
 
 		// Calculate Relation Blocks payload base offset
-		int totalDirLen = dirTableOut.size() + relationCount * 128;
+		int totalAttrDescBytes = 0;
+		for (String rName : relNames) {
+			RelationSnapshot relSnap = loaded != null && loaded.graph() != null
+					? loaded.graph().getRelationSnapshot(rName)
+					: null;
+			if (relSnap != null) {
+				totalAttrDescBytes += relSnap.getAttributeSegments().size() * 44;
+			}
+		}
+		int totalDirLen = dirTableOut.size() + relationCount * 128 + totalAttrDescBytes;
 		int alignedDirLen = (totalDirLen + 4095) & ~4095;
 		long relBlocksBaseOffset = dataOffset + alignedDirLen;
 
@@ -252,20 +271,30 @@ public final class DefaultSnapshotBuilder {
 						: null;
 
 				// Row Offsets
-				align128Out(payloadOut);
-				long csrRowOffOffset = relBlocksBaseOffset + payloadOut.size();
 				MemorySegment rowSeg = relSnap != null ? relSnap.getRowOffsetsSegment() : MemorySegment.NULL;
-				byte[] rowBytes = rowSeg != MemorySegment.NULL ? rowSeg.toArray(ValueLayout.JAVA_BYTE) : new byte[0];
+				byte[] rowBytes = rowSeg != null && rowSeg != MemorySegment.NULL
+						? rowSeg.toArray(ValueLayout.JAVA_BYTE)
+						: new byte[0];
+				long csrRowOffOffset = 0L;
 				long csrRowOffBytes = rowBytes.length;
-				payloadOut.write(rowBytes);
+				if (csrRowOffBytes > 0) {
+					align128Out(payloadOut);
+					csrRowOffOffset = relBlocksBaseOffset + payloadOut.size();
+					payloadOut.write(rowBytes);
+				}
 
 				// Column Indices
-				align128Out(payloadOut);
-				long csrColIdxOffset = relBlocksBaseOffset + payloadOut.size();
 				MemorySegment colSeg = relSnap != null ? relSnap.getColumnTargetsSegment() : MemorySegment.NULL;
-				byte[] colBytes = colSeg != MemorySegment.NULL ? colSeg.toArray(ValueLayout.JAVA_BYTE) : new byte[0];
+				byte[] colBytes = colSeg != null && colSeg != MemorySegment.NULL
+						? colSeg.toArray(ValueLayout.JAVA_BYTE)
+						: new byte[0];
+				long csrColIdxOffset = 0L;
 				long csrColIdxBytes = colBytes.length;
-				payloadOut.write(colBytes);
+				if (csrColIdxBytes > 0) {
+					align128Out(payloadOut);
+					csrColIdxOffset = relBlocksBaseOffset + payloadOut.size();
+					payloadOut.write(colBytes);
+				}
 
 				// CSC Segments evaluation
 				boolean sourceHasCsc = relSnap != null && relSnap.hasCsc();
@@ -307,10 +336,64 @@ public final class DefaultSnapshotBuilder {
 				boolean shouldWriteCoo = includeCooOverride != null ? includeCooOverride : false;
 				byte encodingId = shouldWriteCoo ? (byte) 6 : (byte) 0;
 
-				// Relation Entry (Fixed 128 Bytes)
+				long nodeCount = relSnap != null ? relSnap.getNodeCount() : 0;
+				long edgeCount = relSnap != null ? (int) relSnap.getEdgeCount() : 0;
+
+				List<MemorySegment> attrSegs = relSnap != null ? relSnap.getAttributeSegments() : List.of();
+				List<MemorySegment> valSegs = relSnap != null ? relSnap.getValiditySegments() : List.of();
+				int attrCount = attrSegs.size();
+				ByteBuffer attrDescsBuf = ByteBuffer.allocate(attrCount * 44).order(ByteOrder.LITTLE_ENDIAN);
+
+				for (int a = 0; a < attrCount; a++) {
+					String attrName = relSnap.getAttributeName(a);
+					int attrNameOff = getOrAddString.apply(attrName != null ? attrName : ("attr_" + a));
+					byte typeCode = relSnap.getAttributeTypeCode(a);
+					if (typeCode == 0) {
+						typeCode = 0x06; // default float32
+					}
+					MemorySegment valSeg = (a < valSegs.size()) ? valSegs.get(a) : MemorySegment.NULL;
+					boolean hasValidity = valSeg != null && valSeg != MemorySegment.NULL && valSeg.byteSize() > 0;
+					if (hasValidity) {
+						typeCode = (byte) (typeCode | 0x80);
+					}
+
+					align128Out(payloadOut);
+					long attrDataOff = relBlocksBaseOffset + payloadOut.size();
+					long attrDataBytes = 0L;
+
+					if (hasValidity) {
+						long numBits = (edgeCount > 0) ? edgeCount : nodeCount;
+						long rawBitmapBytes = ((numBits + 63) / 64) * 8;
+						int paddedBitmapBytes = (int) ((rawBitmapBytes + 127) & ~127L);
+						byte[] valBytes = valSeg.toArray(ValueLayout.JAVA_BYTE);
+						byte[] paddedVal = new byte[Math.max(paddedBitmapBytes, valBytes.length)];
+						System.arraycopy(valBytes, 0, paddedVal, 0, valBytes.length);
+						payloadOut.write(paddedVal);
+						attrDataBytes += paddedVal.length;
+					}
+
+					MemorySegment dataSeg = attrSegs.get(a);
+					if (dataSeg != null && dataSeg != MemorySegment.NULL && dataSeg.byteSize() > 0) {
+						byte[] dataBytes = dataSeg.toArray(ValueLayout.JAVA_BYTE);
+						payloadOut.write(dataBytes);
+						attrDataBytes += dataBytes.length;
+					}
+
+					attrDescsBuf.putInt(attrNameOff);
+					attrDescsBuf.put(typeCode);
+					attrDescsBuf.put((byte) 0); // reserved1
+					attrDescsBuf.putShort((short) 0); // reserved2
+					attrDescsBuf.putInt(1); // dimension
+					attrDescsBuf.putLong(attrDataOff);
+					attrDescsBuf.putLong(attrDataBytes);
+					attrDescsBuf.putLong(0L); // offsets_off
+					attrDescsBuf.putLong(0L); // offsets_bytes
+				}
+
+				// Relation Entry (Fixed 128 Bytes) + Attribute Descriptors (44 Bytes each)
 				int rNameOff = relNameOffsets.get(relIdx);
 				int[] doms = customRelationDomains.getOrDefault(rName, new int[]{0, 0});
-				ByteBuffer relBuf = ByteBuffer.allocate(128).order(ByteOrder.LITTLE_ENDIAN);
+				ByteBuffer relBuf = ByteBuffer.allocate(128 + attrCount * 44).order(ByteOrder.LITTLE_ENDIAN);
 				relBuf.putShort((short) relIdx); // relation_id
 				relBuf.putShort((short) doms[0]); // src_domain_id
 				relBuf.putShort((short) doms[1]); // tgt_domain_id
@@ -319,9 +402,6 @@ public final class DefaultSnapshotBuilder {
 				relBuf.put((byte) 4); // edge_index_width = 4
 				relBuf.put(new byte[3]); // reserved1
 				relBuf.putInt(rNameOff); // name_offset
-
-				long nodeCount = relSnap != null ? relSnap.getNodeCount() : 0;
-				long edgeCount = relSnap != null ? (int) relSnap.getEdgeCount() : 0;
 
 				long sectionFeatures = (cscRowOffBytes > 0) ? 1L : 0L;
 
@@ -336,8 +416,11 @@ public final class DefaultSnapshotBuilder {
 				relBuf.putLong(cscRowOffBytes);
 				relBuf.putLong(cscColIdxOffset);
 				relBuf.putLong(cscColIdxBytes);
-				relBuf.putShort((short) 0); // attr_count
+				relBuf.putShort((short) attrCount); // attr_count
 				relBuf.put(new byte[22]); // reserved2
+				if (attrCount > 0) {
+					relBuf.put(attrDescsBuf.array());
+				}
 
 				relEntries.add(relBuf.array());
 				relIdx++;
