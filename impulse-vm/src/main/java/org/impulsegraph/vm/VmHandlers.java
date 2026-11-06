@@ -1179,7 +1179,6 @@ public final class VmHandlers {
 		if (len2 > 0)
 			System.arraycopy(svec2, 0, svecDst, len1, len2);
 		setRegister(state, dst, outHandle, TYPE_STRING_VECTOR);
-		setFlag(state, FLAG_ZF, false);
 	}
 
 	public static void handleRoaringBitmapAnd(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -2098,7 +2097,6 @@ public final class VmHandlers {
 				}
 			}
 		}
-		setFlag(state, FLAG_ZF, false);
 	}
 
 	public static void handleCsrWalkReduceSum(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -3310,7 +3308,6 @@ public final class VmHandlers {
 				out[i] = bit ? val1 : val2;
 			}
 			setRegister(state, dst, h, TYPE_DOUBLE_VECTOR);
-			setFlag(state, FLAG_ZF, false);
 		} else if (type1 == TYPE_FLOAT_VECTOR) {
 			float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, src1));
 			float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, src2));
@@ -3324,7 +3321,6 @@ public final class VmHandlers {
 				out[i] = bit ? val1 : val2;
 			}
 			setRegister(state, dst, h, TYPE_FLOAT_VECTOR);
-			setFlag(state, FLAG_ZF, false);
 		}
 	}
 
@@ -4267,13 +4263,17 @@ public final class VmHandlers {
 		validateReg(dst);
 		validateReg(src);
 
+		boolean frontIsBs = (getRegisterType(state, src) == TYPE_BITSET_HANDLE);
+		ImpulseBitSet frontBs = frontIsBs ? ctx.getBitset((int) getRegisterValue(state, src)) : null;
+
 		Object mockAttr = ctx.getMockAttribute(attrId);
 		ImpulseBitSet validMask = (ctx.getMockAttribute(-attrId - 1) instanceof ImpulseBitSet vbs) ? vbs : null;
 		if (mockAttr instanceof float[] farr) {
 			int handle = ctx.acquireFloatVector(farr.length);
 			float[] gathered = ctx.getFloatVector(handle);
 			for (int i = 0; i < farr.length; i++) {
-				gathered[i] = (validMask != null && !validMask.get(i)) ? Float.NaN : farr[i];
+				boolean inFront = !frontIsBs || (frontBs != null && frontBs.get(i));
+				gathered[i] = (!inFront || (validMask != null && !validMask.get(i))) ? Float.NaN : farr[i];
 			}
 			byte outType = ((instr.flags() & 1) != 0) ? TYPE_NODE_VECTOR : TYPE_FLOAT_VECTOR;
 			setRegister(state, dst, handle, outType);
@@ -4590,7 +4590,9 @@ public final class VmHandlers {
 		validateReg(dst);
 		validateReg(nodesReg);
 		validateReg(valsReg);
-		int count = extractActiveNodeIdsToScratch(state, ctx, nodesReg, 0);
+		boolean hasRealSnapshot = ctx.getSnapshot() != null
+				&& !(ctx.getSnapshot() instanceof MockImpulseGraphSnapshot);
+		int count = hasRealSnapshot ? extractActiveNodeIdsToScratch(state, ctx, nodesReg, 0) : 0;
 		int[] scratch = ctx.peekScratchInt(0);
 		byte valsType = getRegisterType(state, valsReg);
 		int valsHandle = (int) getRegisterValue(state, valsReg);

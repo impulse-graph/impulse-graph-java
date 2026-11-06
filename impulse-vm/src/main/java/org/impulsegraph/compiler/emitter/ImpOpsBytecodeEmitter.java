@@ -756,7 +756,8 @@ public final class ImpOpsBytecodeEmitter {
 			int reg = emitStreamExpr(parsed, instrList, alloc, snapshot);
 			instrList.add(new InstructionWord(OP_STREAM_FILTER, (byte) 0, (short) reg, 0));
 		} else if (node instanceof ScmList list && !list.elements().isEmpty()
-				&& list.elements().get(0) instanceof ScmSymbol sym && !sym.name().equals("project-state")) {
+				&& list.elements().get(0) instanceof ScmSymbol sym && !sym.name().equals("project-state")
+				&& !sym.name().equals("filter-attr")) {
 			int reg = emitStreamExpr(list, instrList, alloc, snapshot);
 			instrList.add(new InstructionWord(OP_STREAM_FILTER, (byte) 0, (short) reg, 0));
 		}

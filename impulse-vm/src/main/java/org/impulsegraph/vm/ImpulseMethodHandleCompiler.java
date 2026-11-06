@@ -551,6 +551,7 @@ public final class ImpulseMethodHandleCompiler {
 				}
 				case 0x60, 0x61, 0x62, 0x63 -> {
 					VmHandlers.validateReg(instr.dstReg());
+					VmHandlers.setFlag(state, VmRegisterType.FLAG_ZF, false);
 					nextPc++;
 				}
 				case 0x66 -> {
