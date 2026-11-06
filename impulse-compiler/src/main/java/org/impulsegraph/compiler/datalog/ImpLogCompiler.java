@@ -190,7 +190,8 @@ public final class ImpLogCompiler {
 				} else {
 					if (ruleIsRecursive) {
 						if (emittedBaseRels.add(atom.predicate())) {
-							steps.add(new ScmFixpoint(new ScmProgram(List.of(new ScmWalk(atom.predicate(), -1, dir)))));
+							steps.add(new ScmFixpoint(atom.predicate(), -1, dir, 100,
+									List.of(new ScmWalk(atom.predicate(), -1, dir))));
 						}
 					} else {
 						steps.add(new ScmWalk(atom.predicate(), -1, dir));

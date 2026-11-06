@@ -222,7 +222,7 @@ public final class CypherParser {
 		}
 
 		if (match(CypherTokenType.COLON)) {
-			if (curr.type() == CypherTokenType.IDENTIFIER) {
+			if (curr.type() != CypherTokenType.RPAREN && curr.type() != CypherTokenType.EOF) {
 				label = curr.lexeme();
 				advance();
 			}

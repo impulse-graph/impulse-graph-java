@@ -633,9 +633,10 @@ public final class BinarySnapshotLoader {
 			align128(dirBuf);
 
 			// Read Relation Directory Entries (Fixed 128 Bytes)
-			Map<Integer, LoadedRelation> relationsById = new HashMap<>();
-			Map<String, RelationSnapshot> relationSnapshots = new HashMap<>();
-			Map<Integer, RelationSnapshot> relIdToSnapshot = new HashMap<>();
+			Map<Integer, LoadedRelation> relationsById = new LinkedHashMap<>();
+			Map<String, RelationSnapshot> relationSnapshots = new LinkedHashMap<>();
+			Map<String, RelationSnapshot> relationAliases = new LinkedHashMap<>();
+			Map<Integer, RelationSnapshot> relIdToSnapshot = new LinkedHashMap<>();
 
 			for (int j = 0; j < relationCount; j++) {
 				if (dirOffset + dirBuf.position() + 128 > segSize || dirBuf.remaining() < 128)
@@ -773,19 +774,26 @@ public final class BinarySnapshotLoader {
 				RelationSnapshot relSnap = new RelationSnapshot(arena, (int) nodeCount, (int) edgeCount, offsetsSeg,
 						targetsSeg, cscOffsetsSeg, cscTargetsSeg, attrSegments, validitySegments, nodeIdWidth,
 						edgeIndexWidth);
+				long effectiveTgtNodeCount = (tgtDomainNodeCount > 0) ? tgtDomainNodeCount : nodeCount;
+				if (effectiveTgtNodeCount > 0) {
+					relSnap.setTargetNodeCount((int) effectiveTgtNodeCount);
+				}
 				java.util.List<String> names = new java.util.ArrayList<>();
+				java.util.List<Byte> typeCodes = new java.util.ArrayList<>();
 				for (LoadedAttribute attr : attributes) {
 					names.add(attr.name());
+					typeCodes.add(attr.typeCode());
 				}
 				relSnap.setAttributeNames(names);
+				relSnap.setAttributeTypeCodes(typeCodes);
 				relationSnapshots.put(relName, relSnap);
 				relIdToSnapshot.put(relId, relSnap);
-				relationSnapshots.putIfAbsent("rel_" + srcDomId + "_" + tgtDomId, relSnap);
+				relationAliases.putIfAbsent("rel_" + srcDomId + "_" + tgtDomId, relSnap);
 
 				if (srcDom != null && tgtDom != null && !srcDom.name().isEmpty() && !tgtDom.name().isEmpty()) {
 					String domainRelName = srcDom.name().toLowerCase() + "To"
 							+ tgtDom.name().substring(0, 1).toUpperCase() + tgtDom.name().substring(1).toLowerCase();
-					relationSnapshots.putIfAbsent(domainRelName, relSnap);
+					relationAliases.putIfAbsent(domainRelName, relSnap);
 				}
 
 				LoadedRelation rel = new LoadedRelation(relId, srcDomId, tgtDomId, encodingId, nodeIdWidth,
@@ -799,7 +807,7 @@ public final class BinarySnapshotLoader {
 				metadata.put("domain." + dom.name() + ".id", String.valueOf(dom.domainId()));
 				metadata.put("domain." + dom.domainId() + ".name", dom.name());
 			}
-			GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata);
+			GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata, relationAliases);
 
 			for (Map.Entry<Integer, RelationSnapshot> entry : relIdToSnapshot.entrySet()) {
 				String json = metadata.get("impulse.stats.relation." + entry.getKey() + ".out_degree");

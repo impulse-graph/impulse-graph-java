@@ -350,13 +350,24 @@ public final class ImpKCompiler {
 			}
 			case "lane_set_cover" -> {
 				String fVar = consumeIdentOrString(tokens, pos, "F");
+				int maxNodes = 0;
+				int targetMask = 0;
 				int mode = 0;
 				if (match(tokens, pos, TokenType.COMMA)) {
-					mode = (int) consumeNumber(tokens, pos, 0);
+					int arg1 = (int) consumeNumber(tokens, pos, 0);
+					if (match(tokens, pos, TokenType.COMMA)) {
+						maxNodes = arg1;
+						targetMask = (int) consumeNumber(tokens, pos, 0);
+						if (match(tokens, pos, TokenType.COMMA)) {
+							mode = (int) consumeNumber(tokens, pos, 0);
+						}
+					} else {
+						targetMask = arg1;
+					}
 				}
 				expect(tokens, pos, TokenType.RPAREN);
-				out.add(new ImpKStatement(target, ImpKOpType.LANE_SET_COVER, "", fVar, "", 0.0, 0, mode, 0, false,
-						List.of(), List.of()));
+				out.add(new ImpKStatement(target, ImpKOpType.LANE_SET_COVER, "", fVar, "", 0.0, maxNodes, targetMask,
+						mode, false, List.of(), List.of()));
 			}
 			default -> {
 				while (pos[0] < tokens.size() && tokens.get(pos[0]).type() != TokenType.RPAREN
@@ -433,8 +444,8 @@ public final class ImpKCompiler {
 				case LANE_REDUCE_AND -> steps.add(new ScmLaneReduceAnd());
 				case LANE_REDUCE_ATTR -> steps.add(new ScmLaneReduceAttr(s.intParam1(), s.intParam2()));
 				case LANE_SET_COVER -> {
-					steps.add(new ScmLaneSetCover(0, s.intParam1()));
-					returnsVector = true;
+					steps.add(new ScmLaneSetCover(s.topK(), s.intParam1(), s.intParam2() == 1));
+					returnsVector = false;
 				}
 			}
 		}

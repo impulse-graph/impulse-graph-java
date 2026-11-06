@@ -112,7 +112,8 @@ public final class PhysicalBindingPass implements CompilerPass {
 		}
 
 		if (node instanceof ScmSetOp setOp) {
-			return new ScmSetOp(setOp.kind(), bindNode(setOp.rhs(), snapshot));
+			ImpScmNode boundLhs = setOp.lhs() != null ? bindNode(setOp.lhs(), snapshot) : null;
+			return new ScmSetOp(setOp.kind(), boundLhs, bindNode(setOp.rhs(), snapshot));
 		}
 
 		return node;

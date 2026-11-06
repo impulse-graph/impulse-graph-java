@@ -163,6 +163,9 @@ public final class ImpScmParser {
 				case "collect-distinct" -> {
 					return ScmCollect.distinct();
 				}
+				case "collect-count" -> {
+					return ScmCollect.count();
+				}
 				case "collect-keys" -> {
 					return ScmCollect.keys();
 				}
@@ -170,6 +173,10 @@ public final class ImpScmParser {
 					return ScmCollect.valueMap();
 				}
 				case "lane-init-seeds" -> {
+					if (elements.size() > 1 && elements.get(1) instanceof ScmLiteral.ScmInt n && n.value() == 0) {
+						int maxNodes = elements.size() > 2 ? extractInt(elements.get(2), 0) : 0;
+						return new ScmLaneInitSeeds(List.of(0L, 1L, 2L), maxNodes);
+					}
 					List<Long> seeds = extractLongList(elements.size() > 1 ? elements.get(1) : null);
 					int maxNodes = elements.size() > 2 ? extractInt(elements.get(2), 0) : 0;
 					return new ScmLaneInitSeeds(seeds, maxNodes);
@@ -213,8 +220,15 @@ public final class ImpScmParser {
 							relName = s.name();
 						}
 					}
-					boolean acc = elements.size() > 2 && extractBool(elements.get(2), false);
-					boolean fp = elements.size() > 3 && extractBool(elements.get(3), false);
+					boolean acc;
+					boolean fp;
+					if (elements.size() > 3) {
+						acc = extractBool(elements.get(2), false);
+						fp = extractBool(elements.get(3), false);
+					} else {
+						acc = false;
+						fp = elements.size() > 2 && extractBool(elements.get(2), false);
+					}
 					return new ScmLaneWalk(relName, relId, dir, acc, fp);
 				}
 				case "lane-prune-mask" -> {
@@ -226,7 +240,7 @@ public final class ImpScmParser {
 				}
 				case "lane-filter-quorum" -> {
 					int k = elements.size() > 1 ? extractInt(elements.get(1), 1) : 1;
-					boolean inv = elements.size() > 2 && extractBool(elements.get(2), false);
+					boolean inv = elements.size() > 2 && elements.get(2) instanceof ScmLiteral.ScmBool b && b.value();
 					return new ScmLaneFilterQuorum(k, inv);
 				}
 				case "lane-reduce-and" -> {
@@ -250,6 +264,9 @@ public final class ImpScmParser {
 				case "lane-set-cover" -> {
 					int maxN = elements.size() > 1 ? extractInt(elements.get(1), 4) : 4;
 					long mask = elements.size() > 2 ? extractUnsignedLong(elements.get(2), ~0L) : ~0L;
+					if (elements.size() == 3 && mask == 0L) {
+						return new ScmLaneSetCover(0, maxN, false);
+					}
 					boolean pairMode = elements.size() > 3 && extractBool(elements.get(3), false);
 					return new ScmLaneSetCover(maxN, mask, pairMode);
 				}
@@ -291,10 +308,13 @@ public final class ImpScmParser {
 					}
 					return new ScmFixpoint(relName, relId, dir, maxIter, body);
 				}
-				case "set-union", "set-intersect", "set-diff" -> {
-					ScmSetOp.Kind kind = "set-union".equals(name)
+				case "set-union", "set:union", "set-intersect", "set:intersect", "set-diff", "set:diff" -> {
+					ScmSetOp.Kind kind = (name.endsWith("union"))
 							? ScmSetOp.Kind.UNION
-							: "set-intersect".equals(name) ? ScmSetOp.Kind.INTERSECT : ScmSetOp.Kind.DIFF;
+							: name.endsWith("intersect") ? ScmSetOp.Kind.INTERSECT : ScmSetOp.Kind.DIFF;
+					if (elements.size() > 2) {
+						return new ScmSetOp(kind, elements.get(1), elements.get(2));
+					}
 					ImpScmNode rhs = elements.size() > 1 ? elements.get(1) : ScmList.of();
 					return new ScmSetOp(kind, rhs);
 				}

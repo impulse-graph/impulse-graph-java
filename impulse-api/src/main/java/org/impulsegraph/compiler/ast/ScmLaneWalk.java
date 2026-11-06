@@ -53,17 +53,16 @@ public record ScmLaneWalk(String relationName, int relationId, ScmWalk.Direction
 
 	@Override
 	public String toScmString() {
-		String sym = direction == ScmWalk.Direction.REVERSE_CSC ? "lane-csc-walk" : "lane-csr-walk";
+		String sym = direction == ScmWalk.Direction.REVERSE_CSC ? "lane-walk-csc" : "lane-walk-csr";
 		StringBuilder sb = new StringBuilder("(").append(sym).append(' ');
 		if (relationId >= 0) {
 			sb.append(relationId);
 		} else {
 			sb.append('"').append(relationName).append('"');
 		}
-		if (accumulate || fixedPoint) {
-			sb.append(' ').append(accumulate ? "#t" : "#f");
-		}
-		if (fixedPoint) {
+		if (accumulate) {
+			sb.append(" #t ").append(fixedPoint ? "#t" : "#f");
+		} else if (fixedPoint) {
 			sb.append(" #t");
 		}
 		sb.append(')');

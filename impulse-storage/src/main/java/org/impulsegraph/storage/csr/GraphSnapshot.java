@@ -18,6 +18,7 @@ public class GraphSnapshot
 
 	private final Arena arena;
 	private final Map<String, RelationSnapshot> relationMap;
+	private final Map<String, RelationSnapshot> aliasMap;
 	private final Map<String, org.impulsegraph.api.RelationSnapshot> unmodifiableRelationMap;
 	private final RelationSnapshot[] relationsById;
 	private final int maxNodeCount;
@@ -25,11 +26,19 @@ public class GraphSnapshot
 	private final Map<String, String> metadata = new ConcurrentHashMap<>();
 
 	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots) {
-		this(arena, snapshots, Map.of());
+		this(arena, snapshots, Map.of(), Map.of());
 	}
 
 	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots, Map<String, String> metadata) {
+		this(arena, snapshots, metadata, Map.of());
+	}
+
+	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots, Map<String, String> metadata,
+			Map<String, RelationSnapshot> aliases) {
 		this.arena = Objects.requireNonNull(arena, "Arena must not be null");
+		this.aliasMap = (aliases != null && !aliases.isEmpty())
+				? Collections.unmodifiableMap(new java.util.LinkedHashMap<>(aliases))
+				: Map.of();
 		if (snapshots == null || snapshots.isEmpty()) {
 			this.relationMap = Map.of();
 			this.unmodifiableRelationMap = Map.of();
@@ -133,6 +142,9 @@ public class GraphSnapshot
 		if (relationName == null)
 			return null;
 		RelationSnapshot snapshot = relationMap.get(relationName);
+		if (snapshot != null)
+			return snapshot;
+		snapshot = aliasMap.get(relationName);
 		if (snapshot != null)
 			return snapshot;
 

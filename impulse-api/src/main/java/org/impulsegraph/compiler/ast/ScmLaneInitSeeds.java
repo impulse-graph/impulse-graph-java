@@ -57,6 +57,9 @@ public record ScmLaneInitSeeds(List<Long> seedIds, int maxNodes) implements ImpS
 
 	@Override
 	public String toScmString() {
+		if (maxNodes == 0) {
+			return "(lane-init-seeds 0 0)";
+		}
 		StringBuilder sb = new StringBuilder("(lane-init-seeds (");
 		for (int i = 0; i < seedIds.size(); i++) {
 			if (i > 0) {

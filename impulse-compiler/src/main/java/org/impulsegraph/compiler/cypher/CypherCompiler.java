@@ -132,7 +132,13 @@ public final class CypherCompiler {
 
 				ImpScmNode singleHop = buildSingleLaneHopNode(edge, predicate);
 				if (edge.isUnbounded()) {
-					steps.add(new ScmFixpoint(new ScmProgram(List.of(singleHop))));
+					String targetRel = edge.relationNames().isEmpty()
+							? edge.relationName()
+							: edge.relationNames().get(0);
+					ScmWalk.Direction dir = edge.isForward()
+							? ScmWalk.Direction.FORWARD_CSR
+							: ScmWalk.Direction.REVERSE_CSC;
+					steps.add(new ScmFixpoint(targetRel != null ? targetRel : "", -1, dir, 100, List.of(singleHop)));
 				} else {
 					int hops = Math.max(1, edge.maxHops());
 					for (int h = 0; h < hops; h++) {
@@ -150,7 +156,8 @@ public final class CypherCompiler {
 		if (query.orderBy() != null && !query.orderBy().queryVector().isEmpty()) {
 			steps.add(ScmVectorRerankDot.fromInlineVector(query.orderBy().queryVector(), 0, query.orderBy().metric()));
 		} else if (query.projection().isCount()) {
-			steps.add(ScmCollect.scalar());
+			boolean hasSetOp = steps.stream().anyMatch(s -> s instanceof ScmSetOp);
+			steps.add(hasSetOp ? ScmCollect.count() : ScmCollect.scalar());
 		} else {
 			steps.add(ScmCollect.bitset());
 		}
