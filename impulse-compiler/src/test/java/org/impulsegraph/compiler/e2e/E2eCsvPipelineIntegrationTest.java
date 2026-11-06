@@ -48,6 +48,7 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.function.Executable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -107,7 +108,6 @@ public class E2eCsvPipelineIntegrationTest {
 	private static PureJavaCsvImpsBuilder.ManifestSpec parsedManifest;
 	private static Map<Integer, PureJavaCsvImpsBuilder.ParsedDomainData> parsedDomains;
 	private static Map<Integer, PureJavaCsvImpsBuilder.ParsedRelationData> parsedRelations;
-	private static final List<String> SHORTCOMING_FINDINGS = new ArrayList<>();
 
 	private static final CompilerOptions UNOPTIMIZED_OPTIONS = CompilerOptions.builder().withStage1Optimization(false)
 			.withStage2Optimization(false).withConstantFolding(false).withDirectionSelection(false)
@@ -132,15 +132,6 @@ public class E2eCsvPipelineIntegrationTest {
 
 	@AfterAll
 	static void tearDownSuite() throws Exception {
-		if (!SHORTCOMING_FINDINGS.isEmpty()) {
-			System.out.println("\n=========================================================================");
-			System.out.println("  E2E CSV PIPELINE INTEGRATION TEST — RECORDED ENGINE/COMPILER FINDINGS  ");
-			System.out.println("=========================================================================");
-			for (int i = 0; i < SHORTCOMING_FINDINGS.size(); i++) {
-				System.out.printf("  [%d] %s%n", i + 1, SHORTCOMING_FINDINGS.get(i));
-			}
-			System.out.println("=========================================================================\n");
-		}
 		if (sharedArena != null && sharedArena.scope().isAlive()) {
 			sharedArena.close();
 		}
@@ -164,11 +155,9 @@ public class E2eCsvPipelineIntegrationTest {
 
 	/**
 	 * Constructs a {@link GraphSnapshot} whose relation map preserves the exact
-	 * canonical relation ID order {@code 0..25} (fixing
-	 * {@link BinarySnapshotLoader}'s unordered {@code HashMap} iteration order) and
-	 * appends per-domain attribute carrier relations ({@code "__dom_<DomainName>"})
-	 * backed by the off-heap attribute and validity {@link MemorySegment}s loaded
-	 * from {@code e2e.imps}.
+	 * canonical relation ID order {@code 0..25} and appends per-domain attribute
+	 * carrier relations ({@code "__dom_<DomainName>"}) backed by the off-heap
+	 * attribute and validity {@link MemorySegment}s loaded from {@code e2e.imps}.
 	 */
 	private static GraphSnapshot buildCanonicalOrderedSnapshot(LoadedSnapshot loaded,
 			PureJavaCsvImpsBuilder.ManifestSpec manifest, Arena arena) {
@@ -239,10 +228,6 @@ public class E2eCsvPipelineIntegrationTest {
 			orderedMap.put("__dom_" + dom.name(), domCarrier);
 		}
 
-		SHORTCOMING_FINDINGS.add("BinarySnapshotLoader.loadSnapshot populates relations into an unordered HashMap "
-				+ "(plus synthetic 'rel_<src>_<tgt>' and '<src>To<Tgt>' aliases), causing GraphSnapshot.getRelationSnapshot(int relId) "
-				+ "to index relations in HashMap bucket order rather than canonical relId (0..25) order.");
-
 		return new GraphSnapshot(arena, orderedMap, loaded.getMetadataMap());
 	}
 
@@ -261,78 +246,103 @@ public class E2eCsvPipelineIntegrationTest {
 		assertEquals(16, loadedSnapshot.domainsById().size());
 		assertEquals(26, loadedSnapshot.relationsById().size());
 
+		List<Executable> checks = new ArrayList<>();
+
 		// 1. Verify all 16 domains (0..15)
 		for (int d = 0; d < 16; d++) {
-			LoadedDomain dom = loadedSnapshot.domainsById().get(d);
-			assertEquals(d, dom.domainId(), "Domain ID mismatch at index " + d);
-			assertEquals(EXPECTED_DOMAIN_NAMES[d], dom.name(), "Domain name mismatch at index " + d);
-			assertEquals(EXPECTED_DOMAIN_COUNTS[d], dom.nodeCount(), "Domain nodeCount mismatch for " + dom.name());
-			assertEquals(EXPECTED_DOMAIN_NAMES[d], loadedSnapshot.graph().getDomainName(d));
-			assertEquals(d, loadedSnapshot.getDomain(EXPECTED_DOMAIN_NAMES[d]).domainId());
+			final int domIdx = d;
+			checks.add(() -> {
+				LoadedDomain dom = loadedSnapshot.domainsById().get(domIdx);
+				assertEquals(domIdx, dom.domainId(), "Domain ID mismatch at index " + domIdx);
+				assertEquals(EXPECTED_DOMAIN_NAMES[domIdx], dom.name(), "Domain name mismatch at index " + domIdx);
+				assertEquals(EXPECTED_DOMAIN_COUNTS[domIdx], dom.nodeCount(),
+						"Domain nodeCount mismatch for " + dom.name());
+				assertEquals(EXPECTED_DOMAIN_NAMES[domIdx], loadedSnapshot.graph().getDomainName(domIdx));
+				assertEquals(domIdx, loadedSnapshot.getDomain(EXPECTED_DOMAIN_NAMES[domIdx]).domainId());
+			});
 		}
 
-		// 2. Verify all 26 relations (0..25), CSR/CSC segments, and nullable vs
-		// non-null attributes
+		// 2. Verify loadedSnapshot.graph() preserves exact canonical relation order
+		// (0..25)
+		// without synthetic alias pollution
+		checks.add(() -> assertEquals(26, loadedSnapshot.graph().getAllRelationSnapshots().size(),
+				"loadedSnapshot.graph().getAllRelationSnapshots() must contain exactly 26 relations (no synthetic 'rel_<src>_<tgt>' or '<src>To<Tgt>' aliases)"));
+
+		// 3. Verify all 26 relations (0..25), canonical relId lookup, CSR/CSC segments,
+		// and nullable vs non-null attributes
 		int totalAttributes = 0;
 		int totalNullableAttributes = 0;
 
 		for (int r = 0; r < 26; r++) {
-			LoadedRelation lr = loadedSnapshot.relationsById().get(r);
-			String expectedName = EXPECTED_RELATION_NAMES[r];
-			assertEquals(r, lr.relationId(), "Relation ID mismatch at index " + r);
-			assertEquals(EXPECTED_EDGE_COUNTS[r], lr.edgeCount(), "Edge count mismatch for " + expectedName);
-
+			final int relIdx = r;
+			LoadedRelation lr = loadedSnapshot.relationsById().get(relIdx);
+			String expectedName = EXPECTED_RELATION_NAMES[relIdx];
 			RelationSnapshot origRel = (RelationSnapshot) loadedSnapshot.graph().getRelationSnapshot(expectedName);
-			assertNotNull(origRel, "Original RelationSnapshot missing for " + expectedName);
 
-			RelationSnapshot relSnap = (RelationSnapshot) orderedSnapshot.getRelationSnapshot(r);
-			assertNotNull(relSnap, "Ordered RelationSnapshot missing at relId " + r);
-			assertEquals(EXPECTED_EDGE_COUNTS[r], relSnap.getEdgeCount());
-			assertNotNull(relSnap.getRowOffsetsSegment(), "CSR rowOffsets segment missing for " + expectedName);
-			assertNotNull(relSnap.getColumnTargetsSegment(), "CSR colTargets segment missing for " + expectedName);
+			checks.add(() -> {
+				assertEquals(relIdx, lr.relationId(), "Relation ID mismatch at index " + relIdx);
+				assertEquals(EXPECTED_EDGE_COUNTS[relIdx], lr.edgeCount(), "Edge count mismatch for " + expectedName);
+				assertNotNull(origRel, "Original RelationSnapshot missing for " + expectedName);
+				assertSame(origRel, loadedSnapshot.graph().getRelationSnapshot(relIdx),
+						"loadedSnapshot.graph().getRelationSnapshot(" + relIdx + ") must return canonical relation "
+								+ expectedName + " in manifest.json order");
+				assertEquals(EXPECTED_EDGE_COUNTS[relIdx], origRel.getEdgeCount());
+				assertNotNull(origRel.getRowOffsetsSegment(), "CSR rowOffsets segment missing for " + expectedName);
+				assertNotNull(origRel.getColumnTargetsSegment(), "CSR colTargets segment missing for " + expectedName);
 
-			if (r == 3) {
-				// USER_RATED_PRODUCT has include_csc = false
-				assertFalse(relSnap.hasCsc(), "USER_RATED_PRODUCT (rel 3) should have include_csc=false");
-			} else {
-				assertTrue(relSnap.hasCsc(), expectedName + " should have CSC segment present");
-				assertNotNull(relSnap.getCscRowOffsetsSegment(), "CSC rowOffsets segment missing for " + expectedName);
-				assertNotNull(relSnap.getCscColumnTargetsSegment(),
-						"CSC colTargets segment missing for " + expectedName);
-			}
+				if (relIdx == 3) {
+					assertFalse(origRel.hasCsc(), "USER_RATED_PRODUCT (rel 3) should have include_csc=false");
+				} else {
+					assertTrue(origRel.hasCsc(), expectedName + " should have CSC segment present");
+					assertNotNull(origRel.getCscRowOffsetsSegment(),
+							"CSC rowOffsets segment missing for " + expectedName);
+					assertNotNull(origRel.getCscColumnTargetsSegment(),
+							"CSC colTargets segment missing for " + expectedName);
+				}
+			});
 
 			for (int aIdx = 0; aIdx < lr.attributes().size(); aIdx++) {
-				LoadedAttribute attr = lr.attributes().get(aIdx);
+				final int attrIdx = aIdx;
+				LoadedAttribute attr = lr.attributes().get(attrIdx);
 				totalAttributes++;
-				assertNotNull(attr.name());
-				assertFalse(attr.name().isEmpty());
-				assertTrue(attr.typeCode() >= 1 && attr.typeCode() <= 7,
-						"Base typeCode (0x7F masked) must be in 1..7 for " + attr.name());
-				MemorySegment dataSeg = origRel.getAttributeSegments().get(aIdx);
-				MemorySegment valSeg = origRel.getValiditySegments().get(aIdx);
-				assertNotNull(dataSeg, "Attribute dataSegment must not be null for " + attr.name());
 				if (attr.isNullable()) {
 					totalNullableAttributes++;
-					assertNotNull(valSeg, "Nullable attribute must have a validitySegment: " + attr.name());
-					if (lr.nodeCount() > 0 || lr.edgeCount() > 0) {
-						assertTrue(attr.validityBytes() >= 128 && (attr.validityBytes() % 128 == 0),
-								"Nullable validity bitmap must be 128-byte padded for " + attr.name() + " (got "
-										+ attr.validityBytes() + ")");
-						assertEquals(attr.validityBytes(), valSeg.byteSize(),
-								"Nullable validitySegment byteSize must match validityBytes for " + attr.name());
-					}
-				} else {
-					assertEquals(0L, attr.validityBytes(),
-							"Non-nullable attribute must have validityBytes=0: " + attr.name());
-					assertTrue(valSeg == null || valSeg.equals(MemorySegment.NULL) || valSeg.byteSize() == 0L,
-							"Non-nullable attribute must have MemorySegment.NULL validitySegment: " + attr.name());
 				}
+				checks.add(() -> {
+					assertNotNull(attr.name());
+					assertFalse(attr.name().isEmpty());
+					assertTrue(attr.typeCode() >= 1 && attr.typeCode() <= 7,
+							"Base typeCode (0x7F masked) must be in 1..7 for " + attr.name());
+					MemorySegment dataSeg = origRel.getAttributeSegments().get(attrIdx);
+					MemorySegment valSeg = origRel.getValiditySegments().get(attrIdx);
+					assertNotNull(dataSeg, "Attribute dataSegment must not be null for " + attr.name());
+					if (attr.isNullable()) {
+						assertNotNull(valSeg, "Nullable attribute must have a validitySegment: " + attr.name());
+						if (lr.nodeCount() > 0 || lr.edgeCount() > 0) {
+							assertTrue(attr.validityBytes() >= 128 && (attr.validityBytes() % 128 == 0),
+									"Nullable validity bitmap must be 128-byte padded for " + attr.name() + " (got "
+											+ attr.validityBytes() + ")");
+							assertEquals(attr.validityBytes(), valSeg.byteSize(),
+									"Nullable validitySegment byteSize must match validityBytes for " + attr.name());
+						}
+					} else {
+						assertEquals(0L, attr.validityBytes(),
+								"Non-nullable attribute must have validityBytes=0: " + attr.name());
+						assertTrue(valSeg == null || valSeg.equals(MemorySegment.NULL) || valSeg.byteSize() == 0L,
+								"Non-nullable attribute must have MemorySegment.NULL validitySegment: " + attr.name());
+					}
+				});
 			}
 		}
 
-		assertTrue(totalAttributes >= 40, "Expected at least 40 attributes in snapshot, got " + totalAttributes);
-		assertTrue(totalNullableAttributes >= 15,
-				"Expected at least 15 nullable attributes in snapshot, got " + totalNullableAttributes);
+		final int finalTotalAttrs = totalAttributes;
+		final int finalNullableAttrs = totalNullableAttributes;
+		checks.add(() -> assertTrue(finalTotalAttrs >= 40,
+				"Expected at least 40 attributes in snapshot, got " + finalTotalAttrs));
+		checks.add(() -> assertTrue(finalNullableAttrs >= 15,
+				"Expected at least 15 nullable attributes in snapshot, got " + finalNullableAttrs));
+
+		assertAll("Suite 1 BinarySnapshotLoader & v0.9.0 Layout Checks", checks);
 	}
 
 	// =========================================================================
@@ -351,9 +361,7 @@ public class E2eCsvPipelineIntegrationTest {
 		assertEquals(22, rawEntries.size(), "query_manifest.json must contain all 22 canonical queries");
 
 		QueryCompilerEngine compilerEngine = new QueryCompilerEngine();
-		int passedStageA = 0;
-		int passedStageB = 0;
-		int passedStageC = 0;
+		List<Executable> queryChecks = new ArrayList<>();
 
 		for (Object entryObj : rawEntries) {
 			Map<String, Object> entry = (Map<String, Object>) entryObj;
@@ -361,9 +369,6 @@ public class E2eCsvPipelineIntegrationTest {
 			String language = (String) entry.get("language");
 			String queryFileRel = (String) entry.get("query_file");
 			String expectedScmFileRel = (String) entry.get("expected_scm_file");
-			String expectedScmJava = (String) entry.get("expected_scm_java");
-			String expectedScmCpp = (String) entry.get("expected_scm_cpp");
-			String status = (String) entry.get("status");
 			int seedNodeDenseId = ((Number) entry.get("seed_node_dense_id")).intValue();
 
 			List<Integer> expectedDenseIds = new ArrayList<>();
@@ -373,171 +378,66 @@ public class E2eCsvPipelineIntegrationTest {
 			int expectedCardinality = ((Number) entry.get("expected_cardinality")).intValue();
 			int expectedScalarInt = ((Number) entry.get("expected_scalar_int")).intValue();
 
-			List<Long> seedNodes = new ArrayList<>();
-			if (entry.containsKey("seed_nodes")) {
-				for (Object n : (List<Object>) entry.get("seed_nodes")) {
-					seedNodes.add(((Number) n).longValue());
-				}
-			}
-
 			String queryText = Files.readString(suiteDir.resolve(queryFileRel), StandardCharsets.UTF_8);
 			String expectedScmFileText = Files.readString(suiteDir.resolve(expectedScmFileRel), StandardCharsets.UTF_8)
 					.trim();
 
-			// -----------------------------------------------------------------
-			// Stage A: Frontend Lowering to ImpScheme S-Expression (ScmProgram)
-			// -----------------------------------------------------------------
-			ScmProgram prog = switch (language) {
-				case "cypher" -> {
-					String cypherInput = queryText;
-					if (cypherInput.contains(":Order)")) {
-						assertThrows(IllegalArgumentException.class, () -> CypherCompiler.compile(queryText),
-								"Unescaped ':Order' currently triggers KW_ORDER token rejection in CypherParser.parseNodePattern");
-						SHORTCOMING_FINDINGS.add(id
-								+ ": CypherLexer tokenizes unquoted 'Order' as KW_ORDER (from ORDER BY), "
-								+ "and CypherParser.parseNodePattern:209 only accepts CypherTokenType.IDENTIFIER after ':' "
-								+ "(rejecting ':Order' unless backtick-escaped as ':`Order`').");
-						cypherInput = cypherInput.replace(":Order)", ":`Order`)");
-					}
-					yield CypherCompiler.compile(cypherInput).ast();
-				}
-				case "implog" -> ImpLogCompiler.compile(queryText);
-				case "impk" -> ImpKCompiler.compile(queryText);
-				case "impscm" -> (ScmProgram) ImpScmParser.parse(queryText);
-				default -> fail("Unsupported query language: " + language);
-			};
-			assertNotNull(prog, "Lowered ScmProgram must not be null for " + id);
+			queryChecks.add(() -> {
+				// -----------------------------------------------------------------
+				// Stage A: Strict Frontend Lowering to ImpScheme S-Expression (ScmProgram)
+				// without any test-side shims or backtick workarounds
+				// -----------------------------------------------------------------
+				ScmProgram prog = switch (language) {
+					case "cypher" -> CypherCompiler.compile(queryText).ast();
+					case "implog" -> ImpLogCompiler.compile(queryText);
+					case "impk" -> ImpKCompiler.compile(queryText);
+					case "impscm" -> (ScmProgram) ImpScmParser.parse(queryText);
+					default -> fail("Unsupported query language: " + language);
+				};
+				assertNotNull(prog, "Lowered ScmProgram must not be null for " + id);
 
-			String actualScm = prog.toScmString().trim();
-			if ("impk_06_multilane_set_cover".equals(id)) {
-				// ImpKCompiler.java:436 calls 'new ScmLaneSetCover(0, s.intParam1())' where
-				// ScmLaneSetCover(int maskReg, int mode) has maskReg first and mode second,
-				// resulting in '(lane-set-cover 0 0 #f)' instead of '(lane-set-cover 0 7)'.
-				assertEquals(
-						"(program\n  (lane-init-seeds (0 1 2))\n  (lane-csr-walk \"USER_FOLLOWS\")\n"
-								+ "  (lane-set-cover 0 0 #f)\n  (collect-vector))",
-						actualScm, "ImpKCompiler.compile actual S-expression for " + id);
-			} else if ("impscm_04_multilane_quorum_pipeline".equals(id)) {
-				// ImpScmParser parses '(lane-init-seeds 0 0)' as ScmLaneInitSeeds([0]) ->
-				// '(lane-init-seeds (0))'
-				// and '(lane-filter-quorum 2 255)' as ScmLaneFilterQuorum(2, maskReg=255) ->
-				// '(lane-filter-quorum 2 #t)'.
-				assertEquals(
-						"(program\n  (lane-init-seeds (0))\n  (lane-csr-walk \"USER_FOLLOWS\")\n"
-								+ "  (lane-filter-quorum 2 #t)\n  (collect-bitset))",
-						actualScm, "ImpScmParser.parse actual S-expression for " + id);
-			} else {
-				assertEquals(expectedScmJava.trim(), actualScm, "Stage A Java ImpScheme mismatch for query " + id);
-			}
-			passedStageA++;
+				String actualScm = prog.toScmString().trim();
 
-			// Compare against C++ expected_scm_file / expected_scm_cpp and log dialect
-			// differences
-			if (!actualScm.equals(expectedScmCpp.trim()) || !actualScm.equals(expectedScmFileText)) {
-				System.out.printf("[Suite 2 Stage A Dialect Diff] %s (%s):%n  Java: %s%n  C++ : %s%n", id, language,
-						actualScm.replace("\n", " "), expectedScmCpp.replace("\n", " "));
-			}
+				// -----------------------------------------------------------------
+				// Stage B: Stage 1 & Stage 2 Optimizer Passes (Opt ON vs Opt OFF)
+				// without bypassing PhysicalBindingPass or patching AST
+				// -----------------------------------------------------------------
+				QueryObject stage1OptOn = compilerEngine.compileStage1(id + "_opt_on", queryText, prog,
+						CompilerOptions.DEFAULT);
+				QueryObject stage1OptOff = compilerEngine.compileStage1(id + "_opt_off", queryText, prog,
+						UNOPTIMIZED_OPTIONS);
 
-			// -----------------------------------------------------------------
-			// Stage B: Stage 1 & Stage 2 Optimizer Passes (Opt ON vs Opt OFF)
-			// -----------------------------------------------------------------
-			ScmProgram execProg = prog;
-			if ("impscm_04_multilane_quorum_pipeline".equals(id) && !seedNodes.isEmpty()) {
-				// Bind seed_nodes [0, 1, 2] from query_manifest.json and unmasked quorum=2
-				// (since C++ '255' in '(lane-filter-quorum 2 255)' is the 0xFF no-mask
-				// sentinel).
-				List<ImpScmNode> patchedSteps = new ArrayList<>(prog.steps());
-				patchedSteps.set(0, ScmLaneInitSeeds.fromInlineSeeds(seedNodes));
-				patchedSteps.set(2, ScmLaneFilterQuorum.of(2));
-				execProg = new ScmProgram(patchedSteps);
-				SHORTCOMING_FINDINGS.add("impscm_04_multilane_quorum_pipeline: ImpScmParser parses C++ "
-						+ "'(lane-init-seeds 0 0)' as '(lane-init-seeds (0))' and C++ sentinel 255 in "
-						+ "'(lane-filter-quorum 2 255)' as masked '#t' (maskReg=255); binding seed_nodes [0, 1, 2] "
-						+ "and unmasked quorum=2 executes the 64-lane pipeline to [4, 5, 6].");
-			}
+				CompiledQuery cqOptOn = compilerEngine.compileStage2(stage1OptOn, orderedSnapshot, sharedArena,
+						CompilerOptions.DEFAULT);
+				CompiledQuery cqOptOff = compilerEngine.compileStage2(stage1OptOff, orderedSnapshot, sharedArena,
+						UNOPTIMIZED_OPTIONS);
+				assertNotNull(cqOptOn, "Stage B Opt ON CompiledQuery must not be null for " + id);
+				assertNotNull(cqOptOff, "Stage B Opt OFF CompiledQuery must not be null for " + id);
 
-			QueryObject stage1OptOn = compilerEngine.compileStage1(id + "_opt_on", queryText, execProg,
-					CompilerOptions.DEFAULT);
-			QueryObject stage1OptOff = compilerEngine.compileStage1(id + "_opt_off", queryText, execProg,
-					UNOPTIMIZED_OPTIONS);
+				// -----------------------------------------------------------------
+				// Stage C: Live Java FFM ImpulseVM Execution & Output Assertion
+				// without instruction injection or PhysicalBindingPass bypasses
+				// -----------------------------------------------------------------
+				Object resOptOn = cqOptOn.execute(orderedSnapshot, seedNodeDenseId, sharedArena);
+				Object resOptOff = cqOptOff.execute(orderedSnapshot, seedNodeDenseId, sharedArena);
 
-			CompiledQuery cqOptOn = compilerEngine.compileStage2(stage1OptOn, orderedSnapshot, sharedArena,
-					CompilerOptions.DEFAULT);
-			CompiledQuery cqOptOff = compilerEngine.compileStage2(stage1OptOff, orderedSnapshot, sharedArena,
-					UNOPTIMIZED_OPTIONS);
-			assertNotNull(cqOptOn, "Stage B Opt ON CompiledQuery must not be null for " + id);
-			assertNotNull(cqOptOff, "Stage B Opt OFF CompiledQuery must not be null for " + id);
-			passedStageB++;
-
-			// -----------------------------------------------------------------
-			// Stage C: Live Java FFM ImpulseVM Execution & Output Assertion
-			// -----------------------------------------------------------------
-			if ("cypher_05_user_follows_undirected_count".equals(id)) {
-				// Document PhysicalBindingPass bug (drops lhs of ScmSetOp) and verify direct
-				// emitter execution
-				Object brokenRes = cqOptOn.execute(orderedSnapshot, seedNodeDenseId, sharedArena);
-				assertInstanceOf(ImpulseBitSet.class, brokenRes);
-				assertEquals(List.of(0, 2), extractSetBits((ImpulseBitSet) brokenRes),
-						"PhysicalBindingPass drops ScmSetOp.lhs, leaving only CSC walk on R0 union R0");
-
-				SHORTCOMING_FINDINGS.add("cypher_05_user_follows_undirected_count: PhysicalBindingPass.java:115 uses "
-						+ "2-arg 'new ScmSetOp(setOp.kind(), bindNode(setOp.rhs(), snapshot))' which sets lhs=null "
-						+ "and drops '(csr-walk \"USER_FOLLOWS\")'. Compiling pre-PhysicalBindingPass AST via "
-						+ "ImpOpsBytecodeEmitter produces the exact expected [1, 2, 4, 5] (cardinality=4).");
-
-				CompiledQuery directCq = ImpOpsBytecodeEmitter.compileToExecutable(execProg, orderedSnapshot,
-						sharedArena);
-				Object directRes = directCq.execute(orderedSnapshot, seedNodeDenseId, sharedArena);
-				assertQueryOutputMatches(id, directRes, expectedDenseIds, expectedCardinality, expectedScalarInt);
-				passedStageC++;
-				continue;
-			}
-
-			if ("impk_06_multilane_set_cover".equals(id)) {
-				assertEquals("pending_capability", status);
-				SHORTCOMING_FINDINGS.add("impk_06_multilane_set_cover: ImpKCompiler.java:436 calls "
-						+ "'new ScmLaneSetCover(0, s.intParam1())' (passing 0 as maskReg and 7 as mode to "
-						+ "ScmLaneSetCover(int maskReg, int mode)), emitting '(lane-set-cover 0 0 #f)' without loading "
-						+ "literal mask 7 into R7. Injecting OP_LOAD_CONST_INT R7, 7 and maskReg=7 yields the exact "
-						+ "greedy set cover [4].");
-
-				ImpOpsBytecodeEmitter.EmittedProgram emitted = ImpOpsBytecodeEmitter.emit(execProg, orderedSnapshot,
-						sharedArena);
-				List<InstructionWord> fixedInstrs = new ArrayList<>();
-				for (InstructionWord iw : emitted.instructionList()) {
-					if (iw.opcode() == OP_LANE_SET_COVER) {
-						fixedInstrs.add(new InstructionWord(OP_LOAD_CONST_INT, (byte) 0, (short) 7, 7));
-						int srcReg = iw.payload() & 0xFF;
-						int fixedPayload = (srcReg & 0xFF) | ((7 & 0xFF) << 8);
-						fixedInstrs.add(new InstructionWord(OP_LANE_SET_COVER, (byte) 0, iw.dstReg(), fixedPayload));
-					} else {
-						fixedInstrs.add(iw);
-					}
-				}
-				Object res = executeInstructionList(fixedInstrs, emitted.stringPool(), emitted.inlineDataSegment(),
-						seedNodeDenseId);
-				assertQueryOutputMatches(id, res, expectedDenseIds, expectedCardinality, expectedScalarInt);
-				passedStageC++;
-				continue;
-			}
-
-			Object resOptOn = cqOptOn.execute(orderedSnapshot, seedNodeDenseId, sharedArena);
-			Object resOptOff = cqOptOff.execute(orderedSnapshot, seedNodeDenseId, sharedArena);
-
-			assertQueryOutputMatches(id + " (Opt ON)", resOptOn, expectedDenseIds, expectedCardinality,
-					expectedScalarInt);
-			assertQueryOutputMatches(id + " (Opt OFF)", resOptOff, expectedDenseIds, expectedCardinality,
-					expectedScalarInt);
-			passedStageC++;
+				boolean isScalarCountQuery = expectedScmFileText.contains("(collect-count)")
+						|| expectedScmFileText.contains("(collect-scalar)");
+				assertAll(id,
+						() -> assertEquals(expectedScmFileText, actualScm,
+								"Stage A ImpScheme S-expression mismatch against " + expectedScmFileRel + " for " + id),
+						() -> assertQueryOutputMatches(id + " (Opt ON)", resOptOn, expectedDenseIds,
+								expectedCardinality, expectedScalarInt, isScalarCountQuery),
+						() -> assertQueryOutputMatches(id + " (Opt OFF)", resOptOff, expectedDenseIds,
+								expectedCardinality, expectedScalarInt, isScalarCountQuery));
+			});
 		}
 
-		assertEquals(22, passedStageA, "All 22 queries must pass Stage A lowering");
-		assertEquals(22, passedStageB, "All 22 queries must pass Stage B Opt ON/OFF compilation");
-		assertEquals(22, passedStageC, "All 22 queries must pass Stage C VM execution verification");
+		assertAll("Suite 2 Multi-Language Query Corpus (22 Queries)", queryChecks);
 	}
 
 	private static void assertQueryOutputMatches(String label, Object vmResult, List<Integer> expectedDenseIds,
-			int expectedCardinality, int expectedScalarInt) {
+			int expectedCardinality, int expectedScalarInt, boolean isScalarCountQuery) {
 		assertNotNull(vmResult, "VM execution result must not be null for " + label);
 		if (vmResult instanceof ImpulseBitSet bs) {
 			List<Integer> actualIds = extractSetBits(bs);
@@ -550,10 +450,11 @@ public class E2eCsvPipelineIntegrationTest {
 			}
 			assertEquals(expectedDenseIds, actualIds, "int[] dense IDs mismatch for " + label);
 			assertEquals(expectedCardinality, actualIds.size(), "int[] cardinality mismatch for " + label);
-		} else if (vmResult instanceof Number num) {
+		} else if (isScalarCountQuery && vmResult instanceof Number num) {
 			assertEquals(expectedScalarInt, num.intValue(), "Scalar result mismatch for " + label);
 		} else {
-			fail("Unexpected VM result type for " + label + ": " + vmResult.getClass().getName());
+			fail("Unexpected VM result for " + label + " (expected dense IDs " + expectedDenseIds + "): got "
+					+ vmResult.getClass().getSimpleName() + "(" + vmResult + ")");
 		}
 	}
 
@@ -585,13 +486,6 @@ public class E2eCsvPipelineIntegrationTest {
 				new InstructionWord(OP_MXV, (byte) 0, (short) 1, payloadMxvZero), // R1 = MAT50_ZERO_CSR * R0
 				new InstructionWord(OP_VECTOR_REDUCE_SUM, (byte) 0, (short) 2, 1), // R2 = sum(R1)
 				new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
-		try (VmRunResult run = runVmProgramDetailed(zeroProg, pool, null, 0)) {
-			float[] yZero = run.getFloatVector(1);
-			assertNotNull(yZero);
-			assertEquals(50, yZero.length);
-			assertEquals(0.0f, run.getFloatScalar(2), 1e-6f, "Zero matrix SpMV sum must be 0.0");
-			assertTrue(run.isZeroFlagSet(), "ZF must be true when sum is 0.0");
-		}
 
 		// 2. Identity matrix on MAT50_IDENTITY_COO (rel 20): y = I_50 * x = x => sum(y)
 		// = 1275.0,
@@ -609,51 +503,92 @@ public class E2eCsvPipelineIntegrationTest {
 				new InstructionWord(OP_EWISE_MULT, (byte) 0, (short) 4, payloadEwiseMult), // R4 = R1 .* R3
 				new InstructionWord(OP_VECTOR_REDUCE_SUM, (byte) 0, (short) 5, 4), // R5 = sum(R4) = 2550.0
 				new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
-		try (VmRunResult run = runVmProgramDetailed(idProg, pool, null, 0)) {
-			float[] yId = run.getFloatVector(1);
-			assertEquals(50, yId.length);
-			assertEquals(1.0f, yId[0], 1e-6f);
-			assertEquals(50.0f, yId[49], 1e-6f);
-			assertEquals(1275.0f, run.getFloatScalar(2), 1e-4f, "Identity SpMV sum(I_50 * x) must be 1275.0");
-			assertEquals(2550.0f, run.getFloatScalar(5), 1e-4f,
-					"Scaled diagonal SpMV sum(2 * I_50 * x) must be 2550.0");
-		}
 
 		// 3. Rectangular 100x50 (MAT_RECT_100x50_COO, rel 24) and 50x100
-		// (MAT_RECT_50x100_COO, rel 25)
-		// First verify VmHandlers.handleMxv behavior on rel 24 (srcNodeCount=100) and
-		// rel 25 (srcNodeCount=50)
-		// and verify bilinear duality: 1_100^T * A_{100x50} * 1_50 = 150.0 (150 edges
-		// with proj_f32 = 1.0)
-		// and 1_50^T * B_{50x100} * 1_100 = 100 * 0.5 = 50.0 (100 edges with back_f32 =
-		// 0.5).
-		int payloadMxvRect24 = (0 & 0xFF) | ((24 & 0xFF) << 8) | ((SEMIRING_PLUS_TIMES & 0xFFFF) << 16);
+		// (MAT_RECT_50x100_COO, rel 25):
+		// - OP_MXV on rel 24 (100x50) with x in R^{50} -> y in R^{100}, sum(y) = 150.0
+		// - OP_VXM on rel 24 (100x50) with x in R^{100} -> y in R^{50}, sum(y) = 150.0
+		// - OP_MXV on rel 25 (50x100, back_f32=0.5) with x in R^{100} -> y in R^{50},
+		// y[0] == 1.0f (or weighted 0.5f per edge, sum(y)=50.0)
+		// - OP_VXM on rel 25 (50x100, back_f32=0.5) with x in R^{50} -> y in R^{100},
+		// sum(y) = 50.0
+		int payloadMxvRect24 = (1 & 0xFF) | ((24 & 0xFF) << 8) | ((SEMIRING_PLUS_TIMES & 0xFFFF) << 16);
 		int payloadVxmRect24 = (0 & 0xFF) | ((24 & 0xFF) << 8) | ((SEMIRING_PLUS_TIMES & 0xFFFF) << 16);
+		int payloadMxvRect25 = (0 & 0xFF) | ((25 & 0xFF) << 8) | ((SEMIRING_PLUS_TIMES & 0xFFFF) << 16);
+		int payloadVxmRect25 = (1 & 0xFF) | ((25 & 0xFF) << 8) | ((SEMIRING_PLUS_TIMES & 0xFFFF) << 16);
+
 		List<InstructionWord> rectProg = List.of(new InstructionWord(OP_LOAD_COLUMN_VECTOR, (byte) 0, (short) 0, 2), // R0
 																														// =
 																														// MatNet100.pr_init_f32
-																														// (100
-																														// x
+																														// (len
+																														// 100,
 																														// 0.01)
 				new InstructionWord(OP_FLOAT_VECTOR_SCALE, (byte) 0, (short) 0, Float.floatToRawIntBits(100.0f)), // R0
 																													// =
 																													// 1_{100}
-				new InstructionWord(OP_MXV, (byte) 0, (short) 1, payloadMxvRect24), // R1 = A_{100x50} * 1
-				new InstructionWord(OP_VXM, (byte) 0, (short) 2, payloadVxmRect24), // R2 = 1^T * A_{100x50}
-				new InstructionWord(OP_VECTOR_REDUCE_SUM, (byte) 0, (short) 3, 1), // R3 = sum(R1) = 150.0
-				new InstructionWord(OP_VECTOR_REDUCE_SUM, (byte) 0, (short) 4, 2), // R4 = sum(R2) = 150.0
+				new InstructionWord(OP_LOAD_COLUMN_VECTOR, (byte) 0, (short) 1, 1), // R1 = MatFeature50.feat_a_f32 (len
+																					// 50, 1.0)
+				new InstructionWord(OP_MXV, (byte) 0, (short) 2, payloadMxvRect24), // R2 = A_{100x50} * 1_{50}
+																					// (expected len 100)
+				new InstructionWord(OP_VXM, (byte) 0, (short) 3, payloadVxmRect24), // R3 = 1_{100}^T * A_{100x50}
+																					// (expected len 50)
+				new InstructionWord(OP_MXV, (byte) 0, (short) 4, payloadMxvRect25), // R4 = B_{50x100} * 1_{100}
+																					// (expected len 50, weighted sum
+																					// 50.0)
+				new InstructionWord(OP_VXM, (byte) 0, (short) 5, payloadVxmRect25), // R5 = 1_{50}^T * B_{50x100}
+																					// (expected len 100, weighted sum
+																					// 50.0)
+				new InstructionWord(OP_VECTOR_REDUCE_SUM, (byte) 0, (short) 6, 2),
+				new InstructionWord(OP_VECTOR_REDUCE_SUM, (byte) 0, (short) 7, 3),
+				new InstructionWord(OP_VECTOR_REDUCE_SUM, (byte) 0, (short) 8, 4),
+				new InstructionWord(OP_VECTOR_REDUCE_SUM, (byte) 0, (short) 9, 5),
 				new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
-		try (VmRunResult run = runVmProgramDetailed(rectProg, pool, null, 0)) {
-			float sumMxv = run.getFloatScalar(3);
-			float sumVxm = run.getFloatScalar(4);
-			assertEquals(150.0f, sumMxv, 1e-3f, "1^T (A_{100x50} 1) must equal 150.0");
-			assertEquals(150.0f, sumVxm, 1e-3f, "(1^T A_{100x50}) 1 must equal 150.0 (bilinear duality)");
-		}
 
-		SHORTCOMING_FINDINGS.add("VmHandlers.handleMxv / handleVxm: uses single 'nodeCount = rel.getNodeCount()' "
-				+ "(source domain cardinality) for both input vector length check (x.length < nodeCount) and output "
-				+ "vector allocation on rectangular relations (MAT_RECT_100x50_COO rel 24 and MAT_RECT_50x100_COO rel 25), "
-				+ "and treats edges as unweighted 1.0f.");
+		assertAll("Suite 3.1 Semiring SpMV Checks", () -> {
+			try (VmRunResult run = runVmProgramDetailed(zeroProg, pool, null, 0)) {
+				float[] yZero = run.getFloatVector(1);
+				assertNotNull(yZero);
+				assertEquals(50, yZero.length);
+				assertEquals(0.0f, run.getFloatScalar(2), 1e-6f, "Zero matrix SpMV sum must be 0.0");
+				assertTrue(run.isZeroFlagSet(), "ZF must be true when sum is 0.0");
+			}
+		}, () -> {
+			try (VmRunResult run = runVmProgramDetailed(idProg, pool, null, 0)) {
+				float[] yId = run.getFloatVector(1);
+				assertEquals(50, yId.length);
+				assertEquals(1.0f, yId[0], 1e-6f);
+				assertEquals(50.0f, yId[49], 1e-6f);
+				assertEquals(1275.0f, run.getFloatScalar(2), 1e-4f, "Identity SpMV sum(I_50 * x) must be 1275.0");
+				assertEquals(2550.0f, run.getFloatScalar(5), 1e-4f,
+						"Scaled diagonal SpMV sum(2 * I_50 * x) must be 2550.0");
+			}
+		}, () -> {
+			try (VmRunResult run = runVmProgramDetailed(rectProg, pool, null, 0)) {
+				float[] mxv24 = run.getFloatVector(2);
+				float[] vxm24 = run.getFloatVector(3);
+				float[] mxv25 = run.getFloatVector(4);
+				float[] vxm25 = run.getFloatVector(5);
+				assertAll("Rectangular SpMV/VpM Dimensions & Weighted Sums",
+						() -> assertEquals(100, mxv24.length,
+								"OP_MXV on MAT_RECT_100x50_COO (100x50) with len-50 input must produce len-100 output"),
+						() -> assertEquals(150.0f, run.getFloatScalar(6), 1e-3f,
+								"OP_MXV on MAT_RECT_100x50_COO (100x50) * 1_{50} must sum to 150.0"),
+						() -> assertEquals(50, vxm24.length,
+								"OP_VXM on MAT_RECT_100x50_COO (100x50) with len-100 input must produce len-50 output"),
+						() -> assertEquals(150.0f, run.getFloatScalar(7), 1e-3f,
+								"OP_VXM 1_{100}^T * MAT_RECT_100x50_COO must sum to 150.0"),
+						() -> assertEquals(50, mxv25.length,
+								"OP_MXV on MAT_RECT_50x100_COO (50x100) with len-100 input must produce len-50 output"),
+						() -> assertEquals(0.5f, mxv25[0] / 2.0f, 1e-5f,
+								"OP_MXV on MAT_RECT_50x100_COO must weight each edge by back_f32=0.5 (row sum 1.0, per-edge 0.5)"),
+						() -> assertEquals(50.0f, run.getFloatScalar(8), 1e-3f,
+								"OP_MXV on MAT_RECT_50x100_COO (100 edges * back_f32=0.5) must sum to 50.0"),
+						() -> assertEquals(100, vxm25.length,
+								"OP_VXM on MAT_RECT_50x100_COO (50x100) with len-50 input must produce len-100 output"),
+						() -> assertEquals(50.0f, run.getFloatScalar(9), 1e-3f,
+								"OP_VXM 1_{50}^T * MAT_RECT_50x100_COO (100 edges * back_f32=0.5) must sum to 50.0"));
+			}
+		});
 	}
 
 	@Test
@@ -662,101 +597,72 @@ public class E2eCsvPipelineIntegrationTest {
 	void testSuite3_2_TropicalMinPlusShortestPath() {
 		// MAT10_UPPER_TRI_CSR (rel 18) has direct edge 0 -> 9 with w_f32 = 100.0,
 		// and 3-hop path 0 -> 3 -> 6 -> 9 with w_f32 = 1.0 + 1.0 + 1.0 = 3.0.
-		// Verify both:
-		// (A) OP_MXV with SEMIRING_MIN_PLUS = 1 (unweighted hop-count relaxation in
-		// VmHandlers.handleMxv)
-		// (B) 4-step Weighted Tropical Min-Plus Bellman-Ford via OP_CSR_WALK_STREAM +
-		// OP_STREAM_LOAD_SRC
-		// + OP_STREAM_LOAD_EDGE (w_f32) + OP_STREAM_MATH_ADD + OP_STREAM_REDUCE (MIN,
-		// monoid=2)
-		RelationSnapshot rel18 = (RelationSnapshot) orderedSnapshot.getRelationSnapshot(18);
-		int wAttrIdx = rel18.findAttributeIndex("w_f32");
-		assertTrue(wAttrIdx >= 0, "MAT10_UPPER_TRI_CSR must have w_f32 attribute");
-		MemorySegment wSeg = rel18.getAttributeSegments().get(wAttrIdx);
-		float[] edgeWeights = new float[25];
-		for (int e = 0; e < 25; e++) {
-			edgeWeights[e] = wSeg.get(ValueLayout.JAVA_FLOAT_UNALIGNED, e * 4L);
+		// Execute 4-step Bellman-Ford directly via OP_MXV (SEMIRING_MIN_PLUS = 1) +
+		// OP_EWISE_ADD (BINARY_OP_MIN = 2) without a stream shader workaround!
+		float[] initDist = new float[10];
+		Arrays.fill(initDist, Float.POSITIVE_INFINITY);
+		initDist[0] = 0.0f;
+
+		ByteArrayOutputStream inlineBytes = new ByteArrayOutputStream();
+		for (float f : initDist) {
+			int bits = Float.floatToRawIntBits(f);
+			inlineBytes.write(bits & 0xFF);
+			inlineBytes.write((bits >>> 8) & 0xFF);
+			inlineBytes.write((bits >>> 16) & 0xFF);
+			inlineBytes.write((bits >>> 24) & 0xFF);
 		}
-		assertEquals(100.0f, edgeWeights[3], 1e-6f, "Edge (0 -> 9) at index 3 must have weight 100.0");
+		byte[] rawInline = inlineBytes.toByteArray();
+		MemorySegment inlineSeg = sharedArena.allocate(rawInline.length);
+		inlineSeg.copyFrom(MemorySegment.ofArray(rawInline));
+		int inlinePayload = ((10 & 0xFFFF) << 16) | 0;
 
-		// Execute 4-step weighted Bellman-Ford inside ImpulseVM using
-		// OP_CSR_WALK_STREAM + OP_STREAM_REDUCE(MIN)
-		try (VmQueryContext ctx = VmQueryContext.acquire(orderedSnapshot, sharedArena)) {
-			MemorySegment state = ctx.allocateStateSegment();
+		// Note: OP_MXV (handleMxv) iterates over row u and accumulates y[u] = min_v
+		// (x[v] + w(u, v)),
+		// whereas forward single-source shortest path from source 0 relaxes y[v] =
+		// min_u (dist[u] + w(u, v))
+		// or backward from target 9 relaxes dist_to_9[u] = min_v (w(u, v) +
+		// dist_to_9[v]).
+		// Test both 1-hop and 4-hop Min-Plus OP_MXV from target 9 (initDist[9]=0.0f)
+		// and source 0:
+		float[] initTo9 = new float[10];
+		Arrays.fill(initTo9, Float.POSITIVE_INFINITY);
+		initTo9[9] = 0.0f;
+		ByteArrayOutputStream to9Bytes = new ByteArrayOutputStream();
+		for (float f : initTo9) {
+			int bits = Float.floatToRawIntBits(f);
+			to9Bytes.write(bits & 0xFF);
+			to9Bytes.write((bits >>> 8) & 0xFF);
+			to9Bytes.write((bits >>> 16) & 0xFF);
+			to9Bytes.write((bits >>> 24) & 0xFF);
+		}
+		byte[] rawTo9 = to9Bytes.toByteArray();
+		MemorySegment to9Seg = sharedArena.allocate(rawTo9.length);
+		to9Seg.copyFrom(MemorySegment.ofArray(rawTo9));
 
-			// Initialize R10 = edge weights vector (w_f32), R1 = distance vector d[0..9] =
-			// [0, +inf, ..., +inf]
-			int wHandle = ctx.acquireFloatVector(25);
-			System.arraycopy(edgeWeights, 0, ctx.getFloatVector(wHandle), 0, 25);
-			VmHandlers.setRegister(state, 10, wHandle, TYPE_FLOAT_VECTOR);
+		int payloadMxvMinPlus18 = (0 & 0xFF) | ((18 & 0xFF) << 8) | ((SEMIRING_MIN_PLUS & 0xFFFF) << 16);
+		int payloadMinAdd = (0 & 0xFF) | ((1 & 0xFF) << 8) | ((BINARY_OP_MIN & 0xFFFF) << 16);
 
-			int dHandle = ctx.acquireFloatVector(10);
-			float[] dist = ctx.getFloatVector(dHandle);
-			Arrays.fill(dist, 1e9f);
-			dist[0] = 0.0f;
-			VmHandlers.setRegister(state, 1, dHandle, TYPE_FLOAT_VECTOR);
+		List<InstructionWord> hop1Prog = List.of(
+				new InstructionWord(OP_LOAD_INLINE_ARRAY, (byte) 0, (short) 0, inlinePayload),
+				new InstructionWord(OP_MXV, (byte) 0, (short) 1, payloadMxvMinPlus18),
+				new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
 
-			// Seed active frontier R0 with node 0
-			int bsHandle = ctx.acquireBitset();
-			ImpulseBitSet frontier = ctx.getBitset(bsHandle);
-			frontier.set(0);
-			VmHandlers.setRegister(state, 0, bsHandle, TYPE_BITSET_HANDLE);
+		List<InstructionWord> hop4Prog = new ArrayList<>();
+		hop4Prog.add(new InstructionWord(OP_LOAD_INLINE_ARRAY, (byte) 0, (short) 0, inlinePayload));
+		for (int step = 0; step < 4; step++) {
+			hop4Prog.add(new InstructionWord(OP_MXV, (byte) 0, (short) 1, payloadMxvMinPlus18));
+			hop4Prog.add(new InstructionWord(OP_EWISE_ADD, (byte) 0, (short) 0, payloadMinAdd));
+		}
+		hop4Prog.add(new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
 
-			// Build stream shader program:
-			// PC 0: OP_CSR_WALK_STREAM dst=R2, flags=2 (shaderPcStart=2), payload=(relId=18
-			// << 16) | srcReg=0
-			// PC 1: OP_STREAM_FUNC_BEGIN
-			// PC 2: OP_STREAM_LOAD_SRC sDst=1, payload=1 (global R1 = dist[])
-			// PC 3: OP_STREAM_LOAD_EDGE sDst=2, payload=10 (global R10 = edgeWeights[])
-			// PC 4: OP_STREAM_MATH_ADD sDst=3, payload=(2 << 16) | 1 (s3 = dist[u] + w[e])
-			// PC 5: OP_STREAM_REDUCE sDst=3, payload=(2 << 16) | 1 (globalReg=1, monoid=2
-			// MIN)
-			// PC 6: OP_STREAM_YIELD
-			// PC 7: OP_STREAM_FUNC_END
-			List<InstructionWord> shaderInstrs = List.of(
-					new InstructionWord(OP_CSR_WALK_STREAM, (byte) 2, (short) 2, (18 << 16) | 0),
-					new InstructionWord(OP_STREAM_FUNC_BEGIN, (byte) 0, (short) 0, 0),
-					new InstructionWord(OP_STREAM_LOAD_SRC, (byte) 0, (short) 1, 1),
-					new InstructionWord(OP_STREAM_LOAD_EDGE, (byte) 0, (short) 2, 10),
-					new InstructionWord(OP_STREAM_MATH_ADD, (byte) 0, (short) 3, (2 << 16) | 1),
-					new InstructionWord(OP_STREAM_REDUCE, (byte) 0, (short) 3, (2 << 16) | 1),
-					new InstructionWord(OP_STREAM_YIELD, (byte) 0, (short) 0, 0),
-					new InstructionWord(OP_STREAM_FUNC_END, (byte) 0, (short) 0, 0));
-
-			MemorySegment progSeg = encodeInstructions(shaderInstrs, sharedArena);
-			VmHandlers.Instruction walkInstr = VmHandlers.decodeInstruction(progSeg, 0);
-
-			// Hop 1: from {0} -> reaches {1, 2, 3, 9} with dist[1]=1, dist[2]=1, dist[3]=1,
-			// dist[9]=100.0
-			// Pre-mark touchedMask so monoid=2 (MIN) compares against current dist[v]
-			// rather than overwriting
-			VmHandlers.handleStreamWalk(state, ctx, walkInstr, progSeg, shaderInstrs.size());
-			assertEquals(1.0f, dist[3], 1e-6f);
-			assertEquals(100.0f, dist[9], 1e-6f, "After 1 hop, direct edge 0->9 gives dist[9] = 100.0");
-
-			// Hop 2..4: include active nodes {0..9} in frontier and relax edges while
-			// preserving best distances
-			for (int hop = 2; hop <= 4; hop++) {
-				float[] prevDist = Arrays.copyOf(dist, dist.length);
-				ImpulseBitSet nextFrontier = ctx.getBitset((int) VmHandlers.getRegisterValue(state, 2));
-				frontier.or(nextFrontier);
-				VmHandlers.handleStreamWalk(state, ctx, walkInstr, progSeg, shaderInstrs.size());
-				for (int i = 0; i < 10; i++) {
-					dist[i] = Math.min(prevDist[i], dist[i]);
-				}
-			}
-
-			assertEquals(0.0f, dist[0], 1e-6f);
-			assertEquals(1.0f, dist[1], 1e-6f);
-			assertEquals(1.0f, dist[2], 1e-6f);
-			assertEquals(1.0f, dist[3], 1e-6f);
-			assertEquals(2.0f, dist[4], 1e-6f);
-			assertEquals(2.0f, dist[5], 1e-6f);
-			assertEquals(2.0f, dist[6], 1e-6f);
-			assertEquals(3.0f, dist[7], 1e-6f);
-			assertEquals(3.0f, dist[8], 1e-6f);
-			assertEquals(3.0f, dist[9], 1e-6f,
-					"4-step Tropical Min-Plus shortest path 0->9 must be 3.0 (via 0->3->6->9) instead of 100.0");
+		try (VmRunResult run1 = runVmProgramDetailed(hop1Prog, List.of(), to9Seg, 0);
+				VmRunResult run4 = runVmProgramDetailed(hop4Prog, List.of(), to9Seg, 0)) {
+			float[] d1 = run1.getFloatVector(1);
+			float[] d4 = run4.getFloatVector(0);
+			assertAll("Suite 3.2 Weighted Tropical Min-Plus OP_MXV Checks", () -> assertEquals(100.0f, d1[0], 1e-5f,
+					"1-hop weighted Min-Plus OP_MXV on MAT10_UPPER_TRI_CSR (rel 18) must use edge weight w_f32(0->9)=100.0, not unweighted 1.0"),
+					() -> assertEquals(3.0f, d4[0], 1e-5f,
+							"4-step weighted Min-Plus Bellman-Ford via OP_MXV on MAT10_UPPER_TRI_CSR (rel 18) must find shortest path d(0->9)=3.0 via 0->3->6->9"));
 		}
 	}
 
@@ -999,39 +905,58 @@ public class E2eCsvPipelineIntegrationTest {
 																					// 20*(-1.0) = 60.0
 				new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
 
-		try (VmRunResult run = runVmProgramDetailed(nullProg, pool, null, 0)) {
-			float[] rawObs = run.getFloatVector(0);
-			float[] rawPrior = run.getFloatVector(1);
-			assertEquals(50, rawObs.length);
-			assertEquals(100, rawPrior.length);
+		assertAll("Suite 3.6: Null-Aware Vector Math on JitDriver AND ImpulseVmInterpreter", () -> {
+			try (VmRunResult run = runVmProgramDetailed(nullProg, pool, null, 0)) {
+				float[] rawObs = run.getFloatVector(0);
+				float[] rawPrior = run.getFloatVector(1);
+				assertEquals(50, rawObs.length);
+				assertEquals(100, rawPrior.length);
 
-			// Verify NaN conversion at null positions
-			assertTrue(Float.isNaN(rawObs[4]), "MatGrid50.opt_obs_f32[4] must be NaN");
-			assertFalse(Float.isNaN(rawObs[0]), "MatGrid50.opt_obs_f32[0] must be valid (0.0)");
-			assertTrue(Float.isNaN(rawPrior[0]), "MatNet100.opt_prior_f32[0] must be NaN");
-			assertEquals(1.0f, rawPrior[1], 1e-6f, "MatNet100.opt_prior_f32[1] must be 1.0");
+				// Verify NaN conversion at null positions
+				assertTrue(Float.isNaN(rawObs[4]), "MatGrid50.opt_obs_f32[4] must be NaN");
+				assertFalse(Float.isNaN(rawObs[0]), "MatGrid50.opt_obs_f32[0] must be valid (0.0)");
+				assertTrue(Float.isNaN(rawPrior[0]), "MatNet100.opt_prior_f32[0] must be NaN");
+				assertEquals(1.0f, rawPrior[1], 1e-6f, "MatNet100.opt_prior_f32[1] must be 1.0");
 
-			// Verify OP_EXTRACT_VALIDITY (0x3C) bitset cardinalities
-			assertEquals(40L, run.getLongScalar(4), "MatGrid50.opt_obs_f32 validity cardinality must be 40");
-			assertEquals(80L, run.getLongScalar(6), "MatNet100.opt_prior_f32 validity cardinality must be 80");
+				// Verify OP_EXTRACT_VALIDITY (0x3C) bitset cardinalities
+				assertEquals(40L, run.getLongScalar(4), "MatGrid50.opt_obs_f32 validity cardinality must be 40");
+				assertEquals(80L, run.getLongScalar(6), "MatNet100.opt_prior_f32 validity cardinality must be 80");
 
-			ImpulseBitSet valid50 = run.getBitset(3);
-			assertFalse(valid50.get(4));
-			assertTrue(valid50.get(3));
+				ImpulseBitSet valid50 = run.getBitset(3);
+				assertFalse(valid50.get(4));
+				assertTrue(valid50.get(3));
 
-			// Verify OP_COALESCE (0x3B) replaced all NaNs with -1.0f
-			float[] coalesced50 = run.getFloatVector(7);
-			float[] coalesced100 = run.getFloatVector(8);
-			assertEquals(-1.0f, coalesced50[4], 1e-6f);
-			assertEquals(4.5f, coalesced50[3], 1e-6f);
-			assertEquals(-1.0f, coalesced100[0], 1e-6f);
-			assertEquals(1.0f, coalesced100[1], 1e-6f);
-			assertEquals(60.0f, run.getFloatScalar(9), 1e-4f, "Sum of coalesced MatNet100.opt_prior_f32 must be 60.0");
-		}
-
-		SHORTCOMING_FINDINGS.add("OP_COALESCE (0x3B) and OP_EXTRACT_VALIDITY (0x3C) are wired in "
-				+ "ImpulseMethodHandleCompiler.executeDecoded (JitDriver) and VmHandlers, but are named "
-				+ "OP_RESERVED_3B / OP_RESERVED_3C in VmRegisterType and missing from ImpulseVmInterpreter.execute's switch.");
+				// Verify OP_COALESCE (0x3B) replaced all NaNs with -1.0f
+				float[] coalesced50 = run.getFloatVector(7);
+				float[] coalesced100 = run.getFloatVector(8);
+				assertEquals(-1.0f, coalesced50[4], 1e-6f);
+				assertEquals(4.5f, coalesced50[3], 1e-6f);
+				assertEquals(-1.0f, coalesced100[0], 1e-6f);
+				assertEquals(1.0f, coalesced100[1], 1e-6f);
+				assertEquals(60.0f, run.getFloatScalar(9), 1e-4f,
+						"Sum of coalesced MatNet100.opt_prior_f32 must be 60.0");
+			}
+		}, () -> {
+			// Also execute on ImpulseVmInterpreter (where OP_COALESCE 0x3B &
+			// OP_EXTRACT_VALIDITY 0x3C are missing)
+			List<InstructionWord> interpNullProg = List.of(
+					new InstructionWord(OP_LOAD_COLUMN_VECTOR, (byte) 0, (short) 1, 1), // R1 = MatNet100.opt_prior_f32
+					new InstructionWord(OP_LOAD_CONST_FLOAT, (byte) 0, (short) 2, Float.floatToRawIntBits(-1.0f)),
+					new InstructionWord(OP_RESERVED_3C, (byte) 0, (short) 5, 1), // OP_EXTRACT_VALIDITY (0x3C) R5 <- R1
+					new InstructionWord(OP_SET_CARDINALITY, (byte) 0, (short) 6, 5), // R6 = popcnt(R5) = 80
+					new InstructionWord(OP_RESERVED_3B, (byte) 0, (short) 8, payloadCoalesce100), // OP_COALESCE (0x3B)
+																									// R8 <-
+																									// coalesce(R1,
+																									// -1.0f)
+					new InstructionWord(OP_VECTOR_REDUCE_SUM, (byte) 0, (short) 0, 8), // R0 = sum(R8) = 60.0
+					new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
+			Object interpRes = executeInstructionList(interpNullProg, pool, null, 0);
+			assertTrue(interpRes instanceof Number,
+					"ImpulseVmInterpreter must return numeric sum for OP_COALESCE + OP_VECTOR_REDUCE_SUM, got: "
+							+ interpRes);
+			assertEquals(60.0, ((Number) interpRes).doubleValue(), 1e-4,
+					"ImpulseVmInterpreter OP_COALESCE (0x3B) + OP_EXTRACT_VALIDITY (0x3C) must produce sum 60.0");
+		});
 	}
 
 	@Test
@@ -1078,52 +1003,60 @@ public class E2eCsvPipelineIntegrationTest {
 	@Order(10)
 	@DisplayName("Suite 3.8: Structural Graph Analytics (OP_CC_AFFOREST & OP_KCORE_DECOMPOSITION)")
 	void testSuite3_8_ConnectedComponentsAndKCore() {
-		// 1. OP_CC_AFFOREST (0x40) on MAT100_STOCHASTIC_CSR (rel 23):
-		// Ground-truth components: {0..39} (40 nodes), {40..74} (35 nodes), {75..99}
-		// (25 nodes)
-		List<InstructionWord> ccProg = List.of(new InstructionWord(OP_CC_AFFOREST, (byte) 0, (short) 0, 23),
-				new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
-		try (VmRunResult run = runVmProgramDetailed(ccProg, List.of(), null, 0)) {
-			int[] comp = run.getNodeVector(0);
-			assertNotNull(comp);
-			assertEquals(100, comp.length);
+		assertAll("Suite 3.8: OP_CC_AFFOREST & OP_KCORE_DECOMPOSITION on JitDriver AND ImpulseVmInterpreter", () -> {
+			// 1. OP_CC_AFFOREST (0x40) on MAT100_STOCHASTIC_CSR (rel 23):
+			// Ground-truth components: {0..39} (40 nodes), {40..74} (35 nodes), {75..99}
+			// (25 nodes)
+			List<InstructionWord> ccProg = List.of(new InstructionWord(OP_CC_AFFOREST, (byte) 0, (short) 0, 23),
+					new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
+			try (VmRunResult run = runVmProgramDetailed(ccProg, List.of(), null, 0)) {
+				int[] comp = run.getNodeVector(0);
+				assertNotNull(comp);
+				assertEquals(100, comp.length);
 
-			int root0 = comp[0];
-			int root40 = comp[40];
-			int root75 = comp[75];
-			assertNotEquals(root0, root40, "Component {0..39} and {40..74} must have distinct roots");
-			assertNotEquals(root0, root75, "Component {0..39} and {75..99} must have distinct roots");
-			assertNotEquals(root40, root75, "Component {40..74} and {75..99} must have distinct roots");
+				int root0 = comp[0];
+				int root40 = comp[40];
+				int root75 = comp[75];
+				assertNotEquals(root0, root40, "Component {0..39} and {40..74} must have distinct roots");
+				assertNotEquals(root0, root75, "Component {0..39} and {75..99} must have distinct roots");
+				assertNotEquals(root40, root75, "Component {40..74} and {75..99} must have distinct roots");
 
-			for (int u = 0; u < 40; u++) {
-				assertEquals(root0, comp[u], "Node " + u + " must belong to component {0..39}");
+				for (int u = 0; u < 40; u++) {
+					assertEquals(root0, comp[u], "Node " + u + " must belong to component {0..39}");
+				}
+				for (int u = 40; u < 75; u++) {
+					assertEquals(root40, comp[u], "Node " + u + " must belong to component {40..74}");
+				}
+				for (int u = 75; u < 100; u++) {
+					assertEquals(root75, comp[u], "Node " + u + " must belong to component {75..99}");
+				}
 			}
-			for (int u = 40; u < 75; u++) {
-				assertEquals(root40, comp[u], "Node " + u + " must belong to component {40..74}");
+		}, () -> {
+			// 2. OP_KCORE_DECOMPOSITION (0x68) on MAT50_LAPLACIAN_CSR (rel 21) via
+			// JitDriver:
+			// Every node on the 2-regular 50-node ring C_50 has coreness k = 2.0
+			List<InstructionWord> kcoreProg = List.of(
+					new InstructionWord(OP_KCORE_DECOMPOSITION, (byte) 0, (short) 1, 21),
+					new InstructionWord(OP_VECTOR_REDUCE_SUM, (byte) 0, (short) 0, 1),
+					new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
+			try (VmRunResult run = runVmProgramDetailed(kcoreProg, List.of(), null, 0)) {
+				float[] coreness = run.getFloatVector(1);
+				assertNotNull(coreness);
+				assertEquals(50, coreness.length);
+				for (int u = 0; u < 50; u++) {
+					assertEquals(2.0f, coreness[u], 1e-6f, "Ring C_50 node " + u + " must have k-core number 2.0");
+				}
+				assertEquals(100.0f, run.getFloatScalar(0), 1e-5f, "Sum of k-core numbers across C_50 must be 100.0");
 			}
-			for (int u = 75; u < 100; u++) {
-				assertEquals(root75, comp[u], "Node " + u + " must belong to component {75..99}");
-			}
-		}
 
-		// 2. OP_KCORE_DECOMPOSITION (0x68) on MAT50_LAPLACIAN_CSR (rel 21):
-		// Every node on the 2-regular 50-node ring C_50 has coreness k = 2.0
-		List<InstructionWord> kcoreProg = List.of(new InstructionWord(OP_KCORE_DECOMPOSITION, (byte) 0, (short) 0, 21),
-				new InstructionWord(OP_VECTOR_REDUCE_SUM, (byte) 0, (short) 1, 0),
-				new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
-		try (VmRunResult run = runVmProgramDetailed(kcoreProg, List.of(), null, 0)) {
-			float[] coreness = run.getFloatVector(0);
-			assertNotNull(coreness);
-			assertEquals(50, coreness.length);
-			for (int u = 0; u < 50; u++) {
-				assertEquals(2.0f, coreness[u], 1e-6f, "Ring C_50 node " + u + " must have k-core number 2.0");
-			}
-			assertEquals(100.0f, run.getFloatScalar(1), 1e-5f, "Sum of k-core numbers across C_50 must be 100.0");
-		}
-
-		SHORTCOMING_FINDINGS.add("ImpulseVmInterpreter.java:658 places OP_KCORE_DECOMPOSITION (0x68) in the no-op "
-				+ "stub case, whereas ImpulseMethodHandleCompiler.executeDecoded:553 invokes "
-				+ "VmHandlers.handleKcoreDecomposition.");
+			// 3. Also execute OP_KCORE_DECOMPOSITION (0x68) on ImpulseVmInterpreter
+			// (where 0x68 is currently a no-op stub at ImpulseVmInterpreter.java:658)
+			Object interpKcoreRes = executeInstructionList(kcoreProg, List.of(), null, 0);
+			assertTrue(interpKcoreRes instanceof Number,
+					"ImpulseVmInterpreter must return numeric sum for OP_KCORE_DECOMPOSITION, got: " + interpKcoreRes);
+			assertEquals(100.0, ((Number) interpKcoreRes).doubleValue(), 1e-4,
+					"ImpulseVmInterpreter OP_KCORE_DECOMPOSITION (0x68) on C_50 must produce sum 100.0");
+		});
 	}
 
 	// =========================================================================
@@ -1134,119 +1067,125 @@ public class E2eCsvPipelineIntegrationTest {
 	@Order(11)
 	@DisplayName("Suite 4: Complex CEL Filter & State Projection Expressions over User, Order, and Sensor Attributes")
 	void testSuite4_CelFilterAndStateProjections() {
-		// 1. Verify CelCompiler lowering for User, Order, and Sensor CEL expressions
-		// (Vector & Stream modes)
-		CelAstNode userCel = CelParser.parse("node.age_i32 > 30 && node.active_flag_i8 == 1");
-		String userVecScm = CelCompiler.toImpScheme(userCel, false);
-		String userStreamScm = CelCompiler.toImpScheme(userCel, true);
-		assertEquals(
-				"(mask-and (vec-cmp-gt (get-attr node \"age_i32\") 30) (vec-cmp-eq (get-attr node \"active_flag_i8\") 1))",
-				userVecScm);
-		assertEquals(
-				"(stream-logic-and (stream-cmp-gt (stream-load-attr node \"age_i32\") 30) (stream-cmp-eq (stream-load-attr node \"active_flag_i8\") 1))",
-				userStreamScm);
+		assertAll("Suite 4: Complex CEL Filter & State Projection Expressions", () -> {
+			// 1. Verify CelCompiler lowering for User, Order, and Sensor CEL expressions
+			// (Vector & Stream modes)
+			CelAstNode userCel = CelParser.parse("node.age_i32 > 30 && node.active_flag_i8 == 1");
+			String userVecScm = CelCompiler.toImpScheme(userCel, false);
+			String userStreamScm = CelCompiler.toImpScheme(userCel, true);
+			assertEquals(
+					"(mask-and (vec-cmp-gt (get-attr node \"age_i32\") 30) (vec-cmp-eq (get-attr node \"active_flag_i8\") 1))",
+					userVecScm);
+			assertEquals(
+					"(stream-logic-and (stream-cmp-gt (stream-load-attr node \"age_i32\") 30) (stream-cmp-eq (stream-load-attr node \"active_flag_i8\") 1))",
+					userStreamScm);
 
-		// 2. Verify ParameterBindingPass + AlgebraicTypeInferencePass +
-		// PhysicalBindingPass on Sensor CEL query
-		ImpulseGraphQuery<ImpulseBitSet> sensorQuery = ImpulseGraphQuery.<ImpulseBitSet>builder()
-				.walkEdgeWithCel("SENSOR_FEEDS_SENSOR",
-						"node.voltage_f64 < @minVoltage || node.voltage_f64 > @maxVoltage")
-				.bindParameter("@minVoltage", 117.0).bindParameter("@maxVoltage", 124.0).collectBitSet();
-		CompilerOptions opts = CompilerOptions.builder().withParameters(sensorQuery.getParameters()).build();
-		CompilerContext cctx = new CompilerContext(orderedSnapshot, opts, new PassTracer(opts));
-		CelAstNode sensorCelAst = CelParser.parse("node.voltage_f64 < @minVoltage || node.voltage_f64 > @maxVoltage");
-		ScmProgram sensorRawAst = ScmProgram.of(
-				ScmWalk.forward("SENSOR_FEEDS_SENSOR", new ScmCelExpr(
-						"node.voltage_f64 < @minVoltage || node.voltage_f64 > @maxVoltage", sensorCelAst)),
-				ScmCollect.bitset());
-		ImpScmNode boundSensorAst = cctx.executePass(PreBindValidator.INSTANCE, sensorRawAst);
-		boundSensorAst = cctx.executePass(ParameterBindingPass.INSTANCE, boundSensorAst);
-		boundSensorAst = cctx.executePass(AlgebraicTypeInferencePass.INSTANCE, boundSensorAst);
-		boundSensorAst = cctx.executePass(PhysicalBindingPass.INSTANCE, boundSensorAst);
-		String boundSensorScm = boundSensorAst.toScmString();
-		assertTrue(boundSensorScm.contains("117.0"), "Parameter @minVoltage must bind to 117.0");
-		assertTrue(boundSensorScm.contains("124.0"), "Parameter @maxVoltage must bind to 124.0");
+			// 2. Verify ParameterBindingPass + AlgebraicTypeInferencePass +
+			// PhysicalBindingPass on Sensor CEL query
+			ImpulseGraphQuery<ImpulseBitSet> sensorQuery = ImpulseGraphQuery.<ImpulseBitSet>builder()
+					.walkEdgeWithCel("SENSOR_FEEDS_SENSOR",
+							"node.voltage_f64 < @minVoltage || node.voltage_f64 > @maxVoltage")
+					.bindParameter("@minVoltage", 117.0).bindParameter("@maxVoltage", 124.0).collectBitSet();
+			CompilerOptions opts = CompilerOptions.builder().withParameters(sensorQuery.getParameters()).build();
+			CompilerContext cctx = new CompilerContext(orderedSnapshot, opts, new PassTracer(opts));
+			CelAstNode sensorCelAst = CelParser
+					.parse("node.voltage_f64 < @minVoltage || node.voltage_f64 > @maxVoltage");
+			ScmProgram sensorRawAst = ScmProgram.of(
+					ScmWalk.forward("SENSOR_FEEDS_SENSOR", new ScmCelExpr(
+							"node.voltage_f64 < @minVoltage || node.voltage_f64 > @maxVoltage", sensorCelAst)),
+					ScmCollect.bitset());
+			ImpScmNode boundSensorAst = cctx.executePass(PreBindValidator.INSTANCE, sensorRawAst);
+			boundSensorAst = cctx.executePass(ParameterBindingPass.INSTANCE, boundSensorAst);
+			boundSensorAst = cctx.executePass(AlgebraicTypeInferencePass.INSTANCE, boundSensorAst);
+			boundSensorAst = cctx.executePass(PhysicalBindingPass.INSTANCE, boundSensorAst);
+			String boundSensorScm = boundSensorAst.toScmString();
+			assertTrue(boundSensorScm.contains("117.0"), "Parameter @minVoltage must bind to 117.0");
+			assertTrue(boundSensorScm.contains("124.0"), "Parameter @maxVoltage must bind to 124.0");
+		}, () -> {
+			// 3. Execute live Stream Filter + State Projection over User (USER_FOLLOWS, rel
+			// 0) on Java FFM ImpulseVM using the CSV attribute columns!
+			// User u2 (dense ID 2) follows u0 (age 20), u4 (age 28), u6 (age 32).
+			// Filtering target users with age_i32 > 30 yields [6]!
+			List<String> rawAges = parsedDomains.get(0).rawColumns().get("age_i32");
+			float[] userAges = new float[16];
+			for (int i = 0; i < 16; i++) {
+				userAges[i] = Float.parseFloat(rawAges.get(i));
+			}
 
-		// 3. Execute live Stream Filter + State Projection over User (USER_FOLLOWS, rel
-		// 0),
-		// Order (ORDER_CONTAINS_PRODUCT, rel 10), and Sensor (SENSOR_FEEDS_SENSOR, rel
-		// 16)
-		// on Java FFM ImpulseVM using the CSV attribute columns!
-		// User u2 (dense ID 2) follows u0 (age 20), u4 (age 28), u6 (age 32).
-		// Filtering target users with age_i32 > 30 yields [6]!
-		List<String> rawAges = parsedDomains.get(0).rawColumns().get("age_i32");
-		float[] userAges = new float[16];
-		for (int i = 0; i < 16; i++) {
-			userAges[i] = Float.parseFloat(rawAges.get(i));
-		}
+			try (VmQueryContext ctx = VmQueryContext.acquire(orderedSnapshot, sharedArena)) {
+				MemorySegment state = ctx.allocateStateSegment();
+				VmHandlers.setRegister(state, 0, 2L, TYPE_NODE_ID); // seed user u2 (dense ID 2)
+				int ageHandle = ctx.acquireFloatVector(16);
+				System.arraycopy(userAges, 0, ctx.getFloatVector(ageHandle), 0, 16);
+				VmHandlers.setRegister(state, 10, ageHandle, TYPE_FLOAT_VECTOR);
 
-		try (VmQueryContext ctx = VmQueryContext.acquire(orderedSnapshot, sharedArena)) {
-			MemorySegment state = ctx.allocateStateSegment();
-			VmHandlers.setRegister(state, 0, 2L, TYPE_NODE_ID); // seed user u2 (dense ID 2)
-			int ageHandle = ctx.acquireFloatVector(16);
-			System.arraycopy(userAges, 0, ctx.getFloatVector(ageHandle), 0, 16);
-			VmHandlers.setRegister(state, 10, ageHandle, TYPE_FLOAT_VECTOR);
+				// Stream Shader on USER_FOLLOWS (rel 0):
+				// Filter: target.age_i32 > 30.0
+				// State Projection: state[target] = target.age_i32 * 2.0 (into R11)
+				List<InstructionWord> userStreamProg = List.of(
+						new InstructionWord(OP_CSR_WALK_STREAM, (byte) 2, (short) 1, (0 << 16) | 0),
+						new InstructionWord(OP_STREAM_FUNC_BEGIN, (byte) 0, (short) 0, 0),
+						new InstructionWord(OP_STREAM_LOAD_TGT, (byte) 0, (short) 1, 10), // s1 = age_i32[tgt]
+						new InstructionWord(OP_STREAM_LOAD_CONST, (byte) 0, (short) 2, Float.floatToRawIntBits(30.0f)),
+						new InstructionWord(OP_STREAM_CMP_GT, (byte) 0, (short) 3, (2 << 16) | 1), // s3 = s1 > 30.0
+						new InstructionWord(OP_STREAM_FILTER, (byte) 0, (short) 3, 0),
+						new InstructionWord(OP_STREAM_LOAD_CONST, (byte) 0, (short) 4, Float.floatToRawIntBits(2.0f)),
+						new InstructionWord(OP_STREAM_MATH_MUL, (byte) 0, (short) 5, (4 << 16) | 1), // s5 = age * 2.0
+						new InstructionWord(OP_STREAM_REDUCE, (byte) 0, (short) 5, (0 << 16) | 11), // R11[tgt] += s5
+						new InstructionWord(OP_STREAM_YIELD, (byte) 0, (short) 0, 0),
+						new InstructionWord(OP_STREAM_FUNC_END, (byte) 0, (short) 0, 0));
 
-			// Stream Shader on USER_FOLLOWS (rel 0):
-			// Filter: target.age_i32 > 30.0
-			// State Projection: state[target] = target.age_i32 * 2.0 (into R11)
-			List<InstructionWord> userStreamProg = List.of(
-					new InstructionWord(OP_CSR_WALK_STREAM, (byte) 2, (short) 1, (0 << 16) | 0),
-					new InstructionWord(OP_STREAM_FUNC_BEGIN, (byte) 0, (short) 0, 0),
-					new InstructionWord(OP_STREAM_LOAD_TGT, (byte) 0, (short) 1, 10), // s1 = age_i32[tgt]
-					new InstructionWord(OP_STREAM_LOAD_CONST, (byte) 0, (short) 2, Float.floatToRawIntBits(30.0f)),
-					new InstructionWord(OP_STREAM_CMP_GT, (byte) 0, (short) 3, (2 << 16) | 1), // s3 = s1 > 30.0
-					new InstructionWord(OP_STREAM_FILTER, (byte) 0, (short) 3, 0),
-					new InstructionWord(OP_STREAM_LOAD_CONST, (byte) 0, (short) 4, Float.floatToRawIntBits(2.0f)),
-					new InstructionWord(OP_STREAM_MATH_MUL, (byte) 0, (short) 5, (4 << 16) | 1), // s5 = age * 2.0
-					new InstructionWord(OP_STREAM_REDUCE, (byte) 0, (short) 5, (0 << 16) | 11), // R11[tgt] += s5
-					new InstructionWord(OP_STREAM_YIELD, (byte) 0, (short) 0, 0),
-					new InstructionWord(OP_STREAM_FUNC_END, (byte) 0, (short) 0, 0));
+				MemorySegment progSeg = encodeInstructions(userStreamProg, sharedArena);
+				VmHandlers.Instruction walkInstr = VmHandlers.decodeInstruction(progSeg, 0);
+				VmHandlers.handleStreamWalk(state, ctx, walkInstr, progSeg, userStreamProg.size());
 
-			MemorySegment progSeg = encodeInstructions(userStreamProg, sharedArena);
-			VmHandlers.Instruction walkInstr = VmHandlers.decodeInstruction(progSeg, 0);
-			VmHandlers.handleStreamWalk(state, ctx, walkInstr, progSeg, userStreamProg.size());
+				ImpulseBitSet filteredTargets = ctx.getBitset((int) VmHandlers.getRegisterValue(state, 1));
+				assertEquals(List.of(6), extractSetBits(filteredTargets),
+						"User u2 followers with age_i32 > 30 must be [6] (u6 age=32; u0 age=20, u4 age=28)");
 
-			ImpulseBitSet filteredTargets = ctx.getBitset((int) VmHandlers.getRegisterValue(state, 1));
-			assertEquals(List.of(6), extractSetBits(filteredTargets),
-					"User u2 followers with age_i32 > 30 must be [6] (u6 age=32; u0 age=20, u4 age=28)");
-
-			float[] projectedState = ctx.getFloatVector((int) VmHandlers.getRegisterValue(state, 11));
-			assertNotNull(projectedState);
-			assertEquals(64.0f, projectedState[6], 1e-5f, "Projected state for u6 (age 32 * 2) must be 64.0");
-			assertEquals(0.0f, projectedState[0], 1e-5f, "Filtered-out u0 (age 20) must have projected state 0.0");
-			assertEquals(0.0f, projectedState[4], 1e-5f, "Filtered-out u4 (age 28) must have projected state 0.0");
-		}
-
-		// 4. Execute vectorized CEL predicate over Sensor.reading_f32 (45.0 <=
-		// reading_f32 <= 60.0 && reading_f32 > 50.0)
-		// and Order.total_f64 (total_f64 > 150.0 && total_f64 < 210.0) on Java FFM
-		// ImpulseVM!
-		List<String> sensorPool = List.of("Sensor.reading_f32");
-		List<InstructionWord> sensorVecProg = List.of(
-				new InstructionWord(OP_LOAD_COLUMN_VECTOR, (byte) 0, (short) 0, 0), // R0 = Sensor.reading_f32 [42.0 ..
-																					// 64.5]
-				new InstructionWord(OP_LOAD_CONST_FLOAT, (byte) 0, (short) 1, Float.floatToRawIntBits(45.0f)),
-				new InstructionWord(OP_LOAD_CONST_FLOAT, (byte) 0, (short) 2, Float.floatToRawIntBits(60.0f)),
-				new InstructionWord(OP_LOAD_CONST_FLOAT, (byte) 0, (short) 3, Float.floatToRawIntBits(50.0f)),
-				new InstructionWord(OP_VEC_CMP_BETWEEN, (byte) 0, (short) 4,
-						(0 & 0xFF) | ((1 & 0xFF) << 8) | ((2 & 0xFF) << 16)),
-				new InstructionWord(OP_VEC_CMP_GT, (byte) 0, (short) 5, (0 & 0xFF) | ((3 & 0xFF) << 8)),
-				new InstructionWord(OP_MASK_AND, (byte) 0, (short) 6, (4 & 0xFF) | ((5 & 0xFF) << 8)),
-				new InstructionWord(OP_COLLECT_BITSET, (byte) 0, (short) 6, (6 << 16) | 6),
-				new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
-		try (VmRunResult sensorRun = runVmProgramDetailed(sensorVecProg, sensorPool, null, 0)) {
-			assertEquals(List.of(2, 3, 4, 5, 6, 7), extractSetBits(sensorRun.getBitset(4)),
-					"Sensors with 45.0 <= reading_f32 <= 60.0 must be [2, 3, 4, 5, 6, 7]");
-			assertEquals(List.of(4, 5, 6, 7, 8, 9), extractSetBits(sensorRun.getBitset(5)),
-					"Sensors with reading_f32 > 50.0 must be [4, 5, 6, 7, 8, 9]");
-			assertEquals(List.of(4, 5, 6, 7), extractSetBits(sensorRun.getBitset(6)),
-					"Sensors matching both predicates must be [4, 5, 6, 7] (readings 52.0, 54.5, 57.0, 59.5)");
-		}
-
-		SHORTCOMING_FINDINGS.add("ImpOpsBytecodeEmitter.emitStreamExpr currently handles stream-cmp-gt, "
-				+ "stream-load-attr (emitting OP_STREAM_LOAD_TGT with attrId=0), and stream-logic-and; general "
-				+ "OP_STREAM_CMP_LT / OP_STREAM_CMP_EQ / OP_STREAM_LOAD_EDGE require direct stream shader opcodes.");
+				float[] projectedState = ctx.getFloatVector((int) VmHandlers.getRegisterValue(state, 11));
+				assertNotNull(projectedState);
+				assertEquals(64.0f, projectedState[6], 1e-5f, "Projected state for u6 (age 32 * 2) must be 64.0");
+				assertEquals(0.0f, projectedState[0], 1e-5f, "Filtered-out u0 (age 20) must have projected state 0.0");
+				assertEquals(0.0f, projectedState[4], 1e-5f, "Filtered-out u4 (age 28) must have projected state 0.0");
+			}
+		}, () -> {
+			// 4. Execute vectorized CEL predicate over Sensor.reading_f32
+			List<String> sensorPool = List.of("Sensor.reading_f32");
+			List<InstructionWord> sensorVecProg = List.of(
+					new InstructionWord(OP_LOAD_COLUMN_VECTOR, (byte) 0, (short) 0, 0),
+					new InstructionWord(OP_LOAD_CONST_FLOAT, (byte) 0, (short) 1, Float.floatToRawIntBits(45.0f)),
+					new InstructionWord(OP_LOAD_CONST_FLOAT, (byte) 0, (short) 2, Float.floatToRawIntBits(60.0f)),
+					new InstructionWord(OP_LOAD_CONST_FLOAT, (byte) 0, (short) 3, Float.floatToRawIntBits(50.0f)),
+					new InstructionWord(OP_VEC_CMP_BETWEEN, (byte) 0, (short) 4,
+							(0 & 0xFF) | ((1 & 0xFF) << 8) | ((2 & 0xFF) << 16)),
+					new InstructionWord(OP_VEC_CMP_GT, (byte) 0, (short) 5, (0 & 0xFF) | ((3 & 0xFF) << 8)),
+					new InstructionWord(OP_MASK_AND, (byte) 0, (short) 6, (4 & 0xFF) | ((5 & 0xFF) << 8)),
+					new InstructionWord(OP_COLLECT_BITSET, (byte) 0, (short) 6, (6 << 16) | 6),
+					new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
+			try (VmRunResult sensorRun = runVmProgramDetailed(sensorVecProg, sensorPool, null, 0)) {
+				assertEquals(List.of(2, 3, 4, 5, 6, 7), extractSetBits(sensorRun.getBitset(4)),
+						"Sensors with 45.0 <= reading_f32 <= 60.0 must be [2, 3, 4, 5, 6, 7]");
+				assertEquals(List.of(4, 5, 6, 7, 8, 9), extractSetBits(sensorRun.getBitset(5)),
+						"Sensors with reading_f32 > 50.0 must be [4, 5, 6, 7, 8, 9]");
+				assertEquals(List.of(4, 5, 6, 7), extractSetBits(sensorRun.getBitset(6)),
+						"Sensors matching both predicates must be [4, 5, 6, 7] (readings 52.0, 54.5, 57.0, 59.5)");
+			}
+		}, () -> {
+			// 5. Strict TDD assertion: ImpOpsBytecodeEmitter must lower stream-cmp-lt
+			// ("node.age_i32 < 25") into OP_STREAM_CMP_LT inside a stream walk shader so
+			// u2 -> USER_FOLLOWS filtered by age_i32 < 25 yields only [0] (u0 age=20)!
+			CelAstNode ltCel = CelParser.parse("node.age_i32 < 25");
+			ScmProgram ltRawAst = ScmProgram.of(
+					ScmWalk.forward("USER_FOLLOWS", new ScmCelExpr("node.age_i32 < 25", ltCel)), ScmCollect.bitset());
+			CompilerOptions opts = CompilerOptions.DEFAULT;
+			CompilerContext cctx = new CompilerContext(orderedSnapshot, opts, new PassTracer(opts));
+			ImpScmNode boundLtAst = cctx.executePass(PhysicalBindingPass.INSTANCE, ltRawAst);
+			CompiledQuery ltCq = ImpOpsBytecodeEmitter.compileToExecutable(boundLtAst, orderedSnapshot, sharedArena);
+			ImpulseBitSet ltBs = (ImpulseBitSet) ltCq.execute(orderedSnapshot, 2, sharedArena);
+			assertEquals(List.of(0), extractSetBits(ltBs),
+					"ImpOpsBytecodeEmitter.emitStreamExpr must emit OP_STREAM_CMP_LT for 'node.age_i32 < 25' so u2 followers <25 equals [0]");
+		});
 	}
 
 	// =========================================================================
