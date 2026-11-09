@@ -26,29 +26,15 @@ jobs:
     name: Build, Package & Release Java 25 Engine
     runs-on: ubuntu-latest
 
-    env:
-      HAS_PAT: ${{ secrets.GH_PAT || secrets.ORGANIZATION_PAT }}
-
     steps:
-      - name: Checkout impulse-graph-java
-        uses: actions/checkout@v4
-
-      - name: Checkout impulse-graph-spec (if PAT available)
-        continue-on-error: true
-        if: env.HAS_PAT != ''
+      - name: Checkout impulse-graph-java (with spec/ submodule)
         uses: actions/checkout@v4
         with:
-          repository: impulse-graph/impulse-graph-spec
-          path: impulse-graph-spec
-          ref: main
-          token: ${{ secrets.GH_PAT || secrets.ORGANIZATION_PAT || secrets.GITHUB_TOKEN }}
+          submodules: recursive
 
-      - name: Provision Test Vector Snapshot
+      - name: Create datasets directory
         run: |
           mkdir -p datasets
-          if [ -f impulse-graph-spec/test-vectors/tc01_minimal_csr/snapshot.imps ]; then
-            cp impulse-graph-spec/test-vectors/tc01_minimal_csr/snapshot.imps datasets/rbac_snapshot.imps
-          fi
 
       - name: Setup Java 25
         uses: actions/setup-java@v4

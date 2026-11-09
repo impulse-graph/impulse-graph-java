@@ -141,10 +141,10 @@ public class E2eCsvPipelineIntegrationTest {
 	}
 
 	private static Path resolveManifestPath() {
-		Path[] candidates = {Path.of("../impulse-graph-spec/test-fixtures/e2e-csv-suite/manifest.json"),
-				Path.of("../../impulse-graph-spec/test-fixtures/e2e-csv-suite/manifest.json"),
-				Path.of("/Users/jesse/impulse/.worktrees/e2e-suite/impulse-graph-spec/test-fixtures/e2e-csv-suite/manifest.json"),
-				Path.of("/Users/jesse/impulse/impulse-graph-spec/test-fixtures/e2e-csv-suite/manifest.json")};
+		Path[] candidates = {Path.of("../spec/test-fixtures/e2e-csv-suite/manifest.json"),
+				Path.of("spec/test-fixtures/e2e-csv-suite/manifest.json"),
+				Path.of("../impulse-graph-spec/test-fixtures/e2e-csv-suite/manifest.json"),
+				Path.of("../../impulse-graph-spec/test-fixtures/e2e-csv-suite/manifest.json")};
 		for (Path candidate : candidates) {
 			if (Files.exists(candidate)) {
 				return candidate.toAbsolutePath().normalize();

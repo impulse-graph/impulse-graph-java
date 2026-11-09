@@ -28,29 +28,15 @@ jobs:
             distribution: 'temurin'
             profile: '-Pjdk22-plus'
 
-    env:
-      HAS_PAT: ${{ secrets.ORGANIZATION_PAT }}
-
     steps:
-      - name: Checkout impulse-graph-java
-        uses: actions/checkout@v4
-
-      - name: Checkout impulse-graph-spec (if PAT available)
-        continue-on-error: true
-        if: env.HAS_PAT != ''
+      - name: Checkout impulse-graph-java (with spec/ submodule)
         uses: actions/checkout@v4
         with:
-          repository: impulse-graph/impulse-graph-spec
-          path: impulse-graph-spec
-          ref: main
-          token: ${{ secrets.ORGANIZATION_PAT }}
+          submodules: recursive
 
       - name: Create datasets directory
         run: |
           mkdir -p datasets
-          if [ -f impulse-graph-spec/test-vectors/tc01_minimal_csr/snapshot.imps ]; then
-            cp impulse-graph-spec/test-vectors/tc01_minimal_csr/snapshot.imps datasets/rbac_snapshot.imps
-          fi
 
       - name: Setup Java ${{ matrix.java }}
         uses: actions/setup-java@v4
@@ -61,8 +47,4 @@ jobs:
 
       - name: Build & Run Test Suites (${{ matrix.name }})
         run: |
-          if [ -d impulse-graph-spec ]; then
-            mvn clean test ${{ matrix.profile }} --batch-mode --errors
-          else
-            mvn clean test-compile ${{ matrix.profile }} --batch-mode --errors
-          fi
+          mvn clean test ${{ matrix.profile }} --batch-mode --errors

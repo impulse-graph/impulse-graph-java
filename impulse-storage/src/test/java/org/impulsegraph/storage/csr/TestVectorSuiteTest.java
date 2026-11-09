@@ -24,14 +24,17 @@ class TestVectorSuiteTest {
 
 	private static Path getSpecTestVectorsDir() {
 		Path curr = Paths.get("").toAbsolutePath();
-		while (curr != null && !Files.exists(curr.resolve("impulse-graph-spec"))) {
+		while (curr != null) {
+			if (Files.exists(curr.resolve("spec/test-vectors"))) {
+				return curr.resolve("spec/test-vectors");
+			}
+			if (Files.exists(curr.resolve("impulse-graph-spec/test-vectors"))) {
+				return curr.resolve("impulse-graph-spec/test-vectors");
+			}
 			curr = curr.getParent();
 		}
-		if (curr == null) {
-			throw new IllegalStateException(
-					"Workspace root containing 'impulse-graph-spec' directory not found. Spec testing (.imps) is MANDATORY.");
-		}
-		return curr.resolve("impulse-graph-spec/test-vectors");
+		throw new IllegalStateException(
+				"Spec 'spec/test-vectors' directory not found. Spec testing (.imps) is MANDATORY.");
 	}
 
 	static Stream<Path> testVectorDirectoriesProvider() throws IOException {
