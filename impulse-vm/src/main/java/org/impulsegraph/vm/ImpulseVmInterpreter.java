@@ -673,9 +673,29 @@ public final class ImpulseVmInterpreter {
 						pc++;
 					}
 
-					case OP_SAMPLE_NEIGHBORS, OP_RANDOM_WALK, OP_SCATTER_GATHER, OP_REBAC_CHECK, OP_SPARSE_MATVEC,
-							OP_LOUVAIN_MODULARITY, OP_MOTIF_MATCH_3, OP_GRAPH_ISOMORPHISM -> {
+					case OP_SAMPLE_NEIGHBORS, OP_RANDOM_WALK, OP_SCATTER_GATHER, OP_REBAC_CHECK -> {
 						VmHandlers.validateReg(instr.dstReg());
+						VmHandlers.setFlag(state, VmRegisterType.FLAG_ZF, false);
+						pc++;
+					}
+
+					case OP_SPARSE_MATVEC -> {
+						VmHandlers.handleSparseMatvec(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_LOUVAIN_MODULARITY -> {
+						VmHandlers.handleLouvainModularity(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_MOTIF_MATCH_3 -> {
+						VmHandlers.handleMotifMatch3(state, ctx, instr);
+						pc++;
+					}
+
+					case OP_GRAPH_ISOMORPHISM -> {
+						VmHandlers.handleGraphIsomorphism(state, ctx, instr);
 						pc++;
 					}
 
