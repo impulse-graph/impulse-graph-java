@@ -232,17 +232,22 @@ public class JavaVmPolyglotAssemblyVerifierTest {
 	@Test
 	@DisplayName("Run Polyglot Assembly Test Suite against Java ImpulseVM Interpreter")
 	public void runPolyglotAssemblyVerificationSuite() throws IOException {
-		Path testVectorDir = Paths.get("../impulse-graph-spec/test-vectors/vm-impas");
+		Path testVectorDir = Paths.get("../spec/test-vectors/vm-impas");
 		if (!Files.exists(testVectorDir)) {
-			testVectorDir = Paths.get("../../impulse-graph-spec/test-vectors/vm-impas");
+			testVectorDir = Paths.get("spec/test-vectors/vm-impas");
 		}
 		if (!Files.exists(testVectorDir)) {
 			Path curr = Paths.get("").toAbsolutePath();
-			while (curr != null && !Files.exists(curr.resolve("impulse-graph-spec/test-vectors/vm-impas"))) {
+			while (curr != null) {
+				if (Files.exists(curr.resolve("spec/test-vectors/vm-impas"))) {
+					testVectorDir = curr.resolve("spec/test-vectors/vm-impas");
+					break;
+				}
+				if (Files.exists(curr.resolve("impulse-graph-spec/test-vectors/vm-impas"))) {
+					testVectorDir = curr.resolve("impulse-graph-spec/test-vectors/vm-impas");
+					break;
+				}
 				curr = curr.getParent();
-			}
-			if (curr != null) {
-				testVectorDir = curr.resolve("impulse-graph-spec/test-vectors/vm-impas");
 			}
 		}
 

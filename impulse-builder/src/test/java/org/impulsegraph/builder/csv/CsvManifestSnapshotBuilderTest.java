@@ -41,15 +41,14 @@ class CsvManifestSnapshotBuilderTest {
 			"MAT100_STOCHASTIC_CSR", "MAT_RECT_100x50_COO", "MAT_RECT_50x100_COO"};
 
 	private static Path resolveManifestPath() {
-		Path rel = Path.of("../impulse-graph-spec/test-fixtures/e2e-csv-suite/manifest.json").toAbsolutePath()
-				.normalize();
-		if (Files.exists(rel)) {
-			return rel;
-		}
-		Path fromModule = Path.of("../../impulse-graph-spec/test-fixtures/e2e-csv-suite/manifest.json").toAbsolutePath()
-				.normalize();
-		if (Files.exists(fromModule)) {
-			return fromModule;
+		Path[] candidates = {Path.of("../spec/test-fixtures/e2e-csv-suite/manifest.json"),
+				Path.of("spec/test-fixtures/e2e-csv-suite/manifest.json"),
+				Path.of("../impulse-graph-spec/test-fixtures/e2e-csv-suite/manifest.json"),
+				Path.of("../../impulse-graph-spec/test-fixtures/e2e-csv-suite/manifest.json")};
+		for (Path candidate : candidates) {
+			if (Files.exists(candidate)) {
+				return candidate.toAbsolutePath().normalize();
+			}
 		}
 		throw new IllegalStateException(
 				"Could not locate e2e-csv-suite/manifest.json from " + Path.of("").toAbsolutePath());
