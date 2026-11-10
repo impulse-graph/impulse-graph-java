@@ -172,6 +172,9 @@ Check the [`samples/`](samples/src/main/java/org/impulsegraph/samples) directory
 ## 🛠️ Build & Test Instructions
 
 ```bash
+# Clone with pinned spec/ submodule (provides compliance test vectors & fixtures)
+git clone --recurse-submodules https://github.com/impulse-graph/impulse-graph-java.git
+
 # Full clean reactor build and test run
 mvn clean test
 

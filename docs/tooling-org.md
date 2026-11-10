@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
 
-This document outlines the organization of code generation utilities, build plugins, and tooling within the **Impulse Graph Engine** (`impulse-graph`) ecosystem, specifically detailing the Java tooling modules (`impulse-codegen`, `impulse-maven-plugin`, `impulse-gradle-plugin`) and their relationship to the unified Impulse Graph CLI suite (`impulse-graph-tooling`).
+This document outlines the organization of code generation utilities, build plugins, and tooling within the **Impulse Graph Engine** (`impulse-graph`) ecosystem, specifically detailing the Java tooling modules (`impulse-codegen`, `impulse-maven-plugin`, `impulse-gradle-plugin`) and their relationship to the unified Impulse Graph CLI suite (`impulse-graph-core/impulse-cli`).
 
 ---
 
@@ -16,7 +16,7 @@ The Impulse Graph ecosystem decouples schema-driven code generation, dataset sna
 | **`impulse-codegen`** | `impulse-graph-java` | Core Java schema parser, AST representation, and JavaPoet code generator. Standalone Java CLI entry point via `GeneratorMain`. | Strongly-typed Java POJOs, Domain Views, Query Builders. |
 | **`impulse-maven-plugin`** | `impulse-graph-java` | Maven plugin binding code generation to `generate-sources` lifecycle phase. | Generated sources compiled into Maven project classpath. |
 | **`impulse-gradle-plugin`** | `impulse-graph-java` | Gradle plugin providing tasks for code generation, CSV snapshot compilation, and snapshot inspection. | Generated sources, test `.imps` snapshots, inspection output. |
-| **`impulse-graph-tooling`** | `impulse-graph-tooling` | Unified ecosystem CLI utility (`impulse` / `impulse-graph`) for building, optimizing, validating, inspecting `.imps` snapshots, and assembling/running bytecode. | Native binary snapshot compiler, layout optimizer, and query runner. |
+| **`impulse-cli`** | `impulse-graph-core` | Unified ecosystem CLI utility (`impulse` / `impulse-graph`) for building, optimizing, validating, inspecting `.imps` snapshots, and assembling/running bytecode. | Native binary snapshot compiler, layout optimizer, and query runner. |
 | **`impulse-compiler`** | `impulse-graph-java` | Multi-pass query compiler for openCypher, CEL, and ImpScheme into `impOps` bytecode. | Native off-heap `impOps` bytecode blocks. |
 | **`impulse-builder`** | `impulse-graph-java` | Pure Java 21 LTS zero-allocation streaming builder for `.imps` binary snapshots with S3 single-pass semantics. | Immutable binary snapshot files (`.imps`). |
 
@@ -121,14 +121,14 @@ The code generation pipeline follows a four-stage lifecycle:
 
 ---
 
-## 4. Relationship to Ecosystem CLI Tooling (`impulse-graph-tooling`)
+## 4. Relationship to Ecosystem CLI Tooling (`impulse-graph-core/impulse-cli`)
 
-While `impulse-graph-java` generates strongly-typed Java application code, the **`impulse-graph-tooling`** repository provides the canonical command-line interface (`impulse` / `impulse-graph`) for binary snapshot creation, layout optimization, and bytecode compilation across the entire ecosystem.
+While `impulse-graph-java` generates strongly-typed Java application code, **`impulse-cli`** (located in `impulse-graph-core/impulse-cli/`) provides the canonical command-line interface (`impulse` / `impulse-graph`) for binary snapshot creation, layout optimization, and bytecode compilation across the entire ecosystem.
 
 > [!IMPORTANT]
-> **Official Tooling Mandate**: When building or regenerating `.imps` zero-copy binary snapshot files from datasets, always use the official `impulse-graph-tooling` CLI utilities (`impulse build`, `impulse generate`) or the native Java streaming builder (`impulse-builder`). Never use ad-hoc scripts to directly assemble raw snapshot bytes, as this bypasses Section 2 string pools, auxiliary CSC indices, and 128-byte alignment verification.
+> **Official Tooling Mandate**: When building or regenerating `.imps` zero-copy binary snapshot files from datasets, always use the official `impulse-cli` utilities (`impulse build`, `impulse generate`) or the native Java streaming builder (`impulse-builder`). Never use ad-hoc scripts to directly assemble raw snapshot bytes, as this bypasses Section 2 string pools, auxiliary CSC indices, and 128-byte alignment verification.
 
-### Key CLI Operations in `impulse-graph-tooling`
+### Key CLI Operations in `impulse-cli`
 
 * **Snapshot Compilation & Ingestion**:
   ```bash
@@ -233,9 +233,10 @@ impulse run --snapshot graph.imps --bytecode query.impb --input-val 0
 
 | Repository | Role in Tooling & Runtime Pipeline |
 | :--- | :--- |
-| **[`impulse-graph-java`](https://github.com/impulse-graph/impulse-graph-java)** | Java 21 LTS FFM Core Engine: `impulse-codegen`, `impulse-maven-plugin`, `impulse-gradle-plugin`, `impulse-compiler`, `impulse-vm`, `impulse-storage`, `impulse-builder`. |
-| **[`impulse-graph-tooling`](https://github.com/impulse-graph/impulse-graph-tooling)** | Unified Developer Utilities & CLI (`impulse build`, `generate`, `inspect`, `stats`, `validate`, `optimize`, `compile`, `assemble`, `disassemble`, `run`, `crypto`). |
-| **[`impulse-graph-spec`](https://github.com/impulse-graph/impulse-graph-spec)** | Normative C-ABI Binary Snapshot v0.9.0 specification (`FORMAT_SPECIFICATION.md`), test vectors (`tc01`..`tc36`), and polyglot validation suite (`four_way_validation.py`). |
-| **[`impulse-graph-core`](https://github.com/impulse-graph/impulse-graph-core)** | C++20 zero-copy kernel, Rust core crate (`impulse-rust`), and multi-language FFI bindings (Python, C#, Go, Node.js). |
+| **[`impulse-graph-spec`](https://github.com/impulse-graph/impulse-graph-spec)** | Normative C-ABI Binary Snapshot v0.9.0 specification (`FORMAT_SPECIFICATION.md`), opcode contracts, and compliance test vectors (`tc01`..`tc37`, `vm-impas/`). |
+| **[`impulse-graph-core`](https://github.com/impulse-graph/impulse-graph-core)** | C++20 zero-copy kernel (`impulse-cpp`), Rust core crate (`impulse-rust`), unified developer CLI (`impulse-cli`), and multi-language FFI bindings (Python, C#, Go, Node.js). |
+| **[`impulse-graph-java`](https://github.com/impulse-graph/impulse-graph-java)** | Java 21 LTS & Java 25 FFM Core Engine: `impulse-codegen`, `impulse-maven-plugin`, `impulse-gradle-plugin`, `impulse-compiler`, `impulse-vm`, `impulse-storage`, `impulse-builder`. |
+| **[`impulse-ocaml`](https://github.com/impulse-graph/impulse-ocaml)** | Normative OCaml reference engine and formal `ImpulseVM` bytecode oracle. |
+| **[`impulse-verification`](https://github.com/impulse-graph/impulse-verification)** | Four-way polyglot validation suite (`four_way_validation.py`), contract-guided differential fuzzer (`fuzz_vm_contracts.py`), and cross-compiler parity harness. |
 | **[`impulse-platform`](https://github.com/impulse-graph/impulse-platform)** | Cloud ingestion infrastructure, gRPC services, Kafka WAL streaming, and RocksDB persistence. |
 

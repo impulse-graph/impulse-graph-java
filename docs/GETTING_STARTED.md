@@ -136,7 +136,7 @@ tasks.withType(Test).configureEach {
 
 > [!NOTE]
 > **Generating Binary Snapshots**:
-> To convert large datasets (CSV, TSV, Parquet) into zero-copy `.imps` binary snapshots, always use the official [`impulse-graph-tooling`](file:///Users/jesse/impulse/impulse-graph-tooling) CLI (`impulse build` or `impulse generate`). You can also programmatically build snapshots directly in Java via `DefaultSnapshotBuilder` (see [Section 5](#5-building-snapshots-from-code)).
+> To convert large datasets (CSV, TSV, Parquet) into zero-copy `.imps` binary snapshots, always use the official [`impulse-cli`](https://github.com/impulse-graph/impulse-graph-core/tree/main/impulse-cli) utility (`impulse build` or `impulse generate`). You can also programmatically build snapshots directly in Java via `DefaultSnapshotBuilder` (see [Section 5](#5-building-snapshots-from-code)).
 
 To load and query an immutable binary snapshot file:
 
@@ -391,7 +391,7 @@ Each domain and relation independently configures its physical primitive integer
 * `4` bytes (`uint32_t`): Up to 4,294,967,296 nodes — standard enterprise default (16 nodes per 64-byte cache line).
 * `8` bytes (`uint64_t`): Hyperscale domains (8 nodes per 64-byte cache line).
 
-In the C-ABI binary specification (`ImpulseLayoutsV0_9`), `node_id_width` and `edge_index_width` are encoded in the 128-byte Relation Directory Entry. When building relations in Java, constructors on `RelationSnapshot` accept primitive widths (`nodeIdWidth`, `edgeIndexWidth`), and when generating from external datasets, `impulse-graph-tooling` sets these in the manifest schema.
+In the C-ABI binary specification (`ImpulseLayoutsV0_9`), `node_id_width` and `edge_index_width` are encoded in the 128-byte Relation Directory Entry. When building relations in Java, constructors on `RelationSnapshot` accept primitive widths (`nodeIdWidth`, `edgeIndexWidth`), and when generating from external datasets, `impulse-cli` sets these in the manifest schema.
 
 ---
 
