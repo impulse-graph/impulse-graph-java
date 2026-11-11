@@ -696,7 +696,10 @@ public final class VmMultiLaneHandlers {
 				int k = lfSrc.numLanes();
 				int nCnt = lfSrc.nodeCount();
 				float[] attrFloats = resolveAttrFloats(state, ctx, attrOrReg, (flags & 1) != 0, nCnt);
-				int attrLen = attrFloats.length;
+				int attrLen = ctx.getScratchFloatLen(1);
+				if (attrLen <= 0 || attrLen > attrFloats.length) {
+					attrLen = Math.min(nCnt, attrFloats.length);
+				}
 				if (redOp == 6 || redOp == 7) { // ARGMIN / ARGMAX
 					boolean isMin = (redOp == 6);
 					int h = ctx.acquireNodeVectorWithLong(k);
@@ -862,7 +865,15 @@ public final class VmMultiLaneHandlers {
 				int[] topNodes = ctx.scratchInt(0, Math.max(64, topK));
 				int topCount = 0;
 				if (flatEmbs != null && dim > 0 && flatEmbs.length >= dim) {
-					int nNodes = flatEmbs.length / dim;
+					int actualLen = ctx.getScratchFloatLen(2);
+					if (actualLen <= 0 || actualLen > flatEmbs.length) {
+						actualLen = flatEmbs.length;
+					}
+					int nNodes = actualLen / dim;
+					int maxSnapNodes = resolveNodeCount(ctx, 0, 0);
+					if (maxSnapNodes > 0 && maxSnapNodes < nNodes) {
+						nNodes = maxSnapNodes;
+					}
 					int takeCap = Math.min(256, Math.min(topK, nNodes));
 					int[] bestU = ctx.scratchInt(1, 256);
 					float[] bestD = ctx.scratchFloat(0, 256);
@@ -1067,6 +1078,7 @@ public final class VmMultiLaneHandlers {
 			mock = ctx.getMockAttribute(0);
 		}
 		if (mock instanceof float[] fa) {
+			ctx.setScratchFloatLen(2, fa.length);
 			return fa;
 		}
 		if (mock instanceof int[] ia) {
@@ -1074,6 +1086,7 @@ public final class VmMultiLaneHandlers {
 			for (int i = 0; i < ia.length; i++) {
 				out[i] = Float.intBitsToFloat(ia[i]);
 			}
+			ctx.setScratchFloatLen(2, ia.length);
 			return out;
 		}
 		if (ctx.getSnapshot() != null) {
@@ -1092,6 +1105,7 @@ public final class VmMultiLaneHandlers {
 							for (int i = 0; i < nFloats; i++) {
 								out[i] = seg.get(ValueLayout.JAVA_FLOAT_UNALIGNED, (long) i * 4L);
 							}
+							ctx.setScratchFloatLen(2, nFloats);
 							return out;
 						}
 					}
@@ -1126,6 +1140,7 @@ public final class VmMultiLaneHandlers {
 					for (int i = 0; i < len; i++) {
 						out[i] = ia != null ? (float) ia[i] : (float) la[i];
 					}
+					ctx.setScratchFloatLen(1, len);
 					yield out;
 				}
 				case T_NULL, T_INT64, T_NODE_ID, T_RELATION_ID, T_BITSET_HANDLE, T_CSR_SPAN, T_BOOLEAN, T_FLOAT,
@@ -1135,6 +1150,7 @@ public final class VmMultiLaneHandlers {
 		}
 		Object mock = ctx.getMockAttribute(attrOrReg);
 		if (mock instanceof float[] fa) {
+			ctx.setScratchFloatLen(1, fa.length);
 			return fa;
 		}
 		if (mock instanceof int[] ia) {
@@ -1142,6 +1158,7 @@ public final class VmMultiLaneHandlers {
 			for (int i = 0; i < ia.length; i++) {
 				out[i] = Float.intBitsToFloat(ia[i]);
 			}
+			ctx.setScratchFloatLen(1, ia.length);
 			return out;
 		}
 		float[] snapAttr = resolveEmbeddingFloats(ctx, attrOrReg);
@@ -1152,6 +1169,7 @@ public final class VmMultiLaneHandlers {
 		for (int i = 0; i < nodeCount; i++) {
 			fallback[i] = (float) i;
 		}
+		ctx.setScratchFloatLen(1, nodeCount);
 		return fallback;
 	}
 

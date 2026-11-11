@@ -652,6 +652,18 @@ public final class VmQueryContext implements AutoCloseable {
 		return arr;
 	}
 
+	private final int[] scratchFloatLens = new int[4];
+
+	public void setScratchFloatLen(int slot, int len) {
+		if (slot >= 0 && slot < scratchFloatLens.length) {
+			scratchFloatLens[slot] = len;
+		}
+	}
+
+	public int getScratchFloatLen(int slot) {
+		return (slot >= 0 && slot < scratchFloatLens.length) ? scratchFloatLens[slot] : 0;
+	}
+
 	public float[] scratchFloat(int slot, int minCap) {
 		ThreadLocalBufferPool pool = TL_BUFFER_POOL.get();
 		float[] arr = pool.scratchFloats[slot];
@@ -659,7 +671,7 @@ public final class VmQueryContext implements AutoCloseable {
 			arr = new float[Math.max(minCap, arr.length << 1)];
 			pool.scratchFloats[slot] = arr;
 		}
-		Arrays.fill(arr, 0, minCap, 0.0f);
+		Arrays.fill(arr, 0.0f);
 		return arr;
 	}
 

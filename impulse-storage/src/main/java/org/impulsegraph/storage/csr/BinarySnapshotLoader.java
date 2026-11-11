@@ -761,7 +761,7 @@ public final class BinarySnapshotLoader {
 			throw new IllegalArgumentException("Invalid catalog directory offset: " + badDirOffset);
 		}
 
-		long dirWindowLen = Math.min(segSize - dirOffset, (long) (Integer.MAX_VALUE - 8));
+		long dirWindowLen = Math.min(segSize - dirOffset, 64 * 1024 * 1024L);
 		ByteBuffer dirBuf = segment.asSlice(dirOffset, dirWindowLen).asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
 
 		Map<Integer, LoadedDomain> domainsById = new HashMap<>();
