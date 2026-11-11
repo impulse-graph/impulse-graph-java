@@ -681,6 +681,20 @@ public final class ImpOpsBytecodeEmitter {
 	private static int resolveRelationId(ImpulseGraphSnapshot snapshot, String relName) {
 		if (snapshot == null || relName == null)
 			return 0;
+		org.impulsegraph.api.RelationSnapshot targetRel = snapshot.getRelationSnapshot(relName);
+		if (targetRel != null) {
+			for (int i = 0; i < 65536; i++) {
+				org.impulsegraph.api.RelationSnapshot r = snapshot.getRelationSnapshot(i);
+				if (r == null) {
+					if (i >= snapshot.getAllRelationSnapshots().size() && i > 10)
+						break;
+					continue;
+				}
+				if (r == targetRel || r.equals(targetRel)) {
+					return i;
+				}
+			}
+		}
 		var map = snapshot.getAllRelationSnapshots();
 		if (map.containsKey(relName)) {
 			int idx = 0;

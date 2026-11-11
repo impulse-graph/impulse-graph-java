@@ -29,16 +29,40 @@ public final class BinarySnapshotLoader {
 		private final String name;
 		private final byte keyType;
 		private final long nodeCount;
+		private final int attrCount;
+		private final int keyAttrIndex;
+		private final List<LoadedAttribute> attributes;
+		private final List<MemorySegment> attributeSegments;
+		private final List<MemorySegment> validitySegments;
+		private final List<MemorySegment> offsetsSegments;
+		private volatile Map<String, Long> reverseKeyIndex;
 
 		public LoadedDomain(int domainId, String name, byte keyType) {
-			this(domainId, name, keyType, 0L);
+			this(domainId, name, keyType, 0L, 0xFFFF, List.of(), List.of(), List.of(), List.of());
 		}
 
 		public LoadedDomain(int domainId, String name, byte keyType, long nodeCount) {
+			this(domainId, name, keyType, nodeCount, 0xFFFF, List.of(), List.of(), List.of(), List.of());
+		}
+
+		public LoadedDomain(int domainId, String name, byte keyType, long nodeCount, int keyAttrIndex,
+				List<LoadedAttribute> attributes) {
+			this(domainId, name, keyType, nodeCount, keyAttrIndex, attributes, List.of(), List.of(), List.of());
+		}
+
+		public LoadedDomain(int domainId, String name, byte keyType, long nodeCount, int keyAttrIndex,
+				List<LoadedAttribute> attributes, List<MemorySegment> attributeSegments,
+				List<MemorySegment> validitySegments, List<MemorySegment> offsetsSegments) {
 			this.domainId = domainId;
 			this.name = name;
 			this.keyType = keyType;
 			this.nodeCount = nodeCount;
+			this.attrCount = attributes != null ? attributes.size() : 0;
+			this.keyAttrIndex = keyAttrIndex;
+			this.attributes = attributes != null ? List.copyOf(attributes) : List.of();
+			this.attributeSegments = attributeSegments != null ? List.copyOf(attributeSegments) : List.of();
+			this.validitySegments = validitySegments != null ? List.copyOf(validitySegments) : List.of();
+			this.offsetsSegments = offsetsSegments != null ? List.copyOf(offsetsSegments) : List.of();
 		}
 
 		public int domainId() {
@@ -52,6 +76,158 @@ public final class BinarySnapshotLoader {
 		}
 		public long nodeCount() {
 			return nodeCount;
+		}
+		public int attrCount() {
+			return attrCount;
+		}
+		public int attributeCount() {
+			return attrCount;
+		}
+		public int keyAttrIndex() {
+			return keyAttrIndex;
+		}
+		public List<LoadedAttribute> attributes() {
+			return attributes;
+		}
+		public List<MemorySegment> attributeSegments() {
+			return attributeSegments;
+		}
+		public List<MemorySegment> validitySegments() {
+			return validitySegments;
+		}
+		public List<MemorySegment> offsetsSegments() {
+			return offsetsSegments;
+		}
+
+		public LoadedAttribute getAttribute(int index) {
+			return (index >= 0 && index < attributes.size()) ? attributes.get(index) : null;
+		}
+
+		public LoadedAttribute getAttribute(String attrName) {
+			if (attrName == null)
+				return null;
+			for (LoadedAttribute attr : attributes) {
+				if (attr.name().equalsIgnoreCase(attrName)) {
+					return attr;
+				}
+			}
+			return null;
+		}
+
+		public int getAttributeIndex(String attrName) {
+			if (attrName == null)
+				return -1;
+			for (int i = 0; i < attributes.size(); i++) {
+				if (attributes.get(i).name().equalsIgnoreCase(attrName)) {
+					return i;
+				}
+			}
+			return -1;
+		}
+
+		public MemorySegment getAttributeSegment(int index) {
+			return (index >= 0 && index < attributeSegments.size()) ? attributeSegments.get(index) : MemorySegment.NULL;
+		}
+
+		public MemorySegment getAttributeSegment(String attrName) {
+			int idx = getAttributeIndex(attrName);
+			return idx >= 0 ? getAttributeSegment(idx) : MemorySegment.NULL;
+		}
+
+		public MemorySegment getValiditySegment(int index) {
+			return (index >= 0 && index < validitySegments.size()) ? validitySegments.get(index) : MemorySegment.NULL;
+		}
+
+		public MemorySegment getValiditySegment(String attrName) {
+			int idx = getAttributeIndex(attrName);
+			return idx >= 0 ? getValiditySegment(idx) : MemorySegment.NULL;
+		}
+
+		public MemorySegment getOffsetsSegment(int index) {
+			return (index >= 0 && index < offsetsSegments.size()) ? offsetsSegments.get(index) : MemorySegment.NULL;
+		}
+
+		public MemorySegment getOffsetsSegment(String attrName) {
+			int idx = getAttributeIndex(attrName);
+			return idx >= 0 ? getOffsetsSegment(idx) : MemorySegment.NULL;
+		}
+
+		public LoadedAttribute getKeyAttribute() {
+			return (keyAttrIndex >= 0 && keyAttrIndex < attributes.size()) ? attributes.get(keyAttrIndex) : null;
+		}
+
+		/**
+		 * Resolves external business key string for the given dense ID via §5.1 O(1)
+		 * array lookup.
+		 */
+		public String resolveKey(long denseId) {
+			if (denseId < 0 || (nodeCount > 0 && denseId >= nodeCount)) {
+				return null;
+			}
+			if (keyAttrIndex < 0 || keyAttrIndex >= attributes.size()) {
+				return null;
+			}
+			LoadedAttribute keyAttr = attributes.get(keyAttrIndex);
+			MemorySegment dataSeg = getAttributeSegment(keyAttrIndex);
+			if (dataSeg == null || dataSeg.equals(MemorySegment.NULL)) {
+				return null;
+			}
+			byte code = (byte) (keyAttr.typeCode() & 0x7F);
+			if (code == 0x0B) { // VAR_STRING
+				MemorySegment offsSeg = getOffsetsSegment(keyAttrIndex);
+				if (offsSeg == null || offsSeg.equals(MemorySegment.NULL)) {
+					return null;
+				}
+				long start = Integer.toUnsignedLong(offsSeg.get(ValueLayout.JAVA_INT_UNALIGNED, denseId * 4L));
+				long end = Integer.toUnsignedLong(offsSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (denseId + 1) * 4L));
+				if (end < start || end > dataSeg.byteSize()) {
+					return null;
+				}
+				byte[] bytes = dataSeg.asSlice(start, end - start).toArray(ValueLayout.JAVA_BYTE);
+				return new String(bytes, StandardCharsets.UTF_8);
+			} else if (code == 0x04) { // INT64
+				if ((denseId + 1) * 8L <= dataSeg.byteSize()) {
+					return String.valueOf(dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, denseId * 8L));
+				}
+			} else if (code == 0x03) { // INT32
+				if ((denseId + 1) * 4L <= dataSeg.byteSize()) {
+					return String.valueOf(dataSeg.get(ValueLayout.JAVA_INT_UNALIGNED, denseId * 4L));
+				}
+			} else if (code == 0x0C || (code == 0x0A && keyAttr.dimension() == 16)) { // UUID128 / FIXED_BYTES[16]
+				if ((denseId + 1) * 16L <= dataSeg.byteSize()) {
+					long mostSig = dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, denseId * 16L);
+					long leastSig = dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, denseId * 16L + 8L);
+					return new UUID(mostSig, leastSig).toString();
+				}
+			}
+			return null;
+		}
+
+		/**
+		 * Resolves dense node ID (0 .. N_d - 1) for the given external business key
+		 * string.
+		 */
+		public long resolveDenseId(String key) {
+			if (key == null || keyAttrIndex < 0 || keyAttrIndex >= attributes.size()) {
+				return -1;
+			}
+			Map<String, Long> map = reverseKeyIndex;
+			if (map == null) {
+				synchronized (this) {
+					map = reverseKeyIndex;
+					if (map == null) {
+						map = new HashMap<>();
+						for (long i = 0; i < nodeCount; i++) {
+							String k = resolveKey(i);
+							if (k != null) {
+								map.put(k, i);
+							}
+						}
+						reverseKeyIndex = map;
+					}
+				}
+			}
+			return map.getOrDefault(key, -1L);
 		}
 	}
 
@@ -266,6 +442,9 @@ public final class BinarySnapshotLoader {
 		default Set<String> getRelationNames() {
 			return graph() != null ? graph().getAllRelationSnapshots().keySet() : Set.of();
 		}
+		default List<LoadedIndex> indices() {
+			return List.of();
+		}
 	}
 
 	public static class DefaultLoadedSnapshot implements LoadedSnapshot {
@@ -279,11 +458,18 @@ public final class BinarySnapshotLoader {
 		private final Map<String, LoadedDomain> domainsByName;
 		private final Map<Integer, LoadedRelation> relationsById;
 		private final Map<String, String> metadata;
+		private final List<LoadedIndex> indices;
 		private final GraphSnapshot graph;
 
 		public DefaultLoadedSnapshot(int magic, short version, GraphSnapshot graph,
 				Map<Integer, LoadedDomain> domainsById, Map<String, LoadedDomain> domainsByName,
 				Map<Integer, LoadedRelation> relationsById, Map<String, String> metadata) {
+			this(magic, version, graph, domainsById, domainsByName, relationsById, metadata, List.of());
+		}
+
+		public DefaultLoadedSnapshot(int magic, short version, GraphSnapshot graph,
+				Map<Integer, LoadedDomain> domainsById, Map<String, LoadedDomain> domainsByName,
+				Map<Integer, LoadedRelation> relationsById, Map<String, String> metadata, List<LoadedIndex> indices) {
 			this.magic = magic;
 			this.version = version;
 			this.domainCount = domainsById != null ? domainsById.size() : 0;
@@ -295,6 +481,12 @@ public final class BinarySnapshotLoader {
 			this.domainsByName = domainsByName != null ? Map.copyOf(domainsByName) : Map.of();
 			this.relationsById = relationsById != null ? Map.copyOf(relationsById) : Map.of();
 			this.metadata = metadata != null ? Map.copyOf(metadata) : Map.of();
+			this.indices = indices != null ? List.copyOf(indices) : List.of();
+		}
+
+		@Override
+		public List<LoadedIndex> indices() {
+			return indices;
 		}
 
 		@Override
@@ -507,7 +699,7 @@ public final class BinarySnapshotLoader {
 
 		short version = buf.getShort(4);
 		int ver = Short.toUnsignedInt(version);
-		if (ver != 9 && ver != 0x0009 && ver != 2 && ver != 0x0204) {
+		if (ver != 10 && ver != 0x000A && ver != 9 && ver != 0x0009 && ver != 2 && ver != 0x0204) {
 			ImpulseAssert.checkWellFormed(false, () -> "Unsupported protocol version number: " + ver);
 			throw new IllegalArgumentException("Unsupported protocol version number: " + ver);
 		}
@@ -521,13 +713,15 @@ public final class BinarySnapshotLoader {
 		ImpulseAssert.testcase(domainCount == 0);
 		ImpulseAssert.testcase(relationCount == 0);
 
+		boolean isV010 = (ver == 10 || ver == 0x000A);
 		boolean isV09 = (ver == 9 || ver == 0x0009);
+		boolean isModern = isV010 || isV09;
 
-		if (isV09) {
+		if (isModern) {
 			if (segSize < 64) {
 				ImpulseAssert.checkWellFormed(false,
-						() -> "snapshot file size (" + segSize + " bytes) is smaller than v0.9 header");
-				throw new IllegalArgumentException("snapshot file size (" + segSize + " bytes) is smaller than v0.9 header");
+						() -> "snapshot file size (" + segSize + " bytes) is smaller than header");
+				throw new IllegalArgumentException("snapshot file size (" + segSize + " bytes) is smaller than header");
 			}
 			long requiredFeatures = buf.getLong(22);
 			if ((requiredFeatures & ~7L) != 0L) {
@@ -539,16 +733,18 @@ public final class BinarySnapshotLoader {
 			int expectedCrc = Short.toUnsignedInt(buf.getShort(0x3E));
 			int actualCrc = computeCrc16(buf, 0, 0x3E);
 			if (actualCrc != expectedCrc) {
-				ImpulseAssert.checkWellFormed(false,
-						() -> String.format("Header CRC-16 mismatch: expected 0x%04X, computed 0x%04X", expectedCrc, actualCrc));
-				throw new IllegalArgumentException(
-						String.format("Header CRC-16 mismatch: expected 0x%04X, computed 0x%04X", expectedCrc, actualCrc));
+				ImpulseAssert.checkWellFormed(false, () -> String
+						.format("Header CRC-16 mismatch: expected 0x%04X, computed 0x%04X", expectedCrc, actualCrc));
+				throw new IllegalArgumentException(String
+						.format("Header CRC-16 mismatch: expected 0x%04X, computed 0x%04X", expectedCrc, actualCrc));
 			}
 		}
 
+		int indexCount = (isV010 && segSize >= 66) ? Short.toUnsignedInt(buf.getShort(0x40)) : 0;
+
 		// Determine Catalog Directory offset
 		long dirOffset = dataOffset;
-		if (isV09) {
+		if (isModern) {
 			long footerDirectoryOffset = buf.getLong(30);
 			if (footerDirectoryOffset < 0 || footerDirectoryOffset >= segSize) {
 				ImpulseAssert.checkWellFormed(false, () -> "Invalid footerDirectoryOffset: " + footerDirectoryOffset);
@@ -565,20 +761,21 @@ public final class BinarySnapshotLoader {
 			throw new IllegalArgumentException("Invalid catalog directory offset: " + badDirOffset);
 		}
 
-		long dirWindowLen = Math.min(segSize - dirOffset, (long) Integer.MAX_VALUE);
+		long dirWindowLen = Math.min(segSize - dirOffset, (long) (Integer.MAX_VALUE - 8));
 		ByteBuffer dirBuf = segment.asSlice(dirOffset, dirWindowLen).asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
 
 		Map<Integer, LoadedDomain> domainsById = new HashMap<>();
 		Map<String, LoadedDomain> domainsByName = new HashMap<>();
 
-		if (isV09) {
+		if (isModern) {
 			// Read Shared String Table Header & Pool
 			if (dirBuf.remaining() < 4) {
 				ImpulseAssert.checkWellFormed(false, () -> "Truncated Section 2 string table header");
 				throw new IllegalArgumentException("Truncated Section 2 string table header");
 			}
 			int strPoolBytes = dirBuf.getInt();
-			if (strPoolBytes < 1 || dirOffset + dirBuf.position() + strPoolBytes > segSize || dirBuf.remaining() < strPoolBytes) {
+			if (strPoolBytes < 1 || dirOffset + dirBuf.position() + strPoolBytes > segSize
+					|| dirBuf.remaining() < strPoolBytes) {
 				ImpulseAssert.checkWellFormed(false,
 						() -> "Invalid or overflowing Section 2 string_table_bytes: " + strPoolBytes);
 				throw new IllegalArgumentException(
@@ -610,27 +807,132 @@ public final class BinarySnapshotLoader {
 
 			align128(dirBuf);
 
-			// Read Domain Catalog Entries (Fixed 16 Bytes)
+			// Read Domain Catalog Entries
 			for (int i = 0; i < domainCount; i++) {
-				if (dirOffset + dirBuf.position() + 16 > segSize || dirBuf.remaining() < 16)
-					break;
-				int domId = Short.toUnsignedInt(dirBuf.getShort());
-				byte keyType = dirBuf.get();
-				dirBuf.get(); // reserved
-				int nameOff = dirBuf.getInt();
-				long nodeCount = dirBuf.getLong();
-				if (nodeCount < 0) {
-					ImpulseAssert.checkWellFormed(false, () -> "Negative domain nodeCount: " + nodeCount);
-					throw new IllegalArgumentException("Negative domain nodeCount: " + nodeCount);
-				}
+				if (isV010) {
+					if (dirOffset + dirBuf.position() + 32 > segSize || dirBuf.remaining() < 32)
+						break;
+					int domId = Short.toUnsignedInt(dirBuf.getShort());
+					byte keyType = dirBuf.get();
+					dirBuf.get(); // reserved1
+					int nameOff = dirBuf.getInt();
+					long nodeCount = dirBuf.getLong();
+					int attrCount = Short.toUnsignedInt(dirBuf.getShort());
+					int keyAttrIndex = Short.toUnsignedInt(dirBuf.getShort());
+					dirBuf.position(dirBuf.position() + 12); // reserved2
 
-				String domName = getString.apply(nameOff, "dom_" + domId);
-				LoadedDomain domain = new LoadedDomain(domId, domName, keyType, nodeCount);
-				domainsById.put(domId, domain);
-				domainsByName.put(domName, domain);
+					if (nodeCount < 0) {
+						ImpulseAssert.checkWellFormed(false, () -> "Negative domain nodeCount: " + nodeCount);
+						throw new IllegalArgumentException("Negative domain nodeCount: " + nodeCount);
+					}
+
+					String domName = getString.apply(nameOff, "dom_" + domId);
+
+					List<LoadedAttribute> domAttributes = new ArrayList<>();
+					List<MemorySegment> domAttrSegs = new ArrayList<>();
+					List<MemorySegment> domValSegs = new ArrayList<>();
+					List<MemorySegment> domOffsSegs = new ArrayList<>();
+
+					for (int a = 0; a < attrCount; a++) {
+						if (dirOffset + dirBuf.position() + 44 > segSize || dirBuf.remaining() < 44)
+							break;
+						int attrNameOff = dirBuf.getInt();
+						byte typeCode = dirBuf.get();
+						dirBuf.get(); // reserved1
+						dirBuf.getShort(); // reserved2
+						int dimension = dirBuf.getInt();
+						long dataOff = dirBuf.getLong();
+						long dataBytes = dirBuf.getLong();
+						long offsOff = dirBuf.getLong();
+						long offsBytes = dirBuf.getLong();
+
+						boolean isNullable = (typeCode & 0x80) != 0;
+						long validityOff = 0;
+						long validityBytes = 0;
+
+						if (isNullable) {
+							long numBits = nodeCount;
+							long rawBitmapBytes = ((numBits + 63) / 64) * 8;
+							long paddedBitmapBytes = (rawBitmapBytes + 127) & ~127L;
+
+							final long initialDataBytes = dataBytes;
+							if (initialDataBytes < paddedBitmapBytes) {
+								ImpulseAssert.checkWellFormed(false,
+										() -> "dataBytes (" + initialDataBytes + ") < paddedBitmapBytes ("
+												+ paddedBitmapBytes + ") for nullable domain attribute");
+								throw new IllegalArgumentException(
+										"dataBytes (" + initialDataBytes + ") < paddedBitmapBytes (" + paddedBitmapBytes
+												+ ") for nullable domain attribute");
+							}
+
+							validityOff = dataOff;
+							validityBytes = paddedBitmapBytes;
+
+							dataOff += paddedBitmapBytes;
+							dataBytes -= paddedBitmapBytes;
+
+							validateSectionBounds("Domain attribute validity", validityOff, validityBytes, segSize);
+						}
+
+						if (dataBytes > 0 || dataOff > 0) {
+							validateSectionBounds("Domain attribute data", dataOff, dataBytes, segSize);
+						}
+						if (offsBytes > 0 || offsOff > 0) {
+							validateSectionBounds("Domain attribute offsets", offsOff, offsBytes, segSize);
+						}
+
+						String attrName = getString.apply(attrNameOff, "");
+						domAttributes.add(new LoadedAttribute(attrName, typeCode, dimension, validityOff, validityBytes,
+								dataOff, dataBytes, offsOff, offsBytes));
+
+						if (dataOff > 0 && dataOff + dataBytes <= segSize) {
+							domAttrSegs.add(segment.asSlice(dataOff, dataBytes));
+						} else {
+							domAttrSegs.add(MemorySegment.NULL);
+						}
+						if (isNullable && validityOff > 0 && validityOff + validityBytes <= segSize) {
+							domValSegs.add(segment.asSlice(validityOff, validityBytes));
+						} else {
+							domValSegs.add(MemorySegment.NULL);
+						}
+						if (offsOff > 0 && offsOff + offsBytes <= segSize) {
+							domOffsSegs.add(segment.asSlice(offsOff, offsBytes));
+						} else {
+							domOffsSegs.add(MemorySegment.NULL);
+						}
+					}
+
+					LoadedDomain domain = new LoadedDomain(domId, domName, keyType, nodeCount, keyAttrIndex,
+							domAttributes, domAttrSegs, domValSegs, domOffsSegs);
+					domainsById.put(domId, domain);
+					domainsByName.put(domName, domain);
+
+				} else {
+					if (dirOffset + dirBuf.position() + 16 > segSize || dirBuf.remaining() < 16)
+						break;
+					int domId = Short.toUnsignedInt(dirBuf.getShort());
+					byte keyType = dirBuf.get();
+					dirBuf.get(); // reserved
+					int nameOff = dirBuf.getInt();
+					long nodeCount = dirBuf.getLong();
+					if (nodeCount < 0) {
+						ImpulseAssert.checkWellFormed(false, () -> "Negative domain nodeCount: " + nodeCount);
+						throw new IllegalArgumentException("Negative domain nodeCount: " + nodeCount);
+					}
+
+					String domName = getString.apply(nameOff, "dom_" + domId);
+					LoadedDomain domain = new LoadedDomain(domId, domName, keyType, nodeCount, 0xFFFF, List.of());
+					domainsById.put(domId, domain);
+					domainsByName.put(domName, domain);
+				}
 			}
 
 			align128(dirBuf);
+
+			long totalDomainNodes = 0;
+			for (LoadedDomain d : domainsById.values()) {
+				totalDomainNodes += d.nodeCount();
+			}
 
 			// Read Relation Directory Entries (Fixed 128 Bytes)
 			Map<Integer, LoadedRelation> relationsById = new LinkedHashMap<>();
@@ -701,11 +1003,10 @@ public final class BinarySnapshotLoader {
 
 						final long initialDataBytes = dataBytes;
 						if (initialDataBytes < paddedBitmapBytes) {
-							ImpulseAssert.checkWellFormed(false,
-									() -> "dataBytes (" + initialDataBytes + ") < paddedBitmapBytes (" + paddedBitmapBytes
-											+ ") for nullable attribute");
-							throw new IllegalArgumentException("dataBytes (" + initialDataBytes + ") < paddedBitmapBytes ("
-									+ paddedBitmapBytes + ") for nullable attribute");
+							ImpulseAssert.checkWellFormed(false, () -> "dataBytes (" + initialDataBytes
+									+ ") < paddedBitmapBytes (" + paddedBitmapBytes + ") for nullable attribute");
+							throw new IllegalArgumentException("dataBytes (" + initialDataBytes
+									+ ") < paddedBitmapBytes (" + paddedBitmapBytes + ") for nullable attribute");
 						}
 
 						validityOff = dataOff;
@@ -752,7 +1053,9 @@ public final class BinarySnapshotLoader {
 				LoadedDomain srcDom = domainsById.get(srcDomId);
 				LoadedDomain tgtDom = domainsById.get(tgtDomId);
 				long tgtDomainNodeCount = (tgtDom != null) ? tgtDom.nodeCount() : 0L;
-				auditRelationIntegrity(relId, nodeCount, edgeCount, tgtDomainNodeCount, nodeIdWidth, edgeIndexWidth,
+				boolean isGlobalUnified = (totalDomainNodes > 0 && nodeCount == totalDomainNodes);
+				long effectiveTgtBound = isGlobalUnified ? totalDomainNodes : tgtDomainNodeCount;
+				auditRelationIntegrity(relId, nodeCount, edgeCount, effectiveTgtBound, nodeIdWidth, edgeIndexWidth,
 						offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg);
 
 				List<MemorySegment> attrSegments = new ArrayList<>();
@@ -802,12 +1105,38 @@ public final class BinarySnapshotLoader {
 				relationsById.put(relId, rel);
 			}
 
+			align128(dirBuf);
+
+			List<LoadedIndex> loadedIndices = new ArrayList<>();
+			if (isV010 && indexCount > 0) {
+				for (int x = 0; x < indexCount; x++) {
+					if (dirOffset + dirBuf.position() + 64 > segSize || dirBuf.remaining() < 64)
+						break;
+					int idxId = dirBuf.getInt();
+					int domId = Short.toUnsignedInt(dirBuf.getShort());
+					int relId = Short.toUnsignedInt(dirBuf.getShort());
+					int attrIdx = Short.toUnsignedInt(dirBuf.getShort());
+					byte idxType = dirBuf.get();
+					dirBuf.get(); // reserved1
+					int idxNameOff = dirBuf.getInt();
+					long dataOff = dirBuf.getLong();
+					long dataBytes = dirBuf.getLong();
+					long featureMask = dirBuf.getLong();
+					dirBuf.position(dirBuf.position() + 24); // reserved_padding
+
+					validateSectionBounds("Index data", dataOff, dataBytes, segSize);
+					String idxName = getString.apply(idxNameOff, "idx_" + idxId);
+					loadedIndices.add(new LoadedIndex(idxId, domId, relId, attrIdx, idxType, idxName, dataOff,
+							dataBytes, featureMask));
+				}
+			}
+
 			Map<String, String> metadata = parseMetadataFooter(segment, segSize);
 			for (LoadedDomain dom : domainsById.values()) {
 				metadata.put("domain." + dom.name() + ".id", String.valueOf(dom.domainId()));
 				metadata.put("domain." + dom.domainId() + ".name", dom.name());
 			}
-			GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata, relationAliases);
+			GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata, relationAliases, domainsByName);
 
 			for (Map.Entry<Integer, RelationSnapshot> entry : relIdToSnapshot.entrySet()) {
 				String json = metadata.get("impulse.stats.relation." + entry.getKey() + ".out_degree");
@@ -816,41 +1145,37 @@ public final class BinarySnapshotLoader {
 				}
 			}
 			return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, (short) ver, graph, domainsById, domainsByName,
-					relationsById, metadata);
+					relationsById, metadata, loadedIndices);
 
 		} else {
 			// Legacy v2.4 parsing
 			for (int i = 0; i < domainCount; i++) {
-				if (buf.position() + 64 > segSize)
+				if (dirOffset + dirBuf.position() + 64 > segSize || dirBuf.remaining() < 64)
 					break;
-				int domId = Short.toUnsignedInt(buf.getShort());
-				byte keyType = buf.get();
-				buf.get();
-				long dNodeCount = buf.getLong();
-				buf.getLong();
-				buf.getLong();
-				buf.getLong();
-				buf.getLong();
-				int nameOff = buf.getInt();
-				int nameLen = Short.toUnsignedInt(buf.getShort());
-				buf.position(buf.position() + 14);
+				int domId = Short.toUnsignedInt(dirBuf.getShort());
+				byte keyType = dirBuf.get();
+				dirBuf.get();
+				long dNodeCount = dirBuf.getLong();
+				dirBuf.getLong();
+				dirBuf.getLong();
+				dirBuf.getLong();
+				dirBuf.getLong();
+				int nameOff = dirBuf.getInt();
+				int nameLen = Short.toUnsignedInt(dirBuf.getShort());
+				dirBuf.position(dirBuf.position() + 14);
 
 				String domName = "dom_" + domId;
 				if (nameLen > 0 && nameOff > 0 && nameOff + nameLen <= segSize) {
-					int oldPos = buf.position();
-					buf.position(nameOff);
-					byte[] nameBytes = new byte[nameLen];
-					buf.get(nameBytes);
-					buf.position(oldPos);
-					domName = new String(nameBytes, StandardCharsets.UTF_8);
+					MemorySegment nameSeg = segment.asSlice(nameOff, nameLen);
+					domName = new String(nameSeg.toArray(ValueLayout.JAVA_BYTE), StandardCharsets.UTF_8);
 				}
 
-				LoadedDomain domain = new LoadedDomain(domId, domName, keyType);
+				LoadedDomain domain = new LoadedDomain(domId, domName, keyType, dNodeCount);
 				domainsById.put(domId, domain);
 				domainsByName.put(domName, domain);
 			}
 
-			align64(buf);
+			align64(dirBuf);
 
 			Map<Integer, LoadedRelation> relationsById = new HashMap<>();
 			Map<String, RelationSnapshot> relationSnapshots = new HashMap<>();
@@ -858,24 +1183,24 @@ public final class BinarySnapshotLoader {
 
 			for (int j = 0; j < relationCount; j++) {
 				int entrySize = (ver == 0x0204) ? 128 : 109;
-				if (buf.position() + entrySize > segSize)
+				if (dirOffset + dirBuf.position() + entrySize > segSize || dirBuf.remaining() < entrySize)
 					break;
-				int entryStart = buf.position();
+				int entryStart = dirBuf.position();
 
-				int srcDomId = Short.toUnsignedInt(buf.getShort());
-				int tgtDomId = Short.toUnsignedInt(buf.getShort());
-				byte encodingId = buf.get();
-				long nodeCount = buf.getLong();
-				long edgeCount = buf.getLong();
-				long reqFeat = buf.getLong();
-				long compatFeat = buf.getLong();
-				long csrRowOffOffset = buf.getLong();
-				long csrRowOffBytes = buf.getLong();
-				long csrColIdxOffset = buf.getLong();
-				long csrColIdxBytes = buf.getLong();
+				int srcDomId = Short.toUnsignedInt(dirBuf.getShort());
+				int tgtDomId = Short.toUnsignedInt(dirBuf.getShort());
+				byte encodingId = dirBuf.get();
+				long nodeCount = dirBuf.getLong();
+				long edgeCount = dirBuf.getLong();
+				long reqFeat = dirBuf.getLong();
+				long compatFeat = dirBuf.getLong();
+				long csrRowOffOffset = dirBuf.getLong();
+				long csrRowOffBytes = dirBuf.getLong();
+				long csrColIdxOffset = dirBuf.getLong();
+				long csrColIdxBytes = dirBuf.getLong();
 
 				int relId = j;
-				buf.position(entryStart + entrySize);
+				dirBuf.position(entryStart + entrySize);
 
 				LoadedDomain srcDom = domainsById.get(srcDomId);
 				LoadedDomain tgtDom = domainsById.get(tgtDomId);
@@ -906,7 +1231,7 @@ public final class BinarySnapshotLoader {
 				metadata.put("domain." + dom.name() + ".id", String.valueOf(dom.domainId()));
 				metadata.put("domain." + dom.domainId() + ".name", dom.name());
 			}
-			GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata);
+			GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata, Map.of(), domainsByName);
 
 			for (Map.Entry<Integer, RelationSnapshot> entry : relIdToSnapshot.entrySet()) {
 				String json = metadata.get("impulse.stats.relation." + entry.getKey() + ".out_degree");
@@ -915,7 +1240,7 @@ public final class BinarySnapshotLoader {
 				}
 			}
 			return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, (short) ver, graph, domainsById, domainsByName,
-					relationsById, metadata);
+					relationsById, metadata, List.of());
 		}
 	}
 
@@ -991,7 +1316,8 @@ public final class BinarySnapshotLoader {
 	}
 
 	private static void validateSectionBounds(String sectionName, long offset, long lengthBytes, long segSize) {
-		if (offset < 0 || lengthBytes < 0 || (offset == 0 && lengthBytes > 0) || (offset > 0 && (offset > segSize || lengthBytes > segSize - offset))) {
+		if (offset < 0 || lengthBytes < 0 || (offset == 0 && lengthBytes > 0)
+				|| (offset > 0 && (offset > segSize || lengthBytes > segSize - offset))) {
 			ImpulseAssert.checkWellFormed(false, () -> sectionName + " section out of bounds: offset=" + offset
 					+ ", bytes=" + lengthBytes + ", segSize=" + segSize);
 			throw new IllegalArgumentException(sectionName + " section out of bounds: offset=" + offset + ", bytes="
@@ -1012,9 +1338,8 @@ public final class BinarySnapshotLoader {
 		long reqOffsetsBytes = Math.multiplyExact(Math.addExact(nodeCount, 1L), (long) offWidth);
 		if (!MemorySegment.NULL.equals(offsetsSeg)) {
 			if (offsetsSeg.byteSize() < reqOffsetsBytes) {
-				ImpulseAssert.checkWellFormed(false,
-						() -> "CSR row_offsets segment undersized for relation " + relId + ": actual="
-								+ offsetsSeg.byteSize() + ", expected=" + reqOffsetsBytes);
+				ImpulseAssert.checkWellFormed(false, () -> "CSR row_offsets segment undersized for relation " + relId
+						+ ": actual=" + offsetsSeg.byteSize() + ", expected=" + reqOffsetsBytes);
 				throw new IllegalArgumentException("CSR row_offsets segment undersized for relation " + relId
 						+ ": actual=" + offsetsSeg.byteSize() + ", expected=" + reqOffsetsBytes);
 			}
@@ -1051,9 +1376,8 @@ public final class BinarySnapshotLoader {
 		long reqTargetsBytes = Math.multiplyExact(edgeCount, (long) tgtWidth);
 		if (!MemorySegment.NULL.equals(targetsSeg)) {
 			if (targetsSeg.byteSize() < reqTargetsBytes) {
-				ImpulseAssert.checkWellFormed(false,
-						() -> "CSR col_idx targets segment undersized for relation " + relId + ": actual="
-								+ targetsSeg.byteSize() + ", expected=" + reqTargetsBytes);
+				ImpulseAssert.checkWellFormed(false, () -> "CSR col_idx targets segment undersized for relation "
+						+ relId + ": actual=" + targetsSeg.byteSize() + ", expected=" + reqTargetsBytes);
 				throw new IllegalArgumentException("CSR col_idx targets segment undersized for relation " + relId
 						+ ": actual=" + targetsSeg.byteSize() + ", expected=" + reqTargetsBytes);
 			}
@@ -1072,14 +1396,14 @@ public final class BinarySnapshotLoader {
 		}
 
 		if (!MemorySegment.NULL.equals(cscOffsetsSeg)) {
-			long effectiveTgt = (tgtDomainNodeCount > 0)
+			long segmentNodes = Math.max(0L, (cscOffsetsSeg.byteSize() / (long) offWidth) - 1L);
+			long effectiveTgt = (tgtDomainNodeCount > 0 && tgtDomainNodeCount == segmentNodes)
 					? tgtDomainNodeCount
-					: Math.max(0L, (cscOffsetsSeg.byteSize() / (long) offWidth) - 1L);
+					: segmentNodes;
 			long reqCscOffsetsBytes = Math.multiplyExact(Math.addExact(effectiveTgt, 1L), (long) offWidth);
 			if (cscOffsetsSeg.byteSize() < reqCscOffsetsBytes) {
-				ImpulseAssert.checkWellFormed(false,
-						() -> "CSC row_offsets segment undersized for relation " + relId + ": actual="
-								+ cscOffsetsSeg.byteSize() + ", expected=" + reqCscOffsetsBytes);
+				ImpulseAssert.checkWellFormed(false, () -> "CSC row_offsets segment undersized for relation " + relId
+						+ ": actual=" + cscOffsetsSeg.byteSize() + ", expected=" + reqCscOffsetsBytes);
 				throw new IllegalArgumentException("CSC row_offsets segment undersized for relation " + relId
 						+ ": actual=" + cscOffsetsSeg.byteSize() + ", expected=" + reqCscOffsetsBytes);
 			}
@@ -1111,11 +1435,10 @@ public final class BinarySnapshotLoader {
 		long reqCscTargetsBytes = Math.multiplyExact(edgeCount, (long) tgtWidth);
 		if (!MemorySegment.NULL.equals(cscTargetsSeg)) {
 			if (cscTargetsSeg.byteSize() < reqCscTargetsBytes) {
-				ImpulseAssert.checkWellFormed(false,
-						() -> "CSC targets segment undersized for relation " + relId + ": actual="
-								+ cscTargetsSeg.byteSize() + ", expected=" + reqCscTargetsBytes);
-				throw new IllegalArgumentException("CSC targets segment undersized for relation " + relId
+				ImpulseAssert.checkWellFormed(false, () -> "CSC targets segment undersized for relation " + relId
 						+ ": actual=" + cscTargetsSeg.byteSize() + ", expected=" + reqCscTargetsBytes);
+				throw new IllegalArgumentException("CSC targets segment undersized for relation " + relId + ": actual="
+						+ cscTargetsSeg.byteSize() + ", expected=" + reqCscTargetsBytes);
 			}
 			if (ImpulseAssert.ENABLE_AUDIT || edgeCount <= 100_000) {
 				for (long e = 0; e < edgeCount; e++) {

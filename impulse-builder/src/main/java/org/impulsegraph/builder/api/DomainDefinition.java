@@ -16,13 +16,15 @@ public final class DomainDefinition {
 	private final long cardinality;
 	private final PrimitiveWidth idWidth;
 	private final boolean hasPrimaryKeyIndex;
+	private final String primaryKeyAttribute;
 	private final Map<String, AttributeDataSource> attributes;
 
 	private DomainDefinition(long cardinality, PrimitiveWidth idWidth, boolean hasPrimaryKeyIndex,
-			Map<String, AttributeDataSource> attributes) {
+			String primaryKeyAttribute, Map<String, AttributeDataSource> attributes) {
 		this.cardinality = cardinality;
 		this.idWidth = idWidth;
 		this.hasPrimaryKeyIndex = hasPrimaryKeyIndex;
+		this.primaryKeyAttribute = primaryKeyAttribute;
 		this.attributes = Collections.unmodifiableMap(new LinkedHashMap<>(attributes));
 	}
 
@@ -53,6 +55,14 @@ public final class DomainDefinition {
 	}
 
 	/**
+	 * Returns the name of the attribute serving as the primary key, or null if
+	 * none.
+	 */
+	public String getPrimaryKeyAttribute() {
+		return primaryKeyAttribute;
+	}
+
+	/**
 	 * Returns an immutable map of attribute names to their chunked data sources.
 	 */
 	public Map<String, AttributeDataSource> getAttributes() {
@@ -63,6 +73,7 @@ public final class DomainDefinition {
 		private final long cardinality;
 		private PrimitiveWidth idWidth = PrimitiveWidth.UINT32;
 		private boolean hasPrimaryKeyIndex = false;
+		private String primaryKeyAttribute = null;
 		private final Map<String, AttributeDataSource> attributes = new LinkedHashMap<>();
 
 		private Builder(long cardinality) {
@@ -82,6 +93,11 @@ public final class DomainDefinition {
 			return this;
 		}
 
+		public Builder primaryKeyAttribute(String attrName) {
+			this.primaryKeyAttribute = attrName;
+			return this;
+		}
+
 		public Builder addAttribute(String name, AttributeDataSource source) {
 			Objects.requireNonNull(name, "Attribute name cannot be null");
 			Objects.requireNonNull(source, "AttributeDataSource cannot be null");
@@ -90,7 +106,7 @@ public final class DomainDefinition {
 		}
 
 		public DomainDefinition build() {
-			return new DomainDefinition(cardinality, idWidth, hasPrimaryKeyIndex, attributes);
+			return new DomainDefinition(cardinality, idWidth, hasPrimaryKeyIndex, primaryKeyAttribute, attributes);
 		}
 	}
 }

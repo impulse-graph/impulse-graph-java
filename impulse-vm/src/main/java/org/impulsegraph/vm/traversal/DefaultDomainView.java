@@ -102,9 +102,51 @@ public class DefaultDomainView implements DomainView {
 	}
 
 	@Override
+	public List<String> attributeNames() {
+		return snapshot.getDomainAttributeNames(domainName);
+	}
+
+	@Override
+	public List<java.lang.foreign.MemorySegment> attributeSegments() {
+		return snapshot.getDomainAttributeSegments(domainName);
+	}
+
+	@Override
+	public java.lang.foreign.MemorySegment attributeSegment(String attributeName) {
+		return snapshot.getDomainAttributeSegment(domainName, attributeName);
+	}
+
+	@Override
+	public java.lang.foreign.MemorySegment attributeSegment(int attributeIndex) {
+		if (snapshot instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+			org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain dom = gs.getDomain(domainName);
+			if (dom != null) {
+				return dom.getAttributeSegment(attributeIndex);
+			}
+		}
+		return java.lang.foreign.MemorySegment.NULL;
+	}
+
+	@Override
+	public int keyAttrIndex() {
+		return snapshot.getDomainKeyAttrIndex(domainName);
+	}
+
+	@Override
 	public long toDenseId(String key) {
 		if (key == null)
 			return -1;
+
+		// 1. Resolution via domain key attribute if available
+		if (snapshot instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+			org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain dom = gs.getDomain(domainName);
+			if (dom != null && dom.keyAttrIndex() != 0xFFFF) {
+				long id = dom.resolveDenseId(key);
+				if (id >= 0) {
+					return id;
+				}
+			}
+		}
 
 		// Check if snapshot metadata contains key mapping
 		String metaKey = "domain." + domainName + ".key." + key;
@@ -167,6 +209,17 @@ public class DefaultDomainView implements DomainView {
 
 	@Override
 	public String toKey(long denseId) {
+		// 1. O(1) array lookup via KeyAttrIndex (§5.1)
+		if (snapshot instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+			org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain dom = gs.getDomain(domainName);
+			if (dom != null && dom.keyAttrIndex() != 0xFFFF) {
+				String resolved = dom.resolveKey(denseId);
+				if (resolved != null) {
+					return resolved;
+				}
+			}
+		}
+
 		String metaKey = "domain." + domainName + ".id." + denseId;
 		String metaVal = snapshot.getMetadata(metaKey);
 		if (metaVal != null && !metaVal.isBlank())

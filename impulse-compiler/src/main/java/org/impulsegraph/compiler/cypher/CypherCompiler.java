@@ -87,7 +87,8 @@ public final class CypherCompiler {
 		for (CypherParser.PathStep step : query.path().steps()) {
 			CypherParser.EdgePattern edge = step.edge();
 			if (edge.minHops() < 0) {
-				throw new IllegalArgumentException("Variable-length path minHops cannot be negative: " + edge.minHops());
+				throw new IllegalArgumentException(
+						"Variable-length path minHops cannot be negative: " + edge.minHops());
 			}
 			if (!edge.isUnbounded() && edge.maxHops() < edge.minHops()) {
 				throw new IllegalArgumentException("Variable-length path maxHops (" + edge.maxHops()

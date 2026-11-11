@@ -11,13 +11,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 import static org.impulsegraph.spec.v0_9.ImpulseLayoutsV0_9.SPEC_MAGIC;
-import static org.impulsegraph.spec.v0_9.ImpulseLayoutsV0_9.SPEC_VERSION_PACKED;
+import static org.impulsegraph.spec.v0_10.ImpulseLayoutsV0_10.SPEC_VERSION_PACKED;
 
 public final class DefaultSnapshotBuilder {
 
 	private final Map<String, String> metadata = new HashMap<>();
 	private Boolean includeCscOverride = null;
 	private Boolean includeCooOverride = null;
+	private short targetVersion = SPEC_VERSION_PACKED;
 
 	public DefaultSnapshotBuilder() {
 	}
@@ -27,17 +28,64 @@ public final class DefaultSnapshotBuilder {
 				(short) SPEC_VERSION_PACKED, graph, Map.of(), Map.of(), Map.of(), Map.of()));
 	}
 
+	public static class DomainAttributeEntry {
+		private final String name;
+		private final byte typeCode;
+		private final int dimension;
+		private final byte[] data;
+		private final byte[] offsets;
+		private final byte[] validity;
+
+		public DomainAttributeEntry(String name, byte typeCode, int dimension, byte[] data, byte[] offsets,
+				byte[] validity) {
+			this.name = Objects.requireNonNull(name, "attribute name cannot be null");
+			this.typeCode = typeCode;
+			this.dimension = dimension;
+			this.data = data != null ? data : new byte[0];
+			this.offsets = offsets != null ? offsets : new byte[0];
+			this.validity = validity != null ? validity : new byte[0];
+		}
+
+		public String name() {
+			return name;
+		}
+		public byte typeCode() {
+			return typeCode;
+		}
+		public int dimension() {
+			return dimension;
+		}
+		public byte[] data() {
+			return data;
+		}
+		public byte[] offsets() {
+			return offsets;
+		}
+		public byte[] validity() {
+			return validity;
+		}
+	}
+
 	public static class DomainEntry {
 		private final int domainId;
 		private final String name;
 		private final byte keyType;
 		private final long nodeCount;
+		private final int keyAttrIndex;
+		private final List<DomainAttributeEntry> attributes;
 
 		public DomainEntry(int domainId, String name, byte keyType, long nodeCount) {
+			this(domainId, name, keyType, nodeCount, 0xFFFF, new ArrayList<>());
+		}
+
+		public DomainEntry(int domainId, String name, byte keyType, long nodeCount, int keyAttrIndex,
+				List<DomainAttributeEntry> attributes) {
 			this.domainId = domainId;
 			this.name = name;
 			this.keyType = keyType;
 			this.nodeCount = nodeCount;
+			this.keyAttrIndex = keyAttrIndex;
+			this.attributes = attributes != null ? new ArrayList<>(attributes) : new ArrayList<>();
 		}
 
 		public int domainId() {
@@ -52,15 +100,126 @@ public final class DefaultSnapshotBuilder {
 		public long nodeCount() {
 			return nodeCount;
 		}
+		public int keyAttrIndex() {
+			return keyAttrIndex;
+		}
+		public List<DomainAttributeEntry> attributes() {
+			return attributes;
+		}
 	}
 
 	private final List<DomainEntry> customDomains = new ArrayList<>();
 	private final Map<String, int[]> customRelationDomains = new HashMap<>();
 
+	public DefaultSnapshotBuilder withVersion(short version) {
+		this.targetVersion = version;
+		return this;
+	}
+
 	public DefaultSnapshotBuilder withDomain(int domainId, String name, byte keyType, long nodeCount) {
-		customDomains.add(new DomainEntry(domainId, name, keyType, nodeCount));
+		return withDomain(domainId, name, keyType, nodeCount, 0xFFFF, new ArrayList<>());
+	}
+
+	public DefaultSnapshotBuilder withDomain(int domainId, String name, byte keyType, long nodeCount,
+			int keyAttrIndex) {
+		return withDomain(domainId, name, keyType, nodeCount, keyAttrIndex, new ArrayList<>());
+	}
+
+	public DefaultSnapshotBuilder withDomain(int domainId, String name, byte keyType, long nodeCount, int keyAttrIndex,
+			List<DomainAttributeEntry> attributes) {
+		customDomains.add(new DomainEntry(domainId, name, keyType, nodeCount, keyAttrIndex, attributes));
 		withMetadata("domain." + name + ".nodeCount", String.valueOf(nodeCount));
 		return this;
+	}
+
+	public DefaultSnapshotBuilder withDomainAttribute(int domainId, String name, byte typeCode, byte[] data) {
+		return withDomainAttribute(domainId, name, typeCode, 1, data, null, null);
+	}
+
+	public DefaultSnapshotBuilder withDomainAttribute(String domainName, String name, byte typeCode, byte[] data) {
+		DomainEntry dom = findDomain(domainName);
+		if (dom == null) {
+			throw new IllegalArgumentException("Domain name not found: " + domainName);
+		}
+		return withDomainAttribute(dom.domainId(), name, typeCode, 1, data, null, null);
+	}
+
+	public DefaultSnapshotBuilder withDomainAttribute(int domainId, String name, byte typeCode, int dimension,
+			byte[] data, byte[] offsets, byte[] validity) {
+		DomainEntry dom = findDomain(domainId);
+		if (dom == null) {
+			throw new IllegalArgumentException("Domain ID not found: " + domainId);
+		}
+		dom.attributes().add(new DomainAttributeEntry(name, typeCode, dimension, data, offsets, validity));
+		return this;
+	}
+
+	public DefaultSnapshotBuilder withDomainStringAttribute(int domainId, String name, List<String> values) {
+		int n = (values != null) ? values.size() : 0;
+		ByteBuffer offsetsBuf = ByteBuffer.allocate((n + 1) * 4).order(ByteOrder.LITTLE_ENDIAN);
+		ByteArrayOutputStream dataOut = new ByteArrayOutputStream();
+		if (values != null) {
+			for (String v : values) {
+				offsetsBuf.putInt(dataOut.size());
+				if (v != null) {
+					byte[] b = v.getBytes(StandardCharsets.UTF_8);
+					dataOut.write(b, 0, b.length);
+				}
+			}
+		}
+		offsetsBuf.putInt(dataOut.size());
+		return withDomainAttribute(domainId, name, (byte) 0x0B, 0, dataOut.toByteArray(), offsetsBuf.array(), null);
+	}
+
+	public DefaultSnapshotBuilder withDomainKeyAttribute(int domainId, String name, byte keyType, List<String> keys) {
+		DomainEntry dom = findDomain(domainId);
+		if (dom == null) {
+			throw new IllegalArgumentException("Domain ID not found: " + domainId);
+		}
+		int keyAttrIdx = dom.attributes().size();
+		if (keyType == 0x0B) { // VAR_STRING
+			withDomainStringAttribute(domainId, name, keys);
+		} else if (keyType == 0x04) { // INT64
+			ByteBuffer buf = ByteBuffer.allocate(keys.size() * 8).order(ByteOrder.LITTLE_ENDIAN);
+			for (String k : keys) {
+				buf.putLong(Long.parseLong(k));
+			}
+			withDomainAttribute(domainId, name, (byte) 0x04, 1, buf.array(), null, null);
+		} else if (keyType == 0x03) { // INT32
+			ByteBuffer buf = ByteBuffer.allocate(keys.size() * 4).order(ByteOrder.LITTLE_ENDIAN);
+			for (String k : keys) {
+				buf.putInt(Integer.parseInt(k));
+			}
+			withDomainAttribute(domainId, name, (byte) 0x03, 1, buf.array(), null, null);
+		} else if (keyType == 0x0C) { // UUID128
+			ByteBuffer buf = ByteBuffer.allocate(keys.size() * 16).order(ByteOrder.LITTLE_ENDIAN);
+			for (String k : keys) {
+				UUID u = UUID.fromString(k);
+				buf.putLong(u.getMostSignificantBits());
+				buf.putLong(u.getLeastSignificantBits());
+			}
+			withDomainAttribute(domainId, name, (byte) 0x0C, 16, buf.array(), null, null);
+		}
+		customDomains.set(customDomains.indexOf(dom),
+				new DomainEntry(dom.domainId(), dom.name(), keyType, dom.nodeCount(), keyAttrIdx, dom.attributes()));
+		withDomainKeys(dom.name(), keys);
+		return this;
+	}
+
+	private DomainEntry findDomain(int domainId) {
+		for (DomainEntry dom : customDomains) {
+			if (dom.domainId() == domainId)
+				return dom;
+		}
+		return null;
+	}
+
+	private DomainEntry findDomain(String name) {
+		for (DomainEntry dom : customDomains) {
+			if (dom.name().equalsIgnoreCase(name))
+				return dom;
+		}
+		return null;
 	}
 
 	public DefaultSnapshotBuilder withRelationDomain(String relName, int srcDomainId, int tgtDomainId) {
@@ -168,7 +327,26 @@ public final class DefaultSnapshotBuilder {
 		List<DomainEntry> domainList = new ArrayList<>(this.customDomains);
 		if (domainList.isEmpty() && loaded != null && loaded.domainsById() != null && !loaded.domainsById().isEmpty()) {
 			for (BinarySnapshotLoader.LoadedDomain ld : loaded.domainsById().values()) {
-				domainList.add(new DomainEntry(ld.domainId(), ld.name(), ld.keyType(), 0L));
+				List<DomainAttributeEntry> domAttrs = new ArrayList<>();
+				for (int a = 0; a < ld.attributes().size(); a++) {
+					BinarySnapshotLoader.LoadedAttribute la = ld.attributes().get(a);
+					MemorySegment dSeg = ld.getAttributeSegment(a);
+					MemorySegment oSeg = ld.getOffsetsSegment(a);
+					MemorySegment vSeg = ld.getValiditySegment(a);
+					byte[] dBytes = (dSeg != null && dSeg != MemorySegment.NULL)
+							? dSeg.toArray(ValueLayout.JAVA_BYTE)
+							: new byte[0];
+					byte[] oBytes = (oSeg != null && oSeg != MemorySegment.NULL)
+							? oSeg.toArray(ValueLayout.JAVA_BYTE)
+							: new byte[0];
+					byte[] vBytes = (vSeg != null && vSeg != MemorySegment.NULL)
+							? vSeg.toArray(ValueLayout.JAVA_BYTE)
+							: new byte[0];
+					domAttrs.add(
+							new DomainAttributeEntry(la.name(), la.typeCode(), la.dimension(), dBytes, oBytes, vBytes));
+				}
+				domainList.add(new DomainEntry(ld.domainId(), ld.name(), ld.keyType(), ld.nodeCount(),
+						ld.keyAttrIndex(), domAttrs));
 			}
 		}
 		if (domainList.isEmpty()) {
@@ -197,6 +375,9 @@ public final class DefaultSnapshotBuilder {
 
 		for (DomainEntry dom : domainList) {
 			getOrAddString.apply(dom.name());
+			for (DomainAttributeEntry a : dom.attributes()) {
+				getOrAddString.apply(a.name());
+			}
 		}
 
 		List<Integer> relNameOffsets = new ArrayList<>();
@@ -214,53 +395,115 @@ public final class DefaultSnapshotBuilder {
 			}
 		}
 
-		ByteArrayOutputStream dirTableOut = new ByteArrayOutputStream();
+		// Calculate Section 2 Directory Table layout length
+		int poolBytes = stringPoolOut.size();
+		int alignedStrTableBytes = (4 + poolBytes + 127) & ~127;
 
-		// Write String Table Header & Pool Blob
-		try {
-			int poolBytes = stringPoolOut.size();
-			ByteBuffer strHdrBuf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
-			strHdrBuf.putInt(poolBytes);
-			dirTableOut.write(strHdrBuf.array());
-			dirTableOut.write(stringPoolOut.toByteArray());
-
-			align128Out(dirTableOut);
-
-			// Write Domain Catalog Entries (Fixed 16 Bytes each)
-			for (DomainEntry dom : domainList) {
-				int domNameOff = getOrAddString.apply(dom.name());
-				ByteBuffer domBuf = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
-				domBuf.putShort((short) dom.domainId());
-				domBuf.put(dom.keyType());
-				domBuf.put((byte) 0); // reserved
-				domBuf.putInt(domNameOff); // name_offset
-				domBuf.putLong(dom.nodeCount());// node_count
-				dirTableOut.write(domBuf.array());
-			}
-
-			align128Out(dirTableOut);
-
-		} catch (IOException e) {
-			throw new RuntimeException(e);
+		int rawDomTableBytes = 0;
+		for (DomainEntry dom : domainList) {
+			rawDomTableBytes += (targetVersion >= 10) ? (32 + dom.attributes().size() * 44) : 16;
 		}
+		int alignedDomTableBytes = (rawDomTableBytes + 127) & ~127;
 
-		// Calculate Relation Blocks payload base offset
-		int totalAttrDescBytes = 0;
+		int totalRelAttrDescBytes = 0;
 		for (String rName : relNames) {
 			RelationSnapshot relSnap = loaded != null && loaded.graph() != null
 					? loaded.graph().getRelationSnapshot(rName)
 					: null;
 			if (relSnap != null) {
-				totalAttrDescBytes += relSnap.getAttributeSegments().size() * 44;
+				totalRelAttrDescBytes += relSnap.getAttributeSegments().size() * 44;
 			}
 		}
-		int totalDirLen = dirTableOut.size() + relationCount * 128 + totalAttrDescBytes;
+		int rawRelTableBytes = relationCount * 128 + totalRelAttrDescBytes;
+		int alignedRelTableBytes = (rawRelTableBytes + 127) & ~127;
+
+		int totalDirLen = alignedStrTableBytes + alignedDomTableBytes + alignedRelTableBytes;
 		int alignedDirLen = (totalDirLen + 4095) & ~4095;
-		long relBlocksBaseOffset = dataOffset + alignedDirLen;
+		long payloadBaseOffset = dataOffset + alignedDirLen;
 
 		ByteArrayOutputStream payloadOut = new ByteArrayOutputStream();
-		List<byte[]> relEntries = new ArrayList<>();
 
+		// Layout Domain Attribute Payloads & Build Descriptors
+		Map<Integer, List<byte[]>> domainAttrDescriptors = new HashMap<>();
+		if (targetVersion >= 10) {
+			for (DomainEntry dom : domainList) {
+				List<byte[]> descs = new ArrayList<>();
+				for (DomainAttributeEntry a : dom.attributes()) {
+					try {
+						align128Out(payloadOut);
+						long currentPayloadOffset = payloadBaseOffset + payloadOut.size();
+
+						int aNameOff = getOrAddString.apply(a.name());
+						byte typeCode = a.typeCode();
+						boolean isNullable = (typeCode & 0x80) != 0;
+						long validityOff = 0;
+						long validityBytes = 0;
+
+						if (isNullable) {
+							long numBits = dom.nodeCount();
+							long rawBitmapBytes = ((numBits + 63) / 64) * 8;
+							int paddedBitmapBytes = (int) ((rawBitmapBytes + 127) & ~127L);
+
+							byte[] valData = new byte[paddedBitmapBytes];
+							if (a.validity() != null && a.validity().length > 0) {
+								System.arraycopy(a.validity(), 0, valData, 0,
+										Math.min(a.validity().length, valData.length));
+							}
+							validityOff = currentPayloadOffset;
+							validityBytes = paddedBitmapBytes;
+							payloadOut.write(valData);
+							currentPayloadOffset = payloadBaseOffset + payloadOut.size();
+						}
+
+						align128Out(payloadOut);
+						currentPayloadOffset = payloadBaseOffset + payloadOut.size();
+
+						long dataOff = 0;
+						long dataBytes = 0;
+						if (a.data() != null && a.data().length > 0) {
+							dataOff = currentPayloadOffset;
+							dataBytes = a.data().length;
+							payloadOut.write(a.data());
+							align128Out(payloadOut);
+							currentPayloadOffset = payloadBaseOffset + payloadOut.size();
+						}
+
+						long offsOff = 0;
+						long offsBytes = 0;
+						if (a.offsets() != null && a.offsets().length > 0) {
+							offsOff = currentPayloadOffset;
+							offsBytes = a.offsets().length;
+							payloadOut.write(a.offsets());
+							align128Out(payloadOut);
+						}
+
+						ByteBuffer descBuf = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
+						descBuf.putInt(aNameOff);
+						descBuf.put(typeCode);
+						descBuf.put((byte) 0); // reserved1
+						descBuf.putShort((short) 0); // reserved2
+						descBuf.putInt(a.dimension());
+						if (isNullable) {
+							descBuf.putLong(validityOff);
+							descBuf.putLong(validityBytes + dataBytes);
+						} else {
+							descBuf.putLong(dataOff);
+							descBuf.putLong(dataBytes);
+						}
+						descBuf.putLong(offsOff);
+						descBuf.putLong(offsBytes);
+						descs.add(descBuf.array());
+
+					} catch (IOException e) {
+						throw new RuntimeException(e);
+					}
+				}
+				domainAttrDescriptors.put(dom.domainId(), descs);
+			}
+		}
+
+		// Layout Relation Payloads & Build Descriptors
+		List<byte[]> relEntries = new ArrayList<>();
 		int relIdx = 0;
 		for (String rName : relNames) {
 			try {
@@ -279,7 +522,7 @@ public final class DefaultSnapshotBuilder {
 				long csrRowOffBytes = rowBytes.length;
 				if (csrRowOffBytes > 0) {
 					align128Out(payloadOut);
-					csrRowOffOffset = relBlocksBaseOffset + payloadOut.size();
+					csrRowOffOffset = payloadBaseOffset + payloadOut.size();
 					payloadOut.write(rowBytes);
 				}
 
@@ -292,50 +535,51 @@ public final class DefaultSnapshotBuilder {
 				long csrColIdxBytes = colBytes.length;
 				if (csrColIdxBytes > 0) {
 					align128Out(payloadOut);
-					csrColIdxOffset = relBlocksBaseOffset + payloadOut.size();
+					csrColIdxOffset = payloadBaseOffset + payloadOut.size();
 					payloadOut.write(colBytes);
 				}
 
 				// CSC Segments evaluation
 				boolean sourceHasCsc = relSnap != null && relSnap.hasCsc();
-				boolean shouldWriteCsc = includeCscOverride != null ? includeCscOverride : sourceHasCsc;
+				boolean includeCsc = (includeCscOverride != null) ? includeCscOverride : sourceHasCsc;
 
 				long cscRowOffOffset = 0L;
 				long cscRowOffBytes = 0L;
 				long cscColIdxOffset = 0L;
 				long cscColIdxBytes = 0L;
 
-				if (shouldWriteCsc && relSnap != null) {
-					byte[] cscRowBytes;
-					byte[] cscColBytes;
+				if (includeCsc) {
+					byte[] cscRowBytes = new byte[0];
+					byte[] cscColBytes = new byte[0];
 
-					if (relSnap.hasCsc()) {
-						cscRowBytes = relSnap.getCscRowOffsetsSegment().toArray(ValueLayout.JAVA_BYTE);
-						cscColBytes = relSnap.getCscColumnTargetsSegment().toArray(ValueLayout.JAVA_BYTE);
-					} else {
-						byte[][] computed = computeCscBytes(relSnap.getNodeCount(), (int) relSnap.getEdgeCount(),
-								rowSeg, colSeg);
-						cscRowBytes = computed[0];
-						cscColBytes = computed[1];
+					if (sourceHasCsc) {
+						MemorySegment cscRowSeg = relSnap.getCscRowOffsetsSegment();
+						MemorySegment cscColSeg = relSnap.getCscColumnTargetsSegment();
+						if (cscRowSeg != null && cscRowSeg != MemorySegment.NULL)
+							cscRowBytes = cscRowSeg.toArray(ValueLayout.JAVA_BYTE);
+						if (cscColSeg != null && cscColSeg != MemorySegment.NULL)
+							cscColBytes = cscColSeg.toArray(ValueLayout.JAVA_BYTE);
+					} else if (relSnap != null) {
+						byte[][] comp = computeCscBytes(relSnap.getNodeCount(), (int) relSnap.getEdgeCount(), rowSeg,
+								colSeg);
+						cscRowBytes = comp[0];
+						cscColBytes = comp[1];
 					}
 
 					if (cscRowBytes.length > 0) {
 						align128Out(payloadOut);
-						cscRowOffOffset = relBlocksBaseOffset + payloadOut.size();
-						cscRowOffBytes = cscRowBytes.length;
+						cscRowOffOffset = payloadBaseOffset + payloadOut.size();
 						payloadOut.write(cscRowBytes);
+						cscRowOffBytes = cscRowBytes.length;
 
 						align128Out(payloadOut);
-						cscColIdxOffset = relBlocksBaseOffset + payloadOut.size();
-						cscColIdxBytes = cscColBytes.length;
+						cscColIdxOffset = payloadBaseOffset + payloadOut.size();
 						payloadOut.write(cscColBytes);
+						cscColIdxBytes = cscColBytes.length;
 					}
 				}
 
-				// COO evaluation
-				boolean shouldWriteCoo = includeCooOverride != null ? includeCooOverride : false;
-				byte encodingId = shouldWriteCoo ? (byte) 6 : (byte) 0;
-
+				byte encodingId = 0x00; // RAW
 				long nodeCount = relSnap != null ? relSnap.getNodeCount() : 0;
 				long edgeCount = relSnap != null ? (int) relSnap.getEdgeCount() : 0;
 
@@ -358,7 +602,7 @@ public final class DefaultSnapshotBuilder {
 					}
 
 					align128Out(payloadOut);
-					long attrDataOff = relBlocksBaseOffset + payloadOut.size();
+					long attrDataOff = payloadBaseOffset + payloadOut.size();
 					long attrDataBytes = 0L;
 
 					if (hasValidity) {
@@ -429,12 +673,55 @@ public final class DefaultSnapshotBuilder {
 			}
 		}
 
-		for (byte[] entryBytes : relEntries) {
-			dirTableOut.write(entryBytes, 0, entryBytes.length);
-		}
-
+		// 2. Build Section 2 Directory Table
+		ByteArrayOutputStream dirTableOut = new ByteArrayOutputStream();
 		try {
+			ByteBuffer strHdrBuf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+			strHdrBuf.putInt(poolBytes);
+			dirTableOut.write(strHdrBuf.array());
+			dirTableOut.write(stringPoolOut.toByteArray());
+
+			align128Out(dirTableOut);
+
+			// Write Domain Catalog Entries
+			for (DomainEntry dom : domainList) {
+				int domNameOff = getOrAddString.apply(dom.name());
+				if (targetVersion >= 10) {
+					List<byte[]> descs = domainAttrDescriptors.getOrDefault(dom.domainId(), List.of());
+					ByteBuffer domBuf = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
+					domBuf.putShort((short) dom.domainId());
+					domBuf.put(dom.keyType());
+					domBuf.put((byte) 0); // reserved1
+					domBuf.putInt(domNameOff);
+					domBuf.putLong(dom.nodeCount());
+					domBuf.putShort((short) descs.size()); // attr_count
+					domBuf.putShort((short) dom.keyAttrIndex()); // key_attr_index
+					domBuf.put(new byte[12]); // reserved2
+					dirTableOut.write(domBuf.array());
+
+					for (byte[] d : descs) {
+						dirTableOut.write(d);
+					}
+				} else {
+					ByteBuffer domBuf = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
+					domBuf.putShort((short) dom.domainId());
+					domBuf.put(dom.keyType());
+					domBuf.put((byte) 0); // reserved
+					domBuf.putInt(domNameOff); // name_offset
+					domBuf.putLong(dom.nodeCount());// node_count
+					dirTableOut.write(domBuf.array());
+				}
+			}
+
+			align128Out(dirTableOut);
+
+			for (byte[] entryBytes : relEntries) {
+				dirTableOut.write(entryBytes, 0, entryBytes.length);
+			}
+
+			align128Out(dirTableOut);
 			align4kOut(dirTableOut);
+
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
@@ -444,7 +731,7 @@ public final class DefaultSnapshotBuilder {
 		// 1. Write Header Page 0 (4096 Bytes)
 		ByteBuffer hdrBuf = ByteBuffer.allocate(4096).order(ByteOrder.LITTLE_ENDIAN);
 		hdrBuf.putInt(SPEC_MAGIC); // magic
-		hdrBuf.putShort((short) SPEC_VERSION_PACKED); // version = 9
+		hdrBuf.putShort(targetVersion); // version = 10 (or 9)
 		hdrBuf.putInt(dataOffset); // data_offset = 4096
 		hdrBuf.putShort((short) domainCount); // domain_count
 		hdrBuf.putShort((short) relationCount); // relation_count
@@ -458,6 +745,10 @@ public final class DefaultSnapshotBuilder {
 		byte[] hdrBytes = hdrBuf.array();
 		short crc = (short) computeCrc16(hdrBytes, 0, 0x3E);
 		hdrBuf.putShort(0x3E, crc);
+
+		if (targetVersion >= 10) {
+			hdrBuf.putShort(0x40, (short) 0); // index_count = 0
+		}
 
 		try {
 			finalOut.write(hdrBuf.array());
@@ -496,7 +787,7 @@ public final class DefaultSnapshotBuilder {
 			long footerLen = finalOut.size() + 16 - footerStart;
 			ByteBuffer trailerBuf = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
 			trailerBuf.putLong(footerLen);
-			trailerBuf.putInt(SPEC_VERSION_PACKED);
+			trailerBuf.putInt(targetVersion);
 			trailerBuf.putInt(SPEC_MAGIC);
 			finalOut.write(trailerBuf.array());
 
