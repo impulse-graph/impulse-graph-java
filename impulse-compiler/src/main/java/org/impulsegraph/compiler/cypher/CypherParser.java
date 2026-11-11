@@ -178,7 +178,8 @@ public final class CypherParser {
 				}
 				if (!isUnbounded) {
 					if (minHops < 0) {
-						throw new IllegalArgumentException("Variable-length path minHops cannot be negative: " + minHops);
+						throw new IllegalArgumentException(
+								"Variable-length path minHops cannot be negative: " + minHops);
 					}
 					if (maxHops < minHops) {
 						throw new IllegalArgumentException("Variable-length path maxHops (" + maxHops
@@ -266,8 +267,7 @@ public final class CypherParser {
 			consume(CypherTokenType.RPAREN, "Expected ')' after count(...)");
 			String op = consumeComparisonOperator();
 			int k = parseSignedInt();
-			predicates
-					.add(new WherePredicate(var, "quorum", op, String.valueOf(k), List.of((long) k), List.of(), k));
+			predicates.add(new WherePredicate(var, "quorum", op, String.valueOf(k), List.of((long) k), List.of(), k));
 			return predicates;
 		}
 
@@ -303,8 +303,8 @@ public final class CypherParser {
 			}
 			String op = consumeComparisonOperator();
 			int k = parseSignedInt();
-			predicates.add(new WherePredicate(targetVar, "quorum", op, String.valueOf(k), List.of((long) k),
-					List.of(), k));
+			predicates.add(
+					new WherePredicate(targetVar, "quorum", op, String.valueOf(k), List.of((long) k), List.of(), k));
 			return predicates;
 		}
 
@@ -334,8 +334,7 @@ public final class CypherParser {
 
 		if (prop.equalsIgnoreCase("quorum")) {
 			int k = Integer.parseInt(valOrParam);
-			predicates
-					.add(new WherePredicate(firstIdent, "quorum", op, valOrParam, List.of((long) k), List.of(), k));
+			predicates.add(new WherePredicate(firstIdent, "quorum", op, valOrParam, List.of((long) k), List.of(), k));
 		} else {
 			predicates.add(new WherePredicate(firstIdent, prop, op, valOrParam));
 		}

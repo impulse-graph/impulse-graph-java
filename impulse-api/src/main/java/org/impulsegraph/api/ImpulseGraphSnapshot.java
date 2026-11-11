@@ -112,6 +112,36 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
 	String getDomainName(int domainId);
 
 	/**
+	 * Returns the list of attribute names defined for the given domain.
+	 */
+	default java.util.List<String> getDomainAttributeNames(String domainName) {
+		return java.util.List.of();
+	}
+
+	/**
+	 * Returns the off-heap {@link MemorySegment} for the given domain attribute.
+	 */
+	default MemorySegment getDomainAttributeSegment(String domainName, String attributeName) {
+		return MemorySegment.NULL;
+	}
+
+	/**
+	 * Returns the list of off-heap {@link MemorySegment}s for all attributes in the
+	 * given domain.
+	 */
+	default java.util.List<MemorySegment> getDomainAttributeSegments(String domainName) {
+		return java.util.List.of();
+	}
+
+	/**
+	 * Returns the 0-indexed attribute index holding the primary key column for the
+	 * given domain, or 0xFFFF if none.
+	 */
+	default int getDomainKeyAttrIndex(String domainName) {
+		return 0xFFFF;
+	}
+
+	/**
 	 * Returns the schema/metadata for a given domain, or null if not present.
 	 */
 	org.impulsegraph.api.schema.GraphSchema getSchema(String domainName);

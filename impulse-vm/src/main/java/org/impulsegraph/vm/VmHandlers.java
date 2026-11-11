@@ -4590,8 +4590,7 @@ public final class VmHandlers {
 		validateReg(dst);
 		validateReg(nodesReg);
 		validateReg(valsReg);
-		boolean hasRealSnapshot = ctx.getSnapshot() != null
-				&& !(ctx.getSnapshot() instanceof MockImpulseGraphSnapshot);
+		boolean hasRealSnapshot = ctx.getSnapshot() != null && !(ctx.getSnapshot() instanceof MockImpulseGraphSnapshot);
 		int count = hasRealSnapshot ? extractActiveNodeIdsToScratch(state, ctx, nodesReg, 0) : 0;
 		int[] scratch = ctx.peekScratchInt(0);
 		byte valsType = getRegisterType(state, valsReg);

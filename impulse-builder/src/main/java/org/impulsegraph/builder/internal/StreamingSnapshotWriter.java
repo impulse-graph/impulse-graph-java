@@ -1,6 +1,8 @@
 package org.impulsegraph.builder.internal;
 
 import org.impulsegraph.builder.api.*;
+import org.impulsegraph.builder.spi.AttributeChunkIterator;
+import org.impulsegraph.builder.spi.AttributeDataSource;
 import org.impulsegraph.builder.spi.EdgeChunkIterator;
 import org.impulsegraph.builder.spi.RelationDataSource;
 
@@ -26,10 +28,11 @@ import java.security.cert.Certificate;
 import java.util.*;
 
 import static org.impulsegraph.spec.v0_9.ImpulseLayoutsV0_9.SPEC_MAGIC;
-import static org.impulsegraph.spec.v0_9.ImpulseLayoutsV0_9.SPEC_VERSION_PACKED;
+import static org.impulsegraph.spec.v0_10.ImpulseLayoutsV0_10.SPEC_VERSION_PACKED;
 
 /**
- * Core streaming writer implementation for Impulse Binary Snapshots v0.9.0.
+ * Core streaming writer implementation for Impulse Binary Snapshots v0.9.0 and
+ * v0.10.0.
  */
 public final class StreamingSnapshotWriter implements SnapshotBuilder {
 
@@ -37,6 +40,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 	private long stagingMemoryLimit = 64 * 1024 * 1024L; // 64 MB default
 	private PrivateKey privateKey;
 	private List<Certificate> certificateChain;
+	private short specVersion = SPEC_VERSION_PACKED; // 10
 
 	private final Map<String, DomainDefinition> domains = new LinkedHashMap<>();
 	private final Map<String, RelationDefinition> relations = new LinkedHashMap<>();
@@ -44,6 +48,15 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 	private final Map<String, byte[]> binaryMetadata = new LinkedHashMap<>();
 
 	public StreamingSnapshotWriter() {
+	}
+
+	@Override
+	public SnapshotBuilder withVersion(short version) {
+		if (version != 9 && version != 10) {
+			throw new IllegalArgumentException("Unsupported snapshot version: " + version);
+		}
+		this.specVersion = version;
+		return this;
 	}
 
 	@Override
@@ -110,6 +123,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 
 		ExternalSortStaging staging = new ExternalSortStaging(effectiveStagingDir, stagingMemoryLimit);
 		List<ExternalSortStaging.TopologyFiles> stagedFilesToClean = new ArrayList<>();
+		List<Path> stagedTempFiles = new ArrayList<>();
 
 		try {
 			// 1. Assign IDs
@@ -149,12 +163,86 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 
 			for (String dName : domainNames) {
 				getOrAddString.apply(dName);
+				DomainDefinition dom = domains.get(dName);
+				if (specVersion >= 10 && dom != null) {
+					for (String aName : dom.getAttributes().keySet()) {
+						getOrAddString.apply(aName);
+					}
+				}
 			}
 			for (String rName : relationNames) {
 				getOrAddString.apply(rName);
 			}
 
-			// 3. Stage Relation Topologies to files
+			// 3. Stage Domain Attributes
+			record StagedDomainAttr(String name, byte typeCode, int dimension, long dataBytes, Path dataFile,
+					long validityBytes, Path valFile, long offsBytes, Path offsFile) {
+			}
+
+			List<List<StagedDomainAttr>> stagedDomainAttrs = new ArrayList<>();
+			for (int dId = 0; dId < domainNames.size(); dId++) {
+				String dName = domainNames.get(dId);
+				DomainDefinition dom = domains.get(dName);
+				List<StagedDomainAttr> attrs = new ArrayList<>();
+
+				if (specVersion >= 10 && dom != null) {
+					int aIdx = 0;
+					for (Map.Entry<String, AttributeDataSource> entry : dom.getAttributes().entrySet()) {
+						String aName = entry.getKey();
+						AttributeDataSource ads = entry.getValue();
+						DataType dt = ads.dataType();
+						Nullability nullability = ads.nullability();
+						byte typeCode = dt.typeCode(nullability);
+						int dimension = dt.dimension();
+						boolean isNullable = (nullability == Nullability.NULLABLE);
+
+						Path valFile = null;
+						long valBytes = 0;
+						if (isNullable) {
+							long numBits = dom.getCardinality();
+							long rawBitmapBytes = ((numBits + 63) / 64) * 8;
+							int paddedBitmapBytes = (int) ((rawBitmapBytes + 127) & ~127L);
+							valFile = effectiveStagingDir.resolve("dom_" + dId + "_attr_" + aIdx + "_val.bin");
+							stagedTempFiles.add(valFile);
+							byte[] valData = new byte[paddedBitmapBytes];
+							Arrays.fill(valData, (byte) 0xFF);
+							Files.write(valFile, valData);
+							valBytes = paddedBitmapBytes;
+						}
+
+						Path dataFile = null;
+						long dataBytes = 0;
+						AttributeChunkIterator it = ads.iterator();
+						if (it != null && dom.getCardinality() > 0) {
+							dataFile = effectiveStagingDir.resolve("dom_" + dId + "_attr_" + aIdx + "_data.bin");
+							stagedTempFiles.add(dataFile);
+							int elemBytes = Math.max(1, dt.totalValueBytes());
+							int chunkSize = (int) Math.min(65536L, Math.max(1L, dom.getCardinality()));
+							long chunkByteSize = (long) chunkSize * elemBytes;
+							try (Arena chunkArena = Arena.ofConfined();
+									FileChannel fc = FileChannel.open(dataFile, StandardOpenOption.CREATE,
+											StandardOpenOption.WRITE)) {
+								MemorySegment buf = chunkArena.allocate(chunkByteSize, 128);
+								while (it.hasNext()) {
+									int count = it.nextChunk(buf, chunkSize);
+									if (count <= 0)
+										break;
+									long bytesToWrite = (long) count * elemBytes;
+									fc.write(buf.asSlice(0, bytesToWrite).asByteBuffer());
+									dataBytes += bytesToWrite;
+								}
+							}
+						}
+
+						attrs.add(new StagedDomainAttr(aName, typeCode, dimension, dataBytes, dataFile, valBytes,
+								valFile, 0L, null));
+						aIdx++;
+					}
+				}
+				stagedDomainAttrs.add(attrs);
+			}
+
+			// 4. Stage Relation Topologies to files
 			record StagedRel(int relId, int srcDomId, int tgtDomId, int tgtIdWidth, int edgeIndexWidth, long nodeCount,
 					long edgeCount, ExternalSortStaging.TopologyFiles csr, ExternalSortStaging.TopologyFiles csc,
 					boolean hasCsc) {
@@ -221,42 +309,65 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 						edgeCount, csrFiles, cscFiles, includeCsc));
 			}
 
-			// 4. Build Section 2 Directory Table
-			ByteArrayOutputStream dirTableOut = new ByteArrayOutputStream();
-
+			// Calculate Section 2 Directory Table layout length
 			int poolBytes = stringPoolOut.size();
-			ByteBuffer strHdrBuf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
-			strHdrBuf.putInt(poolBytes);
-			dirTableOut.write(strHdrBuf.array());
-			dirTableOut.write(stringPoolOut.toByteArray());
+			int alignedStrTableBytes = (4 + poolBytes + 127) & ~127;
 
-			align128(dirTableOut);
-
-			// Domain Catalog Entries (16 bytes each)
+			int rawDomTableBytes = 0;
 			for (int dId = 0; dId < domainNames.size(); dId++) {
-				String dName = domainNames.get(dId);
-				DomainDefinition dom = domains.get(dName);
-				int dNameOff = getOrAddString.apply(dName);
-
-				ByteBuffer domBuf = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
-				domBuf.putShort((short) dId);
-				domBuf.put((byte) 0x03); // key_type
-				domBuf.put((byte) 0); // reserved
-				domBuf.putInt(dNameOff);
-				domBuf.putLong(dom.getCardinality());
-				dirTableOut.write(domBuf.array());
+				if (specVersion >= 10) {
+					rawDomTableBytes += 32 + (stagedDomainAttrs.get(dId).size() * 44);
+				} else {
+					rawDomTableBytes += 16;
+				}
 			}
+			int alignedDomTableBytes = (rawDomTableBytes + 127) & ~127;
 
-			align128(dirTableOut);
+			int rawRelTableBytes = stagedRelations.size() * 128;
+			int alignedRelTableBytes = (rawRelTableBytes + 127) & ~127;
 
-			// Calculate Section Layout Offsets
-			int relationCount = stagedRelations.size();
-			int totalDirLen = dirTableOut.size() + relationCount * 128;
+			int totalDirLen = alignedStrTableBytes + alignedDomTableBytes + alignedRelTableBytes;
 			int alignedDirLen = (totalDirLen + 4095) & ~4095;
 			long payloadBaseOffset = 4096L + alignedDirLen;
 
-			// Layout relation payload offsets
+			// Layout domain attribute payloads
+			record AttrLayout(long valOff, long valBytes, long dataOff, long dataBytes, long offsOff, long offsBytes) {
+			}
+			List<List<AttrLayout>> domainAttrLayouts = new ArrayList<>();
 			long currentPayloadOffset = payloadBaseOffset;
+
+			if (specVersion >= 10) {
+				for (int dId = 0; dId < domainNames.size(); dId++) {
+					List<AttrLayout> layouts = new ArrayList<>();
+					for (StagedDomainAttr a : stagedDomainAttrs.get(dId)) {
+						long vOff = 0, vLen = 0;
+						if (a.validityBytes() > 0) {
+							currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
+							vOff = currentPayloadOffset;
+							vLen = a.validityBytes();
+							currentPayloadOffset += vLen;
+						}
+						long dOff = 0, dLen = 0;
+						if (a.dataBytes() > 0) {
+							currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
+							dOff = currentPayloadOffset;
+							dLen = a.dataBytes();
+							currentPayloadOffset += dLen;
+						}
+						long oOff = 0, oLen = 0;
+						if (a.offsBytes() > 0) {
+							currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
+							oOff = currentPayloadOffset;
+							oLen = a.offsBytes();
+							currentPayloadOffset += oLen;
+						}
+						layouts.add(new AttrLayout(vOff, vLen, dOff, dLen, oOff, oLen));
+					}
+					domainAttrLayouts.add(layouts);
+				}
+			}
+
+			// Layout relation payload offsets
 			List<ByteBuffer> relEntries = new ArrayList<>();
 
 			for (StagedRel sr : stagedRelations) {
@@ -319,16 +430,93 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				relEntries.add(relBuf);
 			}
 
+			// 5. Build Section 2 Directory Table
+			ByteArrayOutputStream dirTableOut = new ByteArrayOutputStream();
+
+			ByteBuffer strHdrBuf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+			strHdrBuf.putInt(poolBytes);
+			dirTableOut.write(strHdrBuf.array());
+			dirTableOut.write(stringPoolOut.toByteArray());
+
+			align128(dirTableOut);
+
+			// Domain Catalog Entries
+			for (int dId = 0; dId < domainNames.size(); dId++) {
+				String dName = domainNames.get(dId);
+				DomainDefinition dom = domains.get(dName);
+				int dNameOff = getOrAddString.apply(dName);
+
+				if (specVersion >= 10) {
+					List<StagedDomainAttr> attrs = stagedDomainAttrs.get(dId);
+					List<AttrLayout> layouts = domainAttrLayouts.get(dId);
+
+					int keyAttrIdx = -1;
+					byte keyType = (byte) 0x03;
+					if (dom.getPrimaryKeyAttribute() != null) {
+						for (int i = 0; i < attrs.size(); i++) {
+							if (attrs.get(i).name().equals(dom.getPrimaryKeyAttribute())) {
+								keyAttrIdx = i;
+								keyType = (byte) (attrs.get(i).typeCode() & 0x7F);
+								break;
+							}
+						}
+					}
+
+					ByteBuffer domBuf = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
+					domBuf.putShort((short) dId);
+					domBuf.put(keyType);
+					domBuf.put((byte) 0); // reserved1
+					domBuf.putInt(dNameOff);
+					domBuf.putLong(dom.getCardinality());
+					domBuf.putShort((short) attrs.size());
+					domBuf.putShort((short) (keyAttrIdx >= 0 ? keyAttrIdx : 0xFFFF));
+					domBuf.put(new byte[12]); // reserved2
+					dirTableOut.write(domBuf.array());
+
+					for (int a = 0; a < attrs.size(); a++) {
+						StagedDomainAttr attr = attrs.get(a);
+						AttrLayout l = layouts.get(a);
+						int aNameOff = getOrAddString.apply(attr.name());
+
+						boolean isNullable = (attr.typeCode() & 0x80) != 0;
+						long descDataOff = isNullable ? l.valOff() : l.dataOff();
+						long descDataBytes = isNullable ? (l.valBytes() + l.dataBytes()) : l.dataBytes();
+
+						ByteBuffer descBuf = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
+						descBuf.putInt(aNameOff);
+						descBuf.put(attr.typeCode());
+						descBuf.put((byte) 0); // reserved1
+						descBuf.putShort((short) 0); // reserved2
+						descBuf.putInt(attr.dimension());
+						descBuf.putLong(descDataOff);
+						descBuf.putLong(descDataBytes);
+						descBuf.putLong(l.offsOff());
+						descBuf.putLong(l.offsBytes());
+						dirTableOut.write(descBuf.array());
+					}
+				} else {
+					ByteBuffer domBuf = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
+					domBuf.putShort((short) dId);
+					domBuf.put((byte) 0x03); // key_type
+					domBuf.put((byte) 0); // reserved
+					domBuf.putInt(dNameOff);
+					domBuf.putLong(dom.getCardinality());
+					dirTableOut.write(domBuf.array());
+				}
+			}
+
+			align128(dirTableOut);
+
 			// Add relation entries to directory table
 			for (ByteBuffer rb : relEntries) {
 				dirTableOut.write(rb.array());
 			}
 			align4k(dirTableOut);
 
-			// 5. Build Header Page 0 (4096 bytes)
+			// 6. Build Header Page 0 (4096 bytes)
 			ByteBuffer hdrBuf = ByteBuffer.allocate(4096).order(ByteOrder.LITTLE_ENDIAN);
 			hdrBuf.putInt(SPEC_MAGIC);
-			hdrBuf.putShort((short) SPEC_VERSION_PACKED);
+			hdrBuf.putShort((short) specVersion);
 			hdrBuf.putInt(4096); // data_offset
 			hdrBuf.putShort((short) domainNames.size());
 			hdrBuf.putShort((short) relationNames.size());
@@ -344,7 +532,11 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			short crc = (short) computeCrc16(hdrBytes, 0, 0x3E);
 			hdrBuf.putShort(0x3E, crc);
 
-			// 6. Stream all bytes with rolling SHA-256
+			if (specVersion >= 10) {
+				hdrBuf.putShort(0x40, (short) 0); // index_count = 0
+			}
+
+			// 7. Stream all bytes with rolling SHA-256
 			MessageDigest sha256;
 			try {
 				sha256 = MessageDigest.getInstance("SHA-256");
@@ -362,11 +554,32 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			ByteBuffer dirBuf = ByteBuffer.wrap(dirTableOut.toByteArray());
 			digestChannel.write(dirBuf);
 
-			// Stream Relation Payloads
+			// Stream Domain Attribute Payloads
 			long currentStreamOffset = payloadBaseOffset;
 			byte[] pad128 = new byte[128];
 			byte[] pad4k = new byte[4096];
 
+			if (specVersion >= 10) {
+				for (int dId = 0; dId < domainNames.size(); dId++) {
+					List<StagedDomainAttr> attrs = stagedDomainAttrs.get(dId);
+					for (StagedDomainAttr a : attrs) {
+						if (a.valFile() != null && a.validityBytes() > 0) {
+							currentStreamOffset = writeStagedFileAligned(digestChannel, a.valFile(),
+									currentStreamOffset, pad128);
+						}
+						if (a.dataFile() != null && a.dataBytes() > 0) {
+							currentStreamOffset = writeStagedFileAligned(digestChannel, a.dataFile(),
+									currentStreamOffset, pad128);
+						}
+						if (a.offsFile() != null && a.offsBytes() > 0) {
+							currentStreamOffset = writeStagedFileAligned(digestChannel, a.offsFile(),
+									currentStreamOffset, pad128);
+						}
+					}
+				}
+			}
+
+			// Stream Relation Payloads
 			for (StagedRel sr : stagedRelations) {
 				long target4k = (currentStreamOffset + 4095) & ~4095;
 				if (target4k > currentStreamOffset) {
@@ -457,7 +670,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			long footerLen = footerOut.size() + 16;
 			ByteBuffer trailerBuf = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
 			trailerBuf.putLong(footerLen);
-			trailerBuf.putInt(SPEC_VERSION_PACKED); // 9
+			trailerBuf.putInt(specVersion); // 10 or 9
 			trailerBuf.putInt(SPEC_MAGIC); // 0x494D5053
 			footerOut.write(trailerBuf.array());
 
@@ -467,6 +680,12 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 		} finally {
 			for (var f : stagedFilesToClean) {
 				f.close();
+			}
+			for (var tf : stagedTempFiles) {
+				try {
+					Files.deleteIfExists(tf);
+				} catch (IOException ignored) {
+				}
 			}
 			if (createdTempStaging && effectiveStagingDir != null) {
 				try {

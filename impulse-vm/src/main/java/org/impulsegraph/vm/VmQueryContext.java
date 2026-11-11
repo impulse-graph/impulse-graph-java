@@ -117,7 +117,8 @@ public final class VmQueryContext implements AutoCloseable {
 	}
 
 	private static int[] ensureLengthCapacity(int[] arr, int handle) {
-		if (handle < arr.length) return arr;
+		if (handle < arr.length)
+			return arr;
 		int newCap = Math.max(arr.length * 2, handle + 1);
 		int[] next = new int[newCap];
 		System.arraycopy(arr, 0, next, 0, arr.length);
@@ -167,7 +168,8 @@ public final class VmQueryContext implements AutoCloseable {
 			return nodeVectorLengths[handle];
 		}
 		int[] vec = getNodeVector(handle);
-		if (vec != null) return vec.length;
+		if (vec != null)
+			return vec.length;
 		long[] lvec = getLongVector(handle);
 		return lvec != null ? lvec.length : 0;
 	}
@@ -1084,7 +1086,8 @@ public final class VmQueryContext implements AutoCloseable {
 		for (int i = 0; i < numTargets; i++) {
 			int tgt = inlineSeg.get(layoutInt, targetsOffset + i * 4L);
 			if (tgt < 0 || tgt >= 1_048_576) {
-				throw new IllegalArgumentException("Target node ID out of bounds [0, 1048576) in initMockGraph: " + tgt);
+				throw new IllegalArgumentException(
+						"Target node ID out of bounds [0, 1048576) in initMockGraph: " + tgt);
 			}
 			targets[i] = tgt;
 		}

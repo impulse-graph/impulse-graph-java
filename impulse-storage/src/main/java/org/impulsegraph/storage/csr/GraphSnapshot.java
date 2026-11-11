@@ -24,6 +24,8 @@ public class GraphSnapshot
 	private final int maxNodeCount;
 	private final org.impulsegraph.api.stats.GraphStatistics graphStats = new org.impulsegraph.api.stats.GraphStatistics();
 	private final Map<String, String> metadata = new ConcurrentHashMap<>();
+	private final Map<String, BinarySnapshotLoader.LoadedDomain> domainMap;
+	private final Map<Integer, BinarySnapshotLoader.LoadedDomain> domainIdMap;
 
 	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots) {
 		this(arena, snapshots, Map.of(), Map.of());
@@ -35,10 +37,25 @@ public class GraphSnapshot
 
 	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots, Map<String, String> metadata,
 			Map<String, RelationSnapshot> aliases) {
+		this(arena, snapshots, metadata, aliases, Map.of());
+	}
+
+	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots, Map<String, String> metadata,
+			Map<String, RelationSnapshot> aliases, Map<String, BinarySnapshotLoader.LoadedDomain> domains) {
 		this.arena = Objects.requireNonNull(arena, "Arena must not be null");
 		this.aliasMap = (aliases != null && !aliases.isEmpty())
 				? Collections.unmodifiableMap(new java.util.LinkedHashMap<>(aliases))
 				: Map.of();
+		this.domainMap = (domains != null && !domains.isEmpty())
+				? Collections.unmodifiableMap(new java.util.LinkedHashMap<>(domains))
+				: Map.of();
+		Map<Integer, BinarySnapshotLoader.LoadedDomain> idMap = new java.util.LinkedHashMap<>();
+		for (BinarySnapshotLoader.LoadedDomain d : this.domainMap.values()) {
+			if (d != null) {
+				idMap.put(d.domainId(), d);
+			}
+		}
+		this.domainIdMap = Collections.unmodifiableMap(idMap);
 		if (snapshots == null || snapshots.isEmpty()) {
 			this.relationMap = Map.of();
 			this.unmodifiableRelationMap = Map.of();
@@ -214,15 +231,61 @@ public class GraphSnapshot
 		return relationMap.keySet();
 	}
 
+	public BinarySnapshotLoader.LoadedDomain getDomain(String domainName) {
+		return domainMap.get(domainName);
+	}
+
+	public BinarySnapshotLoader.LoadedDomain getDomain(int domainId) {
+		return domainIdMap.get(domainId);
+	}
+
 	@Override
 	public java.util.Set<String> getDomainNames() {
+		if (!domainMap.isEmpty()) {
+			return domainMap.keySet();
+		}
 		return metadata.keySet().stream().filter(k -> k.startsWith("domain.") && k.endsWith(".id"))
 				.map(k -> k.substring(7, k.length() - 3)).collect(java.util.stream.Collectors.toSet());
 	}
 
 	@Override
 	public String getDomainName(int domainId) {
+		BinarySnapshotLoader.LoadedDomain dom = domainIdMap.get(domainId);
+		if (dom != null) {
+			return dom.name();
+		}
 		return metadata.get("domain." + domainId + ".name");
+	}
+
+	@Override
+	public java.util.List<String> getDomainAttributeNames(String domainName) {
+		BinarySnapshotLoader.LoadedDomain dom = domainMap.get(domainName);
+		if (dom == null || dom.attributes().isEmpty()) {
+			return java.util.List.of();
+		}
+		java.util.List<String> names = new java.util.ArrayList<>(dom.attributes().size());
+		for (BinarySnapshotLoader.LoadedAttribute a : dom.attributes()) {
+			names.add(a.name());
+		}
+		return Collections.unmodifiableList(names);
+	}
+
+	@Override
+	public java.util.List<java.lang.foreign.MemorySegment> getDomainAttributeSegments(String domainName) {
+		BinarySnapshotLoader.LoadedDomain dom = domainMap.get(domainName);
+		return dom != null ? dom.attributeSegments() : java.util.List.of();
+	}
+
+	@Override
+	public java.lang.foreign.MemorySegment getDomainAttributeSegment(String domainName, String attrName) {
+		BinarySnapshotLoader.LoadedDomain dom = domainMap.get(domainName);
+		return dom != null ? dom.getAttributeSegment(attrName) : java.lang.foreign.MemorySegment.NULL;
+	}
+
+	@Override
+	public int getDomainKeyAttrIndex(String domainName) {
+		BinarySnapshotLoader.LoadedDomain dom = domainMap.get(domainName);
+		return dom != null ? dom.keyAttrIndex() : 0xFFFF;
 	}
 
 	@Override
@@ -235,6 +298,10 @@ public class GraphSnapshot
 
 	public long getNodeCount(String domainName) {
 		if (domainName != null) {
+			BinarySnapshotLoader.LoadedDomain dom = domainMap.get(domainName);
+			if (dom != null && dom.nodeCount() > 0) {
+				return dom.nodeCount();
+			}
 			String meta = metadata.get("domain." + domainName + ".nodeCount");
 			if (meta != null) {
 				try {

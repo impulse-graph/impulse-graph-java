@@ -297,7 +297,8 @@ public final class ImpulseVmValidator {
 						return "IMPULSE_VM_ERR_INVALID_REGISTER";
 					}
 				}
-				case 0xA5, 0xA6, 0xAC, 0xAD, 0xAE, 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB7 -> { // Math / Cmp / Logic / Select
+				case 0xA5, 0xA6, 0xAC, 0xAD, 0xAE, 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB7 -> { // Math / Cmp / Logic /
+																									// Select
 					if (dst < 0 || dst >= 16 || pU16Low >= 16 || pU16High >= 16) {
 						return "IMPULSE_VM_ERR_INVALID_REGISTER";
 					}

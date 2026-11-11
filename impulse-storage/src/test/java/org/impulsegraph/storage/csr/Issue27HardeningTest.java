@@ -69,12 +69,14 @@ class Issue27HardeningTest {
 			GraphSnapshot graph = new GraphSnapshot(arena, Map.of("u2g", rel));
 			byte[] snapBytes = DefaultSnapshotBuilder.writeSnapshotBytes(graph);
 
-			// Set unknown required_feature flag (e.g. 0x8000000000000000L or 0x10L) at offset 22
+			// Set unknown required_feature flag (e.g. 0x8000000000000000L or 0x10L) at
+			// offset 22
 			ByteBuffer bb = ByteBuffer.wrap(snapBytes).order(ByteOrder.LITTLE_ENDIAN);
 			long unknownFeatures = 0x8000000000000000L | 1L;
 			bb.putLong(22, unknownFeatures);
 
-			// Recompute valid CRC over corrupted required_features so CRC passes and required_features fails
+			// Recompute valid CRC over corrupted required_features so CRC passes and
+			// required_features fails
 			int crc = computeCrc16(snapBytes, 0, 0x3E);
 			bb.putShort(0x3E, (short) crc);
 
@@ -153,7 +155,8 @@ class Issue27HardeningTest {
 			int domEnd = domStart + domCount * 16;
 			int relStart = (domEnd + 127) & ~127;
 
-			// Corrupt csrColIdxBytes (offset 64) to be 4 bytes instead of edgeCount*4 = 8 bytes
+			// Corrupt csrColIdxBytes (offset 64) to be 4 bytes instead of edgeCount*4 = 8
+			// bytes
 			bb.putLong(relStart + 64, 4L);
 
 			int crc = computeCrc16(snapBytes, 0, 0x3E);

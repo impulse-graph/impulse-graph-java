@@ -26,6 +26,14 @@ public interface SnapshotBuilder {
 	}
 
 	/**
+	 * Configures target binary snapshot specification version (e.g. 9 for v0.9.0 or
+	 * 10 for v0.10.0).
+	 */
+	default SnapshotBuilder withVersion(short version) {
+		return this;
+	}
+
+	/**
 	 * Configures a local directory for staging temporary files (such as external
 	 * sort runs when computing CSC from a source-sorted stream, or spilling large
 	 * string pools).

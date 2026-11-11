@@ -1,5 +1,6 @@
 package org.impulsegraph.api.traversal;
 
+import java.lang.foreign.MemorySegment;
 import org.impulsegraph.api.bitset.ImpulseBitSet;
 
 /**
@@ -96,6 +97,54 @@ public interface DomainView {
 				ids[idx++] = id;
 		}
 		return from(ids);
+	}
+
+	/**
+	 * Returns the list of attribute names defined for this domain.
+	 */
+	default java.util.List<String> attributeNames() {
+		return java.util.List.of();
+	}
+
+	/**
+	 * Returns the list of off-heap {@link MemorySegment}s for all attributes in
+	 * this domain.
+	 */
+	default java.util.List<MemorySegment> attributeSegments() {
+		return java.util.List.of();
+	}
+
+	/**
+	 * Returns the off-heap {@link MemorySegment} for the named attribute in this
+	 * domain.
+	 */
+	default MemorySegment attributeSegment(String attributeName) {
+		return MemorySegment.NULL;
+	}
+
+	/**
+	 * Returns the off-heap {@link MemorySegment} for the attribute at index in this
+	 * domain.
+	 */
+	default MemorySegment attributeSegment(int attributeIndex) {
+		return MemorySegment.NULL;
+	}
+
+	/**
+	 * Returns the 0-indexed attribute index holding the primary key column, or
+	 * 0xFFFF if none.
+	 */
+	default int keyAttrIndex() {
+		return 0xFFFF;
+	}
+
+	/**
+	 * Returns the name of the primary key attribute, or null if none.
+	 */
+	default String keyAttributeName() {
+		int idx = keyAttrIndex();
+		var names = attributeNames();
+		return (idx >= 0 && idx < names.size()) ? names.get(idx) : null;
 	}
 
 	/**
