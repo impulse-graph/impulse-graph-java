@@ -208,6 +208,31 @@ public final class DefaultMultiLaneResult implements MultiLaneResult {
 	}
 
 	@Override
+	public List<ScoredNode> topK(float[] queryVec, String attrName, int metric, int k) {
+		if (k <= 0) {
+			return List.of();
+		}
+		if (attrName != null && !attrName.isEmpty()) {
+			List<Long> activeNodes = nodesWithQuorum(1);
+			if (activeNodes.isEmpty()) {
+				return List.of();
+			}
+			long[] seedArr = new long[activeNodes.size()];
+			for (int i = 0; i < activeNodes.size(); i++) {
+				seedArr[i] = activeNodes.get(i);
+			}
+			List<ScoredNode> rawTop = snapshot.domain(domainName).from(seedArr).rerank(queryVec, attrName, metric)
+					.topK(k);
+			List<ScoredNode> withQuorum = new ArrayList<>(rawTop.size());
+			for (ScoredNode sn : rawTop) {
+				withQuorum.add(new ScoredNode(sn.nodeId(), sn.score(), lanePopcountFor(sn.nodeId())));
+			}
+			return Collections.unmodifiableList(withQuorum);
+		}
+		return topKWithQuorum(queryVec, 1, k);
+	}
+
+	@Override
 	public List<ScoredKey> topKKeys(float[] queryVec, int k) {
 		DomainView dv = snapshot.domain(domainName);
 		List<ScoredNode> nodes = topK(queryVec, k);

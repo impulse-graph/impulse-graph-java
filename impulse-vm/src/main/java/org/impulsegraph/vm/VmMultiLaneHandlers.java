@@ -69,6 +69,65 @@ public final class VmMultiLaneHandlers {
 		return Math.max(64, minNeeded);
 	}
 
+	private static int resolveDomainNodeCount(VmQueryContext ctx, String domName) {
+		if (ctx != null && ctx.getSnapshot() != null) {
+			if (ctx.getSnapshot() instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+				org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain dom = null;
+				if (domName != null && !domName.isEmpty()) {
+					dom = gs.getDomain(domName);
+				}
+				if (dom == null && !gs.getDomainNames().isEmpty()) {
+					dom = gs.getDomain(gs.getDomainNames().iterator().next());
+				}
+				if (dom != null) {
+					return (int) dom.nodeCount();
+				}
+			}
+			if (domName != null && !domName.isEmpty()) {
+				long cnt = ctx.getSnapshot().getNodeCount(domName);
+				if (cnt > 0) {
+					return (int) cnt;
+				}
+			}
+		}
+		return -1;
+	}
+
+	private static int resolveTargetNodeCountForStep(VmQueryContext ctx, RelationSnapshot rel, boolean isCsc,
+			int fallback) {
+		if (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot csrRel) {
+			if (ctx != null && ctx.getSnapshot() instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+				int domId = isCsc ? csrRel.getSrcDomainId() : csrRel.getTgtDomainId();
+				String dName = gs.getDomainName(domId);
+				if (dName != null) {
+					org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain dom = gs.getDomain(dName);
+					if (dom != null) {
+						return (int) Math.max(0L, dom.nodeCount());
+					}
+				}
+			}
+			if (csrRel.isVirtual() && csrRel.getComponentRelations().length > 0) {
+				org.impulsegraph.storage.csr.RelationSnapshot c0 = csrRel.getComponentRelations()[0];
+				int n = isCsc ? c0.getNodeCount() : c0.getTargetNodeCount();
+				if (n > 0) {
+					return n;
+				}
+			}
+			int n = isCsc ? csrRel.getNodeCount() : csrRel.getTargetNodeCount();
+			if (n > 0) {
+				return n;
+			}
+		} else if (rel != null) {
+			int n = isCsc
+					? rel.getNodeCount()
+					: (rel.getCscNodeCount() > 0 ? rel.getCscNodeCount() : rel.getNodeCount());
+			if (n > 0) {
+				return n;
+			}
+		}
+		return fallback;
+	}
+
 	private static void stepLanesOnce(VmQueryContext ctx, VmLaneFrontier lfSrc, long[] currentLanes, int srcLen,
 			long[] nextLanes, int outLen, int relId, boolean isCsc, boolean accumulate) {
 		Arrays.fill(nextLanes, 0, outLen, 0L);
@@ -79,23 +138,92 @@ public final class VmMultiLaneHandlers {
 				nextLanes[u] = currentLanes[u] & activeMask;
 			}
 		}
-		long[] tripArr = lfSrc.getEdgeTripMask(relId);
-		int tripLen = lfSrc.getEdgeTripMaskLength(relId);
 		RelationSnapshot rel = ctx.resolveRelation(relId);
 		if (rel == null) {
 			return;
 		}
+		stepSingleRelationInto(ctx, lfSrc, currentLanes, srcLen, nextLanes, outLen, rel, relId, isCsc, null, null);
+	}
+
+	private static void stepSingleRelationInto(VmQueryContext ctx, VmLaneFrontier lfSrc, long[] currentLanes,
+			int srcLen, long[] nextLanes, int outLen, RelationSnapshot rel, int relId, boolean isCsc,
+			org.impulsegraph.vm.cel.VmCelEvaluator edgePredEval,
+			org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch edgePredScratch) {
+		if (rel == null || outLen <= 0 || srcLen <= 0) {
+			return;
+		}
+		if (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot csrRel) {
+			if (csrRel.isVirtual()) {
+				for (org.impulsegraph.storage.csr.RelationSnapshot comp : csrRel.getComponentRelations()) {
+					stepSingleRelationInto(ctx, lfSrc, currentLanes, srcLen, nextLanes, outLen, comp,
+							comp.getRelationId(), isCsc, edgePredEval, edgePredScratch);
+				}
+				return;
+			}
+			if (csrRel.getEdgeCount() == 0) {
+				return;
+			}
+		}
+
+		long activeMask = lfSrc.activeMask();
+		if (activeMask == 0L) {
+			return;
+		}
+		long[] tripArr = relId >= 0 ? lfSrc.getEdgeTripMask(relId) : null;
+		int tripLen = relId >= 0 ? lfSrc.getEdgeTripMaskLength(relId) : 0;
+
+		org.impulsegraph.storage.csr.RelationSnapshot csrRel = (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot c)
+				? c
+				: null;
+		org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain srcDom = null;
+		org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain tgtDom = null;
+		if (edgePredEval != null && csrRel != null
+				&& ctx.getSnapshot() instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+			String sName = gs.getDomainName(csrRel.getSrcDomainId());
+			String tName = gs.getDomainName(csrRel.getTgtDomainId());
+			if (sName != null) {
+				srcDom = gs.getDomain(sName);
+			}
+			if (tName != null) {
+				tgtDom = gs.getDomain(tName);
+			}
+		}
+
 		int relN = rel.getNodeCount();
 		MemorySegment rowSeg = rel.getRowOffsetsSegment();
 		MemorySegment colSeg = rel.getColumnTargetsSegment();
 		boolean hasOffHeapCsr = rowSeg != null && !rowSeg.equals(MemorySegment.NULL) && colSeg != null
 				&& !colSeg.equals(MemorySegment.NULL)
 				&& rowSeg.byteSize() >= (long) (relN + 1) * rel.getEdgeIndexWidth();
-		boolean fast32 = hasOffHeapCsr && rel.getEdgeIndexWidth() == 4 && rel.getNodeIdWidth() == 4;
+		boolean fast32 = hasOffHeapCsr && rel.getEdgeIndexWidth() == 4 && rel.getNodeIdWidth() == 4
+				&& edgePredEval == null;
 
 		if (!isCsc) {
 			int lim = Math.min(srcLen, relN);
-			if (fast32) {
+			if (csrRel != null && csrRel.isFlatForward()) {
+				int[] edgeMap = (tripArr != null || edgePredEval != null)
+						? csrRel.getOrBuildFlatForwardEdgeMap()
+						: null;
+				for (int u = 0; u < lim; u++) {
+					long mU = currentLanes[u] & activeMask;
+					if (mU == 0L) {
+						continue;
+					}
+					int[] nbrs = csrRel.getTargets(u);
+					if (nbrs.length > 0) {
+						int v = nbrs[0];
+						if (v >= 0 && v < outLen) {
+							int eIdx = (edgeMap != null && u < edgeMap.length) ? edgeMap[u] : -1;
+							if (edgePredEval != null && (eIdx < 0 || !edgePredEval.evalEdgeFilter(csrRel, eIdx, srcDom,
+									u, tgtDom, v, edgePredScratch))) {
+								continue;
+							}
+							long trip = (tripArr != null && eIdx >= 0 && eIdx < tripLen) ? tripArr[eIdx] : 0L;
+							nextLanes[v] |= (mU & ~trip);
+						}
+					}
+				}
+			} else if (fast32) {
 				if (tripArr == null) {
 					for (int u = 0; u < lim; u++) {
 						long mU = currentLanes[u] & activeMask;
@@ -136,20 +264,15 @@ public final class VmMultiLaneHandlers {
 					}
 					int start = (int) rel.readEdgeIndex(rowSeg, u);
 					int end = (int) rel.readEdgeIndex(rowSeg, u + 1);
-					if (tripArr == null) {
-						for (int e = start; e < end; e++) {
-							int v = rel.readNodeId(colSeg, e);
-							if (v >= 0 && v < outLen) {
-								nextLanes[v] |= mU;
+					for (int e = start; e < end; e++) {
+						int v = rel.readNodeId(colSeg, e);
+						if (v >= 0 && v < outLen) {
+							if (edgePredEval != null && csrRel != null
+									&& !edgePredEval.evalEdgeFilter(csrRel, e, srcDom, u, tgtDom, v, edgePredScratch)) {
+								continue;
 							}
-						}
-					} else {
-						for (int e = start; e < end; e++) {
-							int v = rel.readNodeId(colSeg, e);
-							if (v >= 0 && v < outLen) {
-								long trip = (e >= 0 && e < tripLen) ? tripArr[e] : 0L;
-								nextLanes[v] |= (mU & ~trip);
-							}
+							long trip = (tripArr != null && e >= 0 && e < tripLen) ? tripArr[e] : 0L;
+							nextLanes[v] |= (mU & ~trip);
 						}
 					}
 				}
@@ -164,6 +287,10 @@ public final class VmMultiLaneHandlers {
 							int e = edgeCounter + j;
 							int v = nbrs[j];
 							if (v >= 0 && v < outLen) {
+								if (edgePredEval != null && csrRel != null && !edgePredEval.evalEdgeFilter(csrRel, e,
+										srcDom, u, tgtDom, v, edgePredScratch)) {
+									continue;
+								}
 								long trip = (tripArr != null && e >= 0 && e < tripLen) ? tripArr[e] : 0L;
 								nextLanes[v] |= (mU & ~trip);
 							}
@@ -173,41 +300,124 @@ public final class VmMultiLaneHandlers {
 				}
 			}
 		} else {
-			int lim = Math.min(outLen, relN);
-			if (hasOffHeapCsr) {
-				for (int u = 0; u < lim; u++) {
-					int start = (int) rel.readEdgeIndex(rowSeg, u);
-					int end = (int) rel.readEdgeIndex(rowSeg, u + 1);
-					long accU = nextLanes[u];
-					for (int e = start; e < end; e++) {
-						int v = rel.readNodeId(colSeg, e);
-						if (v >= 0 && v < srcLen) {
-							long mV = currentLanes[v] & activeMask;
-							if (mV != 0L) {
-								long trip = (tripArr != null && e >= 0 && e < tripLen) ? tripArr[e] : 0L;
-								accU |= (mV & ~trip);
+			if (csrRel != null && csrRel.isFlatReverse()) {
+				int maxV = Math.min(srcLen, csrRel.getCscNodeCount());
+				boolean needEdgeIdx = (tripArr != null || edgePredEval != null);
+				for (int v = 0; v < maxV; v++) {
+					long mV = currentLanes[v] & activeMask;
+					if (mV == 0L) {
+						continue;
+					}
+					int[] srcs = csrRel.getInTargets(v);
+					for (int u : srcs) {
+						if (u >= 0 && u < outLen) {
+							int eIdx = needEdgeIdx ? csrRel.findCsrEdgeIndex(u, v) : -1;
+							if (edgePredEval != null && (eIdx < 0 || !edgePredEval.evalEdgeFilter(csrRel, eIdx, srcDom,
+									u, tgtDom, v, edgePredScratch))) {
+								continue;
 							}
+							long trip = (tripArr != null && eIdx >= 0 && eIdx < tripLen) ? tripArr[eIdx] : 0L;
+							nextLanes[u] |= (mV & ~trip);
 						}
 					}
-					nextLanes[u] = accU;
+				}
+			} else if (csrRel != null && csrRel.hasCsc() && csrRel.getCscRowOffsetsSegment() != null
+					&& !csrRel.getCscRowOffsetsSegment().equals(MemorySegment.NULL)
+					&& csrRel.getCscColumnTargetsSegment() != null
+					&& !csrRel.getCscColumnTargetsSegment().equals(MemorySegment.NULL)) {
+				MemorySegment cscRow = csrRel.getCscRowOffsetsSegment();
+				MemorySegment cscCol = csrRel.getCscColumnTargetsSegment();
+				int maxV = Math.min(srcLen, csrRel.getCscNodeCount());
+				int[] cscToCsr = (tripArr != null || edgePredEval != null) ? csrRel.getOrBuildCscToCsrEdgeMap() : null;
+				for (int v = 0; v < maxV; v++) {
+					long mV = currentLanes[v] & activeMask;
+					if (mV == 0L) {
+						continue;
+					}
+					long start = csrRel.readEdgeIndex(cscRow, v);
+					long end = csrRel.readEdgeIndex(cscRow, v + 1);
+					for (long cscIdx = start; cscIdx < end; cscIdx++) {
+						int u = csrRel.readSrcNodeId(cscCol, cscIdx);
+						if (u >= 0 && u < outLen) {
+							int eIdx = (cscToCsr != null && cscIdx < cscToCsr.length)
+									? cscToCsr[(int) cscIdx]
+									: (int) cscIdx;
+							if (edgePredEval != null && (eIdx < 0 || !edgePredEval.evalEdgeFilter(csrRel, eIdx, srcDom,
+									u, tgtDom, v, edgePredScratch))) {
+								continue;
+							}
+							long trip = (tripArr != null && eIdx >= 0 && eIdx < tripLen) ? tripArr[eIdx] : 0L;
+							nextLanes[u] |= (mV & ~trip);
+						}
+					}
 				}
 			} else {
-				int edgeCounter = 0;
-				for (int u = 0; u < lim; u++) {
-					int[] nbrs = rel.getTargets(u);
-					int deg = nbrs != null ? nbrs.length : 0;
-					for (int j = 0; j < deg; j++) {
-						int e = edgeCounter + j;
-						int v = nbrs[j];
-						if (v >= 0 && v < srcLen) {
-							long mV = currentLanes[v] & activeMask;
-							if (mV != 0L) {
-								long trip = (tripArr != null && e >= 0 && e < tripLen) ? tripArr[e] : 0L;
-								nextLanes[u] |= (mV & ~trip);
+				int lim = Math.min(outLen, relN);
+				if (csrRel != null && csrRel.isFlatForward()) {
+					int[] edgeMap = (tripArr != null || edgePredEval != null)
+							? csrRel.getOrBuildFlatForwardEdgeMap()
+							: null;
+					for (int u = 0; u < lim; u++) {
+						int[] nbrs = csrRel.getTargets(u);
+						if (nbrs.length > 0) {
+							int v = nbrs[0];
+							if (v >= 0 && v < srcLen) {
+								long mV = currentLanes[v] & activeMask;
+								if (mV != 0L) {
+									int eIdx = (edgeMap != null && u < edgeMap.length) ? edgeMap[u] : -1;
+									if (edgePredEval != null && (eIdx < 0 || !edgePredEval.evalEdgeFilter(csrRel, eIdx,
+											srcDom, u, tgtDom, v, edgePredScratch))) {
+										continue;
+									}
+									long trip = (tripArr != null && eIdx >= 0 && eIdx < tripLen) ? tripArr[eIdx] : 0L;
+									nextLanes[u] |= (mV & ~trip);
+								}
 							}
 						}
 					}
-					edgeCounter += deg;
+				} else if (hasOffHeapCsr) {
+					for (int u = 0; u < lim; u++) {
+						int start = (int) rel.readEdgeIndex(rowSeg, u);
+						int end = (int) rel.readEdgeIndex(rowSeg, u + 1);
+						long accU = nextLanes[u];
+						for (int e = start; e < end; e++) {
+							int v = rel.readNodeId(colSeg, e);
+							if (v >= 0 && v < srcLen) {
+								long mV = currentLanes[v] & activeMask;
+								if (mV != 0L) {
+									if (edgePredEval != null && csrRel != null && !edgePredEval.evalEdgeFilter(csrRel,
+											e, srcDom, u, tgtDom, v, edgePredScratch)) {
+										continue;
+									}
+									long trip = (tripArr != null && e >= 0 && e < tripLen) ? tripArr[e] : 0L;
+									accU |= (mV & ~trip);
+								}
+							}
+						}
+						nextLanes[u] = accU;
+					}
+				} else {
+					int edgeCounter = 0;
+					for (int u = 0; u < lim; u++) {
+						int[] nbrs = rel.getTargets(u);
+						int deg = nbrs != null ? nbrs.length : 0;
+						for (int j = 0; j < deg; j++) {
+							int e = edgeCounter + j;
+							int v = nbrs[j];
+							if (v >= 0 && v < srcLen) {
+								long mV = currentLanes[v] & activeMask;
+								if (mV != 0L) {
+									if (edgePredEval != null && csrRel != null && !edgePredEval.evalEdgeFilter(csrRel,
+											e, srcDom, u, tgtDom, v, edgePredScratch)) {
+										continue;
+									}
+									long trip = (tripArr != null && e >= 0 && e < tripLen) ? tripArr[e] : 0L;
+									nextLanes[u] |= (mV & ~trip);
+								}
+							}
+						}
+						edgeCounter += deg;
+					}
 				}
 			}
 		}
@@ -236,21 +446,26 @@ public final class VmMultiLaneHandlers {
 				int[] seeds = ctx.scratchInt(0, 64);
 				int seedCount = 0;
 				int numLanes;
+				boolean domainBound = (flags & 0x40) != 0;
 				switch (tag) {
 					case T_NULL -> {
-						int k = Math.max(0, Math.min(64, pU16High > 0 ? pU16High : 8));
-						if ((flags & 1) != 0) {
-							for (int i = 0; i < k; i++) {
-								seeds[seedCount++] = i;
+						if (domainBound) {
+							numLanes = 0;
+						} else {
+							int k = Math.max(0, Math.min(64, pU16High > 0 ? pU16High : 8));
+							if ((flags & 1) != 0) {
+								for (int i = 0; i < k; i++) {
+									seeds[seedCount++] = i;
+								}
+							} else if (k >= 1) {
+								seeds[seedCount++] = 0;
 							}
-						} else if (k >= 1) {
-							seeds[seedCount++] = 0;
+							numLanes = k;
 						}
-						numLanes = k;
 					}
 					case T_NODE_ID, T_INT64 -> {
 						int s0 = (int) VmHandlers.getRegisterValue(state, srcReg);
-						if ((flags & 1) != 0 && pU16High > 1) {
+						if (!domainBound && (flags & 1) != 0 && pU16High > 1) {
 							int k = Math.min(64, pU16High);
 							for (int i = 0; i < k; i++) {
 								seeds[seedCount++] = s0 + i;
@@ -302,11 +517,17 @@ public final class VmMultiLaneHandlers {
 				for (int i = 0; i < seedCount; i++) {
 					maxSeed = Math.max(maxSeed, seeds[i]);
 				}
-				int relOrDom = (tag == VmRegType.T_NULL) ? 0 : pU16High;
-				int nodeCount = resolveNodeCount(ctx, relOrDom, maxSeed + 1);
-				VmLaneFrontier.LaneWidth width = VmLaneFrontier.selectLaneWidth(numLanes);
+				int nodeCount;
+				if (domainBound) {
+					int domN = resolveDomainNodeCount(ctx, ctx.getString(pU16High));
+					nodeCount = (domN >= 0) ? domN : resolveNodeCount(ctx, 0, seedCount > 0 ? (maxSeed + 1) : 1);
+				} else {
+					int relOrDom = (tag == VmRegType.T_NULL) ? 0 : pU16High;
+					nodeCount = resolveNodeCount(ctx, relOrDom, maxSeed + 1);
+				}
+				VmLaneFrontier.LaneWidth width = VmLaneFrontier.selectLaneWidth(Math.max(1, numLanes));
 				long activeMask = VmRegType.makeActiveMaskU64(numLanes);
-				int h = ctx.acquireLaneFrontier(width, numLanes, activeMask, nodeCount);
+				int h = ctx.acquireLaneFrontier(width, numLanes, activeMask, Math.max(0, nodeCount));
 				VmLaneFrontier lf = ctx.getLaneFrontier(h);
 				long[] lanes = lf.lanes();
 				boolean anySet = false;
@@ -328,16 +549,45 @@ public final class VmMultiLaneHandlers {
 				int groupsReg = pU8_1;
 				VmHandlers.validateReg(nodesReg);
 				VmRegType tag = VmRegType.fromTag(VmHandlers.getRegisterType(state, nodesReg));
+				boolean domainBound = (flags & 0x40) != 0;
+				String boundDomName = null;
+				int boundNumGroups = 0;
+				if (domainBound) {
+					String spec = ctx.getString(pU16High);
+					if (spec != null) {
+						int sep = spec.indexOf('\0');
+						if (sep >= 0) {
+							boundDomName = spec.substring(0, sep);
+							try {
+								boundNumGroups = Integer.parseInt(spec.substring(sep + 1));
+							} catch (NumberFormatException ignored) {
+							}
+						} else {
+							boundDomName = spec;
+						}
+					}
+				}
 				if (tag == VmRegType.T_NULL) {
-					int numLanes = Math.max(1, Math.min(64, pU16High > 0 ? pU16High : 8));
-					VmLaneFrontier.LaneWidth width = VmLaneFrontier.selectLaneWidth(numLanes);
-					long activeMask = VmRegType.makeActiveMaskU64(numLanes);
-					int nodeCount = resolveNodeCount(ctx, 0, 64);
-					int h = ctx.acquireLaneFrontier(width, numLanes, activeMask, nodeCount);
-					VmLaneFrontier lf = ctx.getLaneFrontier(h);
-					lf.lanes()[0] = 1L & activeMask;
-					VmHandlers.setRegister(state, dst, h, TYPE_LANE_FRONTIER);
-					VmHandlers.setFlag(state, FLAG_ZF, activeMask == 0L);
+					if (domainBound) {
+						int numLanes = Math.max(0, Math.min(64, boundNumGroups));
+						VmLaneFrontier.LaneWidth width = VmLaneFrontier.selectLaneWidth(Math.max(1, numLanes));
+						long activeMask = VmRegType.makeActiveMaskU64(numLanes);
+						int domN = resolveDomainNodeCount(ctx, boundDomName);
+						int nodeCount = (domN >= 0) ? domN : resolveNodeCount(ctx, 0, 1);
+						int h = ctx.acquireLaneFrontier(width, numLanes, activeMask, Math.max(0, nodeCount));
+						VmHandlers.setRegister(state, dst, h, TYPE_LANE_FRONTIER);
+						VmHandlers.setFlag(state, FLAG_ZF, true);
+					} else {
+						int numLanes = Math.max(1, Math.min(64, pU16High > 0 ? pU16High : 8));
+						VmLaneFrontier.LaneWidth width = VmLaneFrontier.selectLaneWidth(numLanes);
+						long activeMask = VmRegType.makeActiveMaskU64(numLanes);
+						int nodeCount = resolveNodeCount(ctx, 0, 64);
+						int h = ctx.acquireLaneFrontier(width, numLanes, activeMask, nodeCount);
+						VmLaneFrontier lf = ctx.getLaneFrontier(h);
+						lf.lanes()[0] = 1L & activeMask;
+						VmHandlers.setRegister(state, dst, h, TYPE_LANE_FRONTIER);
+						VmHandlers.setFlag(state, FLAG_ZF, activeMask == 0L);
+					}
 				} else if (tag == VmRegType.T_NODE_VECTOR || tag == VmRegType.T_UINT64_VECTOR) {
 					int hNodes = (int) VmHandlers.getRegisterValue(state, nodesReg);
 					int[] nodesI = ctx.getIntVector(hNodes);
@@ -382,11 +632,19 @@ public final class VmMultiLaneHandlers {
 						maxGrp = Math.max(maxGrp, gArr[i]);
 						maxNid = Math.max(maxNid, uArr[i]);
 					}
-					int numLanes = (pU16High > 0) ? Math.min(64, pU16High) : Math.min(64, Math.max(0, maxGrp + 1));
-					VmLaneFrontier.LaneWidth width = VmLaneFrontier.selectLaneWidth(numLanes);
+					int numLanes;
+					int nodeCount;
+					if (domainBound) {
+						numLanes = Math.min(64, Math.max(boundNumGroups, Math.max(0, maxGrp + 1)));
+						int domN = resolveDomainNodeCount(ctx, boundDomName);
+						nodeCount = (domN >= 0) ? domN : resolveNodeCount(ctx, 0, maxNid + 1);
+					} else {
+						numLanes = (pU16High > 0) ? Math.min(64, pU16High) : Math.min(64, Math.max(0, maxGrp + 1));
+						nodeCount = resolveNodeCount(ctx, 0, maxNid + 1);
+					}
+					VmLaneFrontier.LaneWidth width = VmLaneFrontier.selectLaneWidth(Math.max(1, numLanes));
 					long activeMask = VmRegType.makeActiveMaskU64(numLanes);
-					int nodeCount = resolveNodeCount(ctx, 0, maxNid + 1);
-					int h = ctx.acquireLaneFrontier(width, numLanes, activeMask, nodeCount);
+					int h = ctx.acquireLaneFrontier(width, numLanes, activeMask, Math.max(0, nodeCount));
 					VmLaneFrontier lf = ctx.getLaneFrontier(h);
 					long[] lanes = lf.lanes();
 					boolean anySet = false;
@@ -480,23 +738,41 @@ public final class VmMultiLaneHandlers {
 				boolean isCsc = (op == 0xC4);
 				boolean accumulate = (flags & OP_FLAG_ACCUMULATE) != 0;
 				boolean isFixpoint = (flags & 0x04) != 0;
+				boolean isBoth = (flags & 0x08) != 0;
+				boolean isWhere = (flags & 0x20) != 0;
+				boolean isUnionOrBoundedFixpoint = (flags & 0x40) != 0;
 				VmLaneFrontier lfSrc = requireLaneFrontier(state, ctx, srcReg);
-				RelationSnapshot rel = ctx.resolveRelation(relId);
-				int outLen = (rel == null) ? lfSrc.nodeCount() : resolveNodeCount(ctx, relId, lfSrc.nodeCount());
-				int h = ctx.acquireLaneFrontier(lfSrc.width(), lfSrc.numLanes(), lfSrc.activeMask(), outLen);
-				VmLaneFrontier lfOut = ctx.getLaneFrontier(h);
-				lfOut.copyEdgeTripMasksFrom(ctx, lfSrc);
-				long[] outLanes = lfOut.lanes();
-				if (rel == null) {
-					for (int u = 0; u < lfSrc.nodeCount(); u++) {
-						outLanes[u] = lfSrc.lanes()[u] & lfSrc.activeMask();
+
+				int outLen;
+				if (isUnionOrBoundedFixpoint && isFixpoint) {
+					// lane-fixpoint-max-hops: "<relName>\0<maxHops>"
+					String spec = ctx.getString(relId);
+					String rName = spec != null ? spec : "";
+					int maxHops = 0;
+					if (spec != null) {
+						int sep = spec.indexOf('\0');
+						if (sep >= 0) {
+							rName = spec.substring(0, sep);
+							try {
+								maxHops = Integer.parseInt(spec.substring(sep + 1));
+							} catch (NumberFormatException ignored) {
+							}
+						}
 					}
-				} else if (!isFixpoint) {
-					stepLanesOnce(ctx, lfSrc, lfSrc.lanes(), lfSrc.nodeCount(), outLanes, outLen, relId, isCsc,
-							accumulate);
-				} else {
-					long[] delta = ctx.scratchLong(0, outLen);
-					long[] stepOut = ctx.scratchLong(1, outLen);
+					RelationSnapshot rel = (ctx.getSnapshot() != null && !rName.isEmpty())
+							? ctx.getSnapshot().getRelationSnapshot(rName)
+							: null;
+					outLen = (rel == null)
+							? lfSrc.nodeCount()
+							: Math.max(lfSrc.nodeCount(),
+									resolveTargetNodeCountForStep(ctx, rel, false, lfSrc.nodeCount()));
+					int h = ctx.acquireLaneFrontier(lfSrc.width(), lfSrc.numLanes(), lfSrc.activeMask(), outLen);
+					VmLaneFrontier lfOut = ctx.getLaneFrontier(h);
+					lfOut.copyEdgeTripMasksFrom(ctx, lfSrc);
+					long[] outLanes = lfOut.lanes();
+					long[] delta = ctx.scratchLong(0, Math.max(1, outLen));
+					long[] stepOut = ctx.scratchLong(1, Math.max(1, outLen));
+					Arrays.fill(delta, 0, outLen, 0L);
 					int initLim = Math.min(lfSrc.nodeCount(), outLen);
 					boolean hasDelta = false;
 					for (int u = 0; u < initLim; u++) {
@@ -507,9 +783,12 @@ public final class VmMultiLaneHandlers {
 							hasDelta = true;
 						}
 					}
-					while (hasDelta) {
+					int hop = 0;
+					while (hasDelta && hop < maxHops && rel != null) {
 						ctx.consumeFuel();
-						stepLanesOnce(ctx, lfSrc, delta, outLen, stepOut, outLen, relId, isCsc, false);
+						Arrays.fill(stepOut, 0, outLen, 0L);
+						stepSingleRelationInto(ctx, lfSrc, delta, outLen, stepOut, outLen, rel, rel.getRelationId(),
+								false, null, null);
 						hasDelta = false;
 						for (int v = 0; v < outLen; v++) {
 							long newlyReached = stepOut[v] & ~outLanes[v];
@@ -519,19 +798,194 @@ public final class VmMultiLaneHandlers {
 								hasDelta = true;
 							}
 						}
+						hop++;
 					}
-				}
-				VmHandlers.setRegister(state, dst, h, TYPE_LANE_FRONTIER);
-				boolean anyActive = false;
-				for (int u = 0; u < outLen; u++) {
-					if (outLanes[u] != 0L) {
-						anyActive = true;
-						break;
+					VmHandlers.setRegister(state, dst, h, TYPE_LANE_FRONTIER);
+					boolean anyActive = false;
+					for (int u = 0; u < outLen; u++) {
+						if (outLanes[u] != 0L) {
+							anyActive = true;
+							break;
+						}
 					}
+					VmHandlers.setFlag(state, FLAG_ZF, !anyActive);
+				} else if (isUnionOrBoundedFixpoint) {
+					// lane-walk-union: "\0"-separated relation names
+					String joined = ctx.getString(relId);
+					RelationSnapshot firstRel = null;
+					if (ctx.getSnapshot() != null && joined != null && !joined.isEmpty()) {
+						int pos = 0;
+						while (pos <= joined.length()) {
+							int next = joined.indexOf('\0', pos);
+							int end = (next < 0) ? joined.length() : next;
+							if (end > pos) {
+								String rn = joined.substring(pos, end);
+								firstRel = ctx.getSnapshot().getRelationSnapshot(rn);
+								if (firstRel != null) {
+									break;
+								}
+							}
+							if (next < 0) {
+								break;
+							}
+							pos = next + 1;
+						}
+					}
+					outLen = resolveTargetNodeCountForStep(ctx, firstRel, isCsc, lfSrc.nodeCount());
+					int h = ctx.acquireLaneFrontier(lfSrc.width(), lfSrc.numLanes(), lfSrc.activeMask(), outLen);
+					VmLaneFrontier lfOut = ctx.getLaneFrontier(h);
+					lfOut.copyEdgeTripMasksFrom(ctx, lfSrc);
+					long[] outLanes = lfOut.lanes();
+					if (ctx.getSnapshot() != null && joined != null && !joined.isEmpty()) {
+						int pos = 0;
+						while (pos <= joined.length()) {
+							int next = joined.indexOf('\0', pos);
+							int end = (next < 0) ? joined.length() : next;
+							if (end > pos) {
+								String rn = joined.substring(pos, end);
+								RelationSnapshot r = ctx.getSnapshot().getRelationSnapshot(rn);
+								if (r != null) {
+									stepSingleRelationInto(ctx, lfSrc, lfSrc.lanes(), lfSrc.nodeCount(), outLanes,
+											outLen, r, r.getRelationId(), isCsc, null, null);
+								}
+							}
+							if (next < 0) {
+								break;
+							}
+							pos = next + 1;
+						}
+					}
+					VmHandlers.setRegister(state, dst, h, TYPE_LANE_FRONTIER);
+					boolean anyActive = false;
+					for (int u = 0; u < outLen; u++) {
+						if (outLanes[u] != 0L) {
+							anyActive = true;
+							break;
+						}
+					}
+					VmHandlers.setFlag(state, FLAG_ZF, !anyActive);
+				} else if (isWhere) {
+					// lane-walk-where: "<relName>\0<cel>"
+					String spec = ctx.getString(relId);
+					String rName = "";
+					String celExpr = "true";
+					if (spec != null) {
+						int sep = spec.indexOf('\0');
+						if (sep >= 0) {
+							rName = spec.substring(0, sep);
+							celExpr = spec.substring(sep + 1);
+						} else {
+							rName = spec;
+						}
+					}
+					RelationSnapshot rel = (ctx.getSnapshot() != null && !rName.isEmpty())
+							? ctx.getSnapshot().getRelationSnapshot(rName)
+							: null;
+					outLen = resolveTargetNodeCountForStep(ctx, rel, isCsc, lfSrc.nodeCount());
+					int h = ctx.acquireLaneFrontier(lfSrc.width(), lfSrc.numLanes(), lfSrc.activeMask(), outLen);
+					VmLaneFrontier lfOut = ctx.getLaneFrontier(h);
+					lfOut.copyEdgeTripMasksFrom(ctx, lfSrc);
+					long[] outLanes = lfOut.lanes();
+					if (rel != null) {
+						org.impulsegraph.vm.cel.VmCelEvaluator eval = org.impulsegraph.vm.cel.VmCelEvaluator
+								.compile(celExpr, java.util.Map.of());
+						org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = eval.createScratch();
+						stepSingleRelationInto(ctx, lfSrc, lfSrc.lanes(), lfSrc.nodeCount(), outLanes, outLen, rel,
+								rel.getRelationId(), isCsc, eval, scratch);
+					}
+					VmHandlers.setRegister(state, dst, h, TYPE_LANE_FRONTIER);
+					boolean anyActive = false;
+					for (int u = 0; u < outLen; u++) {
+						if (outLanes[u] != 0L) {
+							anyActive = true;
+							break;
+						}
+					}
+					VmHandlers.setFlag(state, FLAG_ZF, !anyActive);
+				} else if (isBoth) {
+					RelationSnapshot rel = ctx.resolveRelation(relId);
+					outLen = resolveTargetNodeCountForStep(ctx, rel, false, lfSrc.nodeCount());
+					int h = ctx.acquireLaneFrontier(lfSrc.width(), lfSrc.numLanes(), lfSrc.activeMask(), outLen);
+					VmLaneFrontier lfOut = ctx.getLaneFrontier(h);
+					lfOut.copyEdgeTripMasksFrom(ctx, lfSrc);
+					long[] outLanes = lfOut.lanes();
+					if (rel != null) {
+						stepSingleRelationInto(ctx, lfSrc, lfSrc.lanes(), lfSrc.nodeCount(), outLanes, outLen, rel,
+								relId, false, null, null);
+						stepSingleRelationInto(ctx, lfSrc, lfSrc.lanes(), lfSrc.nodeCount(), outLanes, outLen, rel,
+								relId, true, null, null);
+					}
+					VmHandlers.setRegister(state, dst, h, TYPE_LANE_FRONTIER);
+					boolean anyActive = false;
+					for (int u = 0; u < outLen; u++) {
+						if (outLanes[u] != 0L) {
+							anyActive = true;
+							break;
+						}
+					}
+					VmHandlers.setFlag(state, FLAG_ZF, !anyActive);
+				} else {
+					RelationSnapshot rel = ctx.resolveRelation(relId);
+					if (rel == null) {
+						outLen = lfSrc.nodeCount();
+					} else if (!accumulate && !isFixpoint
+							&& ctx.getSnapshot() instanceof org.impulsegraph.storage.csr.GraphSnapshot gs
+							&& !gs.getDomainNames().isEmpty()) {
+						outLen = resolveTargetNodeCountForStep(ctx, rel, isCsc, lfSrc.nodeCount());
+					} else {
+						outLen = resolveNodeCount(ctx, relId, lfSrc.nodeCount());
+					}
+					int h = ctx.acquireLaneFrontier(lfSrc.width(), lfSrc.numLanes(), lfSrc.activeMask(), outLen);
+					VmLaneFrontier lfOut = ctx.getLaneFrontier(h);
+					lfOut.copyEdgeTripMasksFrom(ctx, lfSrc);
+					long[] outLanes = lfOut.lanes();
+					if (rel == null) {
+						for (int u = 0; u < lfSrc.nodeCount(); u++) {
+							outLanes[u] = lfSrc.lanes()[u] & lfSrc.activeMask();
+						}
+					} else if (!isFixpoint) {
+						stepLanesOnce(ctx, lfSrc, lfSrc.lanes(), lfSrc.nodeCount(), outLanes, outLen, relId, isCsc,
+								accumulate);
+					} else {
+						long[] delta = ctx.scratchLong(0, Math.max(1, outLen));
+						long[] stepOut = ctx.scratchLong(1, Math.max(1, outLen));
+						Arrays.fill(delta, 0, outLen, 0L);
+						int initLim = Math.min(lfSrc.nodeCount(), outLen);
+						boolean hasDelta = false;
+						for (int u = 0; u < initLim; u++) {
+							long m = lfSrc.lanes()[u] & lfSrc.activeMask();
+							outLanes[u] = m;
+							delta[u] = m;
+							if (m != 0L) {
+								hasDelta = true;
+							}
+						}
+						while (hasDelta) {
+							ctx.consumeFuel();
+							stepLanesOnce(ctx, lfSrc, delta, outLen, stepOut, outLen, relId, isCsc, false);
+							hasDelta = false;
+							for (int v = 0; v < outLen; v++) {
+								long newlyReached = stepOut[v] & ~outLanes[v];
+								outLanes[v] |= newlyReached;
+								delta[v] = newlyReached;
+								if (newlyReached != 0L) {
+									hasDelta = true;
+								}
+							}
+						}
+					}
+					VmHandlers.setRegister(state, dst, h, TYPE_LANE_FRONTIER);
+					boolean anyActive = false;
+					for (int u = 0; u < outLen; u++) {
+						if (outLanes[u] != 0L) {
+							anyActive = true;
+							break;
+						}
+					}
+					recordBranch(ctx, pc, op, 0, VmBranchCoverageRecorder.BranchKind.TWO_WAY,
+							VmBranchCoverageRecorder.BranchExpectation.COVERAGE_BOTH, anyActive ? 0 : 1);
+					VmHandlers.setFlag(state, FLAG_ZF, !anyActive);
 				}
-				recordBranch(ctx, pc, op, 0, VmBranchCoverageRecorder.BranchKind.TWO_WAY,
-						VmBranchCoverageRecorder.BranchExpectation.COVERAGE_BOTH, anyActive ? 0 : 1);
-				VmHandlers.setFlag(state, FLAG_ZF, !anyActive);
 			}
 
 			case 0xC5 -> { // OP_LANE_PRUNE_MASK
@@ -548,7 +1002,71 @@ public final class VmMultiLaneHandlers {
 				for (int u = 0; u < lfSrc.nodeCount(); u++) {
 					lanesOut[u] = lfSrc.lanes()[u] & lfSrc.activeMask();
 				}
-				if (mode == 0) {
+				if ((flags & 0x40) != 0) {
+					// lane-filter-cel: "<domain>\0<cel>"
+					String spec = ctx.getString(pU16High);
+					String domName = "";
+					String celExpr = spec != null ? spec : "true";
+					if (spec != null) {
+						int sep = spec.indexOf('\0');
+						if (sep >= 0) {
+							domName = spec.substring(0, sep);
+							celExpr = spec.substring(sep + 1);
+						}
+					}
+					org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain dom = null;
+					if (ctx.getSnapshot() instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+						if (!domName.isEmpty()) {
+							dom = gs.getDomain(domName);
+						}
+						if (dom == null && !gs.getDomainNames().isEmpty()) {
+							dom = gs.getDomain(gs.getDomainNames().iterator().next());
+						}
+					}
+					org.impulsegraph.vm.cel.VmCelEvaluator eval = org.impulsegraph.vm.cel.VmCelEvaluator
+							.compile(celExpr, java.util.Map.of());
+					org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = eval.createScratch();
+					long maxNode = dom != null ? dom.nodeCount() : Long.MAX_VALUE;
+					for (int u = 0; u < lfSrc.nodeCount(); u++) {
+						if (lanesOut[u] != 0L) {
+							if (u >= maxNode || !eval.evalDomainFilter(dom, u, scratch)) {
+								lanesOut[u] = 0L;
+							}
+						}
+					}
+				} else if ((flags & 0x20) != 0) {
+					// lane-quorum-inplace: "<minK>\0<reqMask>\0<forbidMask>"
+					String spec = ctx.getString(pU16High);
+					int minK = 1;
+					long reqMask = lfSrc.activeMask();
+					long forbidMask = 0L;
+					if (spec != null) {
+						String[] parts = spec.split("\0", -1);
+						if (parts.length >= 1 && !parts[0].isEmpty()) {
+							minK = Integer.parseInt(parts[0]);
+						}
+						if (parts.length >= 2 && !parts[1].isEmpty()) {
+							long parsedReq = parts[1].startsWith("-")
+									? Long.parseLong(parts[1])
+									: Long.parseUnsignedLong(parts[1]);
+							reqMask = parsedReq & lfSrc.activeMask();
+						}
+						if (parts.length >= 3 && !parts[2].isEmpty()) {
+							long parsedForb = parts[2].startsWith("-")
+									? Long.parseLong(parts[2])
+									: Long.parseUnsignedLong(parts[2]);
+							forbidMask = parsedForb & lfSrc.activeMask();
+						}
+					}
+					for (int u = 0; u < lfSrc.nodeCount(); u++) {
+						long m = lanesOut[u];
+						if (m != 0L) {
+							if (Long.bitCount(m & reqMask) < minK || (m & forbidMask) != 0L) {
+								lanesOut[u] = 0L;
+							}
+						}
+					}
+				} else if (mode == 0) {
 					if (arg1 != 0) {
 						VmHandlers.validateReg(arg1);
 						VmRegType aTag = VmRegType.fromTag(VmHandlers.getRegisterType(state, arg1));
@@ -990,17 +1508,74 @@ public final class VmMultiLaneHandlers {
 				} else {
 					throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_REGISTER");
 				}
-				float[] flatEmbs = resolveEmbeddingFloats(ctx, attrId);
-				int dim = qVec.length;
+				int dim = ctx.getFloatVectorLength(hFvec);
+				if (dim <= 0 || dim > qVec.length) {
+					dim = qVec.length;
+				}
+				float[] qLocal = ctx.scratchFloat(1, Math.max(1, dim));
+				if (dim > 0) {
+					System.arraycopy(qVec, 0, qLocal, 0, dim);
+				}
 				int hOut = ctx.acquireFloatVector(candCount);
+				ctx.setFloatVectorLength(hOut, candCount);
 				float[] scores = ctx.getFloatVector(hOut);
-				float defaultScore = dim > 0 ? qVec[0] : 0.0f;
-				for (int i = 0; i < candCount; i++) {
-					int u = cands[i];
-					if (flatEmbs != null && dim > 0 && (u + 1) * dim <= flatEmbs.length) {
-						scores[i] = evalMetricScore(metricFlag, qVec, flatEmbs, u * dim, dim);
+				if ((flags & 0x40) != 0 && ctx.getSnapshot() instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+					String spec = ctx.getString(attrId);
+					String domName = "";
+					String attrName = spec != null ? spec : "";
+					if (spec != null) {
+						int sep = spec.indexOf('\0');
+						if (sep >= 0) {
+							domName = spec.substring(0, sep);
+							attrName = spec.substring(sep + 1);
+						}
+					}
+					org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain dom = null;
+					if (!domName.isEmpty()) {
+						dom = gs.getDomain(domName);
+					}
+					if (dom == null) {
+						for (String dn : gs.getDomainNames()) {
+							org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain d = gs.getDomain(dn);
+							if (d != null && d.getAttributeIndex(attrName) >= 0) {
+								dom = d;
+								break;
+							}
+						}
+					}
+					int attrIdx = dom != null ? dom.getAttributeIndex(attrName) : -1;
+					if (dom != null && attrIdx >= 0 && dim > 0) {
+						float[] rowVec = ctx.scratchFloat(2, dim);
+						for (int i = 0; i < candCount; i++) {
+							int u = cands[i];
+							if (org.impulsegraph.vm.cel.VmCelEvaluator.readDomainVector(dom, attrIdx, u, rowVec, dim)) {
+								scores[i] = evalMetricScore(metricFlag, qLocal, rowVec, 0, dim);
+							} else {
+								scores[i] = Float.NaN;
+							}
+						}
 					} else {
-						scores[i] = defaultScore;
+						float[] flatEmbs = resolveEmbeddingFloats(ctx, attrId);
+						float defaultScore = dim > 0 ? qLocal[0] : 0.0f;
+						for (int i = 0; i < candCount; i++) {
+							int u = cands[i];
+							if (flatEmbs != null && dim > 0 && (u + 1) * dim <= flatEmbs.length) {
+								scores[i] = evalMetricScore(metricFlag, qLocal, flatEmbs, u * dim, dim);
+							} else {
+								scores[i] = defaultScore;
+							}
+						}
+					}
+				} else {
+					float[] flatEmbs = resolveEmbeddingFloats(ctx, attrId);
+					float defaultScore = dim > 0 ? qLocal[0] : 0.0f;
+					for (int i = 0; i < candCount; i++) {
+						int u = cands[i];
+						if (flatEmbs != null && dim > 0 && (u + 1) * dim <= flatEmbs.length) {
+							scores[i] = evalMetricScore(metricFlag, qLocal, flatEmbs, u * dim, dim);
+						} else {
+							scores[i] = defaultScore;
+						}
 					}
 				}
 				VmHandlers.setRegister(state, dst, hOut, TYPE_FLOAT_VECTOR);

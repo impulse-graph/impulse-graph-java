@@ -340,7 +340,11 @@ public final class ImpulseVmInterpreter {
 					}
 
 					case OP_CSR_WALK_FILTERED -> {
-						VmHandlers.handleCsrWalk(state, ctx, instr, input);
+						if ((instr.flags() & 0x40) != 0) {
+							VmHandlers.handleCelEdgeWalk(state, ctx, instr);
+						} else {
+							VmHandlers.handleCsrWalk(state, ctx, instr, input);
+						}
 						pc++;
 					}
 

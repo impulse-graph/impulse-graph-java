@@ -61,6 +61,24 @@ public final class RegisterAllocationPass implements CompilerPass {
 						|| step instanceof ScmFixpoint) {
 					srcMap.put(step, currentReg);
 					dstMap.put(step, currentReg);
+				} else if (step instanceof ScmList list && !list.elements().isEmpty()
+						&& list.elements().get(0) instanceof ScmSymbol sym) {
+					String op = sym.name();
+					if ("lane-init-domain-seeds".equalsIgnoreCase(op) || "lane-init-domain-groups".equalsIgnoreCase(op)
+							|| "repeat".equalsIgnoreCase(op) || "repeat-exact".equalsIgnoreCase(op)
+							|| "repeat-until-stable".equalsIgnoreCase(op) || "fixpoint-max-hops".equalsIgnoreCase(op)
+							|| "cel-domain-reduce".equalsIgnoreCase(op) || "lane-filter-cel".equalsIgnoreCase(op)
+							|| "lane-quorum-inplace".equalsIgnoreCase(op)) {
+						srcMap.put(step, currentReg);
+						dstMap.put(step, currentReg);
+					} else {
+						short src = currentReg;
+						short dst = (short) (1 - currentReg);
+						srcMap.put(step, src);
+						dstMap.put(step, dst);
+						currentReg = dst;
+						maxReg = Math.max(maxReg, 2);
+					}
 				} else {
 					short src = currentReg;
 					short dst = (short) (1 - currentReg);

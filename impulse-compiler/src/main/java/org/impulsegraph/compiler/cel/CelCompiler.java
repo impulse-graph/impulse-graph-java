@@ -100,7 +100,13 @@ public final class CelCompiler {
 					+ toImpScheme(node.children().get(1), streamMode) + " "
 					+ toImpScheme(node.children().get(2), streamMode) + ")";
 			case FUNCTION_CALL -> {
-				StringBuilder sb = new StringBuilder("(").append(node.text());
+				String fn = switch (node.text()) {
+					case "is_null" -> "null?";
+					case "is_not_null" -> "not-null?";
+					case "starts_with" -> "starts-with";
+					default -> node.text();
+				};
+				StringBuilder sb = new StringBuilder("(").append(fn);
 				for (CelAstNode arg : node.children()) {
 					sb.append(" ").append(toImpScheme(arg, streamMode));
 				}

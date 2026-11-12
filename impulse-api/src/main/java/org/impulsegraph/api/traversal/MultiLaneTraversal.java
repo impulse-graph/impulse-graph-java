@@ -19,6 +19,38 @@ public interface MultiLaneTraversal {
 
 	MultiLaneTraversal whereQuorum(int minLanes);
 
+	default MultiLaneTraversal whereQuorum(int minK, long reqMask, long forbidMask) {
+		return whereQuorum(minK);
+	}
+
+	default MultiLaneTraversal filter(String celPredicate) {
+		throw new UnsupportedOperationException("MultiLaneTraversal.filter not implemented");
+	}
+
+	default MultiLaneTraversal outUnion(String... relations) {
+		throw new UnsupportedOperationException("MultiLaneTraversal.outUnion not implemented");
+	}
+
+	default MultiLaneTraversal inUnion(String... relations) {
+		throw new UnsupportedOperationException("MultiLaneTraversal.inUnion not implemented");
+	}
+
+	default MultiLaneTraversal outWhere(String relation, String edgeCelPredicate) {
+		throw new UnsupportedOperationException("MultiLaneTraversal.outWhere not implemented");
+	}
+
+	default MultiLaneTraversal inWhere(String relation, String edgeCelPredicate) {
+		throw new UnsupportedOperationException("MultiLaneTraversal.inWhere not implemented");
+	}
+
+	default MultiLaneTraversal repeatOut(String relation, int hops) {
+		throw new UnsupportedOperationException("MultiLaneTraversal.repeatOut not implemented");
+	}
+
+	default MultiLaneTraversal fixpointOut(String relation, int maxHops) {
+		throw new UnsupportedOperationException("MultiLaneTraversal.fixpointOut not implemented");
+	}
+
 	MultiLaneResult collect();
 
 	Traversal<ImpulseBitSet> toQuorumTraversal(int minLanes);

@@ -232,11 +232,42 @@ public class DefaultDomainView implements DomainView {
 
 	@Override
 	public Traversal<ImpulseBitSet> from(long nodeId) {
+		if (snapshot instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+			var dom = gs.getDomain(domainName);
+			if (dom != null && (nodeId < 0 || nodeId >= dom.nodeCount())) {
+				return new DefaultTraversal<>(snapshot, domainName, new long[0]);
+			}
+		}
 		return new DefaultTraversal<>(snapshot, domainName, nodeId);
 	}
 
 	@Override
 	public Traversal<ImpulseBitSet> from(long... nodeIds) {
+		if (nodeIds != null && snapshot instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+			var dom = gs.getDomain(domainName);
+			if (dom != null) {
+				long maxN = dom.nodeCount();
+				boolean anyInvalid = false;
+				int validCount = 0;
+				for (long id : nodeIds) {
+					if (id >= 0 && id < maxN) {
+						validCount++;
+					} else {
+						anyInvalid = true;
+					}
+				}
+				if (anyInvalid) {
+					long[] filtered = new long[validCount];
+					int pos = 0;
+					for (long id : nodeIds) {
+						if (id >= 0 && id < maxN) {
+							filtered[pos++] = id;
+						}
+					}
+					return new DefaultTraversal<>(snapshot, domainName, filtered);
+				}
+			}
+		}
 		return new DefaultTraversal<>(snapshot, domainName, nodeIds);
 	}
 

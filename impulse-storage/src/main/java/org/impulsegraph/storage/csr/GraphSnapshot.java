@@ -50,9 +50,13 @@ public class GraphSnapshot
 				? Collections.unmodifiableMap(new java.util.LinkedHashMap<>(domains))
 				: Map.of();
 		Map<Integer, BinarySnapshotLoader.LoadedDomain> idMap = new java.util.LinkedHashMap<>();
+		int maxDomNodes = 0;
 		for (BinarySnapshotLoader.LoadedDomain d : this.domainMap.values()) {
 			if (d != null) {
 				idMap.put(d.domainId(), d);
+				if (d.nodeCount() > 0 && d.nodeCount() <= Integer.MAX_VALUE) {
+					maxDomNodes = Math.max(maxDomNodes, (int) d.nodeCount());
+				}
 			}
 		}
 		this.domainIdMap = Collections.unmodifiableMap(idMap);
@@ -60,35 +64,44 @@ public class GraphSnapshot
 			this.relationMap = Map.of();
 			this.unmodifiableRelationMap = Map.of();
 			this.relationsById = new RelationSnapshot[0];
-			this.maxNodeCount = 1024 * 1024;
+			this.maxNodeCount = maxDomNodes > 0 ? maxDomNodes : 1024 * 1024;
 		} else {
 			java.util.LinkedHashMap<String, RelationSnapshot> copy = new java.util.LinkedHashMap<>(snapshots);
 			this.relationMap = Collections.unmodifiableMap(copy);
 			this.unmodifiableRelationMap = Collections.unmodifiableMap(copy);
 			int maxSlot = copy.size() - 1;
-			for (String key : copy.keySet()) {
+			for (Map.Entry<String, RelationSnapshot> entry : copy.entrySet()) {
+				String key = entry.getKey();
 				if (key != null && key.startsWith("rel_")) {
 					int idx = parseNonNegativeSlot(key.substring(4));
 					if (idx > maxSlot) {
 						maxSlot = idx;
 					}
 				}
+				RelationSnapshot rel = entry.getValue();
+				if (rel != null && rel.getRelationId() > maxSlot && rel.getRelationId() < 65536) {
+					maxSlot = rel.getRelationId();
+				}
 			}
 			RelationSnapshot[] arr = new RelationSnapshot[maxSlot + 1];
 			int i = 0;
-			int maxNodes = 0;
+			int maxNodes = maxDomNodes;
 			for (RelationSnapshot rel : copy.values()) {
 				if (rel != null) {
 					maxNodes = Math.max(maxNodes, rel.getNodeCount());
+					maxNodes = Math.max(maxNodes, rel.getTargetNodeCount());
 				}
 				arr[i++] = rel;
 			}
 			for (Map.Entry<String, RelationSnapshot> entry : copy.entrySet()) {
 				String key = entry.getKey();
-				if (key != null && key.startsWith("rel_")) {
+				RelationSnapshot rel = entry.getValue();
+				if (rel != null && rel.getRelationId() >= 0 && rel.getRelationId() < arr.length) {
+					arr[rel.getRelationId()] = rel;
+				} else if (key != null && key.startsWith("rel_")) {
 					int idx = parseNonNegativeSlot(key.substring(4));
 					if (idx >= 0 && idx < arr.length) {
-						arr[idx] = entry.getValue();
+						arr[idx] = rel;
 					}
 				}
 			}
@@ -232,7 +245,19 @@ public class GraphSnapshot
 	}
 
 	public BinarySnapshotLoader.LoadedDomain getDomain(String domainName) {
-		return domainMap.get(domainName);
+		if (domainName == null) {
+			return null;
+		}
+		BinarySnapshotLoader.LoadedDomain exact = domainMap.get(domainName);
+		if (exact != null) {
+			return exact;
+		}
+		for (Map.Entry<String, BinarySnapshotLoader.LoadedDomain> entry : domainMap.entrySet()) {
+			if (entry.getKey().equalsIgnoreCase(domainName)) {
+				return entry.getValue();
+			}
+		}
+		return null;
 	}
 
 	public BinarySnapshotLoader.LoadedDomain getDomain(int domainId) {
@@ -259,7 +284,7 @@ public class GraphSnapshot
 
 	@Override
 	public java.util.List<String> getDomainAttributeNames(String domainName) {
-		BinarySnapshotLoader.LoadedDomain dom = domainMap.get(domainName);
+		BinarySnapshotLoader.LoadedDomain dom = getDomain(domainName);
 		if (dom == null || dom.attributes().isEmpty()) {
 			return java.util.List.of();
 		}
@@ -272,19 +297,19 @@ public class GraphSnapshot
 
 	@Override
 	public java.util.List<java.lang.foreign.MemorySegment> getDomainAttributeSegments(String domainName) {
-		BinarySnapshotLoader.LoadedDomain dom = domainMap.get(domainName);
+		BinarySnapshotLoader.LoadedDomain dom = getDomain(domainName);
 		return dom != null ? dom.attributeSegments() : java.util.List.of();
 	}
 
 	@Override
 	public java.lang.foreign.MemorySegment getDomainAttributeSegment(String domainName, String attrName) {
-		BinarySnapshotLoader.LoadedDomain dom = domainMap.get(domainName);
+		BinarySnapshotLoader.LoadedDomain dom = getDomain(domainName);
 		return dom != null ? dom.getAttributeSegment(attrName) : java.lang.foreign.MemorySegment.NULL;
 	}
 
 	@Override
 	public int getDomainKeyAttrIndex(String domainName) {
-		BinarySnapshotLoader.LoadedDomain dom = domainMap.get(domainName);
+		BinarySnapshotLoader.LoadedDomain dom = getDomain(domainName);
 		return dom != null ? dom.keyAttrIndex() : 0xFFFF;
 	}
 
@@ -298,7 +323,7 @@ public class GraphSnapshot
 
 	public long getNodeCount(String domainName) {
 		if (domainName != null) {
-			BinarySnapshotLoader.LoadedDomain dom = domainMap.get(domainName);
+			BinarySnapshotLoader.LoadedDomain dom = getDomain(domainName);
 			if (dom != null && dom.nodeCount() > 0) {
 				return dom.nodeCount();
 			}

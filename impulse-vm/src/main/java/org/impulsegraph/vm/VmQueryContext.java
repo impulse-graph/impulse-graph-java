@@ -501,9 +501,20 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 
 		void recycleInt(int[] arr) {
-			if (arr != null && freeInts.size() < 32) {
-				freeInts.add(arr);
+			if (arr == null || freeInts.size() >= 32) {
+				return;
 			}
+			for (int s = 0; s < scratchInts.length; s++) {
+				if (scratchInts[s] == arr) {
+					return;
+				}
+			}
+			for (int i = 0, n = freeInts.size(); i < n; i++) {
+				if (freeInts.get(i) == arr) {
+					return;
+				}
+			}
+			freeInts.add(arr);
 		}
 
 		float[] acquireFloat(int exactLen) {
@@ -519,9 +530,20 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 
 		void recycleFloat(float[] arr) {
-			if (arr != null && freeFloats.size() < 32) {
-				freeFloats.add(arr);
+			if (arr == null || freeFloats.size() >= 32) {
+				return;
 			}
+			for (int s = 0; s < scratchFloats.length; s++) {
+				if (scratchFloats[s] == arr) {
+					return;
+				}
+			}
+			for (int i = 0, n = freeFloats.size(); i < n; i++) {
+				if (freeFloats.get(i) == arr) {
+					return;
+				}
+			}
+			freeFloats.add(arr);
 		}
 
 		double[] acquireDouble(int exactLen) {
@@ -537,9 +559,15 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 
 		void recycleDouble(double[] arr) {
-			if (arr != null && freeDoubles.size() < 16) {
-				freeDoubles.add(arr);
+			if (arr == null || freeDoubles.size() >= 16) {
+				return;
 			}
+			for (int i = 0, n = freeDoubles.size(); i < n; i++) {
+				if (freeDoubles.get(i) == arr) {
+					return;
+				}
+			}
+			freeDoubles.add(arr);
 		}
 
 		long[] acquireLong(int exactLen) {
@@ -555,9 +583,20 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 
 		void recycleLong(long[] arr) {
-			if (arr != null && freeLongs.size() < 32) {
-				freeLongs.add(arr);
+			if (arr == null || freeLongs.size() >= 32) {
+				return;
 			}
+			for (int s = 0; s < scratchLongs.length; s++) {
+				if (scratchLongs[s] == arr) {
+					return;
+				}
+			}
+			for (int i = 0, n = freeLongs.size(); i < n; i++) {
+				if (freeLongs.get(i) == arr) {
+					return;
+				}
+			}
+			freeLongs.add(arr);
 		}
 
 		String[] acquireString(int exactLen) {
@@ -573,9 +612,15 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 
 		void recycleString(String[] arr) {
-			if (arr != null && freeStrings.size() < 8) {
-				freeStrings.add(arr);
+			if (arr == null || freeStrings.size() >= 8) {
+				return;
 			}
+			for (int i = 0, n = freeStrings.size(); i < n; i++) {
+				if (freeStrings.get(i) == arr) {
+					return;
+				}
+			}
+			freeStrings.add(arr);
 		}
 
 		VmLaneFrontier acquireFrontier(VmLaneFrontier.LaneWidth width, int numLanes, long activeMask, int nodeCount) {
@@ -599,11 +644,30 @@ public final class VmQueryContext implements AutoCloseable {
 
 		void recycleFrontier(VmLaneFrontier lf) {
 			if (lf != null) {
-				if (lf.lanes() != null && freeFrontierBuffers.size() < 32) {
-					freeFrontierBuffers.add(lf.lanes());
+				long[] lanes = lf.lanes();
+				if (lanes != null && freeFrontierBuffers.size() < 32) {
+					boolean dupBuf = false;
+					for (int i = 0, n = freeFrontierBuffers.size(); i < n; i++) {
+						if (freeFrontierBuffers.get(i) == lanes) {
+							dupBuf = true;
+							break;
+						}
+					}
+					if (!dupBuf) {
+						freeFrontierBuffers.add(lanes);
+					}
 				}
 				if (freeFrontiers.size() < 32) {
-					freeFrontiers.add(lf);
+					boolean dupLf = false;
+					for (int i = 0, n = freeFrontiers.size(); i < n; i++) {
+						if (freeFrontiers.get(i) == lf) {
+							dupLf = true;
+							break;
+						}
+					}
+					if (!dupLf) {
+						freeFrontiers.add(lf);
+					}
 				}
 			}
 		}

@@ -231,6 +231,24 @@ public final class CompiledQuery {
 	private static int resolveRelationId(ImpulseGraphSnapshot snapshot, String relName) {
 		if (snapshot == null || relName == null)
 			return 0;
+		RelationSnapshot targetRel = snapshot.getRelationSnapshot(relName);
+		if (targetRel != null) {
+			if (targetRel.getRelationId() >= 0
+					&& snapshot.getRelationSnapshot(targetRel.getRelationId()) == targetRel) {
+				return targetRel.getRelationId();
+			}
+			for (int i = 0; i < 65536; i++) {
+				RelationSnapshot r = snapshot.getRelationSnapshot(i);
+				if (r == null) {
+					if (i >= snapshot.getAllRelationSnapshots().size() && i > 10)
+						break;
+					continue;
+				}
+				if (r == targetRel || r.equals(targetRel)) {
+					return i;
+				}
+			}
+		}
 		var map = snapshot.getAllRelationSnapshots();
 		if (map.containsKey(relName)) {
 			int idx = 0;

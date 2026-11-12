@@ -35,6 +35,21 @@ public interface RelationSnapshot {
 	int getDegree(int nodeId);
 	int getInDegree(int nodeId);
 	int[] getTargets(int nodeId);
+	default int[] getInTargets(int nodeId) {
+		return new int[0];
+	}
+	default int getRelationId() {
+		return -1;
+	}
+	default int getSrcDomainId() {
+		return 0;
+	}
+	default int getTgtDomainId() {
+		return 0;
+	}
+	default boolean isVirtual() {
+		return false;
+	}
 	void copyTargetsSimd(int nodeId, ImpulseBitSet frontier);
 	void copyInTargetsSimd(int nodeId, ImpulseBitSet frontier);
 	void copyTargetsSimdFilteredFloat(int nodeId, MemorySegment attrSegment, float threshold, byte cmpOp,
