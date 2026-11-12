@@ -351,13 +351,20 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 		if (idx == -1)
 			return 0;
 		idx += key.length();
+		while (idx < json.length() && Character.isWhitespace(json.charAt(idx))) {
+			idx++;
+		}
 		int end = idx;
 		while (end < json.length() && Character.isDigit(json.charAt(end))) {
 			end++;
 		}
 		if (end == idx)
 			return 0;
-		return Integer.parseInt(json.substring(idx, end));
+		try {
+			return Integer.parseInt(json.substring(idx, end));
+		} catch (NumberFormatException ex) {
+			return Integer.MAX_VALUE;
+		}
 	}
 
 	private org.impulsegraph.api.stats.RelationStatistics parseFromJson(String json) {
@@ -422,9 +429,19 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 		return edgeCount;
 	}
 
+	private int offsetWidthBytes() {
+		return (edgeIndexWidth == 8) ? 8 : (edgeIndexWidth == 2 ? 2 : 4);
+	}
+
+	private static int idWidthBytes(byte width) {
+		return (width == 2) ? 2 : (width == 8 ? 8 : 4);
+	}
+
 	public long readEdgeIndex(MemorySegment segment, long nodeId) {
 		if (edgeIndexWidth == 8) {
 			return segment.getAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, nodeId);
+		} else if (edgeIndexWidth == 2) {
+			return Short.toUnsignedLong(segment.getAtIndex(ValueLayout.JAVA_SHORT_UNALIGNED, nodeId));
 		} else {
 			return Integer.toUnsignedLong(segment.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, nodeId));
 		}
@@ -453,9 +470,13 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			return rowOffsetsData;
 		if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL))
 			return new int[0];
-		int numRowOffsets = (int) (rowOffsetsSegment.byteSize() / (edgeIndexWidth == 8 ? 8 : 4));
+		int offW = offsetWidthBytes();
+		long rawCount = rowOffsetsSegment.byteSize() / offW;
+		if (rawCount <= 0 || rawCount > Integer.MAX_VALUE)
+			return new int[0];
+		int numRowOffsets = (int) rawCount;
 		int[] arr = new int[numRowOffsets];
-		if (edgeIndexWidth == 4) {
+		if (offW == 4) {
 			MemorySegment.copy(rowOffsetsSegment, ValueLayout.JAVA_INT_UNALIGNED, 0, arr, 0, numRowOffsets);
 		} else {
 			for (int i = 0; i < numRowOffsets; i++)
@@ -469,9 +490,13 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			return columnIndicesData;
 		if (columnTargetsSegment == null || columnTargetsSegment.equals(MemorySegment.NULL))
 			return new int[0];
-		int numCols = (int) (columnTargetsSegment.byteSize() / (nodeIdWidth == 2 ? 2 : (nodeIdWidth == 8 ? 8 : 4)));
+		int tgtW = idWidthBytes(nodeIdWidth);
+		long rawCount = columnTargetsSegment.byteSize() / tgtW;
+		if (rawCount <= 0 || rawCount > Integer.MAX_VALUE)
+			return new int[0];
+		int numCols = (int) rawCount;
 		int[] arr = new int[numCols];
-		if (nodeIdWidth == 4) {
+		if (tgtW == 4) {
 			MemorySegment.copy(columnTargetsSegment, ValueLayout.JAVA_INT_UNALIGNED, 0, arr, 0, numCols);
 		} else {
 			for (int i = 0; i < numCols; i++)
@@ -505,18 +530,21 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			return total;
 		}
 		if (isFlatForward()) {
-			int w = (nodeIdWidth == 2) ? 2 : (nodeIdWidth == 8 ? 8 : 4);
-			if ((long) (nodeId + 1) * w > columnTargetsSegment.byteSize()) {
+			int w = idWidthBytes(nodeIdWidth);
+			if (((long) nodeId + 1L) * w > columnTargetsSegment.byteSize()) {
 				return 0;
 			}
 			int t = readNodeId(columnTargetsSegment, nodeId);
 			return isSentinelNodeId(t, nodeIdWidth) ? 0 : 1;
 		}
+		int offW = offsetWidthBytes();
 		if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)
-				|| rowOffsetsSegment.byteSize() == 0)
+				|| ((long) nodeId + 2L) * offW > rowOffsetsSegment.byteSize())
 			return 0;
 		long start = readEdgeIndex(rowOffsetsSegment, nodeId);
-		long end = readEdgeIndex(rowOffsetsSegment, nodeId + 1);
+		long end = readEdgeIndex(rowOffsetsSegment, nodeId + 1L);
+		if (start < 0 || end <= start || (end - start) > Integer.MAX_VALUE)
+			return 0;
 		return (int) (end - start);
 	}
 
@@ -545,25 +573,28 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			}
 			return pos == out.length ? out : java.util.Arrays.copyOf(out, pos);
 		}
+		int tgtW = idWidthBytes(nodeIdWidth);
 		if (isFlatForward()) {
-			int w = (nodeIdWidth == 2) ? 2 : (nodeIdWidth == 8 ? 8 : 4);
-			if ((long) (nodeId + 1) * w > columnTargetsSegment.byteSize()) {
+			if (((long) nodeId + 1L) * tgtW > columnTargetsSegment.byteSize()) {
 				return new int[0];
 			}
 			int t = readNodeId(columnTargetsSegment, nodeId);
 			return isSentinelNodeId(t, nodeIdWidth) ? new int[0] : new int[]{t};
 		}
+		int offW = offsetWidthBytes();
 		if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)
-				|| rowOffsetsSegment.byteSize() == 0)
+				|| ((long) nodeId + 2L) * offW > rowOffsetsSegment.byteSize() || columnTargetsSegment == null
+				|| columnTargetsSegment.equals(MemorySegment.NULL))
 			return new int[0];
 		long start = readEdgeIndex(rowOffsetsSegment, nodeId);
-		long end = readEdgeIndex(rowOffsetsSegment, nodeId + 1);
-		int len = (int) (end - start);
-		if (len <= 0)
+		long end = readEdgeIndex(rowOffsetsSegment, nodeId + 1L);
+		if (start < 0 || end <= start || (end - start) > Integer.MAX_VALUE
+				|| end > columnTargetsSegment.byteSize() / tgtW)
 			return new int[0];
+		int len = (int) (end - start);
 		int[] targets = new int[len];
-		if (nodeIdWidth == 4) {
-			MemorySegment.copy(columnTargetsSegment, ValueLayout.JAVA_INT_UNALIGNED, start * 4, targets, 0, len);
+		if (tgtW == 4) {
+			MemorySegment.copy(columnTargetsSegment, ValueLayout.JAVA_INT_UNALIGNED, start * 4L, targets, 0, len);
 		} else {
 			for (int i = 0; i < len; i++) {
 				targets[i] = readNodeId(columnTargetsSegment, start + i);
@@ -590,18 +621,21 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			return total;
 		}
 		if (isFlatReverse()) {
-			int w = (srcNodeIdWidth == 2) ? 2 : (srcNodeIdWidth == 8 ? 8 : 4);
-			if ((long) (nodeId + 1) * w > cscColumnTargetsSegment.byteSize()) {
+			int w = idWidthBytes(srcNodeIdWidth);
+			if (((long) nodeId + 1L) * w > cscColumnTargetsSegment.byteSize()) {
 				return 0;
 			}
 			int s = readSrcNodeId(cscColumnTargetsSegment, nodeId);
 			return isSentinelNodeId(s, srcNodeIdWidth) ? 0 : 1;
 		}
+		int offW = offsetWidthBytes();
 		if (cscRowOffsetsSegment == null || cscRowOffsetsSegment.equals(MemorySegment.NULL)
-				|| cscRowOffsetsSegment.byteSize() == 0)
+				|| ((long) nodeId + 2L) * offW > cscRowOffsetsSegment.byteSize())
 			return 0;
 		long start = readEdgeIndex(cscRowOffsetsSegment, nodeId);
-		long end = readEdgeIndex(cscRowOffsetsSegment, nodeId + 1);
+		long end = readEdgeIndex(cscRowOffsetsSegment, nodeId + 1L);
+		if (start < 0 || end <= start || (end - start) > Integer.MAX_VALUE)
+			return 0;
 		return (int) (end - start);
 	}
 
@@ -632,25 +666,28 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			}
 			return pos == out.length ? out : java.util.Arrays.copyOf(out, pos);
 		}
+		int srcW = idWidthBytes(srcNodeIdWidth);
 		if (isFlatReverse()) {
-			int w = (srcNodeIdWidth == 2) ? 2 : (srcNodeIdWidth == 8 ? 8 : 4);
-			if ((long) (nodeId + 1) * w > cscColumnTargetsSegment.byteSize()) {
+			if (((long) nodeId + 1L) * srcW > cscColumnTargetsSegment.byteSize()) {
 				return new int[0];
 			}
 			int s = readSrcNodeId(cscColumnTargetsSegment, nodeId);
 			return isSentinelNodeId(s, srcNodeIdWidth) ? new int[0] : new int[]{s};
 		}
+		int offW = offsetWidthBytes();
 		if (cscRowOffsetsSegment == null || cscRowOffsetsSegment.equals(MemorySegment.NULL)
-				|| cscRowOffsetsSegment.byteSize() == 0)
+				|| ((long) nodeId + 2L) * offW > cscRowOffsetsSegment.byteSize() || cscColumnTargetsSegment == null
+				|| cscColumnTargetsSegment.equals(MemorySegment.NULL))
 			return new int[0];
 		long start = readEdgeIndex(cscRowOffsetsSegment, nodeId);
-		long end = readEdgeIndex(cscRowOffsetsSegment, nodeId + 1);
-		int len = (int) (end - start);
-		if (len <= 0)
+		long end = readEdgeIndex(cscRowOffsetsSegment, nodeId + 1L);
+		if (start < 0 || end <= start || (end - start) > Integer.MAX_VALUE
+				|| end > cscColumnTargetsSegment.byteSize() / srcW)
 			return new int[0];
+		int len = (int) (end - start);
 		int[] targets = new int[len];
-		if (srcNodeIdWidth == 4) {
-			MemorySegment.copy(cscColumnTargetsSegment, ValueLayout.JAVA_INT_UNALIGNED, start * 4, targets, 0, len);
+		if (srcW == 4) {
+			MemorySegment.copy(cscColumnTargetsSegment, ValueLayout.JAVA_INT_UNALIGNED, start * 4L, targets, 0, len);
 		} else {
 			for (int i = 0; i < len; i++) {
 				targets[i] = readSrcNodeId(cscColumnTargetsSegment, start + i);
@@ -679,8 +716,8 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			return;
 		}
 		if (isFlatForward()) {
-			int w = (nodeIdWidth == 2) ? 2 : (nodeIdWidth == 8 ? 8 : 4);
-			if ((long) (nodeId + 1) * w <= columnTargetsSegment.byteSize()) {
+			int tgtW = idWidthBytes(nodeIdWidth);
+			if (((long) nodeId + 1L) * tgtW <= columnTargetsSegment.byteSize()) {
 				int t = readNodeId(columnTargetsSegment, nodeId);
 				if (!isSentinelNodeId(t, nodeIdWidth)) {
 					outBs.set(t);
@@ -688,19 +725,29 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			}
 			return;
 		}
-		if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)
-				|| rowOffsetsSegment.byteSize() == 0)
+		if (!hasValidRowOffsetPair(nodeId))
 			return;
 
 		long start = readEdgeIndex(rowOffsetsSegment, nodeId);
-		long end = readEdgeIndex(rowOffsetsSegment, nodeId + 1);
-		int count = (int) (end - start);
-		if (count <= 0)
+		long end = readEdgeIndex(rowOffsetsSegment, nodeId + 1L);
+		if (!isValidTargetSpan(start, end))
 			return;
+		int count = (int) (end - start);
 
 		for (int i = 0; i < count; i++) {
 			outBs.set(readNodeId(columnTargetsSegment, start + i));
 		}
+	}
+
+	private boolean hasValidRowOffsetPair(int nodeId) {
+		return rowOffsetsSegment != null && !rowOffsetsSegment.equals(MemorySegment.NULL)
+				&& columnTargetsSegment != null && !columnTargetsSegment.equals(MemorySegment.NULL)
+				&& ((long) nodeId + 2L) * offsetWidthBytes() <= rowOffsetsSegment.byteSize();
+	}
+
+	private boolean isValidTargetSpan(long start, long end) {
+		return start >= 0 && end > start && (end - start) <= Integer.MAX_VALUE
+				&& end <= columnTargetsSegment.byteSize() / idWidthBytes(nodeIdWidth);
 	}
 
 	/**
@@ -711,9 +758,7 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 	 */
 	public void copyTargetsSimdFilteredFloat(int nodeId, MemorySegment attrSegment, float threshold, byte cmpOp,
 			ImpulseBitSet outBs) {
-		if (nodeId < 0 || nodeId >= nodeCount || outBs == null)
-			return;
-		if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL))
+		if (nodeId < 0 || nodeId >= nodeCount || outBs == null || !hasValidRowOffsetPair(nodeId))
 			return;
 		if (attrSegment == null || attrSegment.equals(MemorySegment.NULL)) {
 			copyTargetsSimd(nodeId, outBs);
@@ -721,10 +766,10 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 		}
 
 		long start = readEdgeIndex(rowOffsetsSegment, nodeId);
-		long end = readEdgeIndex(rowOffsetsSegment, nodeId + 1);
-		int count = (int) (end - start);
-		if (count <= 0)
+		long end = readEdgeIndex(rowOffsetsSegment, nodeId + 1L);
+		if (!isValidTargetSpan(start, end) || end > (attrSegment.byteSize() >>> 2))
 			return;
+		int count = (int) (end - start);
 
 		int i = 0;
 		if (nodeIdWidth == 4
@@ -785,9 +830,9 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			}
 			return;
 		}
+		int srcW = idWidthBytes(srcNodeIdWidth);
 		if (isFlatReverse()) {
-			int w = (srcNodeIdWidth == 2) ? 2 : (srcNodeIdWidth == 8 ? 8 : 4);
-			if ((long) (nodeId + 1) * w <= cscColumnTargetsSegment.byteSize()) {
+			if (((long) nodeId + 1L) * srcW <= cscColumnTargetsSegment.byteSize()) {
 				int s = readSrcNodeId(cscColumnTargetsSegment, nodeId);
 				if (!isSentinelNodeId(s, srcNodeIdWidth)) {
 					outBs.set(s);
@@ -795,15 +840,18 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			}
 			return;
 		}
+		int offW = offsetWidthBytes();
 		if (cscRowOffsetsSegment == null || cscRowOffsetsSegment.equals(MemorySegment.NULL)
-				|| cscRowOffsetsSegment.byteSize() == 0)
+				|| ((long) nodeId + 2L) * offW > cscRowOffsetsSegment.byteSize() || cscColumnTargetsSegment == null
+				|| cscColumnTargetsSegment.equals(MemorySegment.NULL))
 			return;
 
 		long start = readEdgeIndex(cscRowOffsetsSegment, nodeId);
-		long end = readEdgeIndex(cscRowOffsetsSegment, nodeId + 1);
-		int count = (int) (end - start);
-		if (count <= 0)
+		long end = readEdgeIndex(cscRowOffsetsSegment, nodeId + 1L);
+		if (start < 0 || end <= start || (end - start) > Integer.MAX_VALUE
+				|| end > cscColumnTargetsSegment.byteSize() / srcW)
 			return;
+		int count = (int) (end - start);
 
 		for (int i = 0; i < count; i++) {
 			outBs.set(readSrcNodeId(cscColumnTargetsSegment, start + i));
@@ -825,13 +873,23 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			if (cached != null) {
 				return cached;
 			}
+			int offW = offsetWidthBytes();
+			int tgtW = idWidthBytes(nodeIdWidth);
+			int srcW = idWidthBytes(srcNodeIdWidth);
 			if (edgeCount <= 0 || cscRowOffsetsSegment == null || cscRowOffsetsSegment.equals(MemorySegment.NULL)
-					|| cscRowOffsetsSegment.byteSize() == 0) {
+					|| cscRowOffsetsSegment.byteSize() == 0 || cscColumnTargetsSegment == null
+					|| cscColumnTargetsSegment.equals(MemorySegment.NULL)) {
 				cached = new int[0];
 				cscToCsrEdgeMap = cached;
 				return cached;
 			}
 			int cscN = getCscNodeCount();
+			if (cscN <= 0 || ((long) cscN + 1L) * offW > cscRowOffsetsSegment.byteSize()) {
+				cached = new int[0];
+				cscToCsrEdgeMap = cached;
+				return cached;
+			}
+			long maxCscSlots = cscColumnTargetsSegment.byteSize() / srcW;
 			int[] map = new int[edgeCount];
 			java.util.Arrays.fill(map, -1);
 			int[] cursors = new int[cscN];
@@ -840,18 +898,20 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			}
 			if (isFlatForward()) {
 				int[] fwdMap = getOrBuildFlatForwardEdgeMap();
-				for (int u = 0; u < nodeCount; u++) {
+				long maxFwdSlots = columnTargetsSegment.byteSize() / tgtW;
+				for (int u = 0; u < nodeCount && u < maxFwdSlots; u++) {
 					int e = (u < fwdMap.length) ? fwdMap[u] : -1;
 					if (e < 0) {
 						continue;
 					}
 					int v = readNodeId(columnTargetsSegment, u);
 					if (!isSentinelNodeId(v, nodeIdWidth) && v >= 0 && v < cscN) {
-						int cscEnd = (int) readEdgeIndex(cscRowOffsetsSegment, v + 1);
-						for (int k = cursors[v]; k < cscEnd; k++) {
+						long rawCscEnd = readEdgeIndex(cscRowOffsetsSegment, v + 1L);
+						int cscEnd = (int) Math.min(rawCscEnd, Math.min((long) edgeCount, maxCscSlots));
+						for (int k = Math.max(0, cursors[v]); k < cscEnd; k++) {
 							if (map[k] == -1 && readSrcNodeId(cscColumnTargetsSegment, k) == u) {
 								map[k] = e;
-								while (cursors[v] < cscEnd && map[cursors[v]] != -1) {
+								while (cursors[v] >= 0 && cursors[v] < cscEnd && map[cursors[v]] != -1) {
 									cursors[v]++;
 								}
 								break;
@@ -860,18 +920,26 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 					}
 				}
 			} else if (rowOffsetsSegment != null && !rowOffsetsSegment.equals(MemorySegment.NULL)
-					&& rowOffsetsSegment.byteSize() > 0) {
+					&& ((long) nodeCount + 1L) * offW <= rowOffsetsSegment.byteSize() && columnTargetsSegment != null
+					&& !columnTargetsSegment.equals(MemorySegment.NULL)) {
+				long maxFwdSlots = columnTargetsSegment.byteSize() / tgtW;
 				for (int u = 0; u < nodeCount; u++) {
-					int start = (int) readEdgeIndex(rowOffsetsSegment, u);
-					int end = (int) readEdgeIndex(rowOffsetsSegment, u + 1);
+					long startL = readEdgeIndex(rowOffsetsSegment, u);
+					long endL = readEdgeIndex(rowOffsetsSegment, u + 1L);
+					if (startL < 0 || endL <= startL || endL > maxFwdSlots || endL > Integer.MAX_VALUE) {
+						continue;
+					}
+					int start = (int) startL;
+					int end = (int) endL;
 					for (int e = start; e < end; e++) {
 						int v = readNodeId(columnTargetsSegment, e);
 						if (v >= 0 && v < cscN) {
-							int cscEnd = (int) readEdgeIndex(cscRowOffsetsSegment, v + 1);
-							for (int k = cursors[v]; k < cscEnd; k++) {
+							long rawCscEnd = readEdgeIndex(cscRowOffsetsSegment, v + 1L);
+							int cscEnd = (int) Math.min(rawCscEnd, Math.min((long) edgeCount, maxCscSlots));
+							for (int k = Math.max(0, cursors[v]); k < cscEnd; k++) {
 								if (map[k] == -1 && readSrcNodeId(cscColumnTargetsSegment, k) == u) {
 									map[k] = e;
-									while (cursors[v] < cscEnd && map[cursors[v]] != -1) {
+									while (cursors[v] >= 0 && cursors[v] < cscEnd && map[cursors[v]] != -1) {
 										cursors[v]++;
 									}
 									break;
@@ -903,9 +971,9 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			}
 			int[] map = new int[nodeCount];
 			int rank = 0;
-			int w = (nodeIdWidth == 2) ? 2 : (nodeIdWidth == 8 ? 8 : 4);
+			int w = idWidthBytes(nodeIdWidth);
 			for (int u = 0; u < nodeCount; u++) {
-				if ((long) (u + 1) * w <= columnTargetsSegment.byteSize()) {
+				if (((long) u + 1L) * w <= columnTargetsSegment.byteSize()) {
 					int t = readNodeId(columnTargetsSegment, u);
 					if (!isSentinelNodeId(t, nodeIdWidth)) {
 						map[u] = (edgeCount == nodeCount) ? u : rank++;
@@ -927,11 +995,17 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 			int[] fwdMap = getOrBuildFlatForwardEdgeMap();
 			return (srcU < fwdMap.length) ? fwdMap[srcU] : -1;
 		}
+		int offW = offsetWidthBytes();
+		int tgtW = idWidthBytes(nodeIdWidth);
 		if (rowOffsetsSegment != null && !rowOffsetsSegment.equals(MemorySegment.NULL)
-				&& rowOffsetsSegment.byteSize() > 0) {
-			int start = (int) readEdgeIndex(rowOffsetsSegment, srcU);
-			int end = (int) readEdgeIndex(rowOffsetsSegment, srcU + 1);
-			for (int e = start; e < end; e++) {
+				&& ((long) srcU + 2L) * offW <= rowOffsetsSegment.byteSize() && columnTargetsSegment != null
+				&& !columnTargetsSegment.equals(MemorySegment.NULL)) {
+			long start = readEdgeIndex(rowOffsetsSegment, srcU);
+			long end = readEdgeIndex(rowOffsetsSegment, srcU + 1L);
+			if (start < 0 || end <= start || end > columnTargetsSegment.byteSize() / tgtW || end > Integer.MAX_VALUE) {
+				return -1;
+			}
+			for (int e = (int) start; e < (int) end; e++) {
 				if (readNodeId(columnTargetsSegment, e) == dstV) {
 					return e;
 				}
