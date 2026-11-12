@@ -1226,23 +1226,26 @@ public final class VmMultiLaneHandlers {
 					Arrays.fill(outIds, -1L);
 					Arrays.fill(outInts, -1);
 					float[] laneSlice = ImpulseAssert.isAuditEnabled() ? ctx.scratchFloat(0, nCnt) : null;
+					long activeMask = lfSrc.activeMask();
 					for (int b = 0; b < k; b++) {
-						long bitB = 1L << b;
+						long bitB = (1L << b) & activeMask;
 						float bestVal = isMin ? Float.POSITIVE_INFINITY : Float.NEGATIVE_INFINITY;
 						long bestId = -1L;
 						if (laneSlice != null) {
 							Arrays.fill(laneSlice, Float.NaN);
 						}
-						for (int u = 0; u < nCnt; u++) {
-							if ((lfSrc.lanes()[u] & bitB) != 0L && u < attrLen) {
-								float v = attrFloats[u];
-								if (!Float.isNaN(v)) {
-									if (laneSlice != null) {
-										laneSlice[u] = v;
-									}
-									if (bestId == -1L || (isMin ? (v < bestVal) : (v > bestVal))) {
-										bestVal = v;
-										bestId = u;
+						if (bitB != 0L) {
+							for (int u = 0; u < nCnt; u++) {
+								if ((lfSrc.lanes()[u] & bitB) != 0L && u < attrLen) {
+									float v = attrFloats[u];
+									if (!Float.isNaN(v)) {
+										if (laneSlice != null) {
+											laneSlice[u] = v;
+										}
+										if (bestId == -1L || (isMin ? (v < bestVal) : (v > bestVal))) {
+											bestVal = v;
+											bestId = u;
+										}
 									}
 								}
 							}
@@ -1253,6 +1256,7 @@ public final class VmMultiLaneHandlers {
 							VmInvariants.verifyArgminArgmaxTieBreaking(isMin, laneSlice, bestId);
 						}
 					}
+					ctx.setNodeVectorLength(h, k);
 					VmHandlers.setRegister(state, dst, h, TYPE_UINT64_VECTOR);
 					boolean anyFound = false;
 					for (int b = 0; b < k; b++) {
@@ -1270,6 +1274,7 @@ public final class VmMultiLaneHandlers {
 						default -> 0.0f; // SUM / COUNT
 					};
 					int h = ctx.acquireFloatVector(k);
+					ctx.setFloatVectorLength(h, k);
 					float[] outFloats = ctx.getFloatVector(h);
 					Arrays.fill(outFloats, 0, k, initV);
 					long touchedMask = 0L;
@@ -1293,6 +1298,13 @@ public final class VmMultiLaneHandlers {
 										default -> outFloats[b] += v;
 									}
 								}
+							}
+						}
+					}
+					if (redOp == 1 || redOp == 2 || redOp == 3) {
+						for (int b = 0; b < k; b++) {
+							if ((touchedMask & (1L << b)) == 0L) {
+								outFloats[b] = 0.0f;
 							}
 						}
 					}
@@ -1697,12 +1709,27 @@ public final class VmMultiLaneHandlers {
 			VmRegType tag = VmRegType.fromTag(VmHandlers.getRegisterType(state, attrOrReg));
 			int h = (int) VmHandlers.getRegisterValue(state, attrOrReg);
 			return switch (tag) {
-				case T_FLOAT_VECTOR, T_DOUBLE_VECTOR -> {
+				case T_FLOAT_VECTOR -> {
 					float[] fa = ctx.getFloatVector(h);
 					if (fa == null) {
 						throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
 					}
+					int len = Math.min(fa.length, ctx.getFloatVectorLength(h));
+					ctx.setScratchFloatLen(1, len);
 					yield fa;
+				}
+				case T_DOUBLE_VECTOR -> {
+					double[] da = ctx.getDoubleVector(h);
+					if (da == null) {
+						throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+					}
+					int len = Math.min(da.length, ctx.getDoubleVectorLength(h));
+					float[] out = ctx.scratchFloat(1, len);
+					for (int i = 0; i < len; i++) {
+						out[i] = (float) da[i];
+					}
+					ctx.setScratchFloatLen(1, len);
+					yield out;
 				}
 				case T_NODE_VECTOR, T_UINT64_VECTOR -> {
 					int[] ia = ctx.getIntVector(h);
@@ -1724,19 +1751,36 @@ public final class VmMultiLaneHandlers {
 			};
 		}
 		Object mock = ctx.getMockAttribute(attrOrReg);
+		ImpulseBitSet validBs = (ctx.getMockAttribute(-attrOrReg - 1) instanceof ImpulseBitSet vbs) ? vbs : null;
 		if (mock instanceof float[] fa) {
+			if (validBs == null) {
+				ctx.setScratchFloatLen(1, fa.length);
+				return fa;
+			}
+			float[] out = ctx.scratchFloat(1, fa.length);
+			for (int i = 0; i < fa.length; i++) {
+				out[i] = validBs.get(i) ? fa[i] : Float.NaN;
+			}
 			ctx.setScratchFloatLen(1, fa.length);
-			return fa;
+			return out;
+		}
+		if (mock instanceof double[] da) {
+			float[] out = ctx.scratchFloat(1, da.length);
+			for (int i = 0; i < da.length; i++) {
+				out[i] = (validBs != null && !validBs.get(i)) ? Float.NaN : (float) da[i];
+			}
+			ctx.setScratchFloatLen(1, da.length);
+			return out;
 		}
 		if (mock instanceof int[] ia) {
 			float[] out = ctx.scratchFloat(1, ia.length);
 			for (int i = 0; i < ia.length; i++) {
-				out[i] = Float.intBitsToFloat(ia[i]);
+				out[i] = (validBs != null && !validBs.get(i)) ? Float.NaN : Float.intBitsToFloat(ia[i]);
 			}
 			ctx.setScratchFloatLen(1, ia.length);
 			return out;
 		}
-		float[] snapAttr = resolveEmbeddingFloats(ctx, attrOrReg);
+		float[] snapAttr = resolveSnapshotNodeAttrFloats(ctx, attrOrReg);
 		if (snapAttr != null) {
 			return snapAttr;
 		}
@@ -1746,6 +1790,104 @@ public final class VmMultiLaneHandlers {
 		}
 		ctx.setScratchFloatLen(1, nodeCount);
 		return fallback;
+	}
+
+	private static float[] resolveSnapshotNodeAttrFloats(VmQueryContext ctx, int attrId) {
+		if (ctx.getSnapshot() == null) {
+			return null;
+		}
+		String attrName = ctx.getString(attrId);
+		if (ctx.getSnapshot() instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+			for (String domName : gs.getDomainNames()) {
+				org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain dom = gs.getDomain(domName);
+				if (dom == null) {
+					continue;
+				}
+				int idx = (attrName != null) ? dom.getAttributeIndex(attrName) : -1;
+				if (idx < 0 && attrId >= 0 && attrId < dom.attributeCount()) {
+					idx = attrId;
+				}
+				if (idx >= 0 && idx < dom.attributeCount()) {
+					var loadedAttr = dom.getAttribute(idx);
+					MemorySegment seg = dom.getAttributeSegment(idx);
+					MemorySegment valSeg = dom.getValiditySegment(idx);
+					int count = (int) Math.min(dom.nodeCount(), Integer.MAX_VALUE);
+					if (seg != null && !seg.equals(MemorySegment.NULL) && count > 0) {
+						float[] out = ctx.scratchFloat(1, count);
+						int typeCode = loadedAttr.typeCode() & 0x7F;
+						boolean hasValid = loadedAttr.isNullable() && valSeg != null
+								&& !valSeg.equals(MemorySegment.NULL) && valSeg.byteSize() > 0;
+						for (int i = 0; i < count; i++) {
+							if (hasValid && (i >>> 3) < valSeg.byteSize()) {
+								byte b = valSeg.get(ValueLayout.JAVA_BYTE, i >>> 3);
+								if ((b & (1 << (i & 7))) == 0) {
+									out[i] = Float.NaN;
+									continue;
+								}
+							}
+							out[i] = readSegmentNumericAsFloat(seg, typeCode, i);
+						}
+						ctx.setScratchFloatLen(1, count);
+						return out;
+					}
+				}
+			}
+		}
+		for (RelationSnapshot rel : ctx.getSnapshot().getAllRelationSnapshots().values()) {
+			if (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot csrRel) {
+				int idx = (attrName != null) ? csrRel.findAttributeIndex(attrName) : attrId;
+				if (idx < 0 && attrId < csrRel.getAttributeSegments().size()) {
+					idx = attrId;
+				}
+				if (idx >= 0 && idx < csrRel.getAttributeSegments().size()) {
+					MemorySegment seg = csrRel.getAttributeSegments().get(idx);
+					MemorySegment valSeg = (csrRel.getValiditySegments() != null
+							&& csrRel.getValiditySegments().size() > idx)
+									? csrRel.getValiditySegments().get(idx)
+									: null;
+					if (seg != null && seg.byteSize() > 0L) {
+						String fullName = csrRel.getAttributeName(idx);
+						int typeCode = csrRel.getAttributeTypeCode(idx) & 0x7F;
+						int elemBytes = switch (typeCode) {
+							case 0x01 -> 1;
+							case 0x02 -> 2;
+							case 0x04, 0x06 -> 8;
+							default -> 4;
+						};
+						int count = (int) ((fullName != null && fullName.contains(".")) || rel.getEdgeCount() == 0
+								? Math.min(rel.getNodeCount(), seg.byteSize() / elemBytes)
+								: seg.byteSize() / elemBytes);
+						float[] out = ctx.scratchFloat(1, count);
+						boolean hasValid = valSeg != null && !valSeg.equals(MemorySegment.NULL)
+								&& valSeg.byteSize() > 0;
+						for (int i = 0; i < count; i++) {
+							if (hasValid && (i >>> 3) < valSeg.byteSize()) {
+								byte b = valSeg.get(ValueLayout.JAVA_BYTE, i >>> 3);
+								if ((b & (1 << (i & 7))) == 0) {
+									out[i] = Float.NaN;
+									continue;
+								}
+							}
+							out[i] = readSegmentNumericAsFloat(seg, typeCode, i);
+						}
+						ctx.setScratchFloatLen(1, count);
+						return out;
+					}
+				}
+			}
+		}
+		return null;
+	}
+
+	private static float readSegmentNumericAsFloat(MemorySegment seg, int typeCode, int i) {
+		return switch (typeCode) {
+			case 0x01 -> (float) seg.get(ValueLayout.JAVA_BYTE, i);
+			case 0x02 -> (float) seg.get(ValueLayout.JAVA_SHORT_UNALIGNED, i * 2L);
+			case 0x03 -> (float) seg.get(ValueLayout.JAVA_INT_UNALIGNED, i * 4L);
+			case 0x04 -> (float) seg.get(ValueLayout.JAVA_LONG_UNALIGNED, i * 8L);
+			case 0x06 -> (float) seg.get(ValueLayout.JAVA_DOUBLE_UNALIGNED, i * 8L);
+			default -> seg.get(ValueLayout.JAVA_FLOAT_UNALIGNED, i * 4L);
+		};
 	}
 
 	private static void recordBranch(VmQueryContext ctx, int pc, int opcode, int siteId,

@@ -1,10 +1,12 @@
 package org.impulsegraph.compiler.cel;
 
 import java.util.Map;
+import org.impulsegraph.vm.ImpulseMath;
 
 /**
- * Registry of 46 analytical vector math and FP classification functions for
- * CEL. Exactly matches impulse-cpp impulse_math_ops.h / impulse_cel.h.
+ * Registry and canonical 64-bit evaluator for all 54 analytical vector math and
+ * FP classification functions in CEL. Exactly matches impulse-cpp
+ * impulse_math_ops.h / impulse_cel.h.
  */
 public final class CelMathFunctions {
 
@@ -77,16 +79,18 @@ public final class CelMathFunctions {
 			Map.entry("trunc", MATH_FUNC_TRUNC), Map.entry("round", MATH_FUNC_ROUND),
 			Map.entry("clamp", MATH_FUNC_CLAMP), Map.entry("copysign", MATH_FUNC_COPYSIGN),
 			Map.entry("fmod", MATH_FUNC_FMOD), Map.entry("relu", MATH_FUNC_RELU),
-			Map.entry("leaky_relu", MATH_FUNC_LEAKY_RELU), Map.entry("sigmoid", MATH_FUNC_SIGMOID),
-			Map.entry("gelu", MATH_FUNC_GELU), Map.entry("silu", MATH_FUNC_SILU),
-			Map.entry("softplus", MATH_FUNC_SOFTPLUS), Map.entry("erf", MATH_FUNC_ERF),
-			Map.entry("erfc", MATH_FUNC_ERFC), Map.entry("lgamma", MATH_FUNC_LGAMMA),
-			Map.entry("popcount", MATH_FUNC_POPCOUNT), Map.entry("clz", MATH_FUNC_CLZ), Map.entry("ctz", MATH_FUNC_CTZ),
-			Map.entry("rotl", MATH_FUNC_ROTL), Map.entry("rotr", MATH_FUNC_ROTR),
-			Map.entry("safeDiv", MATH_FUNC_SAFE_DIV), Map.entry("safe_div", MATH_FUNC_SAFE_DIV),
-			Map.entry("isNan", MATH_FUNC_ISNAN), Map.entry("isnan", MATH_FUNC_ISNAN),
-			Map.entry("isInf", MATH_FUNC_ISINF), Map.entry("isinf", MATH_FUNC_ISINF),
-			Map.entry("isFinite", MATH_FUNC_ISFINITE), Map.entry("isfinite", MATH_FUNC_ISFINITE));
+			Map.entry("leaky_relu", MATH_FUNC_LEAKY_RELU), Map.entry("leakyRelu", MATH_FUNC_LEAKY_RELU),
+			Map.entry("sigmoid", MATH_FUNC_SIGMOID), Map.entry("gelu", MATH_FUNC_GELU),
+			Map.entry("silu", MATH_FUNC_SILU), Map.entry("softplus", MATH_FUNC_SOFTPLUS),
+			Map.entry("erf", MATH_FUNC_ERF), Map.entry("erfc", MATH_FUNC_ERFC), Map.entry("lgamma", MATH_FUNC_LGAMMA),
+			Map.entry("popcount", MATH_FUNC_POPCOUNT), Map.entry("bit_count", MATH_FUNC_POPCOUNT),
+			Map.entry("clz", MATH_FUNC_CLZ), Map.entry("ctz", MATH_FUNC_CTZ), Map.entry("rotl", MATH_FUNC_ROTL),
+			Map.entry("rotr", MATH_FUNC_ROTR), Map.entry("safeDiv", MATH_FUNC_SAFE_DIV),
+			Map.entry("safe_div", MATH_FUNC_SAFE_DIV), Map.entry("isNan", MATH_FUNC_ISNAN),
+			Map.entry("is_nan", MATH_FUNC_ISNAN), Map.entry("isnan", MATH_FUNC_ISNAN),
+			Map.entry("isInf", MATH_FUNC_ISINF), Map.entry("is_inf", MATH_FUNC_ISINF),
+			Map.entry("isinf", MATH_FUNC_ISINF), Map.entry("isFinite", MATH_FUNC_ISFINITE),
+			Map.entry("is_finite", MATH_FUNC_ISFINITE), Map.entry("isfinite", MATH_FUNC_ISFINITE));
 
 	private CelMathFunctions() {
 	}
@@ -99,5 +103,49 @@ public final class CelMathFunctions {
 
 	public static boolean isMathFunc(String name) {
 		return resolveMathFunc(name) > 0;
+	}
+
+	public static double evalUnary(int funcId, double x) {
+		return ImpulseMath.unaryF64(funcId, x);
+	}
+
+	public static double evalBinary(int funcId, double x, double y) {
+		return ImpulseMath.binaryF64(funcId, x, y);
+	}
+
+	public static double evalTernary(int funcId, double x, double y, double z) {
+		return ImpulseMath.ternaryF64(funcId, x, y, z);
+	}
+
+	public static double c99Trunc(double x) {
+		return ImpulseMath.c99Trunc(x);
+	}
+
+	public static double c99Round(double x) {
+		return ImpulseMath.c99Round(x);
+	}
+
+	public static double asinh(double x) {
+		return ImpulseMath.asinh(x);
+	}
+
+	public static double acosh(double x) {
+		return ImpulseMath.acosh(x);
+	}
+
+	public static double atanh(double x) {
+		return ImpulseMath.atanh(x);
+	}
+
+	public static double erf(double x) {
+		return ImpulseMath.erf(x);
+	}
+
+	public static double erfc(double x) {
+		return ImpulseMath.erfc(x);
+	}
+
+	public static double lgamma(double x) {
+		return ImpulseMath.lgamma(x);
 	}
 }

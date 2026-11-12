@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedAttribute;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain;
 import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.vm.ImpulseMath;
 
 /**
  * Zero-dependency Spec v0.10.0 CEL compiler and Kleene 3-valued logic (3VL)
@@ -33,6 +34,20 @@ public final class VmCelEvaluator {
 	public static final byte TRI_FALSE = 0;
 	public static final byte TRI_TRUE = 1;
 	public static final byte TRI_NULL = 2;
+
+	private static final int FUNC_UNKNOWN = 0;
+	private static final int FUNC_IS_NULL = 101;
+	private static final int FUNC_IS_NOT_NULL = 102;
+	private static final int FUNC_STARTS_WITH = 103;
+	private static final int FUNC_ENDS_WITH = 104;
+	private static final int FUNC_CONTAINS = 105;
+	private static final int FUNC_COALESCE = 106;
+	private static final int FUNC_MIN = 107;
+	private static final int FUNC_MAX = 108;
+	private static final int FUNC_SIGN = 109;
+	private static final int FUNC_FMA = 110;
+	private static final int FUNC_DEG2RAD = 111;
+	private static final int FUNC_RAD2DEG = 112;
 
 	private final ExprNode root;
 	private final Map<String, Object> params;
@@ -233,13 +248,9 @@ public final class VmCelEvaluator {
 		}
 
 		void setFloat(int sp, double v) {
-			if (Double.isNaN(v)) {
-				setNull(sp);
-			} else {
-				kinds[sp] = KIND_FLOAT;
-				fVals[sp] = v;
-				oVals[sp] = null;
-			}
+			kinds[sp] = KIND_FLOAT;
+			fVals[sp] = v;
+			oVals[sp] = null;
 		}
 
 		void setStr(int sp, String s) {
@@ -259,11 +270,15 @@ public final class VmCelEvaluator {
 		}
 	}
 
+	private static boolean isNumericSlot(byte kind) {
+		return kind == KIND_FLOAT || kind == KIND_INT || kind == KIND_UINT;
+	}
+
 	private static byte toTriBool(EvalScratch s, int sp) {
 		return switch (s.kinds[sp]) {
 			case KIND_NULL -> TRI_NULL;
 			case KIND_BOOL, KIND_INT, KIND_UINT -> s.iVals[sp] != 0L ? TRI_TRUE : TRI_FALSE;
-			case KIND_FLOAT -> Double.isNaN(s.fVals[sp]) ? TRI_NULL : (s.fVals[sp] != 0.0 ? TRI_TRUE : TRI_FALSE);
+			case KIND_FLOAT -> Double.isNaN(s.fVals[sp]) ? TRI_FALSE : (s.fVals[sp] != 0.0 ? TRI_TRUE : TRI_FALSE);
 			case KIND_STR -> ((String) s.oVals[sp]).isEmpty() ? TRI_FALSE : TRI_TRUE;
 			default -> TRI_NULL;
 		};
@@ -382,27 +397,41 @@ public final class VmCelEvaluator {
 				return;
 			}
 			switch (op) {
-				case "==", "!=" -> {
-					int cmp = compareNonNull(s, sp, sp + 1, true);
-					if (cmp == Integer.MIN_VALUE) {
-						s.setNull(sp);
-					} else {
-						boolean eq = (cmp == 0);
-						s.setBool(sp, "==".equals(op) ? eq : !eq);
-					}
-				}
-				case "<", "<=", ">", ">=" -> {
-					int cmp = compareNonNull(s, sp, sp + 1, false);
-					if (cmp == Integer.MIN_VALUE) {
-						s.setNull(sp);
-					} else {
+				case "==", "!=", "<", "<=", ">", ">=" -> {
+					if ((s.kinds[sp] == KIND_FLOAT || s.kinds[sp + 1] == KIND_FLOAT) && isNumericSlot(s.kinds[sp])
+							&& isNumericSlot(s.kinds[sp + 1])) {
+						double da = slotAsDouble(s, sp);
+						double db = slotAsDouble(s, sp + 1);
 						boolean ok = switch (op) {
-							case "<" -> cmp < 0;
-							case "<=" -> cmp <= 0;
-							case ">" -> cmp > 0;
-							default -> cmp >= 0;
+							case "==" -> da == db;
+							case "!=" -> da != db;
+							case "<" -> da < db;
+							case "<=" -> da <= db;
+							case ">" -> da > db;
+							default -> da >= db;
 						};
 						s.setBool(sp, ok);
+					} else if ("==".equals(op) || "!=".equals(op)) {
+						int cmp = compareNonNull(s, sp, sp + 1, true);
+						if (cmp == Integer.MIN_VALUE) {
+							s.setNull(sp);
+						} else {
+							boolean eq = (cmp == 0);
+							s.setBool(sp, "==".equals(op) ? eq : !eq);
+						}
+					} else {
+						int cmp = compareNonNull(s, sp, sp + 1, false);
+						if (cmp == Integer.MIN_VALUE) {
+							s.setNull(sp);
+						} else {
+							boolean ok = switch (op) {
+								case "<" -> cmp < 0;
+								case "<=" -> cmp <= 0;
+								case ">" -> cmp > 0;
+								default -> cmp >= 0;
+							};
+							s.setBool(sp, ok);
+						}
 					}
 				}
 				case "+", "-", "*", "/", "%" -> evalArithmetic(op, s, sp, sp + 1);
@@ -417,89 +446,282 @@ public final class VmCelEvaluator {
 				evalInto(tern.ifFalse, s, sp);
 			}
 		} else if (node instanceof FuncNode fn) {
-			switch (fn.name) {
-				case "is_null", "null?" -> {
-					if (fn.args.isEmpty()) {
-						s.setBool(sp, true);
-					} else {
-						evalInto(fn.args.get(0), s, sp);
-						s.setBool(sp, s.kinds[sp] == KIND_NULL);
-					}
-				}
-				case "is_not_null", "not_null?", "not-null?" -> {
-					if (fn.args.isEmpty()) {
-						s.setBool(sp, false);
-					} else {
-						evalInto(fn.args.get(0), s, sp);
-						s.setBool(sp, s.kinds[sp] != KIND_NULL);
-					}
-				}
-				case "starts_with", "startsWith", "starts-with" -> {
-					if (fn.args.size() < 2) {
-						s.setNull(sp);
-					} else {
-						evalInto(fn.args.get(0), s, sp);
-						evalInto(fn.args.get(1), s, sp + 1);
-						if (s.kinds[sp] != KIND_STR || s.kinds[sp + 1] != KIND_STR) {
-							s.setNull(sp);
-						} else {
-							s.setBool(sp, ((String) s.oVals[sp]).startsWith((String) s.oVals[sp + 1]));
-						}
-					}
-				}
-				case "ends_with", "endsWith" -> {
-					if (fn.args.size() < 2) {
-						s.setNull(sp);
-					} else {
-						evalInto(fn.args.get(0), s, sp);
-						evalInto(fn.args.get(1), s, sp + 1);
-						if (s.kinds[sp] != KIND_STR || s.kinds[sp + 1] != KIND_STR) {
-							s.setNull(sp);
-						} else {
-							s.setBool(sp, ((String) s.oVals[sp]).endsWith((String) s.oVals[sp + 1]));
-						}
-					}
-				}
-				case "contains" -> {
-					if (fn.args.size() < 2) {
-						s.setNull(sp);
-					} else {
-						evalInto(fn.args.get(0), s, sp);
-						evalInto(fn.args.get(1), s, sp + 1);
-						if (s.kinds[sp] != KIND_STR || s.kinds[sp + 1] != KIND_STR) {
-							s.setNull(sp);
-						} else {
-							s.setBool(sp, ((String) s.oVals[sp]).contains((String) s.oVals[sp + 1]));
-						}
-					}
-				}
-				case "coalesce" -> {
-					s.setNull(sp);
-					for (ExprNode arg : fn.args) {
-						evalInto(arg, s, sp);
-						if (s.kinds[sp] != KIND_NULL) {
-							break;
-						}
-					}
-				}
-				case "abs" -> {
-					if (fn.args.isEmpty()) {
-						s.setNull(sp);
-					} else {
-						evalInto(fn.args.get(0), s, sp);
-						if (s.kinds[sp] == KIND_INT) {
-							s.setInt(sp, Math.abs(s.iVals[sp]));
-						} else if (s.kinds[sp] == KIND_FLOAT) {
-							s.setFloat(sp, Math.abs(s.fVals[sp]));
-						} else if (s.kinds[sp] != KIND_UINT) {
-							s.setNull(sp);
-						}
-					}
-				}
-				default -> s.setNull(sp);
-			}
+			evalFuncNode(fn, s, sp);
 		} else {
 			s.setNull(sp);
+		}
+	}
+
+	private static void evalFuncNode(FuncNode fn, EvalScratch s, int sp) {
+		int arity = fn.args.size();
+		int op = fn.funcOp;
+		switch (op) {
+			case FUNC_IS_NULL -> {
+				if (arity == 0) {
+					s.setBool(sp, true);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					s.setBool(sp, s.kinds[sp] == KIND_NULL);
+				}
+			}
+			case FUNC_IS_NOT_NULL -> {
+				if (arity == 0) {
+					s.setBool(sp, false);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					s.setBool(sp, s.kinds[sp] != KIND_NULL);
+				}
+			}
+			case FUNC_STARTS_WITH -> {
+				if (arity < 2) {
+					s.setNull(sp);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					evalInto(fn.args.get(1), s, sp + 1);
+					if (s.kinds[sp] != KIND_STR || s.kinds[sp + 1] != KIND_STR) {
+						s.setNull(sp);
+					} else {
+						s.setBool(sp, ((String) s.oVals[sp]).startsWith((String) s.oVals[sp + 1]));
+					}
+				}
+			}
+			case FUNC_ENDS_WITH -> {
+				if (arity < 2) {
+					s.setNull(sp);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					evalInto(fn.args.get(1), s, sp + 1);
+					if (s.kinds[sp] != KIND_STR || s.kinds[sp + 1] != KIND_STR) {
+						s.setNull(sp);
+					} else {
+						s.setBool(sp, ((String) s.oVals[sp]).endsWith((String) s.oVals[sp + 1]));
+					}
+				}
+			}
+			case FUNC_CONTAINS -> {
+				if (arity < 2) {
+					s.setNull(sp);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					evalInto(fn.args.get(1), s, sp + 1);
+					if (s.kinds[sp] != KIND_STR || s.kinds[sp + 1] != KIND_STR) {
+						s.setNull(sp);
+					} else {
+						s.setBool(sp, ((String) s.oVals[sp]).contains((String) s.oVals[sp + 1]));
+					}
+				}
+			}
+			case FUNC_COALESCE -> {
+				s.setNull(sp);
+				for (int i = 0; i < arity; i++) {
+					evalInto(fn.args.get(i), s, sp);
+					if (s.kinds[sp] != KIND_NULL) {
+						break;
+					}
+				}
+			}
+			case ImpulseMath.MATH_FUNC_ABS -> {
+				if (arity != 1) {
+					s.setNull(sp);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					switch (s.kinds[sp]) {
+						case KIND_INT -> {
+							long v = s.iVals[sp];
+							if (v == Long.MIN_VALUE) {
+								s.setUint(sp, Long.MIN_VALUE);
+							} else {
+								s.setInt(sp, Math.abs(v));
+							}
+						}
+						case KIND_UINT -> {
+							// already non-negative
+						}
+						case KIND_FLOAT -> s.setFloat(sp, Math.abs(s.fVals[sp]));
+						default -> s.setNull(sp);
+					}
+				}
+			}
+			case ImpulseMath.MATH_FUNC_ISNAN, ImpulseMath.MATH_FUNC_ISINF, ImpulseMath.MATH_FUNC_ISFINITE -> {
+				if (arity != 1) {
+					s.setNull(sp);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					byte k = s.kinds[sp];
+					if (k == KIND_INT || k == KIND_UINT) {
+						s.setBool(sp, op == ImpulseMath.MATH_FUNC_ISFINITE);
+					} else if (k == KIND_FLOAT) {
+						double v = s.fVals[sp];
+						boolean res = switch (op) {
+							case ImpulseMath.MATH_FUNC_ISNAN -> Double.isNaN(v);
+							case ImpulseMath.MATH_FUNC_ISINF -> Double.isInfinite(v);
+							default -> Double.isFinite(v);
+						};
+						s.setBool(sp, res);
+					} else {
+						s.setNull(sp);
+					}
+				}
+			}
+			case ImpulseMath.MATH_FUNC_LEAKY_RELU -> {
+				if (arity == 1) {
+					evalInto(fn.args.get(0), s, sp);
+					if (!isNumericSlot(s.kinds[sp])) {
+						s.setNull(sp);
+					} else {
+						s.setFloat(sp, ImpulseMath.leakyRelu(slotAsDouble(s, sp)));
+					}
+				} else if (arity == 2) {
+					evalInto(fn.args.get(0), s, sp);
+					evalInto(fn.args.get(1), s, sp + 1);
+					if (!isNumericSlot(s.kinds[sp]) || !isNumericSlot(s.kinds[sp + 1])) {
+						s.setNull(sp);
+					} else {
+						s.setFloat(sp, ImpulseMath.binaryF64(op, slotAsDouble(s, sp), slotAsDouble(s, sp + 1)));
+					}
+				} else {
+					s.setNull(sp);
+				}
+			}
+			case ImpulseMath.MATH_FUNC_SAFE_DIV -> {
+				if (arity == 2) {
+					evalInto(fn.args.get(0), s, sp);
+					evalInto(fn.args.get(1), s, sp + 1);
+					if (!isNumericSlot(s.kinds[sp]) || !isNumericSlot(s.kinds[sp + 1])) {
+						s.setNull(sp);
+					} else {
+						s.setFloat(sp, ImpulseMath.binaryF64(op, slotAsDouble(s, sp), slotAsDouble(s, sp + 1)));
+					}
+				} else if (arity == 3) {
+					evalInto(fn.args.get(0), s, sp);
+					evalInto(fn.args.get(1), s, sp + 1);
+					evalInto(fn.args.get(2), s, sp + 2);
+					if (!isNumericSlot(s.kinds[sp]) || !isNumericSlot(s.kinds[sp + 1])
+							|| !isNumericSlot(s.kinds[sp + 2])) {
+						s.setNull(sp);
+					} else {
+						s.setFloat(sp, ImpulseMath.ternaryF64(op, slotAsDouble(s, sp), slotAsDouble(s, sp + 1),
+								slotAsDouble(s, sp + 2)));
+					}
+				} else {
+					s.setNull(sp);
+				}
+			}
+			case ImpulseMath.MATH_FUNC_POW, ImpulseMath.MATH_FUNC_HYPOT, ImpulseMath.MATH_FUNC_ATAN2,
+					ImpulseMath.MATH_FUNC_COPYSIGN, ImpulseMath.MATH_FUNC_FMOD, ImpulseMath.MATH_FUNC_ROTL,
+					ImpulseMath.MATH_FUNC_ROTR -> {
+				if (arity != 2) {
+					s.setNull(sp);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					evalInto(fn.args.get(1), s, sp + 1);
+					if (!isNumericSlot(s.kinds[sp]) || !isNumericSlot(s.kinds[sp + 1])) {
+						s.setNull(sp);
+					} else {
+						s.setFloat(sp, ImpulseMath.binaryF64(op, slotAsDouble(s, sp), slotAsDouble(s, sp + 1)));
+					}
+				}
+			}
+			case ImpulseMath.MATH_FUNC_LERP, ImpulseMath.MATH_FUNC_CLAMP -> {
+				if (arity != 3) {
+					s.setNull(sp);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					evalInto(fn.args.get(1), s, sp + 1);
+					evalInto(fn.args.get(2), s, sp + 2);
+					if (!isNumericSlot(s.kinds[sp]) || !isNumericSlot(s.kinds[sp + 1])
+							|| !isNumericSlot(s.kinds[sp + 2])) {
+						s.setNull(sp);
+					} else {
+						s.setFloat(sp, ImpulseMath.ternaryF64(op, slotAsDouble(s, sp), slotAsDouble(s, sp + 1),
+								slotAsDouble(s, sp + 2)));
+					}
+				}
+			}
+			case FUNC_MIN, FUNC_MAX -> {
+				if (arity != 2) {
+					s.setNull(sp);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					evalInto(fn.args.get(1), s, sp + 1);
+					if (!isNumericSlot(s.kinds[sp]) || !isNumericSlot(s.kinds[sp + 1])) {
+						s.setNull(sp);
+					} else if (s.kinds[sp] == KIND_INT && s.kinds[sp + 1] == KIND_INT) {
+						s.setInt(sp,
+								op == FUNC_MIN
+										? Math.min(s.iVals[sp], s.iVals[sp + 1])
+										: Math.max(s.iVals[sp], s.iVals[sp + 1]));
+					} else {
+						double da = slotAsDouble(s, sp);
+						double db = slotAsDouble(s, sp + 1);
+						s.setFloat(sp, op == FUNC_MIN ? Math.min(da, db) : Math.max(da, db));
+					}
+				}
+			}
+			case FUNC_SIGN -> {
+				if (arity != 1) {
+					s.setNull(sp);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					switch (s.kinds[sp]) {
+						case KIND_INT -> s.setInt(sp, Long.signum(s.iVals[sp]));
+						case KIND_UINT -> s.setInt(sp, s.iVals[sp] == 0L ? 0L : 1L);
+						case KIND_FLOAT -> s.setFloat(sp, Math.signum(s.fVals[sp]));
+						default -> s.setNull(sp);
+					}
+				}
+			}
+			case FUNC_FMA -> {
+				if (arity != 3) {
+					s.setNull(sp);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					evalInto(fn.args.get(1), s, sp + 1);
+					evalInto(fn.args.get(2), s, sp + 2);
+					if (!isNumericSlot(s.kinds[sp]) || !isNumericSlot(s.kinds[sp + 1])
+							|| !isNumericSlot(s.kinds[sp + 2])) {
+						s.setNull(sp);
+					} else {
+						s.setFloat(sp, Math.fma(slotAsDouble(s, sp), slotAsDouble(s, sp + 1), slotAsDouble(s, sp + 2)));
+					}
+				}
+			}
+			case FUNC_DEG2RAD -> {
+				if (arity != 1) {
+					s.setNull(sp);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					if (!isNumericSlot(s.kinds[sp])) {
+						s.setNull(sp);
+					} else {
+						s.setFloat(sp, Math.toRadians(slotAsDouble(s, sp)));
+					}
+				}
+			}
+			case FUNC_RAD2DEG -> {
+				if (arity != 1) {
+					s.setNull(sp);
+				} else {
+					evalInto(fn.args.get(0), s, sp);
+					if (!isNumericSlot(s.kinds[sp])) {
+						s.setNull(sp);
+					} else {
+						s.setFloat(sp, Math.toDegrees(slotAsDouble(s, sp)));
+					}
+				}
+			}
+			default -> {
+				if (op >= ImpulseMath.MATH_FUNC_SQRT && op <= ImpulseMath.MATH_FUNC_CTZ && arity == 1) {
+					evalInto(fn.args.get(0), s, sp);
+					if (!isNumericSlot(s.kinds[sp])) {
+						s.setNull(sp);
+					} else {
+						s.setFloat(sp, ImpulseMath.unaryF64(op, slotAsDouble(s, sp)));
+					}
+				} else {
+					s.setNull(sp);
+				}
+			}
 		}
 	}
 
@@ -578,6 +800,7 @@ public final class VmCelEvaluator {
 			}
 			return;
 		}
+		boolean anyFloat = (ka == KIND_FLOAT || kb == KIND_FLOAT);
 		double da = slotAsDouble(s, a);
 		double db = slotAsDouble(s, b);
 		switch (op) {
@@ -585,14 +808,14 @@ public final class VmCelEvaluator {
 			case "-" -> s.setFloat(a, da - db);
 			case "*" -> s.setFloat(a, da * db);
 			case "/" -> {
-				if (db == 0.0) {
+				if (!anyFloat && db == 0.0) {
 					s.setNull(a);
 				} else {
 					s.setFloat(a, da / db);
 				}
 			}
 			case "%" -> {
-				if (db == 0.0) {
+				if (!anyFloat && db == 0.0) {
 					s.setNull(a);
 				} else {
 					s.setFloat(a, da % db);
@@ -950,7 +1173,85 @@ public final class VmCelEvaluator {
 	}
 	private record TernaryNode(ExprNode cond, ExprNode ifTrue, ExprNode ifFalse) implements ExprNode {
 	}
-	private record FuncNode(String name, List<ExprNode> args) implements ExprNode {
+	private record FuncNode(String name, int funcOp, List<ExprNode> args) implements ExprNode {
+		FuncNode(String name, List<ExprNode> args) {
+			this(name, resolveFuncOp(name), args);
+		}
+	}
+
+	private static int resolveFuncOp(String name) {
+		if (name == null) {
+			return FUNC_UNKNOWN;
+		}
+		return switch (name) {
+			case "abs" -> ImpulseMath.MATH_FUNC_ABS;
+			case "sqrt" -> ImpulseMath.MATH_FUNC_SQRT;
+			case "rsqrt" -> ImpulseMath.MATH_FUNC_RSQRT;
+			case "cbrt" -> ImpulseMath.MATH_FUNC_CBRT;
+			case "pow" -> ImpulseMath.MATH_FUNC_POW;
+			case "hypot" -> ImpulseMath.MATH_FUNC_HYPOT;
+			case "lerp" -> ImpulseMath.MATH_FUNC_LERP;
+			case "exp" -> ImpulseMath.MATH_FUNC_EXP;
+			case "exp2" -> ImpulseMath.MATH_FUNC_EXP2;
+			case "exp10" -> ImpulseMath.MATH_FUNC_EXP10;
+			case "expm1" -> ImpulseMath.MATH_FUNC_EXPM1;
+			case "log" -> ImpulseMath.MATH_FUNC_LOG;
+			case "log2" -> ImpulseMath.MATH_FUNC_LOG2;
+			case "log10" -> ImpulseMath.MATH_FUNC_LOG10;
+			case "log1p" -> ImpulseMath.MATH_FUNC_LOG1P;
+			case "sin" -> ImpulseMath.MATH_FUNC_SIN;
+			case "cos" -> ImpulseMath.MATH_FUNC_COS;
+			case "tan" -> ImpulseMath.MATH_FUNC_TAN;
+			case "asin" -> ImpulseMath.MATH_FUNC_ASIN;
+			case "acos" -> ImpulseMath.MATH_FUNC_ACOS;
+			case "atan" -> ImpulseMath.MATH_FUNC_ATAN;
+			case "atan2" -> ImpulseMath.MATH_FUNC_ATAN2;
+			case "sinc" -> ImpulseMath.MATH_FUNC_SINC;
+			case "sinh" -> ImpulseMath.MATH_FUNC_SINH;
+			case "cosh" -> ImpulseMath.MATH_FUNC_COSH;
+			case "tanh" -> ImpulseMath.MATH_FUNC_TANH;
+			case "asinh" -> ImpulseMath.MATH_FUNC_ASINH;
+			case "acosh" -> ImpulseMath.MATH_FUNC_ACOSH;
+			case "atanh" -> ImpulseMath.MATH_FUNC_ATANH;
+			case "floor" -> ImpulseMath.MATH_FUNC_FLOOR;
+			case "ceil" -> ImpulseMath.MATH_FUNC_CEIL;
+			case "trunc" -> ImpulseMath.MATH_FUNC_TRUNC;
+			case "round" -> ImpulseMath.MATH_FUNC_ROUND;
+			case "clamp" -> ImpulseMath.MATH_FUNC_CLAMP;
+			case "copysign" -> ImpulseMath.MATH_FUNC_COPYSIGN;
+			case "fmod" -> ImpulseMath.MATH_FUNC_FMOD;
+			case "relu" -> ImpulseMath.MATH_FUNC_RELU;
+			case "leakyRelu", "leaky_relu" -> ImpulseMath.MATH_FUNC_LEAKY_RELU;
+			case "sigmoid" -> ImpulseMath.MATH_FUNC_SIGMOID;
+			case "gelu" -> ImpulseMath.MATH_FUNC_GELU;
+			case "silu" -> ImpulseMath.MATH_FUNC_SILU;
+			case "softplus" -> ImpulseMath.MATH_FUNC_SOFTPLUS;
+			case "erf" -> ImpulseMath.MATH_FUNC_ERF;
+			case "erfc" -> ImpulseMath.MATH_FUNC_ERFC;
+			case "lgamma" -> ImpulseMath.MATH_FUNC_LGAMMA;
+			case "popcount", "bit_count" -> ImpulseMath.MATH_FUNC_POPCOUNT;
+			case "clz" -> ImpulseMath.MATH_FUNC_CLZ;
+			case "ctz" -> ImpulseMath.MATH_FUNC_CTZ;
+			case "rotl" -> ImpulseMath.MATH_FUNC_ROTL;
+			case "rotr" -> ImpulseMath.MATH_FUNC_ROTR;
+			case "safeDiv", "safe_div" -> ImpulseMath.MATH_FUNC_SAFE_DIV;
+			case "isNan", "is_nan", "isnan" -> ImpulseMath.MATH_FUNC_ISNAN;
+			case "isInf", "is_inf", "isinf" -> ImpulseMath.MATH_FUNC_ISINF;
+			case "isFinite", "is_finite", "isfinite" -> ImpulseMath.MATH_FUNC_ISFINITE;
+			case "is_null", "null?", "isNull" -> FUNC_IS_NULL;
+			case "is_not_null", "not_null?", "not-null?", "isNotNull" -> FUNC_IS_NOT_NULL;
+			case "starts_with", "startsWith", "starts-with" -> FUNC_STARTS_WITH;
+			case "ends_with", "endsWith" -> FUNC_ENDS_WITH;
+			case "contains" -> FUNC_CONTAINS;
+			case "coalesce" -> FUNC_COALESCE;
+			case "min" -> FUNC_MIN;
+			case "max" -> FUNC_MAX;
+			case "sign" -> FUNC_SIGN;
+			case "fma" -> FUNC_FMA;
+			case "deg2rad" -> FUNC_DEG2RAD;
+			case "rad2deg" -> FUNC_RAD2DEG;
+			default -> FUNC_UNKNOWN;
+		};
 	}
 
 	private static int computeDepth(ExprNode n) {
@@ -964,9 +1265,9 @@ public final class VmCelEvaluator {
 			return 2 + Math.max(computeDepth(t.cond), Math.max(computeDepth(t.ifTrue), computeDepth(t.ifFalse)));
 		}
 		if (n instanceof FuncNode f) {
-			int m = 1;
-			for (ExprNode a : f.args) {
-				m = Math.max(m, 2 + computeDepth(a));
+			int m = Math.max(1, f.args.size());
+			for (int i = 0; i < f.args.size(); i++) {
+				m = Math.max(m, i + 1 + computeDepth(f.args.get(i)));
 			}
 			return m;
 		}
