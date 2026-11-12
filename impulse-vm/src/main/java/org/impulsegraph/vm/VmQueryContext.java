@@ -96,6 +96,9 @@ public final class VmQueryContext implements AutoCloseable {
 	private List<VmLaneFrontier> laneFrontiers;
 	private VmBranchCoverageRecorder coverageRecorder;
 	private VmFaultInjector faultInjector;
+	private org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch celScratch;
+	private VmHandlers.Instruction[] decodedInstrBuf;
+	private VmHandlers.ExtendedInstruction[] decodedExtBuf;
 
 	private int[] floatVectorLengths = initLengthsArray();
 	private int[] doubleVectorLengths = initLengthsArray();
@@ -174,11 +177,44 @@ public final class VmQueryContext implements AutoCloseable {
 		return lvec != null ? lvec.length : 0;
 	}
 
+	public VmBranchCoverageRecorder peekCoverageRecorder() {
+		return coverageRecorder;
+	}
+
 	public VmBranchCoverageRecorder getCoverageRecorder() {
 		if (coverageRecorder == null) {
 			coverageRecorder = new VmBranchCoverageRecorder();
 		}
 		return coverageRecorder;
+	}
+
+	public org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch acquireCelScratch(
+			org.impulsegraph.vm.cel.VmCelEvaluator eval) {
+		int needed = eval != null ? eval.maxDepth() : 16;
+		if (celScratch == null || celScratch.capacity() < needed) {
+			celScratch = new org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch(Math.max(32, needed));
+		}
+		return celScratch;
+	}
+
+	public VmHandlers.Instruction[] acquireDecodedInstructions(int count) {
+		if (decodedInstrBuf == null || decodedInstrBuf.length < count) {
+			decodedInstrBuf = new VmHandlers.Instruction[Math.max(64,
+					Integer.highestOneBit(Math.max(1, count - 1)) << 1)];
+		} else {
+			Arrays.fill(decodedInstrBuf, 0, count, null);
+		}
+		return decodedInstrBuf;
+	}
+
+	public VmHandlers.ExtendedInstruction[] acquireExtendedInstructions(int count) {
+		if (decodedExtBuf == null || decodedExtBuf.length < count) {
+			decodedExtBuf = new VmHandlers.ExtendedInstruction[Math.max(64,
+					Integer.highestOneBit(Math.max(1, count - 1)) << 1)];
+		} else {
+			Arrays.fill(decodedExtBuf, 0, count, null);
+		}
+		return decodedExtBuf;
 	}
 
 	public void setCoverageRecorder(VmBranchCoverageRecorder coverageRecorder) {

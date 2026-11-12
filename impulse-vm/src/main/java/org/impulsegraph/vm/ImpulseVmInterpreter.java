@@ -35,6 +35,12 @@ public final class ImpulseVmInterpreter {
 
 	public static Object execute(MemorySegment programSeg, long instructionCount, ImpulseGraphSnapshot snapshot,
 			Object input, Arena arena, java.util.List<String> stringPool, MemorySegment inlineDataSeg) {
+		return execute(programSeg, null, instructionCount, snapshot, input, arena, stringPool, inlineDataSeg);
+	}
+
+	public static Object execute(MemorySegment programSeg, VmHandlers.Instruction[] preDecoded, long instructionCount,
+			ImpulseGraphSnapshot snapshot, Object input, Arena arena, java.util.List<String> stringPool,
+			MemorySegment inlineDataSeg) {
 		if (programSeg == null || instructionCount <= 0) {
 			return new OffHeapBitSet(arena, 1000);
 		}
@@ -48,12 +54,27 @@ public final class ImpulseVmInterpreter {
 				ctx.setInlineData(inlineDataSeg, inlineDataSeg.byteSize());
 			}
 			MemorySegment state = ctx.allocateStateSegment();
+			VmHandlers.Instruction[] decodedCache = (preDecoded != null && preDecoded.length >= instructionCount)
+					? preDecoded
+					: (instructionCount <= Integer.MAX_VALUE
+							? ctx.acquireDecodedInstructions((int) instructionCount)
+							: null);
 			Object finalResult = null;
 
 			long pc = 0;
 			while (pc >= 0 && pc < instructionCount) {
 				ctx.consumeFuel();
-				VmHandlers.Instruction instr = VmHandlers.decodeInstruction(programSeg, pc);
+				VmHandlers.Instruction instr;
+				if (decodedCache != null) {
+					int iPc = (int) pc;
+					instr = decodedCache[iPc];
+					if (instr == null) {
+						instr = VmHandlers.decodeInstruction(programSeg, pc);
+						decodedCache[iPc] = instr;
+					}
+				} else {
+					instr = VmHandlers.decodeInstruction(programSeg, pc);
+				}
 				if (DEBUG_MODE) {
 					LOG.info("EXEC: pc=" + pc + ", op=0x" + Integer.toHexString(instr.opcode() & 0xFF));
 				}

@@ -209,18 +209,15 @@ public final class VmMultiLaneHandlers {
 					if (mU == 0L) {
 						continue;
 					}
-					int[] nbrs = csrRel.getTargets(u);
-					if (nbrs.length > 0) {
-						int v = nbrs[0];
-						if (v >= 0 && v < outLen) {
-							int eIdx = (edgeMap != null && u < edgeMap.length) ? edgeMap[u] : -1;
-							if (edgePredEval != null && (eIdx < 0 || !edgePredEval.evalEdgeFilter(csrRel, eIdx, srcDom,
-									u, tgtDom, v, edgePredScratch))) {
-								continue;
-							}
-							long trip = (tripArr != null && eIdx >= 0 && eIdx < tripLen) ? tripArr[eIdx] : 0L;
-							nextLanes[v] |= (mU & ~trip);
+					int v = csrRel.getFlatForwardTarget(u);
+					if (v >= 0 && v < outLen) {
+						int eIdx = (edgeMap != null && u < edgeMap.length) ? edgeMap[u] : -1;
+						if (edgePredEval != null && (eIdx < 0
+								|| !edgePredEval.evalEdgeFilter(csrRel, eIdx, srcDom, u, tgtDom, v, edgePredScratch))) {
+							continue;
 						}
+						long trip = (tripArr != null && eIdx >= 0 && eIdx < tripLen) ? tripArr[eIdx] : 0L;
+						nextLanes[v] |= (mU & ~trip);
 					}
 				}
 			} else if (fast32) {
@@ -280,12 +277,11 @@ public final class VmMultiLaneHandlers {
 				int edgeCounter = 0;
 				for (int u = 0; u < lim; u++) {
 					long mU = currentLanes[u] & activeMask;
-					int[] nbrs = rel.getTargets(u);
-					int deg = nbrs != null ? nbrs.length : 0;
+					int deg = rel.getDegree(u);
 					if (mU != 0L && deg > 0) {
 						for (int j = 0; j < deg; j++) {
 							int e = edgeCounter + j;
-							int v = nbrs[j];
+							int v = rel.getTargetAt(u, j);
 							if (v >= 0 && v < outLen) {
 								if (edgePredEval != null && csrRel != null && !edgePredEval.evalEdgeFilter(csrRel, e,
 										srcDom, u, tgtDom, v, edgePredScratch)) {
@@ -308,17 +304,15 @@ public final class VmMultiLaneHandlers {
 					if (mV == 0L) {
 						continue;
 					}
-					int[] srcs = csrRel.getInTargets(v);
-					for (int u : srcs) {
-						if (u >= 0 && u < outLen) {
-							int eIdx = needEdgeIdx ? csrRel.findCsrEdgeIndex(u, v) : -1;
-							if (edgePredEval != null && (eIdx < 0 || !edgePredEval.evalEdgeFilter(csrRel, eIdx, srcDom,
-									u, tgtDom, v, edgePredScratch))) {
-								continue;
-							}
-							long trip = (tripArr != null && eIdx >= 0 && eIdx < tripLen) ? tripArr[eIdx] : 0L;
-							nextLanes[u] |= (mV & ~trip);
+					int u = csrRel.getFlatReverseSource(v);
+					if (u >= 0 && u < outLen) {
+						int eIdx = needEdgeIdx ? csrRel.findCsrEdgeIndex(u, v) : -1;
+						if (edgePredEval != null && (eIdx < 0
+								|| !edgePredEval.evalEdgeFilter(csrRel, eIdx, srcDom, u, tgtDom, v, edgePredScratch))) {
+							continue;
 						}
+						long trip = (tripArr != null && eIdx >= 0 && eIdx < tripLen) ? tripArr[eIdx] : 0L;
+						nextLanes[u] |= (mV & ~trip);
 					}
 				}
 			} else if (csrRel != null && csrRel.hasCsc() && csrRel.getCscRowOffsetsSegment() != null
@@ -358,20 +352,17 @@ public final class VmMultiLaneHandlers {
 							? csrRel.getOrBuildFlatForwardEdgeMap()
 							: null;
 					for (int u = 0; u < lim; u++) {
-						int[] nbrs = csrRel.getTargets(u);
-						if (nbrs.length > 0) {
-							int v = nbrs[0];
-							if (v >= 0 && v < srcLen) {
-								long mV = currentLanes[v] & activeMask;
-								if (mV != 0L) {
-									int eIdx = (edgeMap != null && u < edgeMap.length) ? edgeMap[u] : -1;
-									if (edgePredEval != null && (eIdx < 0 || !edgePredEval.evalEdgeFilter(csrRel, eIdx,
-											srcDom, u, tgtDom, v, edgePredScratch))) {
-										continue;
-									}
-									long trip = (tripArr != null && eIdx >= 0 && eIdx < tripLen) ? tripArr[eIdx] : 0L;
-									nextLanes[u] |= (mV & ~trip);
+						int v = csrRel.getFlatForwardTarget(u);
+						if (v >= 0 && v < srcLen) {
+							long mV = currentLanes[v] & activeMask;
+							if (mV != 0L) {
+								int eIdx = (edgeMap != null && u < edgeMap.length) ? edgeMap[u] : -1;
+								if (edgePredEval != null && (eIdx < 0 || !edgePredEval.evalEdgeFilter(csrRel, eIdx,
+										srcDom, u, tgtDom, v, edgePredScratch))) {
+									continue;
 								}
+								long trip = (tripArr != null && eIdx >= 0 && eIdx < tripLen) ? tripArr[eIdx] : 0L;
+								nextLanes[u] |= (mV & ~trip);
 							}
 						}
 					}
@@ -399,11 +390,10 @@ public final class VmMultiLaneHandlers {
 				} else {
 					int edgeCounter = 0;
 					for (int u = 0; u < lim; u++) {
-						int[] nbrs = rel.getTargets(u);
-						int deg = nbrs != null ? nbrs.length : 0;
+						int deg = rel.getDegree(u);
 						for (int j = 0; j < deg; j++) {
 							int e = edgeCounter + j;
-							int v = nbrs[j];
+							int v = rel.getTargetAt(u, j);
 							if (v >= 0 && v < srcLen) {
 								long mV = currentLanes[v] & activeMask;
 								if (mV != 0L) {
@@ -889,7 +879,7 @@ public final class VmMultiLaneHandlers {
 					if (rel != null) {
 						org.impulsegraph.vm.cel.VmCelEvaluator eval = org.impulsegraph.vm.cel.VmCelEvaluator
 								.compile(celExpr, java.util.Map.of());
-						org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = eval.createScratch();
+						org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = ctx.acquireCelScratch(eval);
 						stepSingleRelationInto(ctx, lfSrc, lfSrc.lanes(), lfSrc.nodeCount(), outLanes, outLen, rel,
 								rel.getRelationId(), isCsc, eval, scratch);
 					}
@@ -1025,7 +1015,7 @@ public final class VmMultiLaneHandlers {
 					}
 					org.impulsegraph.vm.cel.VmCelEvaluator eval = org.impulsegraph.vm.cel.VmCelEvaluator
 							.compile(celExpr, java.util.Map.of());
-					org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = eval.createScratch();
+					org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = ctx.acquireCelScratch(eval);
 					long maxNode = dom != null ? dom.nodeCount() : Long.MAX_VALUE;
 					for (int u = 0; u < lfSrc.nodeCount(); u++) {
 						if (lanesOut[u] != 0L) {
@@ -1892,8 +1882,9 @@ public final class VmMultiLaneHandlers {
 
 	private static void recordBranch(VmQueryContext ctx, int pc, int opcode, int siteId,
 			VmBranchCoverageRecorder.BranchKind kind, VmBranchCoverageRecorder.BranchExpectation exp, int branchIdx) {
-		if (ctx != null && ctx.getCoverageRecorder() != null) {
-			ctx.getCoverageRecorder().recordBranch(pc, opcode, siteId, kind, exp, branchIdx);
+		VmBranchCoverageRecorder local = (ctx != null) ? ctx.peekCoverageRecorder() : null;
+		if (local != null) {
+			local.recordBranch(pc, opcode, siteId, kind, exp, branchIdx);
 		} else {
 			VmBranchCoverageRecorder.recordGlobalBranch(pc, opcode, siteId, kind, exp, branchIdx);
 		}

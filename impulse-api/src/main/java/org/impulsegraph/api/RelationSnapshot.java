@@ -35,6 +35,10 @@ public interface RelationSnapshot {
 	int getDegree(int nodeId);
 	int getInDegree(int nodeId);
 	int[] getTargets(int nodeId);
+	default int getTargetAt(int nodeId, int index) {
+		int[] targets = getTargets(nodeId);
+		return (targets != null && index >= 0 && index < targets.length) ? targets[index] : -1;
+	}
 	default int[] getInTargets(int nodeId) {
 		return new int[0];
 	}

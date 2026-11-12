@@ -27,6 +27,8 @@ public final class VmHandlers {
 	public static final int PARALLEL_FRONTIER_THRESHOLD = 524_288; // 512k Frontier Threshold
 	public static final byte FLAG_HALT_ON_EMPTY = 0x01;
 	public static final byte FLAG_INPUT_SEED = 0x02;
+	private static final ValueLayout.OfLong LE_INSTR_WORD = ValueLayout.JAVA_LONG_UNALIGNED
+			.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN);
 
 	private VmHandlers() {
 	}
@@ -2141,7 +2143,7 @@ public final class VmHandlers {
 
 		org.impulsegraph.vm.cel.VmCelEvaluator eval = org.impulsegraph.vm.cel.VmCelEvaluator.compile(celExpr,
 				java.util.Map.of());
-		org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = eval.createScratch();
+		org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = ctx.acquireCelScratch(eval);
 
 		byte srcType = getRegisterType(state, srcReg);
 		long srcVal = getRegisterValue(state, srcReg);
@@ -2954,7 +2956,7 @@ public final class VmHandlers {
 
 		org.impulsegraph.vm.cel.VmCelEvaluator eval = org.impulsegraph.vm.cel.VmCelEvaluator.compile(expr,
 				java.util.Map.of());
-		org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = eval.createScratch();
+		org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = ctx.acquireCelScratch(eval);
 
 		int count = extractActiveNodeIdsToScratch(state, ctx, srcReg, 0);
 		int[] active = ctx.peekScratchInt(0);
@@ -5175,7 +5177,9 @@ public final class VmHandlers {
 				org.impulsegraph.vm.cel.VmCelEvaluator eval = (celExpr != null && !celExpr.isBlank())
 						? org.impulsegraph.vm.cel.VmCelEvaluator.compile(celExpr, java.util.Map.of())
 						: null;
-				org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = eval != null ? eval.createScratch() : null;
+				org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = eval != null
+						? ctx.acquireCelScratch(eval)
+						: null;
 				walkEdgeFilteredSingle(gs, csrRel, activeIn, outBs, isReverse, eval, scratch);
 			} else if (rel != null && !activeIn.isEmpty()) {
 				if (!isReverse) {
@@ -5189,13 +5193,12 @@ public final class VmHandlers {
 				} else {
 					int n = rel.getNodeCount();
 					for (int u = 0; u < n; u++) {
-						int[] tgts = rel.getTargets(u);
-						if (tgts != null) {
-							for (int v : tgts) {
-								if (v >= 0 && activeIn.get(v)) {
-									outBs.set(u);
-									break;
-								}
+						int deg = rel.getDegree(u);
+						for (int j = 0; j < deg; j++) {
+							int v = rel.getTargetAt(u, j);
+							if (v >= 0 && activeIn.get(v)) {
+								outBs.set(u);
+								break;
 							}
 						}
 					}
@@ -5253,12 +5256,22 @@ public final class VmHandlers {
 				}
 			} else {
 				int n = csrRel.getNodeCount();
-				for (int u = 0; u < n; u++) {
-					int[] tgts = csrRel.getTargets(u);
-					for (int v : tgts) {
+				if (csrRel.isFlatForward()) {
+					for (int u = 0; u < n; u++) {
+						int v = csrRel.getFlatForwardTarget(u);
 						if (v >= 0 && activeIn.get(v)) {
 							outBs.set(u);
-							break;
+						}
+					}
+				} else {
+					for (int u = 0; u < n; u++) {
+						int deg = csrRel.getDegree(u);
+						for (int j = 0; j < deg; j++) {
+							int v = csrRel.getTargetAt(u, j);
+							if (v >= 0 && activeIn.get(v)) {
+								outBs.set(u);
+								break;
+							}
 						}
 					}
 				}
@@ -5271,9 +5284,8 @@ public final class VmHandlers {
 			if (csrRel.isFlatForward()) {
 				int[] edgeMap = csrRel.getOrBuildFlatForwardEdgeMap();
 				for (int u = activeIn.nextSetBit(0); u >= 0 && u < maxU; u = activeIn.nextSetBit(u + 1)) {
-					int[] tgts = csrRel.getTargets(u);
-					if (tgts.length > 0) {
-						int v = tgts[0];
+					int v = csrRel.getFlatForwardTarget(u);
+					if (v >= 0) {
 						int eIdx = (edgeMap != null && u < edgeMap.length) ? edgeMap[u] : -1;
 						if (eIdx >= 0 && eval.evalEdgeFilter(csrRel, eIdx, srcDom, u, tgtDom, v, scratch)) {
 							outBs.set(v);
@@ -5301,8 +5313,8 @@ public final class VmHandlers {
 			if (csrRel.isFlatReverse()) {
 				int maxV = csrRel.getCscNodeCount();
 				for (int v = activeIn.nextSetBit(0); v >= 0 && v < maxV; v = activeIn.nextSetBit(v + 1)) {
-					int[] srcs = csrRel.getInTargets(v);
-					for (int u : srcs) {
+					int u = csrRel.getFlatReverseSource(v);
+					if (u >= 0) {
 						int eIdx = csrRel.findCsrEdgeIndex(u, v);
 						if (eIdx >= 0 && eval.evalEdgeFilter(csrRel, eIdx, srcDom, u, tgtDom, v, scratch)) {
 							outBs.set(u);
@@ -5336,14 +5348,11 @@ public final class VmHandlers {
 				if (csrRel.isFlatForward()) {
 					int[] edgeMap = csrRel.getOrBuildFlatForwardEdgeMap();
 					for (int u = 0; u < maxU; u++) {
-						int[] tgts = csrRel.getTargets(u);
-						if (tgts.length > 0) {
-							int v = tgts[0];
-							if (v >= 0 && activeIn.get(v)) {
-								int eIdx = (edgeMap != null && u < edgeMap.length) ? edgeMap[u] : -1;
-								if (eIdx >= 0 && eval.evalEdgeFilter(csrRel, eIdx, srcDom, u, tgtDom, v, scratch)) {
-									outBs.set(u);
-								}
+						int v = csrRel.getFlatForwardTarget(u);
+						if (v >= 0 && activeIn.get(v)) {
+							int eIdx = (edgeMap != null && u < edgeMap.length) ? edgeMap[u] : -1;
+							if (eIdx >= 0 && eval.evalEdgeFilter(csrRel, eIdx, srcDom, u, tgtDom, v, scratch)) {
+								outBs.set(u);
 							}
 						}
 					}
@@ -5536,22 +5545,23 @@ public final class VmHandlers {
 
 				int mutPc = shaderPcStart;
 				while (mutPc < instructionCount) {
-					Instruction sInst = decodeInstruction(programSeg, mutPc);
-					byte op = sInst.opcode();
+					long rawWord = programSeg.get(LE_INSTR_WORD, (long) mutPc * INSTRUCTION_SIZE_BYTES);
+					byte op = (byte) (rawWord & 0xFFL);
 					if (op == VmRegisterType.OP_STREAM_FUNC_END) {
 						break;
 					}
 
-					int sDst = sInst.dstReg();
-					int sPayloadLow = sInst.payload() & 0xFFFF;
-					int sPayloadHigh = (sInst.payload() >> 16) & 0xFFFF;
+					int sDst = (int) ((rawWord >>> 16) & 0xFFFFL);
+					int sPayload = (int) (rawWord >>> 32);
+					int sPayloadLow = sPayload & 0xFFFF;
+					int sPayloadHigh = (sPayload >>> 16) & 0xFFFF;
 
 					switch (op) {
 						case VmRegisterType.OP_STREAM_FUNC_BEGIN -> {
 						}
 
 						case VmRegisterType.OP_STREAM_LOAD_SRC -> {
-							int attrId = sInst.payload() & 0xFFFF;
+							int attrId = sPayloadLow;
 							Object obj = ctx.getMockAttribute(attrId);
 							if (obj != null) {
 								if (ctx.getMockAttribute(-attrId - 1) instanceof ImpulseBitSet validBs
@@ -5574,7 +5584,7 @@ public final class VmHandlers {
 							}
 						}
 						case VmRegisterType.OP_STREAM_LOAD_TGT -> {
-							int attrId = sInst.payload() & 0xFFFF;
+							int attrId = sPayloadLow;
 							Object obj = ctx.getMockAttribute(attrId);
 							if (obj != null) {
 								if (ctx.getMockAttribute(-attrId - 1) instanceof ImpulseBitSet validBs
@@ -5597,7 +5607,7 @@ public final class VmHandlers {
 							}
 						}
 						case VmRegisterType.OP_STREAM_LOAD_EDGE -> {
-							int attrId = sInst.payload() & 0xFFFF;
+							int attrId = sPayloadLow;
 							Object obj = ctx.getMockAttribute(attrId);
 							if (obj != null) {
 								if (ctx.getMockAttribute(-attrId - 1) instanceof ImpulseBitSet validBs
@@ -5625,7 +5635,7 @@ public final class VmHandlers {
 						case VmRegisterType.OP_STREAM_LOAD_EDGE_ID -> s_regs[sDst] = (float) eIdx;
 
 						case VmRegisterType.OP_STREAM_LOAD_CONST -> {
-							s_regs[sDst] = Float.intBitsToFloat(sInst.payload());
+							s_regs[sDst] = Float.intBitsToFloat(sPayload);
 						}
 
 						case VmRegisterType.OP_STREAM_MATH_ADD ->

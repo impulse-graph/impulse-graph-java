@@ -20,11 +20,32 @@ import static org.impulsegraph.vm.VmStateLayout.*;
 public final class CompiledQuery {
 
 	public record QueryBindingState(ImpulseGraphSnapshot snapshot, MethodHandle methodHandle, JitDriver jitDriver,
-			MemorySegment programSeg, long instructionCount, Map<String, Integer> relationIdMap) {
+			VmHandlers.Instruction[] decodedInstructions, MemorySegment programSeg, long instructionCount,
+			Map<String, Integer> relationIdMap) {
+		public QueryBindingState(ImpulseGraphSnapshot snapshot, MethodHandle methodHandle, JitDriver jitDriver,
+				MemorySegment programSeg, long instructionCount, Map<String, Integer> relationIdMap) {
+			this(snapshot, methodHandle, jitDriver, preDecodeInstructions(programSeg, instructionCount), programSeg,
+					instructionCount, relationIdMap);
+		}
+
 		public QueryBindingState(ImpulseGraphSnapshot snapshot, MethodHandle methodHandle, MemorySegment programSeg,
 				long instructionCount, Map<String, Integer> relationIdMap) {
-			this(snapshot, methodHandle, null, programSeg, instructionCount, relationIdMap);
+			this(snapshot, methodHandle, null, preDecodeInstructions(programSeg, instructionCount), programSeg,
+					instructionCount, relationIdMap);
 		}
+	}
+
+	private static VmHandlers.Instruction[] preDecodeInstructions(MemorySegment programSeg, long instructionCount) {
+		if (programSeg == null || instructionCount <= 0 || instructionCount > Integer.MAX_VALUE
+				|| programSeg.byteSize() < instructionCount * 8L) {
+			return null;
+		}
+		int n = (int) instructionCount;
+		VmHandlers.Instruction[] arr = new VmHandlers.Instruction[n];
+		for (int pc = 0; pc < n; pc++) {
+			arr[pc] = VmHandlers.decodeInstruction(programSeg, pc);
+		}
+		return arr;
 	}
 
 	private final List<RelationInstructionPatch> patches;
@@ -172,11 +193,13 @@ public final class CompiledQuery {
 					return state.methodHandle().invoke(targetSnapshot, input, executionArena);
 				}
 			}
-			return ImpulseVmInterpreter.execute(state.programSeg(), state.instructionCount(), targetSnapshot, input,
-					executionArena, this.stringPool, this.inlineDataSegment);
+			return ImpulseVmInterpreter.execute(state.programSeg(), state.decodedInstructions(),
+					state.instructionCount(), targetSnapshot, input, executionArena, this.stringPool,
+					this.inlineDataSegment);
 		} catch (Throwable e) {
-			return ImpulseVmInterpreter.execute(state.programSeg(), state.instructionCount(), targetSnapshot, input,
-					executionArena, this.stringPool, this.inlineDataSegment);
+			return ImpulseVmInterpreter.execute(state.programSeg(), state.decodedInstructions(),
+					state.instructionCount(), targetSnapshot, input, executionArena, this.stringPool,
+					this.inlineDataSegment);
 		} finally {
 			if (targetSnapshot != null) {
 				targetSnapshot.exitQuery();
