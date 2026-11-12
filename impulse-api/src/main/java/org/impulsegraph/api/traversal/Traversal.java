@@ -262,6 +262,98 @@ public interface Traversal<T> {
 	ImpulseBitSet toBitSet();
 
 	/**
+	 * Returns the name of the currently active node domain in this traversal
+	 * pipeline.
+	 */
+	default String activeDomain() {
+		return "node";
+	}
+
+	/**
+	 * Forward edge-filtered traversal keeping only edges satisfying the given CEL
+	 * edge predicate.
+	 */
+	default Traversal<T> outWhere(String relation, String edgeCelPredicate) {
+		return out(relation, edgeCelPredicate);
+	}
+
+	/**
+	 * Reverse edge-filtered traversal keeping only edges satisfying the given CEL
+	 * edge predicate.
+	 */
+	default Traversal<T> inWhere(String relation, String edgeCelPredicate) {
+		return in(relation, edgeCelPredicate);
+	}
+
+	/**
+	 * Exact {@code hops}-step forward composition along {@code relation} without
+	 * intermediate union accumulation.
+	 */
+	default Traversal<T> repeatOut(String relation, int hops) {
+		if (hops <= 0) {
+			return this;
+		}
+		return repeat(hops, relation);
+	}
+
+	/**
+	 * Monotone transitive closure {@code F_{t+1} = F_t U out(relation)(F_t)} up to
+	 * {@code maxHops} iterations, including {@code F_0}.
+	 */
+	default Traversal<T> fixpointOut(String relation, int maxHops) {
+		if (maxHops <= 0) {
+			return this;
+		}
+		return repeatUntilStable(relation);
+	}
+
+	/**
+	 * Set union with another traversal pipeline ending in the same domain.
+	 */
+	default Traversal<T> union(Traversal<ImpulseBitSet> branch) {
+		throw new UnsupportedOperationException("union not implemented");
+	}
+
+	/**
+	 * Set intersection with another traversal pipeline ending in the same domain.
+	 */
+	default Traversal<T> intersect(Traversal<ImpulseBitSet> branch) {
+		throw new UnsupportedOperationException("intersect not implemented");
+	}
+
+	/**
+	 * Set difference ({@code this \ branch}) with another traversal pipeline ending
+	 * in the same domain.
+	 */
+	default Traversal<T> difference(Traversal<ImpulseBitSet> branch) {
+		throw new UnsupportedOperationException("difference not implemented");
+	}
+
+	/**
+	 * Scalar sum reduction over {@code attrOrCelExpr} across active nodes in the
+	 * final domain, skipping NULL values (returns {@code 0.0} when empty).
+	 */
+	default double sum(String attrOrCelExpr) {
+		throw new UnsupportedOperationException("sum not implemented");
+	}
+
+	/**
+	 * Scalar minimum reduction over {@code attrOrCelExpr} across active nodes in
+	 * the final domain, skipping NULL values.
+	 */
+	default java.util.OptionalDouble min(String attrOrCelExpr) {
+		throw new UnsupportedOperationException("min not implemented");
+	}
+
+	/**
+	 * Scalar maximum reduction over {@code attrOrCelExpr} across active nodes in
+	 * the final domain, skipping NULL values.
+	 */
+	default java.util.OptionalDouble max(String attrOrCelExpr) {
+		throw new UnsupportedOperationException("max not implemented");
+	}
+
+	/**
 	 * Disassembles the traversal pipeline into human-readable ImpAsm bytecode
 	 * assembly.
 	 */

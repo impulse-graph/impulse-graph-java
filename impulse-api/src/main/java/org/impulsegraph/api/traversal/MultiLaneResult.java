@@ -88,6 +88,10 @@ public interface MultiLaneResult {
 
 	List<ScoredNode> topK(float[] queryVec, int k);
 
+	default List<ScoredNode> topK(float[] queryVec, String attrName, int metric, int k) {
+		return topK(queryVec, k);
+	}
+
 	List<ScoredKey> topKKeys(float[] queryVec, int k);
 
 	List<ScoredNode> topKWithQuorum(float[] queryVec, int minQuorum, int k);

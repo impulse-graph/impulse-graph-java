@@ -168,16 +168,24 @@ public final class BinarySnapshotLoader {
 				return null;
 			}
 			LoadedAttribute keyAttr = attributes.get(keyAttrIndex);
+			if (keyAttr.isNullable()) {
+				MemorySegment valSeg = getValiditySegment(keyAttrIndex);
+				if (valSeg != null && !valSeg.equals(MemorySegment.NULL) && (denseId >>> 3) < valSeg.byteSize()) {
+					byte b = valSeg.get(ValueLayout.JAVA_BYTE, denseId >>> 3);
+					if ((b & (1 << (denseId & 7))) == 0) {
+						return null;
+					}
+				}
+			}
 			MemorySegment dataSeg = getAttributeSegment(keyAttrIndex);
 			if (dataSeg == null || dataSeg.equals(MemorySegment.NULL)) {
 				return null;
 			}
+			MemorySegment offsSeg = getOffsetsSegment(keyAttrIndex);
+			boolean hasOffsets = offsSeg != null && !offsSeg.equals(MemorySegment.NULL)
+					&& offsSeg.byteSize() >= (denseId + 2) * 4L;
 			byte code = (byte) (keyAttr.typeCode() & 0x7F);
-			if (code == 0x0B) { // VAR_STRING
-				MemorySegment offsSeg = getOffsetsSegment(keyAttrIndex);
-				if (offsSeg == null || offsSeg.equals(MemorySegment.NULL)) {
-					return null;
-				}
+			if ((code == 0x0B || code == 0x09) && hasOffsets) { // VAR_STRING
 				long start = Integer.toUnsignedLong(offsSeg.get(ValueLayout.JAVA_INT_UNALIGNED, denseId * 4L));
 				long end = Integer.toUnsignedLong(offsSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (denseId + 1) * 4L));
 				if (end < start || end > dataSeg.byteSize()) {
@@ -185,26 +193,46 @@ public final class BinarySnapshotLoader {
 				}
 				byte[] bytes = dataSeg.asSlice(start, end - start).toArray(ValueLayout.JAVA_BYTE);
 				return new String(bytes, StandardCharsets.UTF_8);
-			} else if (code == 0x04) { // INT64
+			} else if (code == 0x04 || code == 0x08 || (code == 0x09 && !hasOffsets)
+					|| (code == 0x0C && nodeCount > 0 && dataSeg.byteSize() == nodeCount * 8L)) { // INT64 / TS64
 				if ((denseId + 1) * 8L <= dataSeg.byteSize()) {
 					return String.valueOf(dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, denseId * 8L));
 				}
-			} else if (code == 0x03) { // INT32
+			} else if (code == 0x14) { // UINT64
+				if ((denseId + 1) * 8L <= dataSeg.byteSize()) {
+					return Long.toUnsignedString(dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, denseId * 8L));
+				}
+			} else if (code == 0x03 || (code == 0x0B && !hasOffsets)) { // INT32 / DATE32
 				if ((denseId + 1) * 4L <= dataSeg.byteSize()) {
 					return String.valueOf(dataSeg.get(ValueLayout.JAVA_INT_UNALIGNED, denseId * 4L));
+				}
+			} else if (code == 0x13) { // UINT32
+				if ((denseId + 1) * 4L <= dataSeg.byteSize()) {
+					return Long.toString(
+							Integer.toUnsignedLong(dataSeg.get(ValueLayout.JAVA_INT_UNALIGNED, denseId * 4L)));
 				}
 			} else if (code == 0x02) { // INT16
 				if ((denseId + 1) * 2L <= dataSeg.byteSize()) {
 					return String.valueOf(dataSeg.get(ValueLayout.JAVA_SHORT_UNALIGNED, denseId * 2L));
 				}
+			} else if (code == 0x12) { // UINT16
+				if ((denseId + 1) * 2L <= dataSeg.byteSize()) {
+					return Integer
+							.toString(Short.toUnsignedInt(dataSeg.get(ValueLayout.JAVA_SHORT_UNALIGNED, denseId * 2L)));
+				}
 			} else if (code == 0x01) { // INT8
 				if ((denseId + 1) <= dataSeg.byteSize()) {
 					return String.valueOf(dataSeg.get(ValueLayout.JAVA_BYTE, denseId));
 				}
+			} else if (code == 0x11) { // UINT8
+				if ((denseId + 1) <= dataSeg.byteSize()) {
+					return Integer.toString(Byte.toUnsignedInt(dataSeg.get(ValueLayout.JAVA_BYTE, denseId)));
+				}
 			} else if (code == 0x0C || (code == 0x0A && keyAttr.dimension() == 16)) { // UUID128 / FIXED_BYTES[16]
 				if ((denseId + 1) * 16L <= dataSeg.byteSize()) {
-					long mostSig = dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, denseId * 16L);
-					long leastSig = dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, denseId * 16L + 8L);
+					ValueLayout.OfLong beLong = ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.BIG_ENDIAN);
+					long mostSig = dataSeg.get(beLong, denseId * 16L);
+					long leastSig = dataSeg.get(beLong, denseId * 16L + 8L);
 					return new UUID(mostSig, leastSig).toString();
 				}
 			}
@@ -974,7 +1002,33 @@ public final class BinarySnapshotLoader {
 				long cscColIdxOffset = dirBuf.getLong();
 				long cscColIdxBytes = dirBuf.getLong();
 				int attrCount = Short.toUnsignedInt(dirBuf.getShort());
-				dirBuf.position(dirBuf.position() + 22); // reserved2
+				int res2Pos = dirBuf.position();
+				dirBuf.position(res2Pos + 22); // reserved2
+
+				boolean isVirtualRel = (secFeatures & 0x04L) != 0L;
+				int[] virtualComponentIds = new int[0];
+				boolean virtualOverflowInCsrCol = false;
+				if (isVirtualRel) {
+					int compCnt = Short.toUnsignedInt(dirBuf.getShort(res2Pos));
+					int firstTag = Short.toUnsignedInt(dirBuf.getShort(res2Pos + 2));
+					if (compCnt > 0 && firstTag != 0xFFFF && compCnt <= 10) {
+						virtualComponentIds = new int[compCnt];
+						for (int k = 0; k < compCnt; k++) {
+							virtualComponentIds[k] = Short.toUnsignedInt(dirBuf.getShort(res2Pos + 2 + k * 2));
+						}
+					} else if (csrColIdxOffset > 0 && csrColIdxBytes >= 2
+							&& csrColIdxOffset + csrColIdxBytes <= segSize) {
+						virtualOverflowInCsrCol = true;
+						int maxSlots = (int) (csrColIdxBytes / 2L);
+						int nComp = (compCnt > 0) ? Math.min(compCnt, maxSlots) : maxSlots;
+						virtualComponentIds = new int[nComp];
+						for (int k = 0; k < nComp; k++) {
+							virtualComponentIds[k] = Short.toUnsignedInt(
+									segment.get(ValueLayout.JAVA_SHORT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN),
+											csrColIdxOffset + k * 2L));
+						}
+					}
+				}
 
 				if (nodeCount < 0 || edgeCount < 0) {
 					ImpulseAssert.checkWellFormed(false,
@@ -1051,9 +1105,10 @@ public final class BinarySnapshotLoader {
 				MemorySegment offsetsSeg = (csrRowOffOffset > 0 && csrRowOffOffset + csrRowOffBytes <= segSize)
 						? segment.asSlice(csrRowOffOffset, csrRowOffBytes)
 						: MemorySegment.NULL;
-				MemorySegment targetsSeg = (csrColIdxOffset > 0 && csrColIdxOffset + csrColIdxBytes <= segSize)
-						? segment.asSlice(csrColIdxOffset, csrColIdxBytes)
-						: MemorySegment.NULL;
+				MemorySegment targetsSeg = (!virtualOverflowInCsrCol && csrColIdxOffset > 0
+						&& csrColIdxOffset + csrColIdxBytes <= segSize)
+								? segment.asSlice(csrColIdxOffset, csrColIdxBytes)
+								: MemorySegment.NULL;
 
 				MemorySegment cscOffsetsSeg = (cscRowOffOffset > 0 && cscRowOffOffset + cscRowOffBytes <= segSize)
 						? segment.asSlice(cscRowOffOffset, cscRowOffBytes)
@@ -1072,6 +1127,7 @@ public final class BinarySnapshotLoader {
 
 				List<MemorySegment> attrSegments = new ArrayList<>();
 				List<MemorySegment> validitySegments = new ArrayList<>();
+				List<MemorySegment> attrOffsetsSegments = new ArrayList<>();
 				for (LoadedAttribute attr : attributes) {
 					if (attr.dataOffset() > 0 && attr.dataOffset() + attr.dataBytes() <= segSize) {
 						attrSegments.add(segment.asSlice(attr.dataOffset(), attr.dataBytes()));
@@ -1084,11 +1140,18 @@ public final class BinarySnapshotLoader {
 					} else {
 						validitySegments.add(MemorySegment.NULL);
 					}
+					if (attr.offsetsOffset() > 0 && attr.offsetsOffset() + attr.offsetsBytes() <= segSize) {
+						attrOffsetsSegments.add(segment.asSlice(attr.offsetsOffset(), attr.offsetsBytes()));
+					} else {
+						attrOffsetsSegments.add(MemorySegment.NULL);
+					}
 				}
 
 				RelationSnapshot relSnap = new RelationSnapshot(arena, (int) nodeCount, (int) edgeCount, offsetsSeg,
 						targetsSeg, cscOffsetsSeg, cscTargetsSeg, attrSegments, validitySegments, nodeIdWidth,
 						edgeIndexWidth);
+				relSnap.setCatalogMetadata(relId, srcDomId, tgtDomId, encodingId, secFeatures, virtualComponentIds);
+				relSnap.setLoadedAttributes(attributes, attrOffsetsSegments);
 				long effectiveTgtNodeCount = (tgtDomainNodeCount > 0) ? tgtDomainNodeCount : nodeCount;
 				if (effectiveTgtNodeCount > 0) {
 					relSnap.setTargetNodeCount((int) effectiveTgtNodeCount);
@@ -1115,6 +1178,20 @@ public final class BinarySnapshotLoader {
 						edgeIndexWidth, nodeCount, edgeCount, csrRowOffOffset, csrRowOffBytes, csrColIdxOffset,
 						csrColIdxBytes, attributes);
 				relationsById.put(relId, rel);
+			}
+
+			for (RelationSnapshot relSnap : relIdToSnapshot.values()) {
+				int[] compIds = relSnap.getComponentIds();
+				if (compIds.length > 0) {
+					List<RelationSnapshot> resolved = new ArrayList<>(compIds.length);
+					for (int cid : compIds) {
+						RelationSnapshot child = relIdToSnapshot.get(cid);
+						if (child != null && child != relSnap) {
+							resolved.add(child);
+						}
+					}
+					relSnap.setComponentRelations(resolved.toArray(new RelationSnapshot[0]));
+				}
 			}
 
 			align128(dirBuf);

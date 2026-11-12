@@ -112,6 +112,28 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
 	String getDomainName(int domainId);
 
 	/**
+	 * Returns the source domain name for the given relation, or null if unknown.
+	 */
+	default String getRelationSourceDomainName(String relationName) {
+		RelationSnapshot rel = getRelationSnapshot(relationName);
+		if (rel != null && rel.getRelationId() >= 0) {
+			return getDomainName(rel.getSrcDomainId());
+		}
+		return null;
+	}
+
+	/**
+	 * Returns the target domain name for the given relation, or null if unknown.
+	 */
+	default String getRelationTargetDomainName(String relationName) {
+		RelationSnapshot rel = getRelationSnapshot(relationName);
+		if (rel != null && rel.getRelationId() >= 0) {
+			return getDomainName(rel.getTgtDomainId());
+		}
+		return null;
+	}
+
+	/**
 	 * Returns the list of attribute names defined for the given domain.
 	 */
 	default java.util.List<String> getDomainAttributeNames(String domainName) {

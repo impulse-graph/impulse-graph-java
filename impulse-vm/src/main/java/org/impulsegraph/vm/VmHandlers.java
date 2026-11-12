@@ -215,16 +215,19 @@ public final class VmHandlers {
 		if (input instanceof ImpulseBitSet inBs) {
 			bs.or(inBs);
 		} else if (input instanceof Number n) {
-			bs.set(n.intValue());
+			if (n.intValue() >= 0)
+				bs.set(n.intValue());
 		} else if (input instanceof long[] arr) {
 			for (long val : arr)
-				bs.set((int) val);
+				if (val >= 0)
+					bs.set((int) val);
 		} else if (input instanceof int[] arr) {
 			for (int val : arr)
-				bs.set(val);
+				if (val >= 0)
+					bs.set(val);
 		} else if (input instanceof Iterable<?> it) {
 			for (Object elem : it) {
-				if (elem instanceof Number n)
+				if (elem instanceof Number n && n.intValue() >= 0)
 					bs.set(n.intValue());
 			}
 		}
@@ -590,9 +593,46 @@ public final class VmHandlers {
 			byte srcType = getRegisterType(state, frontierReg);
 			long srcVal = getRegisterValue(state, frontierReg);
 
-			if ((instr.flags() & FLAG_INPUT_SEED) != 0 && input instanceof Number n) {
-				srcType = TYPE_NODE_ID;
-				srcVal = n.longValue();
+			if ((instr.flags() & FLAG_INPUT_SEED) != 0 && input != null) {
+				if (input instanceof Number n) {
+					srcType = TYPE_NODE_ID;
+					srcVal = n.longValue();
+				} else if (input instanceof ImpulseBitSet inBs) {
+					srcType = TYPE_BITSET_HANDLE;
+					int tempHandle = ctx.acquireBitset();
+					ctx.getBitset(tempHandle).or(inBs);
+					srcVal = tempHandle;
+				} else if (input instanceof long[] arr) {
+					srcType = TYPE_BITSET_HANDLE;
+					int tempHandle = ctx.acquireBitset();
+					ImpulseBitSet tempBs = ctx.getBitset(tempHandle);
+					for (long val : arr) {
+						if (val >= 0) {
+							tempBs.set((int) val);
+						}
+					}
+					srcVal = tempHandle;
+				} else if (input instanceof int[] arr) {
+					srcType = TYPE_BITSET_HANDLE;
+					int tempHandle = ctx.acquireBitset();
+					ImpulseBitSet tempBs = ctx.getBitset(tempHandle);
+					for (int val : arr) {
+						if (val >= 0) {
+							tempBs.set(val);
+						}
+					}
+					srcVal = tempHandle;
+				} else if (input instanceof Iterable<?> it) {
+					srcType = TYPE_BITSET_HANDLE;
+					int tempHandle = ctx.acquireBitset();
+					ImpulseBitSet tempBs = ctx.getBitset(tempHandle);
+					for (Object elem : it) {
+						if (elem instanceof Number num && num.intValue() >= 0) {
+							tempBs.set(num.intValue());
+						}
+					}
+					srcVal = tempHandle;
+				}
 			}
 
 			if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
@@ -2003,6 +2043,10 @@ public final class VmHandlers {
 	}
 
 	public static void handleNodeFilter(MemorySegment state, VmQueryContext ctx, Instruction instr, Object input) {
+		if ((instr.flags() & 0x40) != 0) {
+			handleCelDomainNodeFilter(state, ctx, instr, input);
+			return;
+		}
 		int srcReg = instr.payload() & 0xFF;
 		int valReg = (instr.payload() >> 8) & 0xFF;
 		int attrId = (instr.payload() >> 16) & 0xFF;
@@ -2062,6 +2106,94 @@ public final class VmHandlers {
 			}
 		}
 
+		setRegister(state, dstReg, outHandle, TYPE_BITSET_HANDLE);
+		setFlag(state, FLAG_ZF, outBs.isEmpty());
+	}
+
+	private static void handleCelDomainNodeFilter(MemorySegment state, VmQueryContext ctx, Instruction instr,
+			Object input) {
+		int srcReg = instr.payload() & 0xFFFF;
+		int poolIdx = (instr.payload() >>> 16) & 0xFFFF;
+		int dstReg = instr.dstReg();
+		validateReg(dstReg);
+		validateReg(srcReg);
+
+		String spec = ctx.getString(poolIdx);
+		String domName = "";
+		String celExpr = spec != null ? spec : "true";
+		if (spec != null) {
+			int sep = spec.indexOf('\0');
+			if (sep >= 0) {
+				domName = spec.substring(0, sep);
+				celExpr = spec.substring(sep + 1);
+			}
+		}
+
+		org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain dom = null;
+		if (ctx.getSnapshot() instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+			if (!domName.isEmpty()) {
+				dom = gs.getDomain(domName);
+			}
+			if (dom == null && !gs.getDomainNames().isEmpty()) {
+				dom = gs.getDomain(gs.getDomainNames().iterator().next());
+			}
+		}
+
+		org.impulsegraph.vm.cel.VmCelEvaluator eval = org.impulsegraph.vm.cel.VmCelEvaluator.compile(celExpr,
+				java.util.Map.of());
+		org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = eval.createScratch();
+
+		byte srcType = getRegisterType(state, srcReg);
+		long srcVal = getRegisterValue(state, srcReg);
+		if ((instr.flags() & FLAG_INPUT_SEED) != 0 && input != null) {
+			if (input instanceof Number n) {
+				srcType = TYPE_NODE_ID;
+				srcVal = n.longValue();
+			} else if (input instanceof ImpulseBitSet inBs) {
+				srcType = TYPE_BITSET_HANDLE;
+				int tempH = ctx.acquireBitset();
+				ctx.getBitset(tempH).or(inBs);
+				srcVal = tempH;
+			}
+		}
+
+		boolean aliased = (dstReg == srcReg && srcType == TYPE_BITSET_HANDLE);
+		int prevDstHandle = aliased ? (int) srcVal : -1;
+		int outHandle = (!aliased && getRegisterType(state, dstReg) == TYPE_BITSET_HANDLE)
+				? (int) getRegisterValue(state, dstReg)
+				: ctx.acquireBitset();
+		ImpulseBitSet outBs = ctx.getBitset(outHandle);
+		outBs.clear();
+
+		long maxNode = dom != null ? dom.nodeCount() : Long.MAX_VALUE;
+		if (srcType == TYPE_BITSET_HANDLE) {
+			ImpulseBitSet inBs = ctx.getBitset((int) srcVal);
+			if (inBs != null) {
+				for (int u = inBs.nextSetBit(0); u >= 0 && u < maxNode; u = inBs.nextSetBit(u + 1)) {
+					if (eval.evalDomainFilter(dom, u, scratch)) {
+						outBs.set(u);
+					}
+				}
+			}
+		} else if (srcType == TYPE_NODE_ID || srcType == TYPE_INT64) {
+			int u = (int) srcVal;
+			if (u >= 0 && u < maxNode && eval.evalDomainFilter(dom, u, scratch)) {
+				outBs.set(u);
+			}
+		} else if (srcType == TYPE_NODE_VECTOR || srcType == TYPE_UINT64_VECTOR) {
+			int[] arr = ctx.getNodeVector((int) srcVal);
+			if (arr != null) {
+				for (int u : arr) {
+					if (u >= 0 && u < maxNode && eval.evalDomainFilter(dom, u, scratch)) {
+						outBs.set(u);
+					}
+				}
+			}
+		}
+
+		if (aliased && prevDstHandle >= 0 && prevDstHandle != outHandle) {
+			ctx.releaseBitset(prevDstHandle);
+		}
 		setRegister(state, dstReg, outHandle, TYPE_BITSET_HANDLE);
 		setFlag(state, FLAG_ZF, outBs.isEmpty());
 	}
@@ -2659,6 +2791,9 @@ public final class VmHandlers {
 	}
 
 	public static Object handleReduce(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		if ((instr.flags() & 0x40) != 0) {
+			return handleCelDomainReduce(state, ctx, instr);
+		}
 		validateReg(instr.dstReg());
 		int srcReg = instr.payload() & 0xFFFF;
 		validateReg(srcReg);
@@ -2678,6 +2813,84 @@ public final class VmHandlers {
 				yield Boolean.TRUE;
 			}
 		};
+	}
+
+	private static Object handleCelDomainReduce(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		int dstReg = instr.dstReg();
+		int srcReg = instr.payload() & 0xFFFF;
+		int poolIdx = (instr.payload() >>> 16) & 0xFFFF;
+		int redKind = instr.flags() & 0x0F;
+		validateReg(dstReg);
+		validateReg(srcReg);
+
+		String spec = ctx.getString(poolIdx);
+		String domName = "";
+		String expr = spec != null ? spec : "";
+		if (spec != null) {
+			int sep = spec.indexOf('\0');
+			if (sep >= 0) {
+				domName = spec.substring(0, sep);
+				expr = spec.substring(sep + 1);
+			}
+		}
+
+		org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain dom = null;
+		if (ctx.getSnapshot() instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+			if (!domName.isEmpty()) {
+				dom = gs.getDomain(domName);
+			}
+			if (dom == null && !gs.getDomainNames().isEmpty()) {
+				dom = gs.getDomain(gs.getDomainNames().iterator().next());
+			}
+		}
+
+		org.impulsegraph.vm.cel.VmCelEvaluator eval = org.impulsegraph.vm.cel.VmCelEvaluator.compile(expr,
+				java.util.Map.of());
+		org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = eval.createScratch();
+
+		int count = extractActiveNodeIdsToScratch(state, ctx, srcReg, 0);
+		int[] active = ctx.peekScratchInt(0);
+		long maxNode = dom != null ? dom.nodeCount() : Long.MAX_VALUE;
+		double sum = 0.0;
+		double min = Double.POSITIVE_INFINITY;
+		double max = Double.NEGATIVE_INFINITY;
+		long nonNullCount = 0L;
+		for (int i = 0; i < count; i++) {
+			int u = active[i];
+			if (u < 0 || u >= maxNode) {
+				continue;
+			}
+			double v = eval.evalDomainScalarOrNaN(dom, u, scratch);
+			if (!Double.isNaN(v)) {
+				sum += v;
+				if (v < min) {
+					min = v;
+				}
+				if (v > max) {
+					max = v;
+				}
+				nonNullCount++;
+			}
+		}
+
+		if (redKind == BINARY_OP_MIN) {
+			double outVal = (nonNullCount > 0) ? min : Double.NaN;
+			setRegister(state, dstReg, Double.doubleToRawLongBits(outVal), TYPE_DOUBLE);
+			setFlag(state, FLAG_ZF, nonNullCount == 0);
+			ctx.setFinalResultDouble(outVal);
+			return Boolean.TRUE;
+		} else if (redKind == BINARY_OP_MAX) {
+			double outVal = (nonNullCount > 0) ? max : Double.NaN;
+			setRegister(state, dstReg, Double.doubleToRawLongBits(outVal), TYPE_DOUBLE);
+			setFlag(state, FLAG_ZF, nonNullCount == 0);
+			ctx.setFinalResultDouble(outVal);
+			return Boolean.TRUE;
+		} else {
+			setRegister(state, dstReg, Double.doubleToRawLongBits(sum), TYPE_DOUBLE);
+			setFlag(state, FLAG_ZF, nonNullCount == 0);
+			ctx.setFinalResultDouble(sum);
+			return Boolean.TRUE;
+		}
 	}
 
 	public static void handleLoadIndirect(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -2706,6 +2919,37 @@ public final class VmHandlers {
 	}
 
 	public static void handleLoadInlineArray(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		if ((instr.flags() & 0x40) != 0) {
+			int dst = instr.dstReg();
+			validateReg(dst);
+			String csv = ctx.getString(instr.payload() & 0xFFFF);
+			if (csv == null || csv.isEmpty()) {
+				int h = ctx.acquireIntVector(0);
+				ctx.setNodeVectorLength(h, 0);
+				setRegister(state, dst, h, TYPE_NODE_VECTOR);
+				setFlag(state, FLAG_ZF, true);
+				return;
+			}
+			String[] parts = csv.split(",");
+			int count = 0;
+			for (String p : parts) {
+				if (!p.isEmpty()) {
+					count++;
+				}
+			}
+			int h = ctx.acquireIntVector(count);
+			int[] nvec = ctx.getIntVector(h);
+			int idx = 0;
+			for (String p : parts) {
+				if (!p.isEmpty()) {
+					nvec[idx++] = Integer.parseInt(p);
+				}
+			}
+			ctx.setNodeVectorLength(h, count);
+			setRegister(state, dst, h, TYPE_NODE_VECTOR);
+			setFlag(state, FLAG_ZF, count == 0);
+			return;
+		}
 		MemorySegment inlineSeg = ctx.inlineDataSegment();
 		if (inlineSeg == null) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
@@ -4495,6 +4739,18 @@ public final class VmHandlers {
 
 	private static String resolveDenseNodeKey(ImpulseGraphSnapshot snap, int domainId, int nodeId) {
 		if (snap != null) {
+			if (snap instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+				String dName = gs.getDomainName(domainId);
+				if (dName != null) {
+					org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain dom = gs.getDomain(dName);
+					if (dom != null && dom.keyAttrIndex() != 0xFFFF) {
+						String resolved = dom.resolveKey(nodeId);
+						if (resolved != null) {
+							return resolved;
+						}
+					}
+				}
+			}
 			String domName = snap.getDomainName(domainId);
 			if (domName != null) {
 				String k = snap.getMetadata("domain." + domName + ".id." + nodeId);
@@ -4603,7 +4859,251 @@ public final class VmHandlers {
 	}
 
 	public static void handleCsrWalkFiltered(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		if ((instr.flags() & 0x40) != 0) {
+			handleCelEdgeWalk(state, ctx, instr);
+			return;
+		}
 		handleCooWalkFiltered(state, ctx, instr);
+	}
+
+	public static void handleCelEdgeWalk(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		int dstReg = instr.dstReg();
+		int srcReg = instr.payload() & 0xFFFF;
+		int poolIdx = (instr.payload() >>> 16) & 0xFFFF;
+		boolean isReverse = (instr.flags() & 0x20) != 0;
+		validateReg(dstReg);
+		validateReg(srcReg);
+
+		String spec = ctx.getString(poolIdx);
+		String relName = "";
+		String celExpr = "";
+		if (spec != null) {
+			int sep = spec.indexOf('\0');
+			if (sep >= 0) {
+				relName = spec.substring(0, sep);
+				celExpr = spec.substring(sep + 1);
+			} else {
+				relName = spec;
+			}
+		}
+
+		ImpulseGraphSnapshot snap = ctx.getSnapshot();
+		RelationSnapshot rel = (snap != null && !relName.isEmpty()) ? snap.getRelationSnapshot(relName) : null;
+
+		int inTempHandle = ctx.acquireBitset();
+		ImpulseBitSet activeIn = ctx.getBitset(inTempHandle);
+		activeIn.clear();
+		addRegisterNodesToBitSet(state, ctx, srcReg, activeIn);
+
+		boolean aliased = (dstReg == srcReg && getRegisterType(state, srcReg) == TYPE_BITSET_HANDLE);
+		int prevDstHandle = aliased ? (int) getRegisterValue(state, dstReg) : -1;
+		int outHandle = (!aliased && getRegisterType(state, dstReg) == TYPE_BITSET_HANDLE)
+				? (int) getRegisterValue(state, dstReg)
+				: ctx.acquireBitset();
+		ImpulseBitSet outBs = ctx.getBitset(outHandle);
+		outBs.clear();
+
+		try {
+			if (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot csrRel && !activeIn.isEmpty()) {
+				org.impulsegraph.storage.csr.GraphSnapshot gs = (snap instanceof org.impulsegraph.storage.csr.GraphSnapshot g)
+						? g
+						: null;
+				org.impulsegraph.vm.cel.VmCelEvaluator eval = (celExpr != null && !celExpr.isBlank())
+						? org.impulsegraph.vm.cel.VmCelEvaluator.compile(celExpr, java.util.Map.of())
+						: null;
+				org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch = eval != null ? eval.createScratch() : null;
+				walkEdgeFilteredSingle(gs, csrRel, activeIn, outBs, isReverse, eval, scratch);
+			} else if (rel != null && !activeIn.isEmpty()) {
+				if (!isReverse) {
+					for (int u = activeIn.nextSetBit(0); u >= 0; u = activeIn.nextSetBit(u + 1)) {
+						rel.copyTargetsSimd(u, outBs);
+					}
+				} else if (rel.hasCsc()) {
+					for (int v = activeIn.nextSetBit(0); v >= 0; v = activeIn.nextSetBit(v + 1)) {
+						rel.copyInTargetsSimd(v, outBs);
+					}
+				} else {
+					int n = rel.getNodeCount();
+					for (int u = 0; u < n; u++) {
+						int[] tgts = rel.getTargets(u);
+						if (tgts != null) {
+							for (int v : tgts) {
+								if (v >= 0 && activeIn.get(v)) {
+									outBs.set(u);
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+		} finally {
+			ctx.releaseBitset(inTempHandle);
+		}
+
+		if (aliased && prevDstHandle >= 0 && prevDstHandle != outHandle) {
+			ctx.releaseBitset(prevDstHandle);
+		}
+		setRegister(state, dstReg, outHandle, TYPE_BITSET_HANDLE);
+		setFlag(state, FLAG_ZF, outBs.isEmpty());
+	}
+
+	private static void walkEdgeFilteredSingle(org.impulsegraph.storage.csr.GraphSnapshot gs,
+			org.impulsegraph.storage.csr.RelationSnapshot csrRel, ImpulseBitSet activeIn, ImpulseBitSet outBs,
+			boolean isReverse, org.impulsegraph.vm.cel.VmCelEvaluator eval,
+			org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch scratch) {
+		if (csrRel.isVirtual()) {
+			for (org.impulsegraph.storage.csr.RelationSnapshot comp : csrRel.getComponentRelations()) {
+				walkEdgeFilteredSingle(gs, comp, activeIn, outBs, isReverse, eval, scratch);
+			}
+			return;
+		}
+		if (csrRel.getEdgeCount() == 0) {
+			return;
+		}
+
+		org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain srcDom = null;
+		org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain tgtDom = null;
+		if (gs != null) {
+			String sName = gs.getDomainName(csrRel.getSrcDomainId());
+			String tName = gs.getDomainName(csrRel.getTgtDomainId());
+			if (sName != null) {
+				srcDom = gs.getDomain(sName);
+			}
+			if (tName != null) {
+				tgtDom = gs.getDomain(tName);
+			}
+		}
+
+		if (eval == null) {
+			if (!isReverse) {
+				for (int u = activeIn.nextSetBit(0); u >= 0
+						&& u < csrRel.getNodeCount(); u = activeIn.nextSetBit(u + 1)) {
+					csrRel.copyTargetsSimd(u, outBs);
+				}
+			} else if (csrRel.hasCsc()) {
+				int maxV = csrRel.getCscNodeCount();
+				for (int v = activeIn.nextSetBit(0); v >= 0
+						&& (maxV <= 0 || v < maxV); v = activeIn.nextSetBit(v + 1)) {
+					csrRel.copyInTargetsSimd(v, outBs);
+				}
+			} else {
+				int n = csrRel.getNodeCount();
+				for (int u = 0; u < n; u++) {
+					int[] tgts = csrRel.getTargets(u);
+					for (int v : tgts) {
+						if (v >= 0 && activeIn.get(v)) {
+							outBs.set(u);
+							break;
+						}
+					}
+				}
+			}
+			return;
+		}
+
+		if (!isReverse) {
+			int maxU = csrRel.getNodeCount();
+			if (csrRel.isFlatForward()) {
+				int[] edgeMap = csrRel.getOrBuildFlatForwardEdgeMap();
+				for (int u = activeIn.nextSetBit(0); u >= 0 && u < maxU; u = activeIn.nextSetBit(u + 1)) {
+					int[] tgts = csrRel.getTargets(u);
+					if (tgts.length > 0) {
+						int v = tgts[0];
+						int eIdx = (edgeMap != null && u < edgeMap.length) ? edgeMap[u] : -1;
+						if (eIdx >= 0 && eval.evalEdgeFilter(csrRel, eIdx, srcDom, u, tgtDom, v, scratch)) {
+							outBs.set(v);
+						}
+					}
+				}
+			} else {
+				MemorySegment rowSeg = csrRel.getRowOffsetsSegment();
+				MemorySegment colSeg = csrRel.getColumnTargetsSegment();
+				if (rowSeg != null && !rowSeg.equals(MemorySegment.NULL) && colSeg != null
+						&& !colSeg.equals(MemorySegment.NULL)) {
+					for (int u = activeIn.nextSetBit(0); u >= 0 && u < maxU; u = activeIn.nextSetBit(u + 1)) {
+						long start = csrRel.readEdgeIndex(rowSeg, u);
+						long end = csrRel.readEdgeIndex(rowSeg, u + 1);
+						for (long e = start; e < end; e++) {
+							int v = csrRel.readNodeId(colSeg, e);
+							if (v >= 0 && eval.evalEdgeFilter(csrRel, (int) e, srcDom, u, tgtDom, v, scratch)) {
+								outBs.set(v);
+							}
+						}
+					}
+				}
+			}
+		} else {
+			if (csrRel.isFlatReverse()) {
+				int maxV = csrRel.getCscNodeCount();
+				for (int v = activeIn.nextSetBit(0); v >= 0 && v < maxV; v = activeIn.nextSetBit(v + 1)) {
+					int[] srcs = csrRel.getInTargets(v);
+					for (int u : srcs) {
+						int eIdx = csrRel.findCsrEdgeIndex(u, v);
+						if (eIdx >= 0 && eval.evalEdgeFilter(csrRel, eIdx, srcDom, u, tgtDom, v, scratch)) {
+							outBs.set(u);
+						}
+					}
+				}
+			} else if (csrRel.hasCsc()) {
+				int[] cscToCsr = csrRel.getOrBuildCscToCsrEdgeMap();
+				MemorySegment cscRow = csrRel.getCscRowOffsetsSegment();
+				MemorySegment cscCol = csrRel.getCscColumnTargetsSegment();
+				int maxV = csrRel.getCscNodeCount();
+				if (cscRow != null && !cscRow.equals(MemorySegment.NULL) && cscCol != null
+						&& !cscCol.equals(MemorySegment.NULL)) {
+					for (int v = activeIn.nextSetBit(0); v >= 0 && v < maxV; v = activeIn.nextSetBit(v + 1)) {
+						long start = csrRel.readEdgeIndex(cscRow, v);
+						long end = csrRel.readEdgeIndex(cscRow, v + 1);
+						for (long cscIdx = start; cscIdx < end; cscIdx++) {
+							int u = csrRel.readSrcNodeId(cscCol, cscIdx);
+							int eIdx = (cscToCsr != null && cscIdx < cscToCsr.length)
+									? cscToCsr[(int) cscIdx]
+									: (int) cscIdx;
+							if (u >= 0 && eIdx >= 0
+									&& eval.evalEdgeFilter(csrRel, eIdx, srcDom, u, tgtDom, v, scratch)) {
+								outBs.set(u);
+							}
+						}
+					}
+				}
+			} else {
+				int maxU = csrRel.getNodeCount();
+				if (csrRel.isFlatForward()) {
+					int[] edgeMap = csrRel.getOrBuildFlatForwardEdgeMap();
+					for (int u = 0; u < maxU; u++) {
+						int[] tgts = csrRel.getTargets(u);
+						if (tgts.length > 0) {
+							int v = tgts[0];
+							if (v >= 0 && activeIn.get(v)) {
+								int eIdx = (edgeMap != null && u < edgeMap.length) ? edgeMap[u] : -1;
+								if (eIdx >= 0 && eval.evalEdgeFilter(csrRel, eIdx, srcDom, u, tgtDom, v, scratch)) {
+									outBs.set(u);
+								}
+							}
+						}
+					}
+				} else {
+					MemorySegment rowSeg = csrRel.getRowOffsetsSegment();
+					MemorySegment colSeg = csrRel.getColumnTargetsSegment();
+					if (rowSeg != null && !rowSeg.equals(MemorySegment.NULL) && colSeg != null
+							&& !colSeg.equals(MemorySegment.NULL)) {
+						for (int u = 0; u < maxU; u++) {
+							long start = csrRel.readEdgeIndex(rowSeg, u);
+							long end = csrRel.readEdgeIndex(rowSeg, u + 1);
+							for (long e = start; e < end; e++) {
+								int v = csrRel.readNodeId(colSeg, e);
+								if (v >= 0 && activeIn.get(v)
+										&& eval.evalEdgeFilter(csrRel, (int) e, srcDom, u, tgtDom, v, scratch)) {
+									outBs.set(u);
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	public static void handleCsrWalkState(MemorySegment state, VmQueryContext ctx, Instruction instr) {

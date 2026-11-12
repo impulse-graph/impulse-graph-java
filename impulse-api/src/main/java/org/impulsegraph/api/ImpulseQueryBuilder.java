@@ -583,6 +583,11 @@ public class ImpulseQueryBuilder<R> {
 		return List.copyOf(steps);
 	}
 
+	public ImpulseQueryBuilder<R> appendStep(ImpScmNode step) {
+		steps.add(Objects.requireNonNull(step, "step must not be null"));
+		return this;
+	}
+
 	/**
 	 * Format AST steps pipeline into a human-readable ImpScheme S-expression text
 	 * representation.

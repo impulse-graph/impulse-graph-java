@@ -64,7 +64,10 @@ public final class ImpOpsBytecodeEmitter {
 		boolean firstStepEmitted = false;
 
 		if (ast instanceof ScmProgram prog) {
-			for (ImpScmNode step : prog.steps()) {
+			List<ImpScmNode> progSteps = prog.steps();
+			for (int stepIdx = 0; stepIdx < progSteps.size(); stepIdx++) {
+				ImpScmNode step = progSteps.get(stepIdx);
+				boolean allowHaltOnEmpty = canRemainingHaltOnEmpty(progSteps, stepIdx + 1);
 				short srcReg = regAlloc.srcRegisters().getOrDefault(step, currentReg);
 				short dstReg = regAlloc.dstRegisters().getOrDefault(step, (short) (1 - currentReg));
 				currentReg = dstReg;
@@ -81,6 +84,17 @@ public final class ImpOpsBytecodeEmitter {
 
 					org.impulsegraph.api.RelationSnapshot boundRel = resolveRelationSnapshot(snapshot, relId,
 							logicalRelName);
+					if (walk.direction() == ScmWalk.Direction.REVERSE_CSC && boundRel != null && !boundRel.hasCsc()
+							&& walk.shaderSteps().isEmpty()) {
+						if (!firstStepEmitted) {
+							instrList.add(new InstructionWord(OP_INIT_INPUT_SET, (byte) 0, srcReg, 0));
+							firstStepEmitted = true;
+						}
+						int poolIdx = internString(stringPool, logicalRelName + "\0");
+						int payload = ((poolIdx & 0xFFFF) << 16) | (srcReg & 0xFFFF);
+						instrList.add(new InstructionWord(OP_CSR_WALK_FILTERED, (byte) 0x60, dstReg, payload));
+						continue;
+					}
 					boolean useCsc = walk.direction() == ScmWalk.Direction.REVERSE_CSC
 							&& (boundRel == null || boundRel.hasCsc());
 					boolean isStream = !walk.shaderSteps().isEmpty();
@@ -88,7 +102,7 @@ public final class ImpOpsBytecodeEmitter {
 							? (isStream ? OP_CSC_WALK_STREAM : OP_CSC_WALK)
 							: (isStream ? OP_CSR_WALK_STREAM : OP_CSR_WALK));
 
-					byte flags = FLAG_HALT_ON_EMPTY;
+					byte flags = allowHaltOnEmpty ? FLAG_HALT_ON_EMPTY : 0;
 					if (!firstStepEmitted) {
 						flags |= FLAG_INPUT_SEED;
 						firstStepEmitted = true;
@@ -155,7 +169,7 @@ public final class ImpOpsBytecodeEmitter {
 					if (rel2Id >= 0)
 						relationIdMap.put(hop2.relation2Name(), rel2Id);
 
-					byte flags = FLAG_HALT_ON_EMPTY;
+					byte flags = allowHaltOnEmpty ? FLAG_HALT_ON_EMPTY : 0;
 					if (!firstStepEmitted) {
 						flags |= FLAG_INPUT_SEED;
 						firstStepEmitted = true;
@@ -163,6 +177,17 @@ public final class ImpOpsBytecodeEmitter {
 
 					int payload = ((rel2Id & 0xFFFF) << 16) | (rel1Id & 0xFFFF);
 					instrList.add(new InstructionWord(OP_CSR_WALK_2HOP, flags, dstReg, payload));
+				} else if (step instanceof ScmStreamFilter sf) {
+					if (!firstStepEmitted) {
+						instrList.add(new InstructionWord(OP_INIT_INPUT_SET, (byte) 0, srcReg, 0));
+						firstStepEmitted = true;
+					}
+					String celText = (sf.predicate() instanceof ScmCelExpr ce)
+							? ce.rawText()
+							: sf.predicate().toScmString();
+					int poolIdx = internString(stringPool, "\0" + celText);
+					int payload = ((poolIdx & 0xFFFF) << 16) | (srcReg & 0xFFFF);
+					instrList.add(new InstructionWord(OP_NODE_FILTER, (byte) 0x40, dstReg, payload));
 				} else if (step instanceof ScmVectorFilter) {
 					byte flags = 0;
 					if (!firstStepEmitted) {
@@ -327,19 +352,36 @@ public final class ImpOpsBytecodeEmitter {
 					instrList.add(new InstructionWord(OP_VECTOR_ANN_SEARCH, flags, dstReg, payload));
 				} else if (step instanceof ScmVectorRerankDot rerank) {
 					short qReg = (short) rerank.queryReg();
-					if (rerank.queryVector().length > 0) {
-						int inlinePayload = appendInlineFloatArray(inlineBytes, rerank.queryVector());
-						instrList.add(new InstructionWord(OP_LOAD_INLINE_ARRAY, (byte) 0, qReg, inlinePayload));
+					if (!rerank.attrName().isEmpty() && !rerank.attrName().startsWith("reg:")) {
+						if (!firstStepEmitted) {
+							instrList.add(new InstructionWord(OP_INIT_INPUT_SET, (byte) 0, srcReg, 0));
+							firstStepEmitted = true;
+						}
+						if (rerank.queryVector().length > 0) {
+							int inlinePayload = appendInlineFloatArray(inlineBytes, rerank.queryVector());
+							instrList.add(new InstructionWord(OP_LOAD_INLINE_ARRAY, (byte) 0, qReg, inlinePayload));
+						}
+						int poolIdx = internString(stringPool, rerank.attrName());
+						int payload = (srcReg & 0xFF) | ((qReg & 0xFF) << 8) | ((poolIdx & 0xFFFF) << 16);
+						instrList.add(new InstructionWord(OP_VECTOR_RERANK_DOT,
+								(byte) (0x40 | (rerank.metric() & 0x03)), dstReg, payload));
+					} else {
+						if (rerank.queryVector().length > 0) {
+							int inlinePayload = appendInlineFloatArray(inlineBytes, rerank.queryVector());
+							instrList.add(new InstructionWord(OP_LOAD_INLINE_ARRAY, (byte) 0, qReg, inlinePayload));
+						}
+						int payload = (srcReg & 0xFF) | ((qReg & 0xFF) << 8) | ((rerank.attrId() & 0xFFFF) << 16);
+						instrList.add(
+								new InstructionWord(OP_VECTOR_RERANK_DOT, (byte) rerank.metric(), dstReg, payload));
 					}
-					int payload = (srcReg & 0xFF) | ((qReg & 0xFF) << 8) | ((rerank.attrId() & 0xFFFF) << 16);
-					instrList.add(new InstructionWord(OP_VECTOR_RERANK_DOT, (byte) rerank.metric(), dstReg, payload));
 				} else if (step instanceof ScmFixpoint fix) {
 					short startReg = srcReg;
 					if (!firstStepEmitted) {
 						instrList.add(new InstructionWord(OP_INIT_INPUT_NODE, (byte) 0, startReg, 0));
 						firstStepEmitted = true;
 					}
-					emitRepeatUntilStable(fix.body().steps(), snapshot, instrList, patches, relationIdMap, startReg);
+					emitRepeatUntilStable(fix.body().steps(), snapshot, instrList, patches, relationIdMap, stringPool,
+							startReg);
 					currentReg = startReg;
 				} else if (step instanceof ScmSetOp setOp) {
 					short startReg = srcReg;
@@ -347,17 +389,247 @@ public final class ImpOpsBytecodeEmitter {
 						instrList.add(new InstructionWord(OP_INIT_INPUT_NODE, (byte) 0, startReg, 0));
 						firstStepEmitted = true;
 					}
-					currentReg = emitSetOp(setOp, snapshot, instrList, patches, relationIdMap, startReg, dstReg);
+					currentReg = emitSetOp(setOp, snapshot, instrList, patches, relationIdMap, stringPool, startReg,
+							dstReg);
 				} else if (step instanceof ScmList list && !list.elements().isEmpty()) {
 					ImpScmNode head = list.elements().get(0);
 					String opName = head instanceof ScmSymbol sym ? sym.name() : "";
 
-					if ("repeat".equalsIgnoreCase(opName)) {
+					if ("cel-domain-filter".equalsIgnoreCase(opName)) {
+						String dom = stringArg(list, 1);
+						String cel = stringArg(list, 2);
+						if (!firstStepEmitted) {
+							instrList.add(new InstructionWord(OP_INIT_INPUT_SET, (byte) 0, srcReg, 0));
+							firstStepEmitted = true;
+						}
+						int poolIdx = internString(stringPool, dom + "\0" + cel);
+						int payload = ((poolIdx & 0xFFFF) << 16) | (srcReg & 0xFFFF);
+						instrList.add(new InstructionWord(OP_NODE_FILTER, (byte) 0x40, dstReg, payload));
+					} else if ("cel-edge-walk".equalsIgnoreCase(opName)) {
+						String dir = stringArg(list, 1);
+						String relName = stringArg(list, 2);
+						String cel = stringArg(list, 3);
+						if (!firstStepEmitted) {
+							instrList.add(new InstructionWord(OP_INIT_INPUT_SET, (byte) 0, srcReg, 0));
+							firstStepEmitted = true;
+						}
+						boolean isRev = "in".equalsIgnoreCase(dir);
+						int poolIdx = internString(stringPool, relName + "\0" + cel);
+						int payload = ((poolIdx & 0xFFFF) << 16) | (srcReg & 0xFFFF);
+						instrList.add(new InstructionWord(OP_CSR_WALK_FILTERED, (byte) (isRev ? 0x60 : 0x40), dstReg,
+								payload));
+					} else if ("repeat-exact".equalsIgnoreCase(opName)) {
+						int repeatCount = intArg(list, 1, 0);
+						short startReg = srcReg;
+						if (!firstStepEmitted) {
+							instrList.add(new InstructionWord(OP_INIT_INPUT_SET, (byte) 0, startReg, 0));
+							firstStepEmitted = true;
+						}
+						ScmProgram subProg = (list.elements().size() > 2
+								&& list.elements().get(2) instanceof ScmProgram sp) ? sp : null;
+						if (repeatCount > 0 && subProg != null && !subProg.steps().isEmpty()) {
+							short countReg = 2;
+							instrList.add(new InstructionWord(OP_LOAD_CONST_INT, (byte) 0, countReg, repeatCount));
+							long loopStartPc = instrList.size();
+							short subOutReg = emitSubSteps(subProg.steps(), snapshot, instrList, patches, relationIdMap,
+									stringPool, startReg);
+							if (subOutReg != startReg) {
+								instrList.add(new InstructionWord(OP_SWAP_REG, (byte) 0, startReg, (int) subOutReg));
+							}
+							int loopEndPc = instrList.size();
+							int relOffset = (int) (loopStartPc - loopEndPc);
+							instrList.add(new InstructionWord(OP_LOOP_DECR, (byte) 0, countReg, relOffset));
+						}
+						currentReg = startReg;
+					} else if ("fixpoint-max-hops".equalsIgnoreCase(opName)) {
+						int maxHops = intArg(list, 1, 0);
+						short startReg = srcReg;
+						if (!firstStepEmitted) {
+							instrList.add(new InstructionWord(OP_INIT_INPUT_SET, (byte) 0, startReg, 0));
+							firstStepEmitted = true;
+						}
+						ScmProgram subProg = (list.elements().size() > 2
+								&& list.elements().get(2) instanceof ScmProgram sp) ? sp : null;
+						if (maxHops > 0 && subProg != null && !subProg.steps().isEmpty()) {
+							short accReg = 2;
+							short countReg = 3;
+							instrList.add(new InstructionWord(OP_MOV, (byte) 0, accReg, (int) startReg));
+							instrList.add(new InstructionWord(OP_LOAD_CONST_INT, (byte) 0, countReg, maxHops));
+							long loopStartPc = instrList.size();
+							short subOutReg = emitSubSteps(subProg.steps(), snapshot, instrList, patches, relationIdMap,
+									stringPool, startReg);
+							int checkPayload = subOutReg & 0xFFFF;
+							instrList.add(new InstructionWord(OP_STABLE_CHECK, (byte) 0, accReg, checkPayload));
+							int jzPc = instrList.size();
+							instrList.add(new InstructionWord(OP_JZ, (byte) 0, (short) 0, 0));
+							int diffPayload = ((accReg & 0xFFFF) << 16) | (subOutReg & 0xFFFF);
+							instrList.add(new InstructionWord(OP_SET_DIFFERENCE, (byte) 0, startReg, diffPayload));
+							int unionPayload = ((startReg & 0xFFFF) << 16) | (accReg & 0xFFFF);
+							instrList.add(new InstructionWord(OP_SET_UNION, (byte) 0, accReg, unionPayload));
+							int loopEndPc = instrList.size();
+							int relOffset = (int) (loopStartPc - loopEndPc);
+							instrList.add(new InstructionWord(OP_LOOP_DECR, (byte) 0, countReg, relOffset));
+							int loopExitPc = instrList.size();
+							instrList.set(jzPc,
+									new InstructionWord(OP_JZ, (byte) 0, (short) 0, (int) (loopExitPc - jzPc)));
+							instrList.add(new InstructionWord(OP_MOV, (byte) 0, startReg, (int) accReg));
+						}
+						currentReg = startReg;
+					} else if ("set-op-nodes".equalsIgnoreCase(opName)) {
+						String kindStr = stringArg(list, 1);
+						String csv = stringArg(list, 2);
+						if (!firstStepEmitted) {
+							instrList.add(new InstructionWord(OP_INIT_INPUT_SET, (byte) 0, srcReg, 0));
+							firstStepEmitted = true;
+						}
+						short rhsReg = 7;
+						if (csv.isEmpty()) {
+							instrList.add(new InstructionWord(OP_CLEAR_REG, (byte) 0, rhsReg, 0));
+						} else {
+							String[] parts = csv.split(",");
+							List<Long> rhsNodes = new ArrayList<>(parts.length);
+							for (String p : parts) {
+								if (!p.isEmpty()) {
+									rhsNodes.add(Long.parseLong(p));
+								}
+							}
+							if (rhsNodes.isEmpty()) {
+								instrList.add(new InstructionWord(OP_CLEAR_REG, (byte) 0, rhsReg, 0));
+							} else if (rhsNodes.size() <= 65535 && inlineBytes.size() + rhsNodes.size() * 4 <= 60000) {
+								int inlinePayload = appendInlineIntArray(inlineBytes, rhsNodes);
+								instrList.add(
+										new InstructionWord(OP_LOAD_INLINE_ARRAY, (byte) 0x01, rhsReg, inlinePayload));
+							} else {
+								int poolIdx = internString(stringPool, csv);
+								instrList.add(new InstructionWord(OP_LOAD_INLINE_ARRAY, (byte) 0x41, rhsReg,
+										poolIdx & 0xFFFF));
+							}
+						}
+						byte setOpcode = switch (kindStr.toLowerCase()) {
+							case "intersect" -> OP_SET_INTERSECT;
+							case "difference", "diff" -> OP_SET_DIFFERENCE;
+							default -> OP_SET_UNION;
+						};
+						int payload = ((rhsReg & 0xFFFF) << 16) | (srcReg & 0xFFFF);
+						instrList.add(new InstructionWord(setOpcode, (byte) 0, dstReg, payload));
+					} else if ("cel-domain-reduce".equalsIgnoreCase(opName)) {
+						String redKindStr = stringArg(list, 1);
+						String dom = stringArg(list, 2);
+						String expr = stringArg(list, 3);
+						if (!firstStepEmitted) {
+							instrList.add(new InstructionWord(OP_INIT_INPUT_SET, (byte) 0, srcReg, 0));
+							firstStepEmitted = true;
+						}
+						int redKind = switch (redKindStr.toLowerCase()) {
+							case "min" -> BINARY_OP_MIN;
+							case "max" -> BINARY_OP_MAX;
+							default -> BINARY_OP_ADD;
+						};
+						int poolIdx = internString(stringPool, dom + "\0" + expr);
+						int payload = ((poolIdx & 0xFFFF) << 16) | (srcReg & 0xFFFF);
+						instrList
+								.add(new InstructionWord(OP_REDUCE, (byte) (0x40 | (redKind & 0x0F)), srcReg, payload));
+						currentReg = srcReg;
+					} else if ("lane-init-domain-seeds".equalsIgnoreCase(opName)) {
+						firstStepEmitted = true;
+						String dom = stringArg(list, 1);
+						List<Long> seeds = new ArrayList<>();
+						for (int i = 2; i < list.elements().size(); i++) {
+							seeds.add((long) intArg(list, i, 0));
+						}
+						short seedReg = 8;
+						if (!seeds.isEmpty()) {
+							int inlinePayload = appendInlineIntArray(inlineBytes, seeds);
+							instrList.add(
+									new InstructionWord(OP_LOAD_INLINE_ARRAY, (byte) 0x01, seedReg, inlinePayload));
+						} else {
+							instrList.add(new InstructionWord(OP_CLEAR_REG, (byte) 0, seedReg, 0));
+						}
+						int poolIdx = internString(stringPool, dom);
+						int payload = (seedReg & 0xFFFF) | ((poolIdx & 0xFFFF) << 16);
+						instrList.add(new InstructionWord(OP_LANE_INIT_SEEDS, (byte) 0x40, dstReg, payload));
+					} else if ("lane-init-domain-groups".equalsIgnoreCase(opName)) {
+						firstStepEmitted = true;
+						String dom = stringArg(list, 1);
+						int numGroups = intArg(list, 2, 0);
+						short pairsReg = 8;
+						short groupsReg = 9;
+						List<Long> nodesList = new ArrayList<>();
+						List<Long> groupsList = new ArrayList<>();
+						for (int i = 3; i + 1 < list.elements().size(); i += 2) {
+							nodesList.add((long) intArg(list, i, 0));
+							groupsList.add((long) intArg(list, i + 1, 0));
+						}
+						if (!nodesList.isEmpty()) {
+							int nodesPayload = appendInlineIntArray(inlineBytes, nodesList);
+							int groupsPayload = appendInlineIntArray(inlineBytes, groupsList);
+							instrList.add(
+									new InstructionWord(OP_LOAD_INLINE_ARRAY, (byte) 0x01, pairsReg, nodesPayload));
+							instrList.add(
+									new InstructionWord(OP_LOAD_INLINE_ARRAY, (byte) 0x01, groupsReg, groupsPayload));
+						} else {
+							instrList.add(new InstructionWord(OP_CLEAR_REG, (byte) 0, pairsReg, 0));
+							instrList.add(new InstructionWord(OP_CLEAR_REG, (byte) 0, groupsReg, 0));
+						}
+						int poolIdx = internString(stringPool, dom + "\0" + numGroups);
+						int payload = (pairsReg & 0xFF) | ((groupsReg & 0xFF) << 8) | ((poolIdx & 0xFFFF) << 16);
+						instrList.add(new InstructionWord(OP_LANE_INIT_GROUPS, (byte) 0x40, dstReg, payload));
+					} else if ("lane-walk-both".equalsIgnoreCase(opName)) {
+						String relName = stringArg(list, 1);
+						int relId = resolveRelationId(snapshot, relName);
+						relationIdMap.put(relName, relId);
+						long pc = instrList.size();
+						patches.add(new RelationInstructionPatch(pc, relName, srcReg, dstReg));
+						int payload = (srcReg & 0xFFFF) | ((relId & 0xFFFF) << 16);
+						instrList.add(new InstructionWord(OP_LANE_CSR_WALK, (byte) 0x08, dstReg, payload));
+					} else if ("lane-walk-union".equalsIgnoreCase(opName)) {
+						String dir = stringArg(list, 1);
+						StringBuilder joined = new StringBuilder();
+						for (int i = 2; i < list.elements().size(); i++) {
+							if (joined.length() > 0) {
+								joined.append('\0');
+							}
+							joined.append(stringArg(list, i));
+						}
+						int poolIdx = internString(stringPool, joined.toString());
+						byte opcode = "in".equalsIgnoreCase(dir) ? OP_LANE_CSC_WALK : OP_LANE_CSR_WALK;
+						int payload = (srcReg & 0xFFFF) | ((poolIdx & 0xFFFF) << 16);
+						instrList.add(new InstructionWord(opcode, (byte) 0x40, dstReg, payload));
+					} else if ("lane-walk-where".equalsIgnoreCase(opName)) {
+						String dir = stringArg(list, 1);
+						String relName = stringArg(list, 2);
+						String cel = stringArg(list, 3);
+						int poolIdx = internString(stringPool, relName + "\0" + cel);
+						byte opcode = "in".equalsIgnoreCase(dir) ? OP_LANE_CSC_WALK : OP_LANE_CSR_WALK;
+						int payload = (srcReg & 0xFFFF) | ((poolIdx & 0xFFFF) << 16);
+						instrList.add(new InstructionWord(opcode, (byte) 0x20, dstReg, payload));
+					} else if ("lane-fixpoint-max-hops".equalsIgnoreCase(opName)) {
+						String relName = stringArg(list, 1);
+						int maxHops = intArg(list, 2, 0);
+						int poolIdx = internString(stringPool, relName + "\0" + maxHops);
+						int payload = (srcReg & 0xFFFF) | ((poolIdx & 0xFFFF) << 16);
+						instrList.add(new InstructionWord(OP_LANE_CSR_WALK, (byte) 0x44, dstReg, payload));
+					} else if ("lane-filter-cel".equalsIgnoreCase(opName)) {
+						String dom = stringArg(list, 1);
+						String cel = stringArg(list, 2);
+						int poolIdx = internString(stringPool, dom + "\0" + cel);
+						int payload = (srcReg & 0xFF) | ((poolIdx & 0xFFFF) << 16);
+						instrList.add(new InstructionWord(OP_LANE_PRUNE_MASK, (byte) 0x40, srcReg, payload));
+						currentReg = srcReg;
+					} else if ("lane-quorum-inplace".equalsIgnoreCase(opName)) {
+						int minK = intArg(list, 1, 1);
+						String reqStr = stringArg(list, 2);
+						String forbStr = stringArg(list, 3);
+						int poolIdx = internString(stringPool, minK + "\0" + reqStr + "\0" + forbStr);
+						int payload = (srcReg & 0xFF) | ((poolIdx & 0xFFFF) << 16);
+						instrList.add(new InstructionWord(OP_LANE_PRUNE_MASK, (byte) 0x20, srcReg, payload));
+						currentReg = srcReg;
+					} else if ("repeat".equalsIgnoreCase(opName)) {
 						int repeatCount = 1;
 						if (list.elements().size() > 1 && list.elements().get(1) instanceof ScmLiteral.ScmInt cnt) {
 							repeatCount = (int) cnt.value();
 						}
-						short startReg = currentReg;
+						short startReg = srcReg;
 						if (!firstStepEmitted) {
 							instrList.add(new InstructionWord(OP_INIT_INPUT_NODE, (byte) 0, startReg, 0));
 							firstStepEmitted = true;
@@ -372,7 +644,7 @@ public final class ImpOpsBytecodeEmitter {
 							long loopStartPc = instrList.size();
 
 							short subOutReg = emitSubSteps(subProg.steps(), snapshot, instrList, patches, relationIdMap,
-									startReg);
+									stringPool, startReg);
 
 							int diffPayload = ((accReg & 0xFFFF) << 16) | (subOutReg & 0xFFFF);
 							instrList.add(new InstructionWord(OP_SET_DIFFERENCE, (byte) 0, startReg, diffPayload));
@@ -401,7 +673,7 @@ public final class ImpOpsBytecodeEmitter {
 							short subOutReg = startReg;
 							if (subProg != null) {
 								subOutReg = emitSubSteps(subProg.steps(), snapshot, instrList, patches, relationIdMap,
-										startReg);
+										stringPool, startReg);
 							}
 							// Swap destination register back to startReg for next iteration in O(1)
 							if (subOutReg != startReg) {
@@ -413,7 +685,7 @@ public final class ImpOpsBytecodeEmitter {
 							currentReg = startReg;
 						}
 					} else if ("repeat-until-stable".equalsIgnoreCase(opName)) {
-						short startReg = currentReg;
+						short startReg = srcReg;
 						if (!firstStepEmitted) {
 							instrList.add(new InstructionWord(OP_INIT_INPUT_NODE, (byte) 0, startReg, 0));
 							firstStepEmitted = true;
@@ -428,7 +700,7 @@ public final class ImpOpsBytecodeEmitter {
 						short subOutReg = startReg;
 						if (list.elements().size() > 1 && list.elements().get(1) instanceof ScmProgram subProg) {
 							subOutReg = emitSubSteps(subProg.steps(), snapshot, instrList, patches, relationIdMap,
-									startReg);
+									stringPool, startReg);
 						}
 
 						// Check if newly reached nodes (subOutReg) are already a subset of accReg
@@ -463,10 +735,7 @@ public final class ImpOpsBytecodeEmitter {
 						if (list.elements().size() > 1 && list.elements().get(1) instanceof ScmSymbol sym) {
 							attrName = sym.name();
 						}
-						if (!stringPool.contains(attrName)) {
-							stringPool.add(attrName);
-						}
-						int nameIdx = stringPool.indexOf(attrName);
+						int nameIdx = internString(stringPool, attrName);
 						int payload = ((srcReg & 0xFFFF) << 16) | (nameIdx & 0xFFFF);
 						instrList.add(new InstructionWord(OP_VECTOR_LOAD_ATTR, (byte) 0, dstReg, payload));
 					} else if ("island-detect".equalsIgnoreCase(opName)) {
@@ -506,6 +775,70 @@ public final class ImpOpsBytecodeEmitter {
 		return new EmittedProgram(programSeg, count, patches, relationIdMap, instrList, stringPool, inlineDataSeg);
 	}
 
+	private static boolean canRemainingHaltOnEmpty(List<ImpScmNode> steps, int fromIdx) {
+		for (int j = fromIdx; j < steps.size(); j++) {
+			ImpScmNode rem = steps.get(j);
+			if (rem instanceof ScmWalk w) {
+				if (!w.shaderSteps().isEmpty()) {
+					return false;
+				}
+			} else if (rem instanceof ScmWalk2Hop) {
+				// pure walk
+			} else if (rem instanceof ScmCollect c) {
+				if (c.format() != ScmCollect.Format.BITSET) {
+					return false;
+				}
+			} else {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static int internString(List<String> stringPool, String value) {
+		String v = value != null ? value : "";
+		int idx = stringPool.indexOf(v);
+		if (idx < 0) {
+			idx = stringPool.size();
+			stringPool.add(v);
+		}
+		return idx;
+	}
+
+	private static String stringArg(ScmList list, int idx) {
+		if (idx < 0 || idx >= list.elements().size()) {
+			return "";
+		}
+		ImpScmNode n = list.elements().get(idx);
+		if (n instanceof ScmLiteral.ScmString s) {
+			return s.value();
+		}
+		if (n instanceof ScmSymbol sym) {
+			return sym.name();
+		}
+		if (n instanceof ScmLiteral.ScmInt iv) {
+			return Long.toString(iv.value());
+		}
+		return n.toScmString();
+	}
+
+	private static int intArg(ScmList list, int idx, int defVal) {
+		if (idx < 0 || idx >= list.elements().size()) {
+			return defVal;
+		}
+		ImpScmNode n = list.elements().get(idx);
+		if (n instanceof ScmLiteral.ScmInt iv) {
+			return (int) iv.value();
+		}
+		if (n instanceof ScmLiteral.ScmString s) {
+			try {
+				return Integer.parseInt(s.value());
+			} catch (NumberFormatException ignored) {
+			}
+		}
+		return defVal;
+	}
+
 	private static int appendInlineIntArray(ByteArrayOutputStream inlineBytes, List<Long> vals) {
 		int offset = inlineBytes.size();
 		int count = vals.size();
@@ -534,11 +867,11 @@ public final class ImpOpsBytecodeEmitter {
 
 	private static void emitRepeatUntilStable(List<ImpScmNode> subSteps, ImpulseGraphSnapshot snapshot,
 			List<InstructionWord> instrList, List<RelationInstructionPatch> patches, Map<String, Integer> relationIdMap,
-			short startReg) {
+			List<String> stringPool, short startReg) {
 		short accReg = 2;
 		instrList.add(new InstructionWord(OP_MOV, (byte) 0, accReg, (int) startReg));
 		long loopStartPc = instrList.size();
-		short subOutReg = emitSubSteps(subSteps, snapshot, instrList, patches, relationIdMap, startReg);
+		short subOutReg = emitSubSteps(subSteps, snapshot, instrList, patches, relationIdMap, stringPool, startReg);
 		int checkPayload = subOutReg & 0xFFFF;
 		instrList.add(new InstructionWord(OP_STABLE_CHECK, (byte) 0, accReg, checkPayload));
 		int jzPc = instrList.size();
@@ -562,18 +895,21 @@ public final class ImpOpsBytecodeEmitter {
 	}
 
 	private static short emitSetOp(ScmSetOp setOp, ImpulseGraphSnapshot snapshot, List<InstructionWord> instrList,
-			List<RelationInstructionPatch> patches, Map<String, Integer> relationIdMap, short startReg, short dstReg) {
+			List<RelationInstructionPatch> patches, Map<String, Integer> relationIdMap, List<String> stringPool,
+			short startReg, short dstReg) {
 		short seedSaveReg = 6;
 		short lhsSaveReg = 7;
 		if (setOp.lhs() != null) {
 			instrList.add(new InstructionWord(OP_MOV, (byte) 0, seedSaveReg, (int) startReg));
-			short lhsOutReg = emitSubSteps(asSteps(setOp.lhs()), snapshot, instrList, patches, relationIdMap, startReg);
+			short lhsOutReg = emitSubSteps(asSteps(setOp.lhs()), snapshot, instrList, patches, relationIdMap,
+					stringPool, startReg);
 			instrList.add(new InstructionWord(OP_MOV, (byte) 0, lhsSaveReg, (int) lhsOutReg));
 			instrList.add(new InstructionWord(OP_MOV, (byte) 0, startReg, (int) seedSaveReg));
 		} else {
 			instrList.add(new InstructionWord(OP_MOV, (byte) 0, lhsSaveReg, (int) startReg));
 		}
-		short rhsOutReg = emitSubSteps(asSteps(setOp.rhs()), snapshot, instrList, patches, relationIdMap, startReg);
+		short rhsOutReg = emitSubSteps(asSteps(setOp.rhs()), snapshot, instrList, patches, relationIdMap, stringPool,
+				startReg);
 		byte opcode = switch (setOp.kind()) {
 			case UNION -> OP_SET_UNION;
 			case INTERSECT -> OP_SET_INTERSECT;
@@ -620,7 +956,7 @@ public final class ImpOpsBytecodeEmitter {
 
 	private static short emitSubSteps(List<ImpScmNode> subSteps, ImpulseGraphSnapshot snapshot,
 			List<InstructionWord> instrList, List<RelationInstructionPatch> patches, Map<String, Integer> relationIdMap,
-			short startReg) {
+			List<String> stringPool, short startReg) {
 		short currentReg = startReg;
 		for (ImpScmNode step : subSteps) {
 			if (step instanceof ScmWalk walk) {
@@ -637,21 +973,51 @@ public final class ImpOpsBytecodeEmitter {
 				short dstReg = (short) (1 - currentReg);
 				currentReg = dstReg;
 
+				org.impulsegraph.api.RelationSnapshot boundRel = resolveRelationSnapshot(snapshot, relId,
+						logicalRelName);
+				if (walk.direction() == ScmWalk.Direction.REVERSE_CSC && boundRel != null && !boundRel.hasCsc()
+						&& walk.shaderSteps().isEmpty()) {
+					int poolIdx = internString(stringPool, logicalRelName + "\0");
+					int payload = ((poolIdx & 0xFFFF) << 16) | (srcReg & 0xFFFF);
+					instrList.add(new InstructionWord(OP_CSR_WALK_FILTERED, (byte) 0x60, dstReg, payload));
+					continue;
+				}
+
 				long pc = instrList.size();
 				patches.add(new RelationInstructionPatch(pc, logicalRelName, srcReg, dstReg));
 
-				org.impulsegraph.api.RelationSnapshot boundRel = resolveRelationSnapshot(snapshot, relId,
-						logicalRelName);
 				boolean useCsc = walk.direction() == ScmWalk.Direction.REVERSE_CSC
 						&& (boundRel == null || boundRel.hasCsc());
 				byte opcode = useCsc ? OP_CSC_WALK : OP_CSR_WALK;
 				int payload = ((relId & 0xFFFF) << 16) | (srcReg & 0xFFFF);
 				instrList.add(new InstructionWord(opcode, (byte) 0, dstReg, payload));
 			} else if (step instanceof ScmFixpoint fix) {
-				emitRepeatUntilStable(fix.body().steps(), snapshot, instrList, patches, relationIdMap, currentReg);
+				emitRepeatUntilStable(fix.body().steps(), snapshot, instrList, patches, relationIdMap, stringPool,
+						currentReg);
 			} else if (step instanceof ScmSetOp setOp) {
 				short dstReg = (short) (1 - currentReg);
-				currentReg = emitSetOp(setOp, snapshot, instrList, patches, relationIdMap, currentReg, dstReg);
+				currentReg = emitSetOp(setOp, snapshot, instrList, patches, relationIdMap, stringPool, currentReg,
+						dstReg);
+			} else if (step instanceof ScmList list && !list.elements().isEmpty()
+					&& list.elements().get(0) instanceof ScmSymbol sym) {
+				String subOp = sym.name();
+				if ("cel-domain-filter".equalsIgnoreCase(subOp)) {
+					short srcReg = currentReg;
+					short dstReg = (short) (1 - currentReg);
+					currentReg = dstReg;
+					int poolIdx = internString(stringPool, stringArg(list, 1) + "\0" + stringArg(list, 2));
+					int payload = ((poolIdx & 0xFFFF) << 16) | (srcReg & 0xFFFF);
+					instrList.add(new InstructionWord(OP_NODE_FILTER, (byte) 0x40, dstReg, payload));
+				} else if ("cel-edge-walk".equalsIgnoreCase(subOp)) {
+					short srcReg = currentReg;
+					short dstReg = (short) (1 - currentReg);
+					currentReg = dstReg;
+					boolean isRev = "in".equalsIgnoreCase(stringArg(list, 1));
+					int poolIdx = internString(stringPool, stringArg(list, 2) + "\0" + stringArg(list, 3));
+					int payload = ((poolIdx & 0xFFFF) << 16) | (srcReg & 0xFFFF);
+					instrList.add(
+							new InstructionWord(OP_CSR_WALK_FILTERED, (byte) (isRev ? 0x60 : 0x40), dstReg, payload));
+				}
 			}
 		}
 		return currentReg;
@@ -662,11 +1028,18 @@ public final class ImpOpsBytecodeEmitter {
 		if (snapshot == null) {
 			return null;
 		}
-		var map = snapshot.getAllRelationSnapshots();
-		if (relName != null && !relName.isEmpty() && map.containsKey(relName)) {
-			return map.get(relName);
+		if (relName != null && !relName.isEmpty()) {
+			org.impulsegraph.api.RelationSnapshot byName = snapshot.getRelationSnapshot(relName);
+			if (byName != null) {
+				return byName;
+			}
 		}
 		if (relId >= 0) {
+			org.impulsegraph.api.RelationSnapshot byId = snapshot.getRelationSnapshot(relId);
+			if (byId != null) {
+				return byId;
+			}
+			var map = snapshot.getAllRelationSnapshots();
 			int idx = 0;
 			for (org.impulsegraph.api.RelationSnapshot rel : map.values()) {
 				if (idx == relId) {
@@ -683,6 +1056,10 @@ public final class ImpOpsBytecodeEmitter {
 			return 0;
 		org.impulsegraph.api.RelationSnapshot targetRel = snapshot.getRelationSnapshot(relName);
 		if (targetRel != null) {
+			if (targetRel.getRelationId() >= 0
+					&& snapshot.getRelationSnapshot(targetRel.getRelationId()) == targetRel) {
+				return targetRel.getRelationId();
+			}
 			for (int i = 0; i < 65536; i++) {
 				org.impulsegraph.api.RelationSnapshot r = snapshot.getRelationSnapshot(i);
 				if (r == null) {
