@@ -193,6 +193,14 @@ public final class BinarySnapshotLoader {
 				if ((denseId + 1) * 4L <= dataSeg.byteSize()) {
 					return String.valueOf(dataSeg.get(ValueLayout.JAVA_INT_UNALIGNED, denseId * 4L));
 				}
+			} else if (code == 0x02) { // INT16
+				if ((denseId + 1) * 2L <= dataSeg.byteSize()) {
+					return String.valueOf(dataSeg.get(ValueLayout.JAVA_SHORT_UNALIGNED, denseId * 2L));
+				}
+			} else if (code == 0x01) { // INT8
+				if ((denseId + 1) <= dataSeg.byteSize()) {
+					return String.valueOf(dataSeg.get(ValueLayout.JAVA_BYTE, denseId));
+				}
 			} else if (code == 0x0C || (code == 0x0A && keyAttr.dimension() == 16)) { // UUID128 / FIXED_BYTES[16]
 				if ((denseId + 1) * 16L <= dataSeg.byteSize()) {
 					long mostSig = dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, denseId * 16L);
@@ -871,7 +879,9 @@ public final class BinarySnapshotLoader {
 							dataOff += paddedBitmapBytes;
 							dataBytes -= paddedBitmapBytes;
 
-							validateSectionBounds("Domain attribute validity", validityOff, validityBytes, segSize);
+							if (validityBytes > 0 || validityOff > 0) {
+								validateSectionBounds("Domain attribute validity", validityOff, validityBytes, segSize);
+							}
 						}
 
 						if (dataBytes > 0 || dataOff > 0) {
@@ -997,7 +1007,7 @@ public final class BinarySnapshotLoader {
 
 					if (isNullable) {
 						// Validity bitmap is padded to 128 bytes
-						long numBits = (edgeCount > 0) ? edgeCount : nodeCount;
+						long numBits = isV010 ? edgeCount : ((edgeCount > 0) ? edgeCount : nodeCount);
 						long rawBitmapBytes = ((numBits + 63) / 64) * 8;
 						long paddedBitmapBytes = (rawBitmapBytes + 127) & ~127L;
 
@@ -1016,7 +1026,9 @@ public final class BinarySnapshotLoader {
 						dataOff += paddedBitmapBytes;
 						dataBytes -= paddedBitmapBytes;
 
-						validateSectionBounds("Attribute validity", validityOff, validityBytes, segSize);
+						if (validityBytes > 0 || validityOff > 0) {
+							validateSectionBounds("Attribute validity", validityOff, validityBytes, segSize);
+						}
 					}
 
 					if (dataBytes > 0 || dataOff > 0) {
@@ -1055,8 +1067,8 @@ public final class BinarySnapshotLoader {
 				long tgtDomainNodeCount = (tgtDom != null) ? tgtDom.nodeCount() : 0L;
 				boolean isGlobalUnified = (totalDomainNodes > 0 && nodeCount == totalDomainNodes);
 				long effectiveTgtBound = isGlobalUnified ? totalDomainNodes : tgtDomainNodeCount;
-				auditRelationIntegrity(relId, nodeCount, edgeCount, effectiveTgtBound, nodeIdWidth, edgeIndexWidth,
-						offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg);
+				auditRelationIntegrity(relId, secFeatures, nodeCount, edgeCount, effectiveTgtBound, nodeIdWidth,
+						edgeIndexWidth, offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg);
 
 				List<MemorySegment> attrSegments = new ArrayList<>();
 				List<MemorySegment> validitySegments = new ArrayList<>();
@@ -1329,11 +1341,17 @@ public final class BinarySnapshotLoader {
 		}
 	}
 
-	private static void auditRelationIntegrity(int relId, long nodeCount, long edgeCount, long tgtDomainNodeCount,
-			byte nodeIdWidth, byte edgeIndexWidth, MemorySegment offsetsSeg, MemorySegment targetsSeg,
-			MemorySegment cscOffsetsSeg, MemorySegment cscTargetsSeg) {
+	private static void auditRelationIntegrity(int relId, long secFeatures, long nodeCount, long edgeCount,
+			long tgtDomainNodeCount, byte nodeIdWidth, byte edgeIndexWidth, MemorySegment offsetsSeg,
+			MemorySegment targetsSeg, MemorySegment cscOffsetsSeg, MemorySegment cscTargetsSeg) {
+		if ((secFeatures & 0x04L) != 0L) {
+			return;
+		}
 		int offWidth = (edgeIndexWidth == 8) ? 8 : (edgeIndexWidth == 2 ? 2 : 4);
 		int tgtWidth = (nodeIdWidth == 8) ? 8 : (nodeIdWidth == 2 ? 2 : 4);
+		long sentinel = (tgtWidth == 2) ? 0xFFFFL : (tgtWidth == 8 ? -1L : 0xFFFFFFFFL);
+		boolean flatForward = MemorySegment.NULL.equals(offsetsSeg) && !MemorySegment.NULL.equals(targetsSeg);
+		boolean flatReverse = MemorySegment.NULL.equals(cscOffsetsSeg) && !MemorySegment.NULL.equals(cscTargetsSeg);
 
 		long reqOffsetsBytes = Math.multiplyExact(Math.addExact(nodeCount, 1L), (long) offWidth);
 		if (!MemorySegment.NULL.equals(offsetsSeg)) {
@@ -1373,7 +1391,8 @@ public final class BinarySnapshotLoader {
 			}
 		}
 
-		long reqTargetsBytes = Math.multiplyExact(edgeCount, (long) tgtWidth);
+		long flatFwdSlots = flatForward ? nodeCount : edgeCount;
+		long reqTargetsBytes = Math.multiplyExact(flatFwdSlots, (long) tgtWidth);
 		if (!MemorySegment.NULL.equals(targetsSeg)) {
 			if (targetsSeg.byteSize() < reqTargetsBytes) {
 				ImpulseAssert.checkWellFormed(false, () -> "CSR col_idx targets segment undersized for relation "
@@ -1381,9 +1400,12 @@ public final class BinarySnapshotLoader {
 				throw new IllegalArgumentException("CSR col_idx targets segment undersized for relation " + relId
 						+ ": actual=" + targetsSeg.byteSize() + ", expected=" + reqTargetsBytes);
 			}
-			if (ImpulseAssert.ENABLE_AUDIT || edgeCount <= 100_000) {
-				for (long e = 0; e < edgeCount; e++) {
+			if (ImpulseAssert.ENABLE_AUDIT || flatFwdSlots <= 100_000) {
+				for (long e = 0; e < flatFwdSlots; e++) {
 					long tgt = readUnsignedAt(targetsSeg, e, tgtWidth);
+					if (flatForward && tgt == sentinel) {
+						continue;
+					}
 					if (tgt < 0 || (tgtDomainNodeCount > 0 && tgt >= tgtDomainNodeCount)) {
 						long badE = e;
 						ImpulseAssert.checkWellFormed(false, () -> "CSR target dense ID out of bounds at e=" + badE
@@ -1432,7 +1454,8 @@ public final class BinarySnapshotLoader {
 			}
 		}
 
-		long reqCscTargetsBytes = Math.multiplyExact(edgeCount, (long) tgtWidth);
+		long flatRevSlots = flatReverse ? tgtDomainNodeCount : edgeCount;
+		long reqCscTargetsBytes = Math.multiplyExact(flatRevSlots, (long) tgtWidth);
 		if (!MemorySegment.NULL.equals(cscTargetsSeg)) {
 			if (cscTargetsSeg.byteSize() < reqCscTargetsBytes) {
 				ImpulseAssert.checkWellFormed(false, () -> "CSC targets segment undersized for relation " + relId
@@ -1440,9 +1463,12 @@ public final class BinarySnapshotLoader {
 				throw new IllegalArgumentException("CSC targets segment undersized for relation " + relId + ": actual="
 						+ cscTargetsSeg.byteSize() + ", expected=" + reqCscTargetsBytes);
 			}
-			if (ImpulseAssert.ENABLE_AUDIT || edgeCount <= 100_000) {
-				for (long e = 0; e < edgeCount; e++) {
+			if (ImpulseAssert.ENABLE_AUDIT || flatRevSlots <= 100_000) {
+				for (long e = 0; e < flatRevSlots; e++) {
 					long src = readUnsignedAt(cscTargetsSeg, e, tgtWidth);
+					if (flatReverse && src == sentinel) {
+						continue;
+					}
 					if (src < 0 || (nodeCount > 0 && src >= nodeCount)) {
 						long badE = e;
 						ImpulseAssert.checkWellFormed(false, () -> "CSC source dense ID out of bounds at e=" + badE
