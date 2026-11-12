@@ -101,6 +101,16 @@ public class MockRelationSnapshot implements RelationSnapshot {
 		return out;
 	}
 	@Override
+	public int getTargetAt(int nodeId, int index) {
+		if (rowOffsets == null || colTargets == null || nodeId < 0 || nodeId >= nodeCount || index < 0)
+			return -1;
+		int start = rowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) nodeId);
+		int end = rowOffsets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) (nodeId + 1));
+		if (start + index >= end)
+			return -1;
+		return colTargets.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, (long) (start + index));
+	}
+	@Override
 	public void copyTargetsSimd(int nodeId, ImpulseBitSet frontier) {
 		if (rowOffsets == null || colTargets == null || nodeId < 0 || nodeId >= nodeCount)
 			return;

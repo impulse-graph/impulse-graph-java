@@ -22,6 +22,8 @@ import org.impulsegraph.vm.ImpulseMath;
 public final class VmCelEvaluator {
 
 	private static final ConcurrentHashMap<String, ExprNode> PARSE_CACHE = new ConcurrentHashMap<>();
+	private static final ConcurrentHashMap<String, VmCelEvaluator> NO_PARAM_EVAL_CACHE = new ConcurrentHashMap<>();
+	private static final VmCelEvaluator TRUE_EVAL = new VmCelEvaluator(new BoolLit(true), Map.of());
 	private static final ValueLayout.OfLong BE_LONG = ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.BIG_ENDIAN);
 
 	public static final byte KIND_NULL = 0;
@@ -60,11 +62,21 @@ public final class VmCelEvaluator {
 	}
 
 	public static VmCelEvaluator compile(String celExpr, Map<String, Object> params) {
+		boolean noParams = (params == null || params.isEmpty());
 		if (celExpr == null || celExpr.isBlank()) {
-			return new VmCelEvaluator(new BoolLit(true), params);
+			return noParams ? TRUE_EVAL : new VmCelEvaluator(new BoolLit(true), params);
 		}
-		ExprNode ast = PARSE_CACHE.computeIfAbsent(celExpr.trim(), VmCelEvaluator::parseExpression);
+		String key = celExpr.trim();
+		if (noParams) {
+			return NO_PARAM_EVAL_CACHE.computeIfAbsent(key,
+					k -> new VmCelEvaluator(PARSE_CACHE.computeIfAbsent(k, VmCelEvaluator::parseExpression), Map.of()));
+		}
+		ExprNode ast = PARSE_CACHE.computeIfAbsent(key, VmCelEvaluator::parseExpression);
 		return new VmCelEvaluator(ast, params);
+	}
+
+	public int maxDepth() {
+		return maxDepth;
 	}
 
 	public EvalScratch createScratch() {
@@ -193,12 +205,16 @@ public final class VmCelEvaluator {
 		boolean edgeMode;
 		Map<String, Object> params = Map.of();
 
-		EvalScratch(int depth) {
+		public EvalScratch(int depth) {
 			int cap = Math.max(16, depth);
 			this.kinds = new byte[cap];
 			this.iVals = new long[cap];
 			this.fVals = new double[cap];
 			this.oVals = new Object[cap];
+		}
+
+		public int capacity() {
+			return this.kinds.length;
 		}
 
 		void bindDomain(LoadedDomain domain, int nodeId, Map<String, Object> params) {
@@ -931,17 +947,18 @@ public final class VmCelEvaluator {
 		MemorySegment offsSeg = (idx < rel.getOffsetsSegments().size())
 				? rel.getOffsetsSegments().get(idx)
 				: MemorySegment.NULL;
-		if (attr == null) {
-			byte tc = rel.getAttributeTypeCode(idx);
-			attr = new LoadedAttribute(rel.getAttributeName(idx), tc, 1, 0L, 0L, 0L,
-					dataSeg != null ? dataSeg.byteSize() : 0L, 0L, offsSeg != null ? offsSeg.byteSize() : 0L);
-		}
 		long rowCount = rel.getEdgeCount();
 		if (rowCount > 0 && edgeRow >= rowCount) {
 			s.setNull(sp);
 			return;
 		}
-		decodeColumnScalar(attr, dataSeg, valSeg, offsSeg, rowCount, edgeRow, s, sp);
+		if (attr != null) {
+			decodeColumnScalar(attr.typeCode(), attr.dimension(), attr.isNullable(), dataSeg, valSeg, offsSeg, rowCount,
+					edgeRow, s, sp);
+		} else {
+			byte tc = rel.getAttributeTypeCode(idx);
+			decodeColumnScalar(tc, 1, (tc & 0x80) != 0, dataSeg, valSeg, offsSeg, rowCount, edgeRow, s, sp);
+		}
 	}
 
 	public static void decodeColumnScalar(LoadedAttribute attr, MemorySegment dataSeg, MemorySegment valSeg,
@@ -950,7 +967,17 @@ public final class VmCelEvaluator {
 			s.setNull(sp);
 			return;
 		}
-		if (attr.isNullable()) {
+		decodeColumnScalar(attr.typeCode(), attr.dimension(), attr.isNullable(), dataSeg, valSeg, offsSeg, totalRows,
+				row, s, sp);
+	}
+
+	public static void decodeColumnScalar(byte typeCode, int dimension, boolean nullable, MemorySegment dataSeg,
+			MemorySegment valSeg, MemorySegment offsSeg, long totalRows, int row, EvalScratch s, int sp) {
+		if (row < 0) {
+			s.setNull(sp);
+			return;
+		}
+		if (nullable) {
 			if (valSeg == null || valSeg.equals(MemorySegment.NULL) || (row >>> 3) >= valSeg.byteSize()) {
 				s.setNull(sp);
 				return;
@@ -966,11 +993,11 @@ public final class VmCelEvaluator {
 			return;
 		}
 
-		int baseCode = attr.typeCode() & 0x7F;
+		int baseCode = typeCode & 0x7F;
 		boolean hasOffsets = offsSeg != null && !offsSeg.equals(MemorySegment.NULL)
 				&& offsSeg.byteSize() >= (row + 2L) * 4L;
 		long dataSize = dataSeg.byteSize();
-		long elemBytes = (totalRows > 0 && !hasOffsets && attr.dimension() <= 1) ? (dataSize / totalRows) : -1L;
+		long elemBytes = (totalRows > 0 && !hasOffsets && dimension <= 1) ? (dataSize / totalRows) : -1L;
 
 		switch (baseCode) {
 			case 0x01 -> { // INT8
@@ -1076,7 +1103,7 @@ public final class VmCelEvaluator {
 				}
 			}
 			case 0x0A -> { // UUID128 / FIXED_BYTES[16]
-				if ((attr.dimension() == 16 || elemBytes == 16L) && (row + 1L) * 16L <= dataSize) {
+				if ((dimension == 16 || elemBytes == 16L) && (row + 1L) * 16L <= dataSize) {
 					long msb = dataSeg.get(BE_LONG, row * 16L);
 					long lsb = dataSeg.get(BE_LONG, row * 16L + 8L);
 					s.setStr(sp, new UUID(msb, lsb).toString());

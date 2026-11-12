@@ -129,6 +129,9 @@ public final class VmBranchCoverageRecorder {
 
 	public static void recordGlobalBranch(int pc, int opcode, int siteId, BranchKind kind,
 			BranchExpectation expectation, int branchIndex) {
+		if (!ImpulseAssert.isAssertionsEnabled() && !ImpulseAssert.isCoverageMode()) {
+			return;
+		}
 		int bit = 1 << branchIndex;
 		if (expectation == BranchExpectation.COVERAGE_ALWAYS_TAKEN && branchIndex != 0) {
 			ImpulseAssert.check(false, "VmBranchCoverageRecorder: COVERAGE_ALWAYS_TAKEN violated at pc=" + pc

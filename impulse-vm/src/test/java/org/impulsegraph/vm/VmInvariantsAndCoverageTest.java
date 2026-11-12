@@ -211,11 +211,33 @@ class VmInvariantsAndCoverageTest {
 				if (line.contains("Arrays.copyOf")) {
 					violations.add(target + " :: " + curMethod + " -> COPYOF: " + line.trim());
 				}
+				if (line.contains("getTargets:(I)[I") || line.contains("getInTargets:(I)[I")
+						|| line.contains("createScratch:()") || line.contains("decodeInstruction:(")) {
+					violations.add(target + " :: " + curMethod + " -> INDIRECT_ALLOC: " + line.trim());
+				}
 			}
 		}
 
 		assertTrue(checkedMethods >= 100, "Expected at least 100 opcode handler methods, checked " + checkedMethods);
 		assertTrue(violations.isEmpty(), () -> "Found hot-path heap allocations or autoboxing in VM opcode handlers:\n"
 				+ String.join("\n", violations));
+	}
+
+	@Test
+	@DisplayName("Hot-path CEL evaluator/scratch caching and release-mode coverage gating")
+	void testZeroAllocCachingAndCoverageGating() {
+		org.impulsegraph.vm.cel.VmCelEvaluator e1 = org.impulsegraph.vm.cel.VmCelEvaluator.compile("voltage_kv > 110.0",
+				java.util.Map.of());
+		org.impulsegraph.vm.cel.VmCelEvaluator e2 = org.impulsegraph.vm.cel.VmCelEvaluator
+				.compile("  voltage_kv > 110.0  ", java.util.Map.of());
+		assertSame(e1, e2, "Stateless CEL evaluators should be cached and reused");
+
+		org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch s1 = ctx.acquireCelScratch(e1);
+		org.impulsegraph.vm.cel.VmCelEvaluator.EvalScratch s2 = ctx.acquireCelScratch(e2);
+		assertSame(s1, s2, "VmQueryContext should reuse pooled EvalScratch across evaluations");
+
+		VmHandlers.Instruction[] dec1 = ctx.acquireDecodedInstructions(16);
+		VmHandlers.Instruction[] dec2 = ctx.acquireDecodedInstructions(16);
+		assertSame(dec1, dec2, "VmQueryContext should reuse decoded instruction array buffer");
 	}
 }

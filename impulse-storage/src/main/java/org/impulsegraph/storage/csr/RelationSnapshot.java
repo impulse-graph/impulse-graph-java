@@ -549,6 +549,78 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 	}
 
 	/**
+	 * Zero-allocation read of the single outgoing target for Flat (1:1 / N:1)
+	 * relations, returning {@code -1} when unbound/sentinel/out-of-range.
+	 */
+	public int getFlatForwardTarget(int nodeId) {
+		if (!isFlatForward() || nodeId < 0 || nodeId >= nodeCount || columnTargetsSegment == null
+				|| columnTargetsSegment.equals(MemorySegment.NULL)) {
+			return -1;
+		}
+		int tgtW = idWidthBytes(nodeIdWidth);
+		if (((long) nodeId + 1L) * tgtW > columnTargetsSegment.byteSize()) {
+			return -1;
+		}
+		int t = readNodeId(columnTargetsSegment, nodeId);
+		return isSentinelNodeId(t, nodeIdWidth) ? -1 : t;
+	}
+
+	/**
+	 * Zero-allocation read of the single incoming source for Flat Reverse (1:1 /
+	 * 1:N) relations, returning {@code -1} when unbound/sentinel/out-of-range.
+	 */
+	public int getFlatReverseSource(int nodeId) {
+		int cscBound = getCscNodeCount() > 0 ? getCscNodeCount() : nodeCount;
+		if (!isFlatReverse() || nodeId < 0 || nodeId >= cscBound || cscColumnTargetsSegment == null
+				|| cscColumnTargetsSegment.equals(MemorySegment.NULL)) {
+			return -1;
+		}
+		int srcW = idWidthBytes(srcNodeIdWidth);
+		if (((long) nodeId + 1L) * srcW > cscColumnTargetsSegment.byteSize()) {
+			return -1;
+		}
+		int s = readSrcNodeId(cscColumnTargetsSegment, nodeId);
+		return isSentinelNodeId(s, srcNodeIdWidth) ? -1 : s;
+	}
+
+	@Override
+	public int getTargetAt(int nodeId, int index) {
+		if (nodeId < 0 || nodeId >= nodeCount || index < 0) {
+			return -1;
+		}
+		if (isVirtual()) {
+			int rem = index;
+			for (RelationSnapshot child : componentRelations) {
+				if (child != null) {
+					int deg = child.getDegree(nodeId);
+					if (rem < deg) {
+						return child.getTargetAt(nodeId, rem);
+					}
+					rem -= deg;
+				}
+			}
+			return -1;
+		}
+		if (isFlatForward()) {
+			return index == 0 ? getFlatForwardTarget(nodeId) : -1;
+		}
+		int offW = offsetWidthBytes();
+		int tgtW = idWidthBytes(nodeIdWidth);
+		if (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)
+				|| ((long) nodeId + 2L) * offW > rowOffsetsSegment.byteSize() || columnTargetsSegment == null
+				|| columnTargetsSegment.equals(MemorySegment.NULL)) {
+			return -1;
+		}
+		long start = readEdgeIndex(rowOffsetsSegment, nodeId);
+		long end = readEdgeIndex(rowOffsetsSegment, nodeId + 1L);
+		long pos = start + index;
+		if (start < 0 || pos >= end || pos >= columnTargetsSegment.byteSize() / tgtW) {
+			return -1;
+		}
+		return readNodeId(columnTargetsSegment, pos);
+	}
+
+	/**
 	 * Returns the array slice of target node IDs for a specific source node ID
 	 * zero-copy from off-heap memory.
 	 */
