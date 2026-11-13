@@ -19,6 +19,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class KleisliJsonQueryRunnerTest {
 
+	private static MemorySegment allocInts(Arena arena, int... vals) {
+		MemorySegment seg = arena.allocate((long) vals.length * Integer.BYTES, Integer.BYTES);
+		seg.copyFrom(MemorySegment.ofArray(vals));
+		return seg;
+	}
+
+	private static MemorySegment allocShorts(Arena arena, short... vals) {
+		MemorySegment seg = arena.allocate((long) vals.length * Short.BYTES, Short.BYTES);
+		seg.copyFrom(MemorySegment.ofArray(vals));
+		return seg;
+	}
+
+	private static MemorySegment allocDoubles(Arena arena, double... vals) {
+		MemorySegment seg = arena.allocate((long) vals.length * Double.BYTES, Double.BYTES);
+		seg.copyFrom(MemorySegment.ofArray(vals));
+		return seg;
+	}
+
 	private static GraphSnapshot buildSpecV010TestGraph(Arena arena) {
 		// Domain 0: Bus (4 nodes: 0, 1, 2, 3)
 		// - bus_num: int32 PK [100, 101, 102, 103]
@@ -27,15 +45,15 @@ class KleisliJsonQueryRunnerTest {
 		// - vm_f16: float16 [1.00, 1.05, 0.96, 1.02]
 		// - bus_label: var_string ["SUB_A_0", "SUB_A_1", "SUB_B_2", "SUB_A_3"]
 		// - emb_f16: float16 VEC4
-		MemorySegment busNumSeg = arena.allocateFrom(ValueLayout.JAVA_INT, 100, 101, 102, 103);
+		MemorySegment busNumSeg = allocInts(arena, 100, 101, 102, 103);
 
-		MemorySegment shuntData = arena.allocateFrom(ValueLayout.JAVA_DOUBLE, 10.0, -5.0, 999.0, 20.0);
+		MemorySegment shuntData = allocDoubles(arena, 10.0, -5.0, 999.0, 20.0);
 		MemorySegment shuntVal = arena.allocate(8);
 		shuntVal.set(ValueLayout.JAVA_BYTE, 0, (byte) 0b0000_1011); // node 2 is NULL
 
 		short[] vmF16Arr = {Float.floatToFloat16(1.00f), Float.floatToFloat16(1.05f), Float.floatToFloat16(0.96f),
 				Float.floatToFloat16(1.02f)};
-		MemorySegment vmF16Seg = arena.allocateFrom(ValueLayout.JAVA_SHORT, vmF16Arr);
+		MemorySegment vmF16Seg = allocShorts(arena, vmF16Arr);
 
 		String[] labels = {"SUB_A_0", "SUB_A_1", "SUB_B_2", "SUB_A_3"};
 		byte[][] labelBytes = new byte[4][];
@@ -79,7 +97,7 @@ class KleisliJsonQueryRunnerTest {
 		// Domain 1: Zone (2 nodes: 0="Z_NORTH", 1="Z_SOUTH")
 		byte[] z0 = "Z_NORTH".getBytes(StandardCharsets.UTF_8);
 		byte[] z1 = "Z_SOUTH".getBytes(StandardCharsets.UTF_8);
-		MemorySegment zOffs = arena.allocateFrom(ValueLayout.JAVA_INT, 0, z0.length, z0.length + z1.length);
+		MemorySegment zOffs = allocInts(arena, 0, z0.length, z0.length + z1.length);
 		MemorySegment zData = arena.allocate(z0.length + z1.length);
 		MemorySegment.copy(z0, 0, zData, ValueLayout.JAVA_BYTE, 0, z0.length);
 		MemorySegment.copy(z1, 0, zData, ValueLayout.JAVA_BYTE, z0.length, z1.length);
@@ -89,11 +107,11 @@ class KleisliJsonQueryRunnerTest {
 				List.of(zData), List.of(MemorySegment.NULL), List.of(zOffs));
 
 		// Relation 0: AC_LINE (0->1, 1->2) with nullable float64 rate_a [150.0, NULL]
-		MemorySegment acRow = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 1, 2, 2, 2);
-		MemorySegment acCol = arena.allocateFrom(ValueLayout.JAVA_INT, 1, 2);
-		MemorySegment acCscRow = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 0, 1, 2, 2);
-		MemorySegment acCscCol = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 1);
-		MemorySegment rateData = arena.allocateFrom(ValueLayout.JAVA_DOUBLE, 150.0, 999.0);
+		MemorySegment acRow = allocInts(arena, 0, 1, 2, 2, 2);
+		MemorySegment acCol = allocInts(arena, 1, 2);
+		MemorySegment acCscRow = allocInts(arena, 0, 0, 1, 2, 2);
+		MemorySegment acCscCol = allocInts(arena, 0, 1);
+		MemorySegment rateData = allocDoubles(arena, 150.0, 999.0);
 		MemorySegment rateVal = arena.allocate(8);
 		rateVal.set(ValueLayout.JAVA_BYTE, 0, (byte) 0b01);
 		RelationSnapshot acLine = new RelationSnapshot(arena, 4, 2, acRow, acCol, acCscRow, acCscCol, List.of(rateData),
@@ -106,10 +124,10 @@ class KleisliJsonQueryRunnerTest {
 		acLine.setCatalogMetadata(0, 0, 0, (byte) 0, 0L, null);
 
 		// Relation 1: TRANSFORMER (2->3)
-		MemorySegment trRow = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 0, 0, 1, 1);
-		MemorySegment trCol = arena.allocateFrom(ValueLayout.JAVA_INT, 3);
-		MemorySegment trCscRow = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 0, 0, 0, 1);
-		MemorySegment trCscCol = arena.allocateFrom(ValueLayout.JAVA_INT, 2);
+		MemorySegment trRow = allocInts(arena, 0, 0, 0, 1, 1);
+		MemorySegment trCol = allocInts(arena, 3);
+		MemorySegment trCscRow = allocInts(arena, 0, 0, 0, 0, 1);
+		MemorySegment trCscCol = allocInts(arena, 2);
 		RelationSnapshot transformer = new RelationSnapshot(arena, 4, 1, trRow, trCol, trCscRow, trCscCol, List.of(),
 				List.of(), (byte) 4, (byte) 4);
 		transformer.setTargetNodeCount(4);
@@ -124,10 +142,9 @@ class KleisliJsonQueryRunnerTest {
 		gridBranch.setComponentRelations(new RelationSnapshot[]{acLine, transformer});
 
 		// Relation 3: BUS_IN_ZONE flat M:1 u16 (0->0, 1->0, 2->1, 3->0xFFFF sentinel)
-		MemorySegment bizFwd = arena.allocateFrom(ValueLayout.JAVA_SHORT, (short) 0, (short) 0, (short) 1,
-				(short) 0xFFFF);
-		MemorySegment bizCscRow = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 2, 3);
-		MemorySegment bizCscCol = arena.allocateFrom(ValueLayout.JAVA_SHORT, (short) 0, (short) 1, (short) 2);
+		MemorySegment bizFwd = allocShorts(arena, (short) 0, (short) 0, (short) 1, (short) 0xFFFF);
+		MemorySegment bizCscRow = allocInts(arena, 0, 2, 3);
+		MemorySegment bizCscCol = allocShorts(arena, (short) 0, (short) 1, (short) 2);
 		RelationSnapshot busInZone = new RelationSnapshot(arena, 4, 3, MemorySegment.NULL, bizFwd, bizCscRow, bizCscCol,
 				List.of(), List.of(), (byte) 2, (byte) 4);
 		busInZone.setTargetNodeCount(2);
