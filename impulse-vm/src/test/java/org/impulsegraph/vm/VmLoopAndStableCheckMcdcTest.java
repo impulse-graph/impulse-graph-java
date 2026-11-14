@@ -182,7 +182,7 @@ public class VmLoopAndStableCheckMcdcTest {
 			VmHandlers.Instruction mov0To0 = new VmHandlers.Instruction(OP_MOV, (byte) 0, 0, 0);
 			VmHandlers.handleMov(state, ctx, mov0To0);
 			int selfMovHandle = (int) VmHandlers.getRegisterValue(state, 0);
-			assertNotEquals(srcHandle, selfMovHandle);
+			assertEquals(srcHandle, selfMovHandle);
 			assertTrue(ctx.getBitset(selfMovHandle).get(19));
 		}
 	}

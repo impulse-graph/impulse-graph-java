@@ -657,6 +657,9 @@ public final class VmMultiLaneHandlers {
 				int srcReg = pU8_0;
 				int edgeReg = pU8_1;
 				int relId = pU16High;
+				if (relId >= 16) {
+					throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+				}
 				VmLaneFrontier lfSrc = requireLaneFrontier(state, ctx, srcReg);
 				int h = ctx.acquireLaneFrontier(lfSrc.width(), lfSrc.numLanes(), lfSrc.activeMask(), lfSrc.nodeCount());
 				VmLaneFrontier lfOut = ctx.getLaneFrontier(h);

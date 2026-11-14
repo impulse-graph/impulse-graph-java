@@ -300,11 +300,14 @@ public final class VmQueryContext implements AutoCloseable {
 
 	public long allocateScratch(long bytes) {
 		getFaultInjector().stepOrThrow("allocateScratch(" + bytes + ")");
+		if (bytes < 0 || bytes > Long.MAX_VALUE - 63) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS: invalid scratch allocation size");
+		}
 		long aligned = (bytes + 63) & ~63L;
-		allocatedScratchBytes += aligned;
-		if (allocatedScratchBytes > maxScratchCapacityBytes) {
+		if (aligned > maxScratchCapacityBytes - allocatedScratchBytes) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS: scratch capacity exceeded");
 		}
+		allocatedScratchBytes += aligned;
 		return allocatedScratchBytes;
 	}
 
@@ -359,6 +362,7 @@ public final class VmQueryContext implements AutoCloseable {
 		this.allocatedScratchBytes = DEFAULT_SCRATCH_BYTES;
 		this.maxThreads = DEFAULT_MAX_THREADS;
 		this.mockAttrCount = 0;
+		java.util.Arrays.fill(this.mockSlots, false);
 		this.fuelEnabled = false;
 		this.maxSteps = 0L;
 		this.fuelRemaining = 0L;
@@ -775,6 +779,13 @@ public final class VmQueryContext implements AutoCloseable {
 		return arr;
 	}
 
+	private final float[] streamRegs16 = new float[16];
+
+	public float[] streamRegs16() {
+		Arrays.fill(streamRegs16, 0.0f);
+		return streamRegs16;
+	}
+
 	public AtomicInteger scratchAtomicCounter() {
 		AtomicInteger ai = TL_BUFFER_POOL.get().atomicCounter;
 		ai.set(0);
@@ -934,6 +945,16 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 	}
 
+	public float[] ensureFloatVectorCapacity(int handle, int capacity) {
+		float[] cur = getFloatVector(handle);
+		if (cur == null || cur.length < capacity) {
+			cur = TL_BUFFER_POOL.get().acquireFloat(capacity);
+			setFloatVector(handle, cur);
+		}
+		setFloatVectorLength(handle, capacity);
+		return cur;
+	}
+
 	public int acquireFloatVector(int capacity) {
 		int handle = registerFloatVector(TL_BUFFER_POOL.get().acquireFloat(capacity));
 		setFloatVectorLength(handle, capacity);
@@ -963,6 +984,20 @@ public final class VmQueryContext implements AutoCloseable {
 
 	public int doubleVectorCount() {
 		return doubleVectors != null ? doubleVectors.size() : 0;
+	}
+
+	public double[] ensureDoubleVectorCapacity(int handle, int capacity) {
+		double[] cur = (doubleVectors != null && handle >= 0 && handle < doubleVectors.size())
+				? doubleVectors.get(handle)
+				: null;
+		if (cur == null || cur.length < capacity) {
+			cur = TL_BUFFER_POOL.get().acquireDouble(capacity);
+			if (doubleVectors != null && handle >= 0 && handle < doubleVectors.size()) {
+				doubleVectors.set(handle, cur);
+			}
+		}
+		setDoubleVectorLength(handle, capacity);
+		return cur;
 	}
 
 	public void setDoubleVector(int handle, double[] vec) {

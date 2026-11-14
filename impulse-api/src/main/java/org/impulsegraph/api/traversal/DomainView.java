@@ -76,7 +76,7 @@ public interface DomainView {
 
 		long[] ids = new long[n];
 		java.util.concurrent.ThreadLocalRandom rnd = java.util.concurrent.ThreadLocalRandom.current();
-		if (n > max / 4) { // Dense sampling via shuffle
+		if (max <= 10_000_000L && n > max / 4) { // Dense sampling via shuffle
 			long[] all = new long[(int) max];
 			for (int i = 0; i < max; i++)
 				all[i] = i;

@@ -66,11 +66,17 @@ public class BytesIdMapper implements IdMapper<byte[]> {
 	}
 
 	@Override
-	public void registerMapping(byte[] key, long denseId) {
+	public synchronized void registerMapping(byte[] key, long denseId) {
 		Objects.requireNonNull(key, "key must not be null");
 		ByteArrayWrapper wrapper = new ByteArrayWrapper(key);
-		bytesToIdMap.put(wrapper, denseId);
-		idToBytesMap.put(denseId, key);
+		Long prevDense = bytesToIdMap.put(wrapper, denseId);
+		if (prevDense != null && prevDense != denseId) {
+			idToBytesMap.remove(prevDense);
+		}
+		byte[] prevKey = idToBytesMap.put(denseId, key);
+		if (prevKey != null && !Arrays.equals(prevKey, key)) {
+			bytesToIdMap.remove(new ByteArrayWrapper(prevKey), denseId);
+		}
 		sequence.updateAndGet(current -> Math.max(current, denseId + 1));
 	}
 

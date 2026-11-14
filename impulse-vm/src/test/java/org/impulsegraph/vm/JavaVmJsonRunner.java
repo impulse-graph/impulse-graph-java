@@ -689,12 +689,18 @@ public class JavaVmJsonRunner {
 								}
 								case 0xA0, 0xA9, 0xAA -> {
 									VmHandlers.handleStreamWalk(state, ctx, instr, progSeg, instructionCount);
-									pc++;
-								}
-								case 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF, 0xB0,
-										0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD,
-										0xBE -> {
-									pc++;
+									long nextPc = pc + 1L;
+									if (nextPc < instructionCount
+											&& progSeg.get(ValueLayout.JAVA_BYTE, nextPc * 8L) == (byte) 0xA1) {
+										while (nextPc < instructionCount
+												&& progSeg.get(ValueLayout.JAVA_BYTE, nextPc * 8L) != (byte) 0xA2) {
+											nextPc++;
+										}
+										if (nextPc < instructionCount) {
+											nextPc++;
+										}
+									}
+									pc = nextPc;
 								}
 								case 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB -> {
 									VmMultiLaneHandlers.handleMultiLaneOpcode(state, ctx, instr, (int) pc);

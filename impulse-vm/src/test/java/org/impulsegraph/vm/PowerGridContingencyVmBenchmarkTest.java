@@ -77,7 +77,7 @@ public class PowerGridContingencyVmBenchmarkTest {
 				MemorySegment state = ctx.allocateStateSegment();
 				VmHandlers.setRegister(state, 0, -1L, VmRegisterType.TYPE_INT64);
 				VmHandlers.setRegister(state, 1, -1L, VmRegisterType.TYPE_INT64);
-				ImpulseVmInterpreter.execute(prog, 2, graph, null, arena);
+				VmHandlers.handleIslandDetect(state, ctx, VmHandlers.decodeInstruction(prog, 0));
 				long baseIslands = VmHandlers.getRegisterValue(state, 63);
 				System.out.printf("Baseline Grid Connectivity:        %,d island(s)%n", baseIslands);
 			}
@@ -200,7 +200,7 @@ public class PowerGridContingencyVmBenchmarkTest {
 				MemorySegment state = ctx.allocateStateSegment();
 				VmHandlers.setRegister(state, 0, -1L, VmRegisterType.TYPE_INT64);
 				VmHandlers.setRegister(state, 1, -1L, VmRegisterType.TYPE_INT64);
-				ImpulseVmInterpreter.execute(prog, 2, graph, null, arena);
+				VmHandlers.handleIslandDetect(state, ctx, VmHandlers.decodeInstruction(prog, 0));
 				long baseIslands = VmHandlers.getRegisterValue(state, 63);
 				System.out.printf("Baseline Grid Connectivity:        %,d island(s)%n", baseIslands);
 			}

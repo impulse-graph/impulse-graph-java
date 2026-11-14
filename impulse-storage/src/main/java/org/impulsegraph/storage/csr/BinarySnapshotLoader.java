@@ -673,7 +673,7 @@ public final class BinarySnapshotLoader {
 
 		GraphSnapshot unifiedGraph = new GraphSnapshot(arena, combinedRelations, combinedMetadata);
 
-		return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, (short) 0x0900, unifiedGraph, java.util.Map.of(),
+		return new DefaultLoadedSnapshot(SNAPSHOT_MAGIC, (short) 9, unifiedGraph, java.util.Map.of(),
 				java.util.Map.of(), java.util.Map.of(), combinedMetadata);
 	}
 	public static LoadedSnapshot loadSnapshot(Path filePath, Arena arena) throws IOException {

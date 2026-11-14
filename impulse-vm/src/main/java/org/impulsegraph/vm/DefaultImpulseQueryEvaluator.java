@@ -6,7 +6,9 @@ import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.compiler.ast.ImpScmNode;
 
 import java.lang.foreign.Arena;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * High-performance query evaluator caching compiled bytecode execution plans
@@ -14,8 +16,15 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator {
 
+	private static final int MAX_CACHE_SIZE = 1024;
 	private static final DefaultImpulseQueryEvaluator INSTANCE = new DefaultImpulseQueryEvaluator();
-	private static final ConcurrentHashMap<ImpulseGraphQuery<?>, CompiledQuery> COMPILED_QUERY_CACHE = new ConcurrentHashMap<>();
+	private static final Map<ImpulseGraphQuery<?>, CompiledQuery> COMPILED_QUERY_CACHE = Collections
+			.synchronizedMap(new LinkedHashMap<>(256, 0.75f, true) {
+				@Override
+				protected boolean removeEldestEntry(Map.Entry<ImpulseGraphQuery<?>, CompiledQuery> eldest) {
+					return size() > MAX_CACHE_SIZE;
+				}
+			});
 	private static final Arena COMPILER_ARENA = Arena.ofAuto();
 
 	public static DefaultImpulseQueryEvaluator getInstance() {

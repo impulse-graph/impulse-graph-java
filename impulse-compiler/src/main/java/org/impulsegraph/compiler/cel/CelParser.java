@@ -37,7 +37,11 @@ public final class CelParser {
 
 	public static CelAstNode parse(String source) {
 		CelParser parser = new CelParser(source);
-		return parser.parseExpression();
+		CelAstNode result = parser.parseExpression();
+		if (parser.curr.type() != CelTokenType.END_OF_FILE) {
+			throw new IllegalArgumentException("Unexpected trailing token '" + parser.curr.text() + "'");
+		}
+		return result;
 	}
 
 	public CelAstNode parseExpression() {
@@ -100,7 +104,9 @@ public final class CelParser {
 			}
 			case LPAREN -> {
 				CelAstNode expr = parseExpression(depth + 1);
-				match(CelTokenType.RPAREN);
+				if (!match(CelTokenType.RPAREN)) {
+					throw new IllegalArgumentException("Expected ')' in CEL expression");
+				}
 				yield expr;
 			}
 			case LBRACKET -> {
@@ -111,10 +117,12 @@ public final class CelParser {
 						elements.add(parseExpression(depth + 1));
 					}
 				}
-				match(CelTokenType.RBRACKET);
+				if (!match(CelTokenType.RBRACKET)) {
+					throw new IllegalArgumentException("Expected ']' in CEL list literal");
+				}
 				yield CelAstNode.makeList(elements);
 			}
-			default -> null;
+			default -> throw new IllegalArgumentException("Unexpected token '" + t.text() + "' in CEL expression");
 		};
 	}
 
@@ -123,8 +131,6 @@ public final class CelParser {
 			throw new IllegalArgumentException("CEL max nesting depth (256) exceeded");
 		}
 		CelAstNode left = parsePrefix(depth);
-		if (left == null)
-			return null;
 
 		while (prec.ordinal() <= getPrecedence(curr.type()).ordinal()) {
 			CelToken op = curr;
@@ -170,6 +176,12 @@ public final class CelParser {
 				if (left.kind() == CelAstNode.Kind.IDENTIFIER) {
 					left = CelAstNode.makeCall(left.text(), args);
 				}
+			} else if (op.type() == CelTokenType.LBRACKET) {
+				CelAstNode index = parseExpression(depth + 1);
+				if (!match(CelTokenType.RBRACKET)) {
+					throw new IllegalArgumentException("Expected ']' after index expression");
+				}
+				left = CelAstNode.makeBinary("[]", left, index);
 			} else {
 				// Binary operator
 				int nextPrecOrd = getPrecedence(op.type()).ordinal() + 1;

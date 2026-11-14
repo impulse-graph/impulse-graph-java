@@ -35,10 +35,16 @@ public class StringIdMapper implements IdMapper<String> {
 	}
 
 	@Override
-	public void registerMapping(String key, long denseId) {
+	public synchronized void registerMapping(String key, long denseId) {
 		Objects.requireNonNull(key, "key must not be null");
-		stringToIdMap.put(key, denseId);
-		idToStringMap.put(denseId, key);
+		Long prevDense = stringToIdMap.put(key, denseId);
+		if (prevDense != null && prevDense != denseId) {
+			idToStringMap.remove(prevDense, key);
+		}
+		String prevKey = idToStringMap.put(denseId, key);
+		if (prevKey != null && !prevKey.equals(key)) {
+			stringToIdMap.remove(prevKey, denseId);
+		}
 		sequence.updateAndGet(current -> Math.max(current, denseId + 1));
 	}
 

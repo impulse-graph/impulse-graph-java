@@ -71,7 +71,7 @@ public final class ExternalSortStaging {
 						long v = reader.currentTgt(i);
 						if (!colBuf.hasRemaining()) {
 							colBuf.flip();
-							colChannel.write(colBuf);
+							writeFully(colChannel, colBuf);
 							colBuf.clear();
 						}
 						if (tgtIdWidth == 2) {
@@ -88,7 +88,7 @@ public final class ExternalSortStaging {
 
 			if (colBuf.position() > 0) {
 				colBuf.flip();
-				colChannel.write(colBuf);
+				writeFully(colChannel, colBuf);
 			}
 		}
 
@@ -103,7 +103,7 @@ public final class ExternalSortStaging {
 			for (int offset : rowOffsets) {
 				if (!rowBuf.hasRemaining()) {
 					rowBuf.flip();
-					rowChannel.write(rowBuf);
+					writeFully(rowChannel, rowBuf);
 					rowBuf.clear();
 				}
 				if (edgeIndexWidth == 8) {
@@ -114,7 +114,7 @@ public final class ExternalSortStaging {
 			}
 			if (rowBuf.position() > 0) {
 				rowBuf.flip();
-				rowChannel.write(rowBuf);
+				writeFully(rowChannel, rowBuf);
 			}
 			rowOffBytes = (long) (srcNodeCount + 1) * edgeIndexWidth;
 		}
@@ -134,8 +134,8 @@ public final class ExternalSortStaging {
 		Path cscColIdxPath = Files.createTempFile(stagingDir, outputPrefix.getFileName().toString() + "_csc_col_",
 				".bin");
 
-		int[] inDegrees = new int[tgtNodeCount];
-		int[] cscRowOffsets = new int[tgtNodeCount + 1];
+		long[] inDegrees = new long[tgtNodeCount];
+		long[] cscRowOffsets = new long[tgtNodeCount + 1];
 
 		// Pass 1: Count in-degrees
 		try (FileChannel colCh = FileChannel.open(csrColIdxPath, StandardOpenOption.READ)) {
@@ -145,7 +145,7 @@ public final class ExternalSortStaging {
 				while (buf.hasRemaining()) {
 					long target = (tgtIdWidth == 2)
 							? Short.toUnsignedInt(buf.getShort())
-							: (tgtIdWidth == 8) ? buf.getLong() : buf.getInt();
+							: (tgtIdWidth == 8) ? buf.getLong() : Integer.toUnsignedLong(buf.getInt());
 					if (target >= 0 && target < tgtNodeCount) {
 						inDegrees[(int) target]++;
 					}
@@ -155,14 +155,14 @@ public final class ExternalSortStaging {
 		}
 
 		// Prefix sum
-		int accum = 0;
+		long accum = 0;
 		for (int n = 0; n < tgtNodeCount; n++) {
 			cscRowOffsets[n] = accum;
 			accum += inDegrees[n];
 		}
 		cscRowOffsets[tgtNodeCount] = accum;
 
-		int[] currentOffsets = inDegrees; // reuse array
+		long[] currentOffsets = inDegrees; // reuse array
 		System.arraycopy(cscRowOffsets, 0, currentOffsets, 0, tgtNodeCount);
 
 		// Pass 2: Invert edges
@@ -172,14 +172,16 @@ public final class ExternalSortStaging {
 			MemorySegment cscColSeg = arena.allocate(colBytesTotal, 128);
 
 			// Read CSR row offsets
-			int[] csrRowOff = new int[srcNodeCount + 1];
+			long[] csrRowOff = new long[srcNodeCount + 1];
 			try (FileChannel rowCh = FileChannel.open(csrRowOffPath, StandardOpenOption.READ)) {
 				ByteBuffer rBuf = ByteBuffer.allocate(64 * 1024).order(ByteOrder.LITTLE_ENDIAN);
 				int idx = 0;
 				while (rowCh.read(rBuf) > 0) {
 					rBuf.flip();
 					while (rBuf.hasRemaining() && idx <= srcNodeCount) {
-						csrRowOff[idx++] = (edgeIndexWidth == 8) ? (int) rBuf.getLong() : rBuf.getInt();
+						csrRowOff[idx++] = (edgeIndexWidth == 8)
+								? rBuf.getLong()
+								: Integer.toUnsignedLong(rBuf.getInt());
 					}
 					rBuf.clear();
 				}
@@ -189,7 +191,7 @@ public final class ExternalSortStaging {
 			try (FileChannel colCh = FileChannel.open(csrColIdxPath, StandardOpenOption.READ)) {
 				ByteBuffer cBuf = ByteBuffer.allocate(64 * 1024).order(ByteOrder.LITTLE_ENDIAN);
 				int currentSource = 0;
-				int edgeCounter = 0;
+				long edgeCounter = 0;
 
 				while (colCh.read(cBuf) > 0) {
 					cBuf.flip();
@@ -200,17 +202,20 @@ public final class ExternalSortStaging {
 
 						long v = (tgtIdWidth == 2)
 								? Short.toUnsignedInt(cBuf.getShort())
-								: (tgtIdWidth == 8) ? cBuf.getLong() : cBuf.getInt();
+								: (tgtIdWidth == 8) ? cBuf.getLong() : Integer.toUnsignedLong(cBuf.getInt());
 
 						if (v >= 0 && v < tgtNodeCount) {
-							int insertPos = currentOffsets[(int) v]++;
+							long insertPos = currentOffsets[(int) v]++;
 							if (srcIdWidth == 2) {
-								cscColSeg.setAtIndex(ValueLayout.JAVA_SHORT_UNALIGNED, insertPos,
+								cscColSeg.setAtIndex(
+										ValueLayout.JAVA_SHORT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN), insertPos,
 										(short) currentSource);
 							} else if (srcIdWidth == 8) {
-								cscColSeg.setAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, insertPos, currentSource);
+								cscColSeg.setAtIndex(ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN),
+										insertPos, currentSource);
 							} else {
-								cscColSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, insertPos, currentSource);
+								cscColSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN),
+										insertPos, currentSource);
 							}
 						}
 						edgeCounter++;
@@ -232,26 +237,32 @@ public final class ExternalSortStaging {
 		long rowOffBytes;
 		try (FileChannel outCh = FileChannel.open(cscRowOffPath, StandardOpenOption.WRITE)) {
 			ByteBuffer rBuf = ByteBuffer.allocate(64 * 1024).order(ByteOrder.LITTLE_ENDIAN);
-			for (int offset : cscRowOffsets) {
+			for (long offset : cscRowOffsets) {
 				if (!rBuf.hasRemaining()) {
 					rBuf.flip();
-					outCh.write(rBuf);
+					writeFully(outCh, rBuf);
 					rBuf.clear();
 				}
 				if (edgeIndexWidth == 8) {
 					rBuf.putLong(offset);
 				} else {
-					rBuf.putInt(offset);
+					rBuf.putInt((int) offset);
 				}
 			}
 			if (rBuf.position() > 0) {
 				rBuf.flip();
-				outCh.write(rBuf);
+				writeFully(outCh, rBuf);
 			}
 			rowOffBytes = (long) (tgtNodeCount + 1) * edgeIndexWidth;
 		}
 
 		return new TopologyFiles(cscRowOffPath, cscColIdxPath, rowOffBytes, colBytesTotal);
+	}
+
+	private static void writeFully(FileChannel ch, ByteBuffer buf) throws IOException {
+		while (buf.hasRemaining()) {
+			ch.write(buf);
+		}
 	}
 
 	public interface EdgeStreamReader {

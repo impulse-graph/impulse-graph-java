@@ -116,7 +116,7 @@ public final class CompiledQuery {
 	 * Re-binds this compiled query to a new blue/green swapped snapshot using an
 	 * atomic reference update.
 	 */
-	public void rebind(ImpulseGraphSnapshot newSnapshot) {
+	public synchronized void rebind(ImpulseGraphSnapshot newSnapshot) {
 		Objects.requireNonNull(newSnapshot, "newSnapshot must not be null");
 		QueryBindingState currentState = bindingState.get();
 		if (currentState.snapshot() == newSnapshot) {

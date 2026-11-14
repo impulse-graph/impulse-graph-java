@@ -135,6 +135,10 @@ public final class ImpOpsBytecodeEmitter {
 						// Emit shader block
 						instrList.add(new InstructionWord((byte) OP_STREAM_FUNC_BEGIN, (byte) 0, (short) 0, 0));
 						int shaderPcStart = instrList.size();
+						if (shaderPcStart < 0 || shaderPcStart > 255) {
+							throw new IllegalStateException(
+									"Shader PC start exceeds 8-bit flags range (0..255): " + shaderPcStart);
+						}
 
 						// Patch the WALK_STREAM instruction with the start PC of the shader
 						InstructionWord walkInstr = instrList.get(walkInstrIdx);

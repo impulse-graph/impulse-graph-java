@@ -127,25 +127,28 @@ public final class ZoneMapPruningPass implements CompilerPass {
 				long min = attrStats.minIntVal();
 				long max = attrStats.maxIntVal();
 
-				if (op.contains("gt") || op.contains(">")) {
+				if (op.contains("gte") || op.contains(">=")) {
+					if (val > max)
+						return ScmLiteral.ofBool(false);
+					if (val <= min)
+						return ScmLiteral.ofBool(true);
+				} else if (op.contains("gt") || op.contains(">")) {
 					if (val >= max)
 						return ScmLiteral.ofBool(false);
 					if (val < min)
 						return ScmLiteral.ofBool(true);
-				} else if (op.contains("gte") || op.contains(">=")) {
-					if (val > max)
+				} else if (op.contains("lte") || op.contains("<=")) {
+					if (val < min)
 						return ScmLiteral.ofBool(false);
-					if (val <= min)
+					if (val >= max)
 						return ScmLiteral.ofBool(true);
 				} else if (op.contains("lt") || op.contains("<")) {
 					if (val <= min)
 						return ScmLiteral.ofBool(false);
 					if (val > max)
 						return ScmLiteral.ofBool(true);
-				} else if (op.contains("lte") || op.contains("<=")) {
-					if (val < min)
-						return ScmLiteral.ofBool(false);
-					if (val >= max)
+				} else if (op.contains("neq") || op.contains("!=")) {
+					if (val < min || val > max)
 						return ScmLiteral.ofBool(true);
 				} else if (op.contains("eq") || op.contains("==")) {
 					if (val < min || val > max)
@@ -172,9 +175,11 @@ public final class ZoneMapPruningPass implements CompilerPass {
 		if (node == null)
 			return null;
 
-		// Top-level constant fold
+		// Top-level constant fold (only for boolean/predicate expressions, never
+		// numeric/string literals)
 		AlgebraicSignature sig = node.signature();
-		if (sig != null && sig.isConstantKnown()) {
+		if (sig != null && sig.isConstantKnown() && node.kind() != CelAstNode.Kind.LITERAL_INT
+				&& node.kind() != CelAstNode.Kind.LITERAL_FLOAT && node.kind() != CelAstNode.Kind.LITERAL_STRING) {
 			return CelAstNode.makeBool(sig.constantBoolVal());
 		}
 

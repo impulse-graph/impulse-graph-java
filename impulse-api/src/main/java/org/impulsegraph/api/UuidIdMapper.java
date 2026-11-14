@@ -35,10 +35,16 @@ public class UuidIdMapper implements IdMapper<UUID> {
 	}
 
 	@Override
-	public void registerMapping(UUID uuid, long denseId) {
+	public synchronized void registerMapping(UUID uuid, long denseId) {
 		Objects.requireNonNull(uuid, "uuid must not be null");
-		uuidToIdMap.put(uuid, denseId);
-		idToUuidMap.put(denseId, uuid);
+		Long prevDense = uuidToIdMap.put(uuid, denseId);
+		if (prevDense != null && prevDense != denseId) {
+			idToUuidMap.remove(prevDense, uuid);
+		}
+		UUID prevUuid = idToUuidMap.put(denseId, uuid);
+		if (prevUuid != null && !prevUuid.equals(uuid)) {
+			uuidToIdMap.remove(prevUuid, denseId);
+		}
 		sequence.updateAndGet(current -> Math.max(current, denseId + 1));
 	}
 

@@ -400,14 +400,20 @@ public class GraphSnapshot
 
 	@Override
 	public void drainAndClose(long timeout, java.util.concurrent.TimeUnit unit) throws InterruptedException {
-		awaitDrained(timeout, unit);
+		if (!awaitDrained(timeout, unit)) {
+			throw new IllegalStateException("Timed out waiting for in-flight queries to drain before closing snapshot");
+		}
 		close();
 	}
 
 	@Override
 	public void close() {
-		if (arena.scope().isAlive()) {
-			arena.close();
+		if (arena != null && arena.scope().isAlive()) {
+			try {
+				arena.close();
+			} catch (UnsupportedOperationException ignored) {
+				// Auto or global arenas are managed by the GC/runtime
+			}
 		}
 	}
 }

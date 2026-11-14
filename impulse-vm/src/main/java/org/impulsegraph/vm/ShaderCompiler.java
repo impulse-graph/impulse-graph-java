@@ -152,13 +152,17 @@ public class ShaderCompiler {
 												VmQueryContext.class, MemorySegment.class, int.class, int.class,
 												int.class, float[].class, ImpulseBitSet.class)),
 								0, sDst, sPayloadLow, sPayloadHigh);
-			case VmRegisterType.OP_STREAM_SELECT :
-				return MethodHandles.insertArguments(
-						LOOKUP.findStatic(ShaderOps.class, "select",
-								MethodType.methodType(void.class, int.class, int.class, int.class, int.class,
-										VmQueryContext.class, MemorySegment.class, int.class, int.class, int.class,
-										float[].class, ImpulseBitSet.class)),
-						0, sDst, sPayloadLow, (sPayloadHigh & 0xFF), (sPayloadHigh >> 8));
+			case VmRegisterType.OP_STREAM_SELECT : {
+				int tReg = sPayloadHigh & 0xFF;
+				int fReg = (sPayloadHigh >>> 8) & 0xFF;
+				return MethodHandles
+						.insertArguments(
+								LOOKUP.findStatic(ShaderOps.class, "select",
+										MethodType.methodType(void.class, int.class, int.class, int.class, int.class,
+												VmQueryContext.class, MemorySegment.class, int.class, int.class,
+												int.class, float[].class, ImpulseBitSet.class)),
+								0, sDst, sPayloadLow, tReg, fReg);
+			}
 			case VmRegisterType.OP_STREAM_LOGIC_NOT :
 				return MethodHandles.insertArguments(LOOKUP.findStatic(ShaderOps.class, "logicNot",
 						MethodType.methodType(void.class, int.class, int.class, VmQueryContext.class,

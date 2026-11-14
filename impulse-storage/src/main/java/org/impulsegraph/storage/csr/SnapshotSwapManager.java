@@ -80,7 +80,7 @@ public class SnapshotSwapManager<T extends AutoCloseable> implements AutoCloseab
 		if (oldHolder != null) {
 			Thread.startVirtualThread(() -> {
 				while (oldHolder.getActiveReaders() > 0) {
-					Thread.onSpinWait();
+					java.util.concurrent.locks.LockSupport.parkNanos(100_000L);
 				}
 				try {
 					oldHolder.getResource().close();
@@ -94,6 +94,10 @@ public class SnapshotSwapManager<T extends AutoCloseable> implements AutoCloseab
 	public void close() {
 		Holder<T> holder = currentHolder.getAndSet(null);
 		if (holder != null) {
+			long deadlineNanos = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+			while (holder.getActiveReaders() > 0 && System.nanoTime() < deadlineNanos) {
+				java.util.concurrent.locks.LockSupport.parkNanos(100_000L);
+			}
 			try {
 				holder.getResource().close();
 			} catch (Exception ignored) {

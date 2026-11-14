@@ -105,7 +105,7 @@ public final class CelLexer {
 				if (Character.isLetter(c) || c == '_') {
 					yield parseIdent(start);
 				}
-				yield CelToken.of(CelTokenType.END_OF_FILE, String.valueOf(c), start);
+				throw new IllegalArgumentException("Unexpected character '" + c + "' at position " + start);
 			}
 		};
 	}
@@ -146,9 +146,11 @@ public final class CelLexer {
 
 	private CelToken parseString(char quote, int start) {
 		StringBuilder sb = new StringBuilder();
+		boolean closed = false;
 		while (cursor < src.length()) {
 			char c = src.charAt(cursor++);
 			if (c == quote) {
+				closed = true;
 				break;
 			}
 			if (c == '\\' && cursor < src.length()) {
@@ -165,6 +167,9 @@ public final class CelLexer {
 			} else {
 				sb.append(c);
 			}
+		}
+		if (!closed) {
+			throw new IllegalArgumentException("Unterminated string literal at position " + start);
 		}
 		return CelToken.ofString(sb.toString(), start);
 	}
