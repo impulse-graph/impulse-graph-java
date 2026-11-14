@@ -1232,7 +1232,7 @@ public final class BinarySnapshotLoader {
 									: ((edgeCount > 0) ? edgeCount : nodeCount));
 
 					if (isNullable) {
-						long numBits = isV010 ? edgeCount : ((edgeCount > 0) ? edgeCount : nodeCount);
+						long numBits = expectedRows;
 						long paddedBitmapBytes = computePaddedValidityBytes(numBits,
 								"nullable relation attribute (relation=" + relId + ", attr=" + attrEntryIdx + ")");
 

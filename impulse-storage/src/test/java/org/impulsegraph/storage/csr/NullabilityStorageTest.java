@@ -75,4 +75,48 @@ class NullabilityStorageTest {
 			assertEquals(0L, next64, "Remaining nodes should be null (0)");
 		}
 	}
+
+	@Test
+	void testZeroEdgeV09RelationWithNullableAttribute() throws Exception {
+		byte[] bytes;
+		try (Arena buildArena = Arena.ofConfined()) {
+			RelationSnapshot rel = new RelationSnapshot(
+					buildArena,
+					15,
+					0,
+					MemorySegment.NULL,
+					MemorySegment.NULL,
+					MemorySegment.NULL,
+					MemorySegment.NULL,
+					List.of(MemorySegment.NULL),
+					List.of(MemorySegment.NULL),
+					(byte) 4,
+					(byte) 4
+			);
+			rel.setAttributeNames(List.of("edge_attr"));
+			rel.setAttributeTypeCodes(List.of((byte) 0x82));
+
+			GraphSnapshot graph = new GraphSnapshot(buildArena, Map.of("R_D1_D1_1", rel));
+			bytes = new DefaultSnapshotBuilder()
+					.withDomain(0, "D1", (byte) 0x03, 15L)
+					.withRelationDomain("R_D1_D1_1", 0, 0)
+					.build(new BinarySnapshotLoader.DefaultLoadedSnapshot(
+							BinarySnapshotLoader.SNAPSHOT_MAGIC,
+							(short) 9,
+							graph,
+							Map.of(),
+							Map.of(),
+							Map.of(),
+							Map.of()));
+		}
+
+		try (Arena arena = Arena.ofShared()) {
+			BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(bytes, arena, false);
+			GraphSnapshot loadedGraph = (GraphSnapshot) loaded.graph();
+			RelationSnapshot loadedRel = loadedGraph.getRelationSnapshot("R_D1_D1_1");
+			assertNotNull(loadedRel, "Relation R_D1_D1_1 should be loaded");
+			assertEquals(15, loadedRel.getNodeCount(), "Node count should be 15");
+			assertEquals(0, loadedRel.getEdgeCount(), "Edge count should be 0");
+		}
+	}
 }
