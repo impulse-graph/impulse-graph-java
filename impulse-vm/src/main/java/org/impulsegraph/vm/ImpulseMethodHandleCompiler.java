@@ -455,6 +455,9 @@ public final class ImpulseMethodHandleCompiler {
 				}
 				case 0x55 -> { // OP_CALL
 					int target = instr.payload();
+					if (target < 0 || target >= instructionCount) {
+						throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+					}
 					long returnPc = pc + 1;
 					if (!VmHandlers.pushCallStack(state, (int) returnPc)) {
 						throw new RuntimeException("IMPULSE_VM_ERR_STACK_OVERFLOW");
@@ -475,12 +478,7 @@ public final class ImpulseMethodHandleCompiler {
 					VmHandlers.setRegister(state, 2, arg2, t2);
 					VmHandlers.setRegister(state, 3, arg3, t3);
 
-					if (target >= 0 && target < instructionCount) {
-						nextPc = target;
-					} else {
-						VmStateLayout.PC_HANDLE.set(state, 0L, target);
-						throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
-					}
+					nextPc = target;
 				}
 				case 0x56 -> { // OP_RET
 					int returnPc = VmHandlers.popCallStack(state);
