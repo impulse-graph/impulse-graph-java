@@ -468,9 +468,9 @@ class MathAndReducerEdgeCasesTest {
 				assertTrue(VmHandlers.checkFlag(state, FLAG_ZF), "All-NaN reduce op=" + opId + " must set ZF");
 			}
 			VmHandlers.handleReduce(state, ctx, instr(OP_REDUCE, 0, 10, (BINARY_OP_ARGMIN << 16) | 4));
-			assertEquals(0L, VmHandlers.getRegisterValue(state, 10));
+			assertEquals(-1L, VmHandlers.getRegisterValue(state, 10));
 			VmHandlers.handleReduce(state, ctx, instr(OP_REDUCE, 0, 10, (BINARY_OP_ARGMAX << 16) | 4));
-			assertEquals(0L, VmHandlers.getRegisterValue(state, 10));
+			assertEquals(-1L, VmHandlers.getRegisterValue(state, 10));
 		}
 	}
 

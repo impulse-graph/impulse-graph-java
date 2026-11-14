@@ -312,6 +312,9 @@ public final class ImpulseVmInterpreter {
 
 					case OP_CALL -> {
 						int target = instr.payload();
+						if (target < 0 || target >= instructionCount) {
+							throw new IllegalArgumentException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+						}
 						long returnPc = pc + 1;
 						if (!VmHandlers.pushCallStack(state, (int) returnPc)) {
 							throw new IllegalStateException("IMPULSE_VM_ERR_STACK_OVERFLOW");
@@ -331,10 +334,7 @@ public final class ImpulseVmInterpreter {
 						VmHandlers.setRegister(state, 2, arg2, t2);
 						VmHandlers.setRegister(state, 3, arg3, t3);
 
-						if (target >= 0 && target < instructionCount)
-							pc = target;
-						else
-							pc += target;
+						pc = target;
 					}
 
 					case OP_RET -> {
