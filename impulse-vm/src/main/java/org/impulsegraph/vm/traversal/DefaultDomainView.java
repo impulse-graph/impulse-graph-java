@@ -22,11 +22,11 @@ import java.util.Objects;
  */
 public class DefaultDomainView implements DomainView {
 
-	private static final java.util.Map<ImpulseGraphSnapshot, java.util.concurrent.ConcurrentHashMap<String, DomainView>> DOMAIN_CACHE = java.util.Collections
+	private static final java.util.Map<ImpulseGraphSnapshot, java.util.concurrent.ConcurrentHashMap<String, java.lang.ref.WeakReference<DomainView>>> DOMAIN_CACHE = java.util.Collections
 			.synchronizedMap(new java.util.WeakHashMap<>());
 
-	private record CachedSnapshotDomains(ImpulseGraphSnapshot snapshot,
-			java.util.concurrent.ConcurrentHashMap<String, DomainView> domainMap) {
+	private record CachedSnapshotDomains(java.lang.ref.WeakReference<ImpulseGraphSnapshot> snapshotRef,
+			java.util.concurrent.ConcurrentHashMap<String, java.lang.ref.WeakReference<DomainView>> domainMap) {
 	}
 
 	private static volatile CachedSnapshotDomains lastSnapshotDomains;
@@ -35,19 +35,24 @@ public class DefaultDomainView implements DomainView {
 			long nodeCount) {
 		Objects.requireNonNull(snapshot, "snapshot must not be null");
 		CachedSnapshotDomains cached = lastSnapshotDomains;
-		java.util.concurrent.ConcurrentHashMap<String, DomainView> domainMap;
-		if (cached != null && cached.snapshot == snapshot) {
-			domainMap = cached.domainMap;
+		java.util.concurrent.ConcurrentHashMap<String, java.lang.ref.WeakReference<DomainView>> domainMap;
+		if (cached != null && cached.snapshotRef().get() == snapshot) {
+			domainMap = cached.domainMap();
 		} else {
 			domainMap = DOMAIN_CACHE.computeIfAbsent(snapshot, k -> new java.util.concurrent.ConcurrentHashMap<>());
-			lastSnapshotDomains = new CachedSnapshotDomains(snapshot, domainMap);
+			lastSnapshotDomains = new CachedSnapshotDomains(new java.lang.ref.WeakReference<>(snapshot), domainMap);
 		}
 		String key = (domainName != null) ? domainName : "default";
-		DomainView existing = domainMap.get(key);
+		java.lang.ref.WeakReference<DomainView> existingRef = domainMap.get(key);
+		DomainView existing = (existingRef != null) ? existingRef.get() : null;
 		if (existing != null) {
 			return existing;
 		}
-		return domainMap.computeIfAbsent(key, k -> {
+		java.lang.ref.WeakReference<DomainView> createdRef = domainMap.compute(key, (k, prevRef) -> {
+			DomainView prev = (prevRef != null) ? prevRef.get() : null;
+			if (prev != null) {
+				return prevRef;
+			}
 			long resolvedCount = nodeCount;
 			if (resolvedCount < 0) {
 				resolvedCount = snapshot.getNodeCount(domainName);
@@ -61,8 +66,10 @@ public class DefaultDomainView implements DomainView {
 					}
 				}
 			}
-			return new DefaultDomainView(snapshot, k, domainId, Math.max(0L, resolvedCount));
+			return new java.lang.ref.WeakReference<>(
+					new DefaultDomainView(snapshot, k, domainId, Math.max(0L, resolvedCount)));
 		});
+		return createdRef.get();
 	}
 
 	private final ImpulseGraphSnapshot snapshot;

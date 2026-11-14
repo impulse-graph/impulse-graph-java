@@ -35,10 +35,16 @@ public class LongIdMapper implements IdMapper<Long> {
 	}
 
 	@Override
-	public void registerMapping(Long rawId, long denseId) {
+	public synchronized void registerMapping(Long rawId, long denseId) {
 		Objects.requireNonNull(rawId, "rawId must not be null");
-		rawToDenseMap.put(rawId, denseId);
-		denseToRawMap.put(denseId, rawId);
+		Long prevDense = rawToDenseMap.put(rawId, denseId);
+		if (prevDense != null && prevDense != denseId) {
+			denseToRawMap.remove(prevDense, rawId);
+		}
+		Long prevRaw = denseToRawMap.put(denseId, rawId);
+		if (prevRaw != null && !prevRaw.equals(rawId)) {
+			rawToDenseMap.remove(prevRaw, denseId);
+		}
 		sequence.updateAndGet(current -> Math.max(current, denseId + 1));
 	}
 

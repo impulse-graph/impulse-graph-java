@@ -50,7 +50,7 @@ public final class ImpulseMethodHandleCompiler {
 			byte op = inst.opcode();
 			int uOp = Byte.toUnsignedInt(op);
 			if (op == VmRegisterType.OP_COO_WALK_STREAM || op == VmRegisterType.OP_CSR_WALK_STREAM
-					|| op == VmRegisterType.OP_CSC_WALK_STREAM || (uOp >= 0xA1 && uOp <= 0xBF)) {
+					|| op == VmRegisterType.OP_CSC_WALK_STREAM) {
 				handlers[pc] = bindInstruction(inst, pc, programSeg, instructionCount);
 			}
 		}
@@ -95,14 +95,21 @@ public final class ImpulseMethodHandleCompiler {
 
 			MethodHandle bound = MethodHandles.insertArguments(baseMh, 2, inst, compiledShader, instructionCount);
 			// bound: (MemorySegment, VmQueryContext) -> void
-			return wrapVoidHandler(bound, pc);
-		}
-
-		// Skip shader instructions in the main loop (they are executed by the compiled
-		// shader)
-		int uOp = Byte.toUnsignedInt(op);
-		if (uOp >= 0xA1 && uOp <= 0xBF) {
-			return getSkipHandler();
+			int nextPc = pc + 1;
+			if (nextPc < instructionCount && programSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE,
+					nextPc * 8L) == VmRegisterType.OP_STREAM_FUNC_BEGIN) {
+				while (nextPc < instructionCount && programSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE,
+						nextPc * 8L) != VmRegisterType.OP_STREAM_FUNC_END) {
+					nextPc++;
+				}
+				if (nextPc < instructionCount) {
+					nextPc++;
+				}
+			}
+			MethodHandle wrapper = LOOKUP.findStatic(ImpulseMethodHandleCompiler.class, "voidWrapper",
+					MethodType.methodType(int.class, MethodHandle.class, int.class, VmQueryContext.class,
+							MemorySegment.class, Object.class, int.class));
+			return MethodHandles.insertArguments(wrapper, 0, bound, nextPc);
 		}
 
 		// Fallback to interpreter switch for all other instructions
@@ -143,8 +150,16 @@ public final class ImpulseMethodHandleCompiler {
 	public static int executeDecoded(MemorySegment programSeg, long instructionCount, VmHandlers.Instruction instr,
 			VmQueryContext ctx, MemorySegment state, Object input, int pc) {
 		int nextPc = pc;
-		if (instr.dstReg() >= 64 && Byte.toUnsignedInt(instr.opcode()) != 0x09
-				&& Byte.toUnsignedInt(instr.opcode()) != 0x0B && Byte.toUnsignedInt(instr.opcode()) != 0x0C) {
+		int uOp = Byte.toUnsignedInt(instr.opcode());
+		if (uOp == 0x28 || uOp == 0x29 || uOp == 0x2B || uOp == 0x2C || uOp == 0x3E || uOp == 0x3F || uOp == 0x4F
+				|| uOp == 0x59 || uOp == 0x5D || uOp == 0x5E || uOp == 0x5F || uOp == 0x6D || uOp == 0x6E || uOp == 0x6F
+				|| (uOp >= 0x76 && uOp <= 0x7F)) {
+			throw new RuntimeException("IMPULSE_VM_ERR_RESERVED_OPCODE");
+		}
+		if (uOp > 0xCB) {
+			throw new RuntimeException("IMPULSE_VM_ERR_INVALID_OPCODE");
+		}
+		if (instr.dstReg() >= 64 && uOp != 0x09 && uOp != 0x0B && uOp != 0x0C) {
 			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
 		}
 
@@ -460,10 +475,12 @@ public final class ImpulseMethodHandleCompiler {
 					VmHandlers.setRegister(state, 2, arg2, t2);
 					VmHandlers.setRegister(state, 3, arg3, t3);
 
-					if (target >= 0 && target < instructionCount)
+					if (target >= 0 && target < instructionCount) {
 						nextPc = target;
-					else
-						nextPc += target;
+					} else {
+						VmStateLayout.PC_HANDLE.set(state, 0L, target);
+						throw new RuntimeException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+					}
 				}
 				case 0x56 -> { // OP_RET
 					int returnPc = VmHandlers.popCallStack(state);
@@ -705,10 +722,16 @@ public final class ImpulseMethodHandleCompiler {
 				case 0xA0, 0xA9, 0xAA -> {
 					VmHandlers.handleStreamWalk(state, ctx, instr, programSeg, instructionCount);
 					nextPc++;
-				}
-				case 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF, 0xB0, 0xB1, 0xB2,
-						0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE -> {
-					nextPc++;
+					if (nextPc < instructionCount && programSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE,
+							nextPc * 8L) == VmRegisterType.OP_STREAM_FUNC_BEGIN) {
+						while (nextPc < instructionCount && programSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE,
+								nextPc * 8L) != VmRegisterType.OP_STREAM_FUNC_END) {
+							nextPc++;
+						}
+						if (nextPc < instructionCount) {
+							nextPc++;
+						}
+					}
 				}
 				case 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB -> {
 					VmMultiLaneHandlers.handleMultiLaneOpcode(state, ctx, instr, pc);

@@ -38,7 +38,7 @@ public class ShaderOps {
 
 	public static void filter(int sDst, VmQueryContext ctx, MemorySegment state, int src, int tgt, int eIdx,
 			float[] regs, ImpulseBitSet outBs) {
-		if (regs[sDst] == 0.0f) {
+		if (Float.isNaN(regs[sDst]) || regs[sDst] == 0.0f) {
 			throw ShaderAbortException.INSTANCE;
 		}
 	}
@@ -285,6 +285,10 @@ public class ShaderOps {
 
 	public static void select(int dst, int cond, int trueVal, int falseVal, VmQueryContext ctx, MemorySegment state,
 			int srcId, int tgtId, int edgeId, float[] fRegs, ImpulseBitSet outBs) {
+		if (dst < 0 || dst >= fRegs.length || cond < 0 || cond >= fRegs.length || trueVal < 0 || trueVal >= fRegs.length
+				|| falseVal < 0 || falseVal >= fRegs.length) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		fRegs[dst] = (fRegs[cond] != 0.0f) ? fRegs[trueVal] : fRegs[falseVal];
 	}
 

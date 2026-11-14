@@ -108,6 +108,14 @@ public final class VmHandlers {
 	 * {@code T_BITSET_HANDLE}, {@code T_NODE_VECTOR}, or {@code T_UINT64_VECTOR})
 	 * and that any referenced handle is allocated in {@code ctx}.
 	 */
+	public static VmRegType validateSetOperand(MemorySegment state, VmQueryContext ctx, int regIndex) {
+		VmRegType tag = validateNodeSource(state, ctx, regIndex);
+		if (tag == VmRegType.T_INT64) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
+		return tag;
+	}
+
 	public static VmRegType validateNodeSource(MemorySegment state, VmQueryContext ctx, int regIndex) {
 		validateReg(regIndex);
 		byte rawTag = getRegisterType(state, regIndex);
@@ -131,6 +139,18 @@ public final class VmHandlers {
 					T_DOUBLE_VECTOR, T_FRONTIER_STATE, T_LANE_FRONTIER ->
 				throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_REGISTER");
 		};
+	}
+
+	private static VmRegType validateMaterializationSource(MemorySegment state, VmQueryContext ctx, int regIndex) {
+		validateReg(regIndex);
+		if (getRegisterType(state, regIndex) == TYPE_LANE_FRONTIER) {
+			long val = getRegisterValue(state, regIndex);
+			if (ctx == null || ctx.getLaneFrontier((int) val) == null) {
+				throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+			}
+			return VmRegType.T_LANE_FRONTIER;
+		}
+		return validateNodeSource(state, ctx, regIndex);
 	}
 
 	private static void addRegisterNodesToBitSet(MemorySegment state, VmQueryContext ctx, int regIndex,
@@ -418,7 +438,11 @@ public final class VmHandlers {
 			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
 		}
 		validateReg(dstReg);
-		validateReg(srcReg);
+		if ((flags & FLAG_INPUT_SEED) == 0) {
+			validateNodeSource(state, ctx, srcReg);
+		} else {
+			validateReg(srcReg);
+		}
 
 		int outHandle = (dstReg != srcReg && getRegisterType(state, dstReg) == TYPE_BITSET_HANDLE)
 				? (int) getRegisterValue(state, dstReg)
@@ -538,23 +562,32 @@ public final class VmHandlers {
 						final int chunkSize = 1024;
 
 						java.util.stream.IntStream.range(0, numThreads).parallel().forEach(t -> {
-							while (true) {
-								int startV = nextChunk.getAndAdd(chunkSize);
-								if (startV >= nodeCount)
-									break;
-								int endV = Math.min(startV + chunkSize, nodeCount);
-								for (int v = unvisitedBs.nextSetBit(startV); v >= 0
-										&& v < endV; v = unvisitedBs.nextSetBit(v + 1)) {
-									long start = rel.readEdgeIndex(cscRowOff, v);
-									long end = rel.readEdgeIndex(cscRowOff, v + 1);
-									for (long i = start; i < end; i++) {
-										int target = rel.readSrcNodeId(cscColIdx, i);
-										if (frontierBs.get(target)) {
-											outBs.set(v);
-											break;
+							int localHandle = ctx.acquireBitset();
+							ImpulseBitSet localBs = ctx.getBitset(localHandle);
+							try {
+								while (true) {
+									int startV = nextChunk.getAndAdd(chunkSize);
+									if (startV >= nodeCount)
+										break;
+									int endV = Math.min(startV + chunkSize, nodeCount);
+									for (int v = unvisitedBs.nextSetBit(startV); v >= 0
+											&& v < endV; v = unvisitedBs.nextSetBit(v + 1)) {
+										long start = rel.readEdgeIndex(cscRowOff, v);
+										long end = rel.readEdgeIndex(cscRowOff, v + 1);
+										for (long i = start; i < end; i++) {
+											int target = rel.readSrcNodeId(cscColIdx, i);
+											if (frontierBs.get(target)) {
+												localBs.set(v);
+												break;
+											}
 										}
 									}
 								}
+								synchronized (outBs) {
+									outBs.or(localBs);
+								}
+							} finally {
+								ctx.releaseBitset(localHandle);
 							}
 						});
 					} else {
@@ -836,6 +869,10 @@ public final class VmHandlers {
 		validateReg(dst);
 		int xReg = instr.payload() & 0xFF;
 		validateReg(xReg);
+		byte xType = getRegisterType(state, xReg);
+		if (xType != TYPE_FLOAT_VECTOR && xType != TYPE_DOUBLE_VECTOR) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		int relId = (instr.payload() >> 8) & 0xFF;
 		int semiring = (instr.payload() >> 16) & 0xFFFF;
 
@@ -946,6 +983,10 @@ public final class VmHandlers {
 		validateReg(dst);
 		int xReg = instr.payload() & 0xFF;
 		validateReg(xReg);
+		byte xType = getRegisterType(state, xReg);
+		if (xType != TYPE_FLOAT_VECTOR && xType != TYPE_DOUBLE_VECTOR) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		int relId = (instr.payload() >> 8) & 0xFF;
 		int semiring = (instr.payload() >> 16) & 0xFFFF;
 
@@ -1015,6 +1056,12 @@ public final class VmHandlers {
 		int opId = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(src1);
 		validateReg(src2);
+		byte t1 = getRegisterType(state, src1);
+		byte t2 = getRegisterType(state, src2);
+		if ((t1 != TYPE_FLOAT_VECTOR && t1 != TYPE_DOUBLE_VECTOR)
+				|| (t2 != TYPE_FLOAT_VECTOR && t2 != TYPE_DOUBLE_VECTOR)) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, src1));
 		float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, src2));
 		int len = (v1 != null) ? v1.length : ((v2 != null) ? v2.length : 1024);
@@ -1040,6 +1087,12 @@ public final class VmHandlers {
 		int src2 = (instr.payload() >> 8) & 0xFF;
 		validateReg(src1);
 		validateReg(src2);
+		byte t1 = getRegisterType(state, src1);
+		byte t2 = getRegisterType(state, src2);
+		if ((t1 != TYPE_FLOAT_VECTOR && t1 != TYPE_DOUBLE_VECTOR)
+				|| (t2 != TYPE_FLOAT_VECTOR && t2 != TYPE_DOUBLE_VECTOR)) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, src1));
 		float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, src2));
 		int len = (v1 != null) ? v1.length : ((v2 != null) ? v2.length : 1024);
@@ -1180,6 +1233,10 @@ public final class VmHandlers {
 		validateReg(dst);
 		int reg1 = instr.payload() & 0xFFFF;
 		int reg2 = (instr.payload() >> 16) & 0xFFFF;
+		if ((getRegisterType(state, reg1) != TYPE_FLOAT_VECTOR && getRegisterType(state, reg1) != TYPE_FLOAT)
+				|| (getRegisterType(state, reg2) != TYPE_FLOAT_VECTOR && getRegisterType(state, reg2) != TYPE_FLOAT)) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
 				? (int) getRegisterValue(state, dst)
 				: ctx.acquireFloatVector(1024);
@@ -1205,12 +1262,11 @@ public final class VmHandlers {
 		if (ctx == null) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
 		}
-		String[] svec1 = (getRegisterType(state, src1) == TYPE_STRING_VECTOR)
-				? ctx.getStringVector((int) getRegisterValue(state, src1))
-				: null;
-		String[] svec2 = (getRegisterType(state, src2) == TYPE_STRING_VECTOR)
-				? ctx.getStringVector((int) getRegisterValue(state, src2))
-				: null;
+		if (getRegisterType(state, src1) != TYPE_STRING_VECTOR || getRegisterType(state, src2) != TYPE_STRING_VECTOR) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
+		String[] svec1 = ctx.getStringVector((int) getRegisterValue(state, src1));
+		String[] svec2 = ctx.getStringVector((int) getRegisterValue(state, src2));
 		int len1 = (svec1 != null) ? svec1.length : 0;
 		int len2 = (svec2 != null) ? svec2.length : 0;
 		int total = len1 + len2;
@@ -1234,8 +1290,14 @@ public final class VmHandlers {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
 		}
 
-		int h1 = (getRegisterType(state, src1) == TYPE_BITSET_HANDLE) ? (int) getRegisterValue(state, src1) : -1;
-		int h2 = (getRegisterType(state, src2) == TYPE_BITSET_HANDLE) ? (int) getRegisterValue(state, src2) : -1;
+		if (getRegisterType(state, src1) != TYPE_BITSET_HANDLE || getRegisterType(state, src2) != TYPE_BITSET_HANDLE) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
+		int h1 = (int) getRegisterValue(state, src1);
+		int h2 = (int) getRegisterValue(state, src2);
+		if (ctx.getBitset(h1) == null || ctx.getBitset(h2) == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
 
 		int hDst = ctx.acquireBitset();
 		if (hDst < 0) {
@@ -1268,8 +1330,8 @@ public final class VmHandlers {
 		int srcReg1 = instr.payload() & 0xFFFF;
 		int srcReg2 = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dstReg);
-		validateNodeSource(state, ctx, srcReg1);
-		validateNodeSource(state, ctx, srcReg2);
+		validateSetOperand(state, ctx, srcReg1);
+		validateSetOperand(state, ctx, srcReg2);
 
 		int outHandle = (getRegisterType(state, dstReg) == TYPE_BITSET_HANDLE)
 				? (int) getRegisterValue(state, dstReg)
@@ -1297,8 +1359,14 @@ public final class VmHandlers {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
 		}
 
-		int h1 = (getRegisterType(state, src1) == TYPE_BITSET_HANDLE) ? (int) getRegisterValue(state, src1) : -1;
-		int h2 = (getRegisterType(state, src2) == TYPE_BITSET_HANDLE) ? (int) getRegisterValue(state, src2) : -1;
+		if (getRegisterType(state, src1) != TYPE_BITSET_HANDLE || getRegisterType(state, src2) != TYPE_BITSET_HANDLE) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
+		int h1 = (int) getRegisterValue(state, src1);
+		int h2 = (int) getRegisterValue(state, src2);
+		if (ctx.getBitset(h1) == null || ctx.getBitset(h2) == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
 
 		int hDst = ctx.acquireBitset();
 		if (hDst < 0) {
@@ -1339,8 +1407,14 @@ public final class VmHandlers {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
 		}
 
-		int h1 = (getRegisterType(state, src1) == TYPE_BITSET_HANDLE) ? (int) getRegisterValue(state, src1) : -1;
-		int h2 = (getRegisterType(state, src2) == TYPE_BITSET_HANDLE) ? (int) getRegisterValue(state, src2) : -1;
+		if (getRegisterType(state, src1) != TYPE_BITSET_HANDLE || getRegisterType(state, src2) != TYPE_BITSET_HANDLE) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
+		int h1 = (int) getRegisterValue(state, src1);
+		int h2 = (int) getRegisterValue(state, src2);
+		if (ctx.getBitset(h1) == null || ctx.getBitset(h2) == null) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
 
 		int hDst = ctx.acquireBitset();
 		if (hDst < 0) {
@@ -1377,8 +1451,8 @@ public final class VmHandlers {
 		int srcReg1 = instr.payload() & 0xFFFF;
 		int srcReg2 = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dstReg);
-		VmRegType tag1 = validateNodeSource(state, ctx, srcReg1);
-		VmRegType tag2 = validateNodeSource(state, ctx, srcReg2);
+		VmRegType tag1 = validateSetOperand(state, ctx, srcReg1);
+		VmRegType tag2 = validateSetOperand(state, ctx, srcReg2);
 
 		byte type1 = tag1.tag();
 		byte type2 = tag2.tag();
@@ -1475,8 +1549,8 @@ public final class VmHandlers {
 		int srcReg1 = instr.payload() & 0xFFFF;
 		int srcReg2 = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dstReg);
-		VmRegType tag1 = validateNodeSource(state, ctx, srcReg1);
-		VmRegType tag2 = validateNodeSource(state, ctx, srcReg2);
+		VmRegType tag1 = validateSetOperand(state, ctx, srcReg1);
+		VmRegType tag2 = validateSetOperand(state, ctx, srcReg2);
 
 		byte type1 = tag1.tag();
 		byte type2 = tag2.tag();
@@ -1562,7 +1636,7 @@ public final class VmHandlers {
 		int dstReg = instr.dstReg();
 		int srcReg = instr.payload() & 0xFFFF;
 		validateReg(dstReg);
-		VmRegType tag = validateNodeSource(state, ctx, srcReg);
+		VmRegType tag = validateSetOperand(state, ctx, srcReg);
 		long val = getRegisterValue(state, srcReg);
 		long count = switch (tag) {
 			case T_NULL -> 0L;
@@ -1616,8 +1690,11 @@ public final class VmHandlers {
 		long val = getRegisterValue(state, srcReg);
 		byte typeTag = getRegisterType(state, srcReg);
 		if (typeTag == TYPE_BITSET_HANDLE) {
+			if (instr.dstReg() == srcReg) {
+				return;
+			}
 			ImpulseBitSet srcBs = ctx.getBitset((int) val);
-			int dstHandle = (instr.dstReg() != srcReg && getRegisterType(state, instr.dstReg()) == TYPE_BITSET_HANDLE)
+			int dstHandle = (getRegisterType(state, instr.dstReg()) == TYPE_BITSET_HANDLE)
 					? (int) getRegisterValue(state, instr.dstReg())
 					: ctx.acquireBitset();
 			ImpulseBitSet dstBs = ctx.getBitset(dstHandle);
@@ -1656,6 +1733,12 @@ public final class VmHandlers {
 
 		byte dstType = getRegisterType(state, dstReg);
 		byte srcType = getRegisterType(state, srcReg);
+		if ((dstType != TYPE_BITSET_HANDLE && dstType != TYPE_NODE_VECTOR && dstType != TYPE_UINT64_VECTOR
+				&& dstType != TYPE_NODE_ID)
+				|| (srcType != TYPE_BITSET_HANDLE && srcType != TYPE_NODE_VECTOR && srcType != TYPE_UINT64_VECTOR
+						&& srcType != TYPE_NODE_ID)) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 
 		long dstVal = getRegisterValue(state, dstReg);
 		long srcVal = getRegisterValue(state, srcReg);
@@ -1825,10 +1908,27 @@ public final class VmHandlers {
 
 	public static void handleFloatVectorScale(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int reg = instr.dstReg();
+		validateReg(reg);
+		float alpha;
+		if (instr.flags() == 0) {
+			alpha = Float.intBitsToFloat(instr.payload());
+		} else {
+			int srcReg = instr.payload() & 0xFFFF;
+			validateReg(srcReg);
+			byte srcType = getRegisterType(state, srcReg);
+			if (srcType == TYPE_FLOAT) {
+				alpha = Float.intBitsToFloat((int) getRegisterValue(state, srcReg));
+			} else if (srcType == TYPE_DOUBLE) {
+				alpha = (float) Double.longBitsToDouble(getRegisterValue(state, srcReg));
+			} else if (srcType == TYPE_INT64 || srcType == TYPE_NODE_ID) {
+				alpha = (float) getRegisterValue(state, srcReg);
+			} else {
+				throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_REGISTER");
+			}
+		}
 		if (getRegisterType(state, reg) != TYPE_FLOAT_VECTOR) {
 			return;
 		}
-		float alpha = Float.intBitsToFloat(instr.payload());
 		int handle = (int) getRegisterValue(state, reg);
 		float[] vec = ctx.getFloatVector(handle);
 		if (vec != null) {
@@ -1841,13 +1941,20 @@ public final class VmHandlers {
 	public static void handleL1NormDiff(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int reg1 = instr.payload() & 0xFFFF;
 		int reg2 = (instr.payload() >> 16) & 0xFFFF;
+		if ((getRegisterType(state, reg1) != TYPE_FLOAT_VECTOR && getRegisterType(state, reg1) != TYPE_FLOAT)
+				|| (getRegisterType(state, reg2) != TYPE_FLOAT_VECTOR && getRegisterType(state, reg2) != TYPE_FLOAT)) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, reg1));
 		float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, reg2));
+		if (v1 == null || v2 == null || v1.length != v2.length) {
+			setRegister(state, instr.dstReg(), 0L, TYPE_FLOAT);
+			setFlag(state, FLAG_ZF, false);
+			return;
+		}
 		double diffSum = 0.0;
-		if (v1 != null && v2 != null && v1.length == v2.length) {
-			for (int i = 0; i < v1.length; i++) {
-				diffSum += Math.abs(v1[i] - v2[i]);
-			}
+		for (int i = 0; i < v1.length; i++) {
+			diffSum += Math.abs(v1[i] - v2[i]);
 		}
 		setRegister(state, instr.dstReg(), Integer.toUnsignedLong(Float.floatToRawIntBits((float) diffSum)),
 				TYPE_FLOAT);
@@ -1879,6 +1986,15 @@ public final class VmHandlers {
 	}
 
 	public static void handleReadEdgeWeight(MemorySegment state, VmQueryContext ctx, Instruction instr) {
+		int uReg = instr.payload() & 0xFF;
+		int vReg = (instr.payload() >> 8) & 0xFF;
+		validateReg(uReg);
+		validateReg(vReg);
+		byte uType = getRegisterType(state, uReg);
+		byte vType = getRegisterType(state, vReg);
+		if ((uType != TYPE_INT64 && uType != TYPE_NODE_ID) || (vType != TYPE_INT64 && vType != TYPE_NODE_ID)) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		setRegister(state, instr.dstReg(), Float.floatToRawIntBits(1.0f), TYPE_FLOAT);
 		setFlag(state, FLAG_ZF, false);
 	}
@@ -1938,7 +2054,10 @@ public final class VmHandlers {
 		int len1 = 0;
 		if (src1 < 64) {
 			byte type = getRegisterType(state, src1);
-			if (type == TYPE_INT64) {
+			if (type != TYPE_INT64 && type != TYPE_NODE_ID && type != TYPE_BITSET_HANDLE) {
+				throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+			}
+			if (type == TYPE_INT64 || type == TYPE_NODE_ID) {
 				lines1[len1++] = (int) getRegisterValue(state, src1);
 			} else if (type == TYPE_BITSET_HANDLE) {
 				int handle = (int) getRegisterValue(state, src1);
@@ -1961,7 +2080,7 @@ public final class VmHandlers {
 		int len2 = 0;
 		if (src2 < 64) {
 			byte type = getRegisterType(state, src2);
-			if (type == TYPE_INT64) {
+			if (type == TYPE_INT64 || type == TYPE_NODE_ID) {
 				lines2[len2++] = (int) getRegisterValue(state, src2);
 			} else if (type == TYPE_BITSET_HANDLE) {
 				int handle = (int) getRegisterValue(state, src2);
@@ -2058,6 +2177,10 @@ public final class VmHandlers {
 		validateReg(srcReg);
 		validateReg(valReg);
 		byte type = getRegisterType(state, srcReg);
+		if ((instr.flags() & FLAG_INPUT_SEED) == 0 && type != TYPE_INT64 && type != TYPE_NODE_ID
+				&& type != TYPE_BITSET_HANDLE) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		long val = getRegisterValue(state, srcReg);
 		long matchVal = getRegisterValue(state, valReg);
 
@@ -2239,7 +2362,11 @@ public final class VmHandlers {
 		int attrId = (instr.payload() >> 8) & 0xFF;
 		int relId = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
+		byte srcType = getRegisterType(state, src);
+		if (srcType == TYPE_FLOAT || srcType == TYPE_NULL) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		RelationSnapshot rel = resolveRelation(ctx, relId);
 		long u = getRegisterValue(state, src);
 		long sum = 0;
@@ -2287,7 +2414,9 @@ public final class VmHandlers {
 
 	public static void handleCsrWalkReduce(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int dst = instr.dstReg();
+		int srcReg = instr.payload() & 0xFFFF;
 		validateReg(dst);
+		validateNodeSource(state, ctx, srcReg);
 		int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
 				? (int) getRegisterValue(state, dst)
 				: ctx.acquireFloatVector(1024);
@@ -2304,6 +2433,9 @@ public final class VmHandlers {
 		validateReg(src2);
 		long val1 = getRegisterValue(state, src1);
 		byte type1 = getRegisterType(state, src1);
+		if (type1 != TYPE_DOUBLE_VECTOR && type1 != TYPE_FLOAT_VECTOR) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		long val2 = getRegisterValue(state, src2);
 		byte type2 = getRegisterType(state, src2);
 		if (type1 == TYPE_FLOAT_VECTOR && type2 == TYPE_FLOAT_VECTOR) {
@@ -2509,10 +2641,7 @@ public final class VmHandlers {
 			ctx.setFinalResultDouble(totalSum);
 			return Boolean.TRUE;
 		}
-		setRegister(state, dst, 0L, TYPE_FLOAT);
-		setFlag(state, FLAG_ZF, true);
-		ctx.setFinalResultDouble(0.0);
-		return Boolean.TRUE;
+		throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
 	}
 
 	public static void handleVectorLoadAttr(MemorySegment state, VmQueryContext ctx, Instruction instr) {
@@ -3007,22 +3136,33 @@ public final class VmHandlers {
 		int dst = instr.dstReg();
 		int srcParam = instr.payload() & 0xFFFF;
 		int idxReg = (instr.payload() >> 16) & 0xFFFF;
+		validateReg(dst);
+		validateReg(srcParam);
 
+		if (instr.flags() != 0 && instr.flags() != 1) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_OPCODE");
+		}
 		if (instr.flags() == 0) {
-			long targetRegIdx = getRegisterValue(state, srcParam);
-			if (targetRegIdx >= 0 && targetRegIdx < 64) {
-				long val = getRegisterValue(state, (int) targetRegIdx);
-				byte type = getRegisterType(state, (int) targetRegIdx);
-				setRegister(state, dst, val, type);
-				setFlag(state, FLAG_ZF, val == 0);
+			byte srcType = getRegisterType(state, srcParam);
+			if (srcType != TYPE_INT64 && srcType != TYPE_NODE_ID) {
+				throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
 			}
+			long targetRegIdx = getRegisterValue(state, srcParam);
+			if (targetRegIdx < 0 || targetRegIdx >= 64) {
+				throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+			}
+			long val = getRegisterValue(state, (int) targetRegIdx);
+			byte type = getRegisterType(state, (int) targetRegIdx);
+			setRegister(state, dst, val, type);
+			setFlag(state, FLAG_ZF, val == 0);
 		} else {
+			validateReg(idxReg);
 			int handle = (int) getRegisterValue(state, srcParam);
 			long index = getRegisterValue(state, idxReg);
 			float[] vec = ctx.getFloatVector(handle);
 			if (vec != null && index >= 0 && index < vec.length) {
 				float val = vec[(int) index];
-				setRegister(state, dst, Float.floatToRawIntBits(val), TYPE_FLOAT);
+				setRegister(state, dst, Integer.toUnsignedLong(Float.floatToRawIntBits(val)), TYPE_FLOAT);
 				setFlag(state, FLAG_ZF, val == 0.0f);
 			}
 		}
@@ -3242,6 +3382,9 @@ public final class VmHandlers {
 	public static void handleSetMaxDop(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int dstReg = instr.dstReg();
 		int requestedDop = instr.payload();
+		if (requestedDop <= 0) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		int hostCeiling = Runtime.getRuntime().availableProcessors();
 		String envDop = System.getenv("IMPULSE_MAX_DOP");
 		if (envDop == null)
@@ -3275,9 +3418,15 @@ public final class VmHandlers {
 		validateReg(src2);
 
 		byte type1 = getRegisterType(state, src1);
+		if (type1 != TYPE_DOUBLE_VECTOR && type1 != TYPE_FLOAT_VECTOR) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		long val1 = getRegisterValue(state, src1);
 		byte type2 = getRegisterType(state, src2);
 		long val2 = getRegisterValue(state, src2);
+		if (type1 == TYPE_NULL || type2 == TYPE_NULL) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 
 		int dstHandle;
 		if (getRegisterType(state, dst) == TYPE_BITSET_HANDLE) {
@@ -3343,9 +3492,15 @@ public final class VmHandlers {
 		validateReg(src2);
 
 		byte type1 = getRegisterType(state, src1);
+		if (type1 != TYPE_DOUBLE_VECTOR && type1 != TYPE_FLOAT_VECTOR) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		long val1 = getRegisterValue(state, src1);
 		byte type2 = getRegisterType(state, src2);
 		long val2 = getRegisterValue(state, src2);
+		if (type1 == TYPE_NULL || type2 == TYPE_NULL) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 
 		int dstHandle;
 		if (getRegisterType(state, dst) == TYPE_BITSET_HANDLE) {
@@ -3411,9 +3566,15 @@ public final class VmHandlers {
 		validateReg(src2);
 
 		byte type1 = getRegisterType(state, src1);
+		if (type1 != TYPE_DOUBLE_VECTOR && type1 != TYPE_FLOAT_VECTOR) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		long val1 = getRegisterValue(state, src1);
 		byte type2 = getRegisterType(state, src2);
 		long val2 = getRegisterValue(state, src2);
+		if (type1 == TYPE_NULL || type2 == TYPE_NULL) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 
 		int dstHandle;
 		if (getRegisterType(state, dst) == TYPE_BITSET_HANDLE) {
@@ -3486,6 +3647,9 @@ public final class VmHandlers {
 		long valMin = getRegisterValue(state, rMin);
 		byte typeMax = getRegisterType(state, rMax);
 		long valMax = getRegisterValue(state, rMax);
+		if (typeVec == TYPE_NULL || typeMin == TYPE_NULL || typeMax == TYPE_NULL) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 
 		int dstHandle;
 		if (getRegisterType(state, dst) == TYPE_BITSET_HANDLE) {
@@ -3539,7 +3703,9 @@ public final class VmHandlers {
 		validateReg(dst);
 		validateReg(src1);
 		validateReg(src2);
-
+		if (getRegisterType(state, src1) != TYPE_BITSET_HANDLE || getRegisterType(state, src2) != TYPE_BITSET_HANDLE) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		ImpulseBitSet bs1 = ctx.getBitset((int) getRegisterValue(state, src1));
 		ImpulseBitSet bs2 = ctx.getBitset((int) getRegisterValue(state, src2));
 
@@ -3570,7 +3736,9 @@ public final class VmHandlers {
 		validateReg(dst);
 		validateReg(src1);
 		validateReg(src2);
-
+		if (getRegisterType(state, src1) != TYPE_BITSET_HANDLE || getRegisterType(state, src2) != TYPE_BITSET_HANDLE) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		ImpulseBitSet bs1 = ctx.getBitset((int) getRegisterValue(state, src1));
 		ImpulseBitSet bs2 = ctx.getBitset((int) getRegisterValue(state, src2));
 
@@ -3625,6 +3793,9 @@ public final class VmHandlers {
 			return;
 		}
 
+		if (srcType != TYPE_BITSET_HANDLE) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		ImpulseBitSet bs = ctx.getBitset((int) getRegisterValue(state, src));
 		boolean aliasedInput = (dst == src);
 		int prevDstHandle = (getRegisterType(state, dst) == TYPE_BITSET_HANDLE)
@@ -3636,7 +3807,7 @@ public final class VmHandlers {
 			dstBs.clear();
 			int maxNodes = 1024;
 			if (ctx.snapshot() != null && !ctx.snapshot().getAllRelationSnapshots().isEmpty()) {
-				maxNodes = ctx.snapshot().getAllRelationSnapshots().values().iterator().next().getNodeCount();
+				maxNodes = ctx.snapshot().getMaxNodeCount();
 			}
 			for (int i = 0; i < maxNodes; i++) {
 				if (bs == null || !bs.get(i)) {
@@ -3663,6 +3834,9 @@ public final class VmHandlers {
 
 		ImpulseBitSet mask = ctx.getBitset((int) getRegisterValue(state, maskReg));
 		byte type1 = getRegisterType(state, src1);
+		if (type1 != TYPE_DOUBLE_VECTOR && type1 != TYPE_FLOAT_VECTOR) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		if (type1 == TYPE_DOUBLE_VECTOR) {
 			double[] v1 = ctx.getDoubleVector((int) getRegisterValue(state, src1));
 			double[] v2 = ctx.getDoubleVector((int) getRegisterValue(state, src2));
@@ -3733,13 +3907,7 @@ public final class VmHandlers {
 			int h = (getRegisterType(state, dst) == TYPE_DOUBLE_VECTOR)
 					? (int) getRegisterValue(state, dst)
 					: ctx.acquireDoubleVector(len);
-			ctx.setDoubleVectorLength(h, len);
-			double[] out = ctx.getDoubleVector(h);
-			if (out == null || out.length < len) {
-				h = ctx.acquireDoubleVector(len);
-				ctx.setDoubleVectorLength(h, len);
-				out = ctx.getDoubleVector(h);
-			}
+			double[] out = ctx.ensureDoubleVectorCapacity(h, len);
 			for (int i = 0; i < len; i++) {
 				double val = (v != null && i < v.length) ? v[i] : 0.0;
 				out[i] = ImpulseMath.unaryF64(funcId, val);
@@ -3752,13 +3920,7 @@ public final class VmHandlers {
 			int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
 					? (int) getRegisterValue(state, dst)
 					: ctx.acquireFloatVector(len);
-			ctx.setFloatVectorLength(h, len);
-			float[] out = ctx.getFloatVector(h);
-			if (out == null || out.length < len) {
-				h = ctx.acquireFloatVector(len);
-				ctx.setFloatVectorLength(h, len);
-				out = ctx.getFloatVector(h);
-			}
+			float[] out = ctx.ensureFloatVectorCapacity(h, len);
 			for (int i = 0; i < len; i++) {
 				float val = (v != null && i < v.length) ? v[i] : 0.0f;
 				out[i] = ImpulseMath.unaryF32(funcId, val);
@@ -3798,6 +3960,9 @@ public final class VmHandlers {
 
 		byte type1 = getRegisterType(state, src1);
 		byte type2 = getRegisterType(state, src2);
+		if (!isMathNumericType(type1) || !isMathNumericType(type2)) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		if (type1 == TYPE_FLOAT && type2 == TYPE_FLOAT) {
 			float a = Float.intBitsToFloat((int) getRegisterValue(state, src1));
 			float b = Float.intBitsToFloat((int) getRegisterValue(state, src2));
@@ -3841,13 +4006,7 @@ public final class VmHandlers {
 			int h = (getRegisterType(state, dst) == TYPE_DOUBLE_VECTOR)
 					? (int) getRegisterValue(state, dst)
 					: ctx.acquireDoubleVector(len);
-			ctx.setDoubleVectorLength(h, len);
-			double[] out = ctx.getDoubleVector(h);
-			if (out == null || out.length < len) {
-				h = ctx.acquireDoubleVector(len);
-				ctx.setDoubleVectorLength(h, len);
-				out = ctx.getDoubleVector(h);
-			}
+			double[] out = ctx.ensureDoubleVectorCapacity(h, len);
 			for (int i = 0; i < len; i++) {
 				double a = (v1 != null) ? ((i < v1.length) ? v1[i] : 0.0) : s1;
 				double b = (v2 != null) ? ((i < v2.length) ? v2[i] : 0.0) : s2;
@@ -3878,13 +4037,7 @@ public final class VmHandlers {
 			int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
 					? (int) getRegisterValue(state, dst)
 					: ctx.acquireFloatVector(len);
-			ctx.setFloatVectorLength(h, len);
-			float[] out = ctx.getFloatVector(h);
-			if (out == null || out.length < len) {
-				h = ctx.acquireFloatVector(len);
-				ctx.setFloatVectorLength(h, len);
-				out = ctx.getFloatVector(h);
-			}
+			float[] out = ctx.ensureFloatVectorCapacity(h, len);
 			for (int i = 0; i < len; i++) {
 				float a = (v1 != null) ? ((i < v1.length) ? v1[i] : 0.0f) : s1;
 				float b = (v2 != null) ? ((i < v2.length) ? v2[i] : 0.0f) : s2;
@@ -3987,13 +4140,7 @@ public final class VmHandlers {
 			int h = (getRegisterType(state, dst) == TYPE_DOUBLE_VECTOR)
 					? (int) getRegisterValue(state, dst)
 					: ctx.acquireDoubleVector(len);
-			ctx.setDoubleVectorLength(h, len);
-			double[] out = ctx.getDoubleVector(h);
-			if (out == null || out.length < len) {
-				h = ctx.acquireDoubleVector(len);
-				ctx.setDoubleVectorLength(h, len);
-				out = ctx.getDoubleVector(h);
-			}
+			double[] out = ctx.ensureDoubleVectorCapacity(h, len);
 			for (int i = 0; i < len; i++) {
 				double a = (v1 != null) ? ((i < v1.length) ? v1[i] : 0.0) : s1;
 				double b = (v2 != null) ? ((i < v2.length) ? v2[i] : 0.0) : s2;
@@ -4020,13 +4167,7 @@ public final class VmHandlers {
 			int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
 					? (int) getRegisterValue(state, dst)
 					: ctx.acquireFloatVector(len);
-			ctx.setFloatVectorLength(h, len);
-			float[] out = ctx.getFloatVector(h);
-			if (out == null || out.length < len) {
-				h = ctx.acquireFloatVector(len);
-				ctx.setFloatVectorLength(h, len);
-				out = ctx.getFloatVector(h);
-			}
+			float[] out = ctx.ensureFloatVectorCapacity(h, len);
 			for (int i = 0; i < len; i++) {
 				float a = (v1 != null) ? ((i < v1.length) ? v1[i] : 0.0f) : s1;
 				float b = (v2 != null) ? ((i < v2.length) ? v2[i] : 0.0f) : s2;
@@ -4049,6 +4190,11 @@ public final class VmHandlers {
 		if (ctx == null) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
 		}
+		byte srcType = getRegisterType(state, src);
+		if (srcType != TYPE_FLOAT_VECTOR && srcType != TYPE_DOUBLE_VECTOR && srcType != TYPE_NODE_VECTOR
+				&& srcType != TYPE_UINT64_VECTOR) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		int h = ctx.acquireFloatVector(1024);
 		if (h < 0) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
@@ -4061,9 +4207,13 @@ public final class VmHandlers {
 		int dst = instr.dstReg();
 		int src = instr.payload() & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 		if (ctx == null) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
+		}
+		byte srcType = getRegisterType(state, src);
+		if (srcType != TYPE_INT64 && srcType != TYPE_NODE_ID && srcType != TYPE_BITSET_HANDLE) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
 		}
 		int h = ctx.acquireNodeVector(1024);
 		if (h < 0) {
@@ -4077,7 +4227,7 @@ public final class VmHandlers {
 		int dst = instr.dstReg();
 		int src = instr.payload() & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 		if (ctx == null) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
 		}
@@ -4089,7 +4239,7 @@ public final class VmHandlers {
 		int dst = instr.dstReg();
 		int src = instr.payload() & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 		if (ctx == null) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
 		}
@@ -4105,6 +4255,10 @@ public final class VmHandlers {
 		}
 		int rSrc = instr.payload() & 0xFF;
 		validateReg(rSrc);
+		byte rSrcType = getRegisterType(state, rSrc);
+		if (rSrcType != TYPE_INT64 && rSrcType != TYPE_NODE_ID && rSrcType != TYPE_NULL) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 
 		int relId = (int) getRegisterValue(state, rSrc);
 		if (relId == 0 && getRegisterType(state, rSrc) == TYPE_NULL && rSrc > 0) {
@@ -4227,8 +4381,8 @@ public final class VmHandlers {
 		int currReg = instr.payload() & 0xFF;
 		int prevReg = (instr.payload() >> 8) & 0xFF;
 		validateReg(dst);
-		validateReg(currReg);
-		validateReg(prevReg);
+		validateSetOperand(state, ctx, currReg);
+		validateSetOperand(state, ctx, prevReg);
 
 		ImpulseBitSet bsCurr = ctx.getBitset((int) getRegisterValue(state, currReg));
 		ImpulseBitSet bsPrev = ctx.getBitset((int) getRegisterValue(state, prevReg));
@@ -4251,7 +4405,7 @@ public final class VmHandlers {
 		int src = instr.payload() & 0xFF;
 		int rel = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 		if (ctx == null) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_NULL_SNAPSHOT");
 		}
@@ -4328,7 +4482,7 @@ public final class VmHandlers {
 		int src = instr.payload() & 0xFF;
 		int rel = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 		executeCsrWalk(state, ctx, dst, src, rel);
 	}
 
@@ -4338,8 +4492,8 @@ public final class VmHandlers {
 		int filterReg = (instr.payload() >> 8) & 0xFF;
 		int rel = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
-		validateReg(filterReg);
+		validateNodeSource(state, ctx, src);
+		validateNodeSource(state, ctx, filterReg);
 
 		RelationSnapshot relSnap = resolveRelation(ctx, rel);
 		if (relSnap == null) {
@@ -4405,7 +4559,7 @@ public final class VmHandlers {
 		int src = instr.payload() & 0xFF;
 		int relId = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 
 		byte srcType = getRegisterType(state, src);
 		long srcVal = getRegisterValue(state, src);
@@ -4466,7 +4620,7 @@ public final class VmHandlers {
 		int src = instr.payload() & 0xFF;
 		int rel = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 		executeCsrWalk(state, ctx, dst, src, rel);
 	}
 
@@ -4475,7 +4629,7 @@ public final class VmHandlers {
 		int src = instr.payload() & 0xFF;
 		int rel = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 		executeCsrWalk(state, ctx, dst, src, rel);
 	}
 
@@ -4484,7 +4638,7 @@ public final class VmHandlers {
 		int src = instr.payload() & 0xFF;
 		int rel = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 		executeCsrWalk(state, ctx, dst, src, rel);
 	}
 
@@ -4500,7 +4654,7 @@ public final class VmHandlers {
 		int src = instr.payload() & 0xFF;
 		int rel = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 		executeCsrWalk(state, ctx, dst, src, rel);
 	}
 
@@ -4509,7 +4663,7 @@ public final class VmHandlers {
 		int src = instr.payload() & 0xFF;
 		int rel = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 		executeCsrWalk(state, ctx, dst, src, rel);
 	}
 
@@ -4518,7 +4672,7 @@ public final class VmHandlers {
 		int src = instr.payload() & 0xFF;
 		int rel = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 		executeCsrWalk(state, ctx, dst, src, rel);
 	}
 
@@ -4527,7 +4681,7 @@ public final class VmHandlers {
 		int src = instr.payload() & 0xFF;
 		int rel = (instr.payload() >> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 		handleCscWalk(state, ctx, instr);
 	}
 
@@ -4682,6 +4836,10 @@ public final class VmHandlers {
 			}
 		}
 
+		if (attrIdx != 0 || domainOrRel != 0) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+		}
+
 		int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
 				? (int) getRegisterValue(state, dst)
 				: ctx.acquireFloatVector(0);
@@ -4771,7 +4929,7 @@ public final class VmHandlers {
 		int src = isExtended ? (pLow > 63 ? (instr.payload() & 0xFF) : pLow) : (instr.payload() & 0xFF);
 		int attrId = (instr.payload() >>> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateNodeSource(state, ctx, src);
 
 		boolean frontIsBs = (getRegisterType(state, src) == TYPE_BITSET_HANDLE);
 		ImpulseBitSet frontBs = frontIsBs ? ctx.getBitset((int) getRegisterValue(state, src)) : null;
@@ -4811,9 +4969,13 @@ public final class VmHandlers {
 		int attrEnd = (instr.payload() >> 24) & 0xFF;
 		validateReg(timeReg);
 
+		byte timeType = getRegisterType(state, timeReg);
+		if (timeType != TYPE_INT64 && timeType != TYPE_FLOAT && timeType != TYPE_DOUBLE && timeType != TYPE_NODE_VECTOR
+				&& timeType != TYPE_UINT64_VECTOR && timeType != TYPE_FLOAT_VECTOR) {
+			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 		int outHandle = ctx.acquireBitset();
 		ImpulseBitSet outBs = ctx.getBitset(outHandle);
-		byte timeType = getRegisterType(state, timeReg);
 		long tsScalar = getRegisterValue(state, timeReg);
 		int[] tsVec = null;
 		int tsVecLen = 0;
@@ -5057,7 +5219,7 @@ public final class VmHandlers {
 		int dst = instr.dstReg();
 		int src = instr.payload() & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateMaterializationSource(state, ctx, src);
 		byte srcType = getRegisterType(state, src);
 		int count = extractActiveNodeIdsToScratch(state, ctx, src, 0);
 		int[] scratch = ctx.peekScratchInt(0);
@@ -5078,7 +5240,7 @@ public final class VmHandlers {
 		int src = instr.payload() & 0xFF;
 		int domainId = (instr.payload() >>> 16) & 0xFFFF;
 		validateReg(dst);
-		validateReg(src);
+		validateMaterializationSource(state, ctx, src);
 		byte srcType = getRegisterType(state, src);
 		int count = extractActiveNodeIdsToScratch(state, ctx, src, 0);
 		int[] scratch = ctx.peekScratchInt(0);
@@ -5400,6 +5562,8 @@ public final class VmHandlers {
 			java.lang.invoke.MethodHandle compiledShader, long instructionCount) {
 		int srcReg = instr.payload() & 0xFFFF;
 		int relId = (instr.payload() >> 16) & 0xFFFF;
+		validateReg(instr.dstReg());
+		validateNodeSource(state, ctx, srcReg);
 
 		org.impulsegraph.api.RelationSnapshot rel = resolveRelation(ctx, relId);
 		if (rel == null) {
@@ -5444,7 +5608,7 @@ public final class VmHandlers {
 		if (colIdx == null)
 			colIdx = rel.getColumnTargetsSegment();
 
-		float[] s_regs = ctx.scratchFloat(0, 16);
+		float[] s_regs = ctx.streamRegs16();
 		int targetNodeBound = (rel != null) ? Math.max(rel.getNodeCount(), rel.getCscNodeCount()) : 0;
 		ctx.setStreamTargetNodeBound(targetNodeBound);
 		ctx.initStreamTouchedMask(Math.max(targetNodeBound, 65536));
@@ -5487,6 +5651,9 @@ public final class VmHandlers {
 
 		long srcVal = getRegisterValue(state, srcReg);
 		byte srcType = getRegisterType(state, srcReg);
+		if (srcType != TYPE_NODE_ID && srcType != TYPE_NODE_VECTOR && srcType != TYPE_BITSET_HANDLE) {
+			throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_REGISTER");
+		}
 
 		int outBsHandle = ctx.acquireBitset();
 		org.impulsegraph.api.bitset.ImpulseBitSet outBs = ctx.getBitset(outBsHandle);
@@ -5501,7 +5668,7 @@ public final class VmHandlers {
 		} else if (srcType == TYPE_NODE_VECTOR) {
 			activeSources = ctx.getNodeVector((int) srcVal);
 			activeCount = (activeSources != null) ? activeSources.length : 0;
-		} else if (srcType == TYPE_BITSET_HANDLE) {
+		} else {
 			org.impulsegraph.api.bitset.ImpulseBitSet bs = ctx.getBitset((int) srcVal);
 			activeSources = ctx.scratchInt(0, Math.max(1, rel.getNodeCount()));
 			for (int i = 0; i < rel.getNodeCount(); i++) {
@@ -5509,8 +5676,6 @@ public final class VmHandlers {
 					activeSources[activeCount++] = i;
 				}
 			}
-		} else {
-			throw new IllegalStateException("IMPULSE_VM_ERR_INVALID_REGISTER");
 		}
 
 		boolean isCsc = (instr.opcode() == VmRegisterType.OP_CSC_WALK_STREAM || instr.opcode() == (byte) 0xAA);
@@ -5525,7 +5690,7 @@ public final class VmHandlers {
 
 		int targetDomainBound = (rel != null) ? Math.max(rel.getNodeCount(), rel.getCscNodeCount()) : 0;
 		long[] touchedMask = ctx.initStreamTouchedMask(Math.max(targetDomainBound, 65536));
-		float[] s_regs = ctx.scratchFloat(0, 16);
+		float[] s_regs = ctx.streamRegs16();
 
 		for (int srcIdx = 0; srcIdx < activeCount; srcIdx++) {
 			int u = activeSources[srcIdx];
@@ -5670,11 +5835,19 @@ public final class VmHandlers {
 							s_regs[sDst] = (s_regs[sPayloadLow] == 0.0f) ? 1.0f : 0.0f;
 
 						case VmRegisterType.OP_STREAM_SELECT -> {
-							s_regs[sDst] = (s_regs[sPayloadLow] != 0.0f) ? s_regs[sPayloadHigh] : s_regs[sDst];
+							int tReg = sPayloadHigh & 0xFF;
+							int fReg = (sPayloadHigh >>> 8) & 0xFF;
+							if (sDst >= 16 || sPayloadLow >= 16 || tReg >= 16 || fReg >= 16) {
+								throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+							}
+							s_regs[sDst] = (s_regs[sPayloadLow] != 0.0f) ? s_regs[tReg] : s_regs[fReg];
 						}
 
 						case VmRegisterType.OP_STREAM_FILTER -> {
-							if (s_regs[sDst] == 0.0f) {
+							if (sDst >= 16) {
+								throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
+							}
+							if (Float.isNaN(s_regs[sDst]) || s_regs[sDst] == 0.0f) {
 								abort = true;
 							}
 						}

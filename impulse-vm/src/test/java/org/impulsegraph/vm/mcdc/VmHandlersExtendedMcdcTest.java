@@ -156,6 +156,7 @@ public class VmHandlersExtendedMcdcTest {
 				MemorySegment state = ctx.allocateStateSegment();
 
 				// Node filter
+				VmHandlers.setRegister(state, 0, 0L, TYPE_NODE_ID);
 				VmHandlers.handleNodeFilter(state, ctx, makeInstr(OP_NODE_FILTER, (byte) 0, 0, 0), null);
 
 				// Vector Load Attr

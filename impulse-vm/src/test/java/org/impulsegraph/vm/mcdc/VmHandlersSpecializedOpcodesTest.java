@@ -105,7 +105,13 @@ public class VmHandlersSpecializedOpcodesTest {
 				assertEquals(6.0f, result[2]);
 
 				// Vector String Concat
-				VmHandlers.handleVectorStrConcat(state, ctx, makeInstr(OP_NOP, (byte) 0, 4, 0));
+				int hStr1 = ctx.acquireStringVector(1);
+				ctx.getStringVector(hStr1)[0] = "a";
+				int hStr2 = ctx.acquireStringVector(1);
+				ctx.getStringVector(hStr2)[0] = "b";
+				VmHandlers.setRegister(state, 5, hStr1, TYPE_STRING_VECTOR);
+				VmHandlers.setRegister(state, 6, hStr2, TYPE_STRING_VECTOR);
+				VmHandlers.handleVectorStrConcat(state, ctx, makeInstr(OP_NOP, (byte) 0, 4, (6 << 16) | 5));
 				assertEquals(TYPE_STRING_VECTOR, VmHandlers.getRegisterType(state, 4));
 				assertFalse(VmHandlers.checkFlag(state, FLAG_ZF));
 			}

@@ -181,7 +181,7 @@ public final class CypherLexer {
 	}
 
 	private CypherToken scanIdentifierOrKeyword(int startPos, int startLine, int startCol) {
-		while (!isAtEnd() && (isAlphaNumeric(peek()) || peek() == '_' || peek() == '>')) {
+		while (!isAtEnd() && (isAlphaNumeric(peek()) || peek() == '_')) {
 			advance();
 		}
 		String lexeme = src.substring(startPos, cursor);

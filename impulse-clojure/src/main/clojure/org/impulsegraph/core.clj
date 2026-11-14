@@ -97,15 +97,12 @@
 
 (defmacro with-snapshot
   "Executes body with snapshot bound to `binding-form`, guaranteeing off-heap
-  memory-mapping deallocation on exit."
+  memory-mapping deallocation and Arena closure on exit."
   [[binding-form path-or-file] & body]
-  `(let [arena# (Arena/ofShared)
-         snap# (open-snapshot ~path-or-file arena#)]
-     (try
+  `(with-open [arena# (Arena/ofShared)]
+     (with-open [snap# (open-snapshot ~path-or-file arena#)]
        (let [~binding-form snap#]
-         ~@body)
-       (finally
-         (close-snapshot snap#)))))
+         ~@body))))
 
 ;; ----------------------------------------------------------------------------
 ;; Traversal Pipeline Data Structures

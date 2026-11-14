@@ -69,10 +69,26 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
 		if (all == null || all.isEmpty()) {
 			return null;
 		}
-		int idx = 0;
+		boolean anyPositiveId = false;
 		for (RelationSnapshot rel : all.values()) {
-			if (idx++ == relationId) {
-				return rel;
+			if (rel != null) {
+				int id = rel.getRelationId();
+				if (id > 0) {
+					anyPositiveId = true;
+				}
+				if (id == relationId) {
+					return rel;
+				}
+			}
+		}
+		// Fallback to positional index only when relation IDs are unset (e.g., mocks
+		// returning -1 or 0).
+		if (!anyPositiveId) {
+			int idx = 0;
+			for (RelationSnapshot rel : all.values()) {
+				if (idx++ == relationId) {
+					return rel;
+				}
 			}
 		}
 		return null;
@@ -224,7 +240,9 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
 	 * graph resources.
 	 */
 	default void drainAndClose(long timeout, java.util.concurrent.TimeUnit unit) throws InterruptedException {
-		awaitDrained(timeout, unit);
+		if (!awaitDrained(timeout, unit)) {
+			throw new IllegalStateException("Timed out waiting for in-flight queries to drain before closing snapshot");
+		}
 		close();
 	}
 

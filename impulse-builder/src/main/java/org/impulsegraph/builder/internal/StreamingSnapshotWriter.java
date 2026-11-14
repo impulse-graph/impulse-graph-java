@@ -265,11 +265,9 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 
 				int srcIdWidth = srcDom.getIdWidth().byteSize();
 				int tgtIdWidth = tgtDom.getIdWidth().byteSize();
-				int edgeIndexWidth = (srcDom.getCardinality() > 4_000_000_000L
-						|| relDef.getDataSource().getEdgeCount() > 4_000_000_000L) ? 8 : 4;
-
 				RelationDataSource rds = relDef.getDataSource();
 				long edgeCount = rds != null ? rds.getEdgeCount() : 0;
+				int edgeIndexWidth = (srcDom.getCardinality() > 4_000_000_000L || edgeCount > 4_000_000_000L) ? 8 : 4;
 				int srcNodeCount = (int) srcDom.getCardinality();
 				int tgtNodeCount = (int) tgtDom.getCardinality();
 
@@ -835,25 +833,32 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			return currentCount;
 		}
 
+		private static final ValueLayout.OfShort LE_SHORT = ValueLayout.JAVA_SHORT_UNALIGNED
+				.withOrder(ByteOrder.LITTLE_ENDIAN);
+		private static final ValueLayout.OfInt LE_INT = ValueLayout.JAVA_INT_UNALIGNED
+				.withOrder(ByteOrder.LITTLE_ENDIAN);
+		private static final ValueLayout.OfLong LE_LONG = ValueLayout.JAVA_LONG_UNALIGNED
+				.withOrder(ByteOrder.LITTLE_ENDIAN);
+
 		@Override
 		public long currentSrc(int index) {
 			if (srcIdWidth == 2) {
-				return Short.toUnsignedInt(srcSeg.getAtIndex(ValueLayout.JAVA_SHORT_UNALIGNED, index));
+				return Short.toUnsignedInt(srcSeg.getAtIndex(LE_SHORT, index));
 			} else if (srcIdWidth == 8) {
-				return srcSeg.getAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, index);
+				return srcSeg.getAtIndex(LE_LONG, index);
 			} else {
-				return Integer.toUnsignedLong(srcSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, index));
+				return Integer.toUnsignedLong(srcSeg.getAtIndex(LE_INT, index));
 			}
 		}
 
 		@Override
 		public long currentTgt(int index) {
 			if (tgtIdWidth == 2) {
-				return Short.toUnsignedInt(tgtSeg.getAtIndex(ValueLayout.JAVA_SHORT_UNALIGNED, index));
+				return Short.toUnsignedInt(tgtSeg.getAtIndex(LE_SHORT, index));
 			} else if (tgtIdWidth == 8) {
-				return tgtSeg.getAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, index);
+				return tgtSeg.getAtIndex(LE_LONG, index);
 			} else {
-				return Integer.toUnsignedLong(tgtSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, index));
+				return Integer.toUnsignedLong(tgtSeg.getAtIndex(LE_INT, index));
 			}
 		}
 
@@ -866,21 +871,21 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 		public void accumulateRowOffsets(int[] rowOffsets, int count, int srcNodeCount) {
 			if (srcIdWidth == 4) {
 				for (int i = 0; i < count; i++) {
-					int u = srcSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i);
+					int u = srcSeg.getAtIndex(LE_INT, i);
 					if (u >= 0 && u < srcNodeCount) {
 						rowOffsets[u + 1]++;
 					}
 				}
 			} else if (srcIdWidth == 2) {
 				for (int i = 0; i < count; i++) {
-					int u = Short.toUnsignedInt(srcSeg.getAtIndex(ValueLayout.JAVA_SHORT_UNALIGNED, i));
+					int u = Short.toUnsignedInt(srcSeg.getAtIndex(LE_SHORT, i));
 					if (u < srcNodeCount) {
 						rowOffsets[u + 1]++;
 					}
 				}
 			} else {
 				for (int i = 0; i < count; i++) {
-					long u = srcSeg.getAtIndex(ValueLayout.JAVA_LONG_UNALIGNED, i);
+					long u = srcSeg.getAtIndex(LE_LONG, i);
 					if (u >= 0 && u < srcNodeCount) {
 						rowOffsets[(int) u + 1]++;
 					}

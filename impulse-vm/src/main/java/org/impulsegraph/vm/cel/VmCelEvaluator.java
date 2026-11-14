@@ -458,8 +458,10 @@ public final class VmCelEvaluator {
 			byte ct = toTriBool(s, sp);
 			if (ct == TRI_TRUE) {
 				evalInto(tern.ifTrue, s, sp);
-			} else {
+			} else if (ct == TRI_FALSE) {
 				evalInto(tern.ifFalse, s, sp);
+			} else {
+				s.setNull(sp);
 			}
 		} else if (node instanceof FuncNode fn) {
 			evalFuncNode(fn, s, sp);

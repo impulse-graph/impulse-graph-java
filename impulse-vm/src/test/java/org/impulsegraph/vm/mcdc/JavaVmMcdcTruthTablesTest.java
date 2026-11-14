@@ -281,20 +281,21 @@ public class JavaVmMcdcTruthTablesTest {
 				float[] v1 = new float[]{1.0f, 5.0f, 10.0f};
 				int hVec = ctx.registerFloatVector(v1);
 				VmHandlers.setRegister(state, 10, hVec, TYPE_FLOAT_VECTOR);
+				VmHandlers.setRegister(state, 20, Float.floatToRawIntBits(4.0f), TYPE_FLOAT);
+				VmHandlers.setRegister(state, 21, Float.floatToRawIntBits(8.0f), TYPE_FLOAT);
+				VmHandlers.setRegister(state, 22, Float.floatToRawIntBits(5.0f), TYPE_FLOAT);
 
-				VmHandlers.handleVecCmpGt(state, ctx,
-						makeInstr(OP_VEC_CMP_GT, (byte) 0, 11, (10 << 16) | Float.floatToRawIntBits(4.0f)));
-				VmHandlers.handleVecCmpLt(state, ctx,
-						makeInstr(OP_VEC_CMP_LT, (byte) 0, 12, (10 << 16) | Float.floatToRawIntBits(8.0f)));
-				VmHandlers.handleVecCmpEq(state, ctx,
-						makeInstr(OP_VEC_CMP_EQ, (byte) 0, 13, (10 << 16) | Float.floatToRawIntBits(5.0f)));
+				VmHandlers.handleVecCmpGt(state, ctx, makeInstr(OP_VEC_CMP_GT, (byte) 0, 11, (20 << 8) | 10));
+				VmHandlers.handleVecCmpLt(state, ctx, makeInstr(OP_VEC_CMP_LT, (byte) 0, 12, (21 << 8) | 10));
+				VmHandlers.handleVecCmpEq(state, ctx, makeInstr(OP_VEC_CMP_EQ, (byte) 0, 13, (22 << 8) | 10));
 				VmHandlers.handleVecCmpBetween(state, ctx, makeInstr(OP_VEC_CMP_BETWEEN, (byte) 0, 14, 10));
 
 				// 5. Masks & Blending
 				VmHandlers.handleMaskAnd(state, ctx, makeInstr(OP_MASK_AND, (byte) 0, 15, (11 << 16) | 12));
 				VmHandlers.handleMaskOr(state, ctx, makeInstr(OP_MASK_OR, (byte) 0, 16, (11 << 16) | 12));
 				VmHandlers.handleMaskNot(state, ctx, makeInstr(OP_MASK_NOT, (byte) 0, 17, 11));
-				VmHandlers.handleVecBlend(state, ctx, makeInstr(OP_VEC_BLEND, (byte) 0, 18, (11 << 16) | 10));
+				VmHandlers.handleVecBlend(state, ctx,
+						makeInstr(OP_VEC_BLEND, (byte) 0, 18, (10 << 16) | (10 << 8) | 11));
 
 				// 6. Vector Math Unary (15 functions), Binary (11 functions), Ternary (4
 				// functions)
@@ -405,6 +406,7 @@ public class JavaVmMcdcTruthTablesTest {
 				MemorySegment state = ctx.allocateStateSegment();
 
 				// Island detection
+				VmHandlers.setRegister(state, 0, 0L, TYPE_NODE_ID);
 				VmHandlers.handleIslandDetect(state, ctx, makeInstr(OP_ISLAND_DETECT, (byte) 0, 0, 0));
 
 				// GraphBLAS Matrix & Vector ops
@@ -414,8 +416,8 @@ public class JavaVmMcdcTruthTablesTest {
 
 				VmHandlers.handleMxv(state, ctx, makeInstr(OP_MXV, (byte) 0, 2, (0 << 16) | 1));
 				VmHandlers.handleVxm(state, ctx, makeInstr(OP_VXM, (byte) 0, 3, (0 << 16) | 1));
-				VmHandlers.handleEwiseAdd(state, ctx, makeInstr(OP_EWISE_ADD, (byte) 0, 4, (1 << 16) | 1));
-				VmHandlers.handleEwiseMult(state, ctx, makeInstr(OP_EWISE_MULT, (byte) 0, 5, (1 << 16) | 1));
+				VmHandlers.handleEwiseAdd(state, ctx, makeInstr(OP_EWISE_ADD, (byte) 0, 4, (1 << 8) | 1));
+				VmHandlers.handleEwiseMult(state, ctx, makeInstr(OP_EWISE_MULT, (byte) 0, 5, (1 << 8) | 1));
 
 				// Connected components & Louvain & Motif & Isomorphism
 				VmHandlers.handleCcAfforest(state, ctx, makeInstr(OP_CC_AFFOREST, (byte) 0, 6, 0));
@@ -442,7 +444,8 @@ public class JavaVmMcdcTruthTablesTest {
 				VmHandlers.handleAllocScratch(state, ctx, makeInstr(OP_ALLOC_SCRATCH, (byte) 0, 17, 1024));
 				VmHandlers.handleAssertScratchBytes(state, ctx, makeInstr(OP_ASSERT_SCRATCH_BYTES, (byte) 0, 17, 512));
 				VmHandlers.handleSetMaxDop(state, ctx, makeInstr(OP_SET_MAX_DOP, (byte) 0, 0, 8));
-				VmHandlers.handleLoadIndirect(state, ctx, makeInstr(OP_LOAD_INDIRECT, (byte) 0, 18, 12));
+				VmHandlers.setRegister(state, 19, 12L, TYPE_INT64);
+				VmHandlers.handleLoadIndirect(state, ctx, makeInstr(OP_LOAD_INDIRECT, (byte) 0, 18, 19));
 			}
 		}
 	}

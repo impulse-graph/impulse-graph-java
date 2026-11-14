@@ -85,39 +85,55 @@ public interface Traversal<T> {
 	 * Traverses edges in both outgoing (CSR) and incoming (CSC) directions along
 	 * the given relation.
 	 */
+	@SuppressWarnings("unchecked")
 	default Traversal<T> both(String relation) {
-		return both(new String[]{relation});
+		return out(relation).union((Traversal<ImpulseBitSet>) in(relation));
 	}
 
 	/**
 	 * Traverses outgoing edges across the union of all given relations.
 	 */
+	@SuppressWarnings("unchecked")
 	default Traversal<T> out(String... relations) {
 		if (relations == null || relations.length == 0) {
 			return this;
 		}
-		return out(relations[0]);
+		Traversal<T> acc = out(relations[0]);
+		for (int i = 1; i < relations.length; i++) {
+			acc = acc.union((Traversal<ImpulseBitSet>) out(relations[i]));
+		}
+		return acc;
 	}
 
 	/**
 	 * Traverses incoming edges across the union of all given relations.
 	 */
+	@SuppressWarnings("unchecked")
 	default Traversal<T> in(String... relations) {
 		if (relations == null || relations.length == 0) {
 			return this;
 		}
-		return in(relations[0]);
+		Traversal<T> acc = in(relations[0]);
+		for (int i = 1; i < relations.length; i++) {
+			acc = acc.union((Traversal<ImpulseBitSet>) in(relations[i]));
+		}
+		return acc;
 	}
 
 	/**
 	 * Traverses both outgoing and incoming edges across the union of all given
 	 * relations.
 	 */
+	@SuppressWarnings("unchecked")
 	default Traversal<T> both(String... relations) {
 		if (relations == null || relations.length == 0) {
 			return this;
 		}
-		return out(relations[0]);
+		Traversal<T> acc = both(relations[0]);
+		for (int i = 1; i < relations.length; i++) {
+			acc = acc.union((Traversal<ImpulseBitSet>) both(relations[i]));
+		}
+		return acc;
 	}
 
 	/**
