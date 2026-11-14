@@ -14,7 +14,10 @@ public class OffHeapBitSet implements ImpulseBitSet {
 	private int maxWord;
 
 	public OffHeapBitSet(Arena arena, int bitCount) {
-		this.wordCount = (bitCount + 63) / 64;
+		if (bitCount < 0) {
+			throw new IllegalArgumentException("bitCount must be >= 0: " + bitCount);
+		}
+		this.wordCount = (int) (((long) bitCount + 63L) >>> 6);
 		// Arena allocation is zero-initialized by default in Java FFM
 		this.segment = arena.allocate((long) this.wordCount * ValueLayout.JAVA_LONG.byteSize());
 		this.minWord = this.wordCount;
@@ -26,7 +29,15 @@ public class OffHeapBitSet implements ImpulseBitSet {
 	}
 
 	public OffHeapBitSet(MemorySegment preAllocated, int bitCount, boolean isZeroed) {
-		this.wordCount = (bitCount + 63) / 64;
+		if (bitCount < 0) {
+			throw new IllegalArgumentException("bitCount must be >= 0: " + bitCount);
+		}
+		this.wordCount = (int) (((long) bitCount + 63L) >>> 6);
+		long requiredBytes = (long) this.wordCount * ValueLayout.JAVA_LONG.byteSize();
+		if (preAllocated == null || preAllocated.byteSize() < requiredBytes) {
+			throw new IllegalArgumentException(
+					"preAllocated segment too small: required " + requiredBytes + " bytes");
+		}
 		this.segment = preAllocated;
 		this.minWord = isZeroed ? this.wordCount : 0;
 		this.maxWord = isZeroed ? -1 : (this.wordCount - 1);

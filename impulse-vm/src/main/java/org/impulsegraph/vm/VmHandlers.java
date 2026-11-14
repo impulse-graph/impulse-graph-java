@@ -793,6 +793,13 @@ public final class VmHandlers {
 
 		MemorySegment rowOff = rel.getRowOffsetsSegment();
 		MemorySegment colIdx = rel.getColumnTargetsSegment();
+		if (rowOff == null || rowOff.equals(MemorySegment.NULL) || colIdx == null || colIdx.equals(MemorySegment.NULL)
+				|| rowOff.byteSize() < ((long) srcNodeCount + 1L) * 4L || colIdx.byteSize() <= 0L) {
+			setRegister(state, dst, outHandle, TYPE_NODE_VECTOR);
+			setFlag(state, FLAG_ZF, false);
+			return;
+		}
+		long maxColElems = colIdx.byteSize() / 4L;
 
 		// 1. 2-Neighbor sampling pass
 		for (int r = 0; r < 2; r++) {
@@ -801,9 +808,9 @@ public final class VmHandlers {
 					int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
 					int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
 					int deg = end - start;
-					if (r < deg) {
+					if (start >= 0 && r < deg && (long) start + r < maxColElems) {
 						int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + r);
-						if (v < nodeCount) {
+						if (v >= 0 && v < nodeCount) {
 							unionCcNodes(comp, u, v);
 						}
 					}
@@ -817,10 +824,13 @@ public final class VmHandlers {
 				int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
 				int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
 				int deg = end - start;
-				for (int i = 0; i < deg; i++) {
-					int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + i);
-					if (v < nodeCount) {
-						unionCcNodes(comp, u, v);
+				if (start >= 0 && deg > 0) {
+					long limit = Math.min(deg, maxColElems - start);
+					for (int i = 0; i < limit; i++) {
+						int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, start + i);
+						if (v >= 0 && v < nodeCount) {
+							unionCcNodes(comp, u, v);
+						}
 					}
 				}
 			}
@@ -4292,14 +4302,22 @@ public final class VmHandlers {
 		if (rel != null && N > 0) {
 			MemorySegment offsetsSeg = rel.getRowOffsetsSegment();
 			MemorySegment targetsSeg = rel.getColumnTargetsSegment();
+			int srcNodeCount = rel.getNodeCount();
+			if (offsetsSeg == null || offsetsSeg.equals(MemorySegment.NULL) || targetsSeg == null
+					|| targetsSeg.equals(MemorySegment.NULL)
+					|| offsetsSeg.byteSize() < ((long) srcNodeCount + 1L) * 4L || targetsSeg.byteSize() <= 0L) {
+				setRegister(state, dst, handle, TYPE_FLOAT_VECTOR);
+				setFlag(state, FLAG_ZF, false);
+				return;
+			}
+			long maxTargetElems = targetsSeg.byteSize() / 4L;
 
 			int[] deg = ctx.scratchInt(0, N);
 			int maxDeg = 0;
-			int srcNodeCount = rel.getNodeCount();
 			for (int i = 0; i < N; i++) {
 				int d = (i < srcNodeCount)
-						? (offsetsSeg.getAtIndex(ValueLayout.JAVA_INT, i + 1)
-								- offsetsSeg.getAtIndex(ValueLayout.JAVA_INT, i))
+						? Math.max(0, offsetsSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i + 1)
+								- offsetsSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i))
 						: 0;
 				deg[i] = d;
 				if (d > maxDeg)
@@ -4332,11 +4350,15 @@ public final class VmHandlers {
 			for (int i = 0; i < N; i++) {
 				int v = vert[i];
 				coreOut[v] = (float) deg[v];
-				int eStart = (v < srcNodeCount) ? offsetsSeg.getAtIndex(ValueLayout.JAVA_INT, v) : 0;
-				int eEnd = (v < srcNodeCount) ? offsetsSeg.getAtIndex(ValueLayout.JAVA_INT, v + 1) : 0;
+				int eStart = (v < srcNodeCount) ? offsetsSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v) : 0;
+				int eEnd = (v < srcNodeCount) ? offsetsSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, v + 1) : 0;
+				if (eStart < 0)
+					eStart = 0;
+				if (eEnd > maxTargetElems)
+					eEnd = (int) maxTargetElems;
 				for (int e = eStart; e < eEnd; e++) {
-					int u = targetsSeg.getAtIndex(ValueLayout.JAVA_INT, e);
-					if (u < N && deg[u] > deg[v]) {
+					int u = targetsSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, e);
+					if (u >= 0 && u < N && deg[u] > deg[v]) {
 						int du = deg[u];
 						int pu = pos[u];
 						int pw = bin[du];
@@ -4815,6 +4837,16 @@ public final class VmHandlers {
 							vec = ctx.getFloatVector(h);
 						}
 						java.lang.foreign.MemorySegment dataSeg = csrRel.getAttributeSegments().get(idx);
+						if (dataSeg == null || dataSeg.equals(MemorySegment.NULL) || dataSeg.byteSize() == 0L) {
+							continue;
+						}
+						int elemBytes = switch (typeCode) {
+							case 0x01 -> 1;
+							case 0x02 -> 2;
+							case 0x04, 0x06 -> 8;
+							default -> 4;
+						};
+						count = Math.min(count, dataSeg.byteSize() / elemBytes);
 						java.lang.foreign.MemorySegment validSeg = null;
 						if (csrRel.getValiditySegments() != null && csrRel.getValiditySegments().size() > idx) {
 							validSeg = csrRel.getValiditySegments().get(idx);
