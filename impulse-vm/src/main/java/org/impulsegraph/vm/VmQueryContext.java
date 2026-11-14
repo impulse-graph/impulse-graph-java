@@ -450,8 +450,8 @@ public final class VmQueryContext implements AutoCloseable {
 		long slabOffset;
 
 		ThreadLocalBitsetPool(int bitCount) {
-			this.bitCount = bitCount;
-			int words = (bitCount + 63) / 64;
+			this.bitCount = Math.max(0, bitCount);
+			int words = (int) (((long) this.bitCount + 63L) >>> 6);
 			this.byteSize = ((long) words * 8L + 63L) & ~63L;
 		}
 

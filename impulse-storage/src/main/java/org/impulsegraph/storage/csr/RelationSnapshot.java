@@ -1065,7 +1065,11 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 		}
 		if (isFlatForward()) {
 			int[] fwdMap = getOrBuildFlatForwardEdgeMap();
-			return (srcU < fwdMap.length) ? fwdMap[srcU] : -1;
+			int e = (srcU < fwdMap.length) ? fwdMap[srcU] : -1;
+			if (e < 0 || columnTargetsSegment == null || columnTargetsSegment.equals(MemorySegment.NULL)) {
+				return -1;
+			}
+			return (readNodeId(columnTargetsSegment, e) == dstV) ? e : -1;
 		}
 		int offW = offsetWidthBytes();
 		int tgtW = idWidthBytes(nodeIdWidth);
@@ -1093,7 +1097,11 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 	@Override
 	public void close() {
 		if (arena.scope().isAlive()) {
-			arena.close();
+			try {
+				arena.close();
+			} catch (UnsupportedOperationException ignored) {
+				// Auto / global arenas cannot be explicitly closed.
+			}
 		}
 	}
 }
