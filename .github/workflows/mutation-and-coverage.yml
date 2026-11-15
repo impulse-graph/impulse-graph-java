@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout impulse-graph-java (with spec/ submodule)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -56,7 +56,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout impulse-graph-java (with spec/ submodule)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 

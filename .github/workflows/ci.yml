@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         with:
@@ -51,7 +51,7 @@ jobs:
 
     steps:
       - name: Checkout impulse-graph-java (with spec/ submodule)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
