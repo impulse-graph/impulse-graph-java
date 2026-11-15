@@ -148,6 +148,24 @@ class ImpulseKotlinMcdcTest {
         val dsl = ImpulseQueryDsl<ImpulseBitSet>()
         dsl.input("User", ArgType.SINGLE_NODE).walkEdge("follows")
         assertNotNull(dsl.build())
+
+        // Assert ImpulseQueryDsl terminal collect* / reduce* methods directly
+        fun makeDsl(): ImpulseQueryDsl<ImpulseBitSet> =
+            ImpulseQueryDsl<ImpulseBitSet>().apply {
+                input("User", ArgType.SINGLE_NODE)
+                walkEdge("follows")
+            }
+
+        assertTrue(makeDsl().collect(ReturnType.ROARING_BITSET).exportAst().contains("collect"))
+        assertTrue(makeDsl().collectBitSet().exportAst().contains("collect"))
+        assertTrue(makeDsl().collectCount().exportAst().contains("collect"))
+        assertTrue(makeDsl().apply { projectState("1.0") }.reduceSum().exportAst().contains("reduce"))
+        assertTrue(makeDsl().apply { projectState("1.0") }.reduceMin().exportAst().contains("reduce"))
+        assertTrue(makeDsl().apply { projectState("1.0") }.reduceMax().exportAst().contains("reduce"))
+        assertTrue(makeDsl().apply { projectState("1.0") }.reduceAvg().exportAst().contains("reduce"))
+        assertTrue(makeDsl().reduceFirst().exportAst().contains("reduce"))
+        assertTrue(makeDsl().reduceArgMax().exportAst().contains("reduce"))
+        assertTrue(makeDsl().reduceArgMin().exportAst().contains("reduce"))
     }
 
     @Test

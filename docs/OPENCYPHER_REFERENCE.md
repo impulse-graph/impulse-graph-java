@@ -12,15 +12,16 @@ Impulse Graph supports the core analytical openCypher subset for graph pattern m
 MATCH <Pattern>
 [WHERE <PredicateExpression>]
 RETURN <ProjectionExpression>
+[ORDER BY <VectorSimilarityClause> [LIMIT <k>]]
 ```
 
 ### 1.1 Supported Projection Expressions (`RETURN`)
 The `RETURN` clause determines the terminal materialization of the active frontier:
 * `RETURN <variable>`: Materializes the active target domain frontier set as an off-heap BitSet ([`ScmCollect.bitset()`](file:///Users/jesse/impulse/impulse-graph-java/impulse-api/src/main/java/org/impulsegraph/compiler/ast/ScmCollect.java)).
-* `RETURN count(<variable>)`: Computes the scalar cardinality of the active target frontier set ([`ScmCollect.scalar()`](file:///Users/jesse/impulse/impulse-graph-java/impulse-api/src/main/java/org/impulsegraph/compiler/ast/ScmCollect.java)).
+* `RETURN count(<variable>)`: Computes the scalar cardinality (`Long`) of the active target frontier set (`ScmCollect.scalar()` or `ScmCollect.count()` after set unions).
 
 > [!NOTE]
-> Impulse Graph is an analytical vector traversal engine. Clauses modifying graph state (`CREATE`, `SET`, `DELETE`, `MERGE`) or pagination clauses (`LIMIT`, `SKIP`, `ORDER BY`) are not part of the core analytical kernel and are not accepted by [`CypherParser`](file:///Users/jesse/impulse/impulse-graph-java/impulse-compiler/src/main/java/org/impulsegraph/compiler/cypher/CypherParser.java). Analytical queries operate strictly on immutable `.imps` binary snapshots.
+> Impulse Graph is an analytical vector traversal engine. Clauses modifying graph state (`CREATE`, `SET`, `DELETE`, `MERGE`) or offset pagination (`SKIP`) are not part of the core analytical kernel and are not accepted by [`CypherParser`](file:///Users/jesse/impulse/impulse-graph-java/impulse-compiler/src/main/java/org/impulsegraph/compiler/cypher/CypherParser.java). `ORDER BY` supports vector similarity reranking (`dot`, `cosine`, `l2`) with optional `LIMIT`. Analytical queries operate strictly on immutable `.imps` binary snapshots.
 
 ### 1.2 `MATCH` Pattern Grammar
 Patterns define single-hop or multi-hop path traversals across node domains:
@@ -32,22 +33,27 @@ MATCH (u:User)-[:knows]->(f:User)
 // Single-Hop Reverse Traversal (CSC Walk)
 MATCH (p:Product)<-[:PURCHASED]-(u:User)
 
+// Undirected & Multi-Relation Union Traversal
+MATCH (u:User)-[:KNOWS|FOLLOWS]-(f:User)
+
 // Multi-Hop Path Traversal (Metapath)
 MATCH (d:Disease)-[:DdG]->(g:Gene)<-[:CuG]-(c:Compound)
 
 // Namespaced or Escaped Relationship Types (using backticks)
 MATCH (d:Disease)-[:`DISGENET::da`]->(g:Gene)<-[:`DRUGBANK::target`]-(c:Compound)
 
-// Bounded Variable-Length Traversal
+// Bounded & Unbounded Variable-Length Traversal
 MATCH (u1:User)-[:knows*1..3]->(u2:User)
+MATCH (u1:User)-[:knows*]->(u2:User)
 
 // Relationship Variable Binding (for edge attribute filtering)
 MATCH (u:User)-[e:knows]->(f:User)
 ```
 
-#### Invariants Enforced by `CypherParser`
-1. **Typed Edge Walk Mandate**: Every relationship in a path pattern must explicitly declare its relationship type (e.g. `[:RelName]`). Anonymous edge traversals (such as `-->` or `-[e]->`) are strictly prohibited and will trigger an `IllegalArgumentException` at parse time.
-2. **Bounded Traversal Mandate**: Infinite unbounded variable-length traversals (`*`) are prohibited to guarantee bounded memory and execution bounds. Variable-length hops must specify a concrete upper bound (e.g. `*2`, `*1..4`, or `*..3`). Unbounded wildcards (`*`) without an upper bound will trigger an `IllegalArgumentException`.
+#### Invariants Enforced by `CypherParser` & `CypherCompiler`
+1. **Typed Edge Walk Mandate**: Every relationship in a path pattern must explicitly declare at least one relationship type (e.g. `[:RelName]` or `[:R1|R2]`). Anonymous edge traversals (such as `-->` or `-[e]->`) are strictly prohibited and trigger an `IllegalArgumentException` at parse time.
+2. **Hop Bounds**: Bounded variable-length traversals (`*1..3`) require `0 <= minHops <= maxHops <= 64`. Unbounded Kleene star (`*`) lowers to fixed-point iteration (`ScmFixpoint` / `ScmLaneWalk` with `fixedPoint=true`).
+3. **Multi-Seed & Vector Search**: `WHERE a.id IN [0, 1]` and `quorum >= N` lower to multi-lane bit-sliced execution (`ScmLaneInitSeeds`, `ScmLaneWalk`, `ScmLaneFilterQuorum`), and `vector_ann(a.emb, [...], k)` lowers to `ScmVectorAnnSearch`.
 
 ---
 
@@ -93,18 +99,20 @@ openCypher queries are parsed by [`CypherParser`](file:///Users/jesse/impulse/im
 
 * **`CypherParser.CypherQuery`**: Represents the complete parsed query:
   ```java
-  public record CypherQuery(PathPattern path, List<WherePredicate> wherePredicates, ReturnProjection projection)
+  public record CypherQuery(PathPattern path, List<WherePredicate> wherePredicates, ReturnProjection projection, OrderByClause orderBy)
   ```
 * **`CypherParser.PathPattern` & `PathStep`**: Represents the multi-hop trajectory:
   ```java
   public record PathPattern(NodePattern startNode, List<PathStep> steps)
   public record PathStep(EdgePattern edge, NodePattern targetNode)
   public record NodePattern(String variable, String label)
-  public record EdgePattern(String variable, String relationName, boolean isForward, int minHops, int maxHops, String filterExpr)
+  public record EdgePattern(String variable, String relationName, boolean isForward, int minHops, int maxHops,
+      String filterExpr, List<String> relationNames, boolean isUndirected, boolean isUnbounded)
   ```
 * **`CypherParser.WherePredicate`**: Represents parsed attribute conditions:
   ```java
-  public record WherePredicate(String targetVar, String field, String op, String valueOrParam)
+  public record WherePredicate(String targetVar, String field, String op, String valueOrParam,
+      List<Long> inValues, List<Float> vectorArg, int topK)
   ```
 * **`CypherParser.ReturnProjection`**: Represents the terminal collection target:
   ```java
