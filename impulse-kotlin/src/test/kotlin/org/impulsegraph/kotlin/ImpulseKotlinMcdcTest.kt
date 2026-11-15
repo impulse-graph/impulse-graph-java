@@ -56,6 +56,7 @@ class ImpulseKotlinMcdcTest {
 
         Arena.ofConfined().use { arena ->
             val snap = createSyntheticGraph(arena)
+            assertEquals(1L, snap(qCount))
             assertEquals(1, snap(qBitSet).cardinality())
         }
 

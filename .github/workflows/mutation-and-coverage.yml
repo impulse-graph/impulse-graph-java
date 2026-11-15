@@ -1,0 +1,89 @@
+name: Mutation Testing & Code Coverage
+
+on:
+  schedule:
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
+    inputs:
+      modules:
+        description: 'Comma-separated modules for Pitest mutationCoverage'
+        required: false
+        default: 'impulse-api,impulse-compiler,impulse-kotlin,impulse-scala'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  jacoco-coverage:
+    name: JaCoCo Coverage (JDK 25)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout impulse-graph-java (with spec/ submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Create datasets directory
+        run: mkdir -p datasets
+
+      - name: Setup Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: 'maven'
+
+      - name: Run Tests with JaCoCo Coverage
+        run: mvn clean test -Pcoverage,jdk22-plus --batch-mode --errors
+
+      - name: Upload JaCoCo Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-reports
+          path: '**/target/site/jacoco/**'
+          if-no-files-found: ignore
+          retention-days: 14
+
+  pitest-mutation:
+    name: Pitest Mutation Coverage (JDK 25)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout impulse-graph-java (with spec/ submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Create datasets directory
+        run: mkdir -p datasets
+
+      - name: Setup Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: 'maven'
+
+      - name: Compile Reactor & Test Sources
+        run: mvn test-compile -Pjdk22-plus --batch-mode --errors
+
+      - name: Run Pitest Mutation Coverage
+        env:
+          PITEST_MODULES: ${{ inputs.modules || 'impulse-api,impulse-compiler,impulse-kotlin,impulse-scala' }}
+        run: |
+          mvn -Pmutation,jdk22-plus -pl "$PITEST_MODULES" org.pitest:pitest-maven:mutationCoverage --batch-mode --errors
+
+      - name: Upload Pitest Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pitest-reports
+          path: '**/target/pit-reports/**'
+          if-no-files-found: ignore
+          retention-days: 14
