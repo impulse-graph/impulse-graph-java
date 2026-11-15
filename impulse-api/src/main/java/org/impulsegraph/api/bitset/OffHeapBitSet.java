@@ -35,8 +35,7 @@ public class OffHeapBitSet implements ImpulseBitSet {
 		this.wordCount = (int) (((long) bitCount + 63L) >>> 6);
 		long requiredBytes = (long) this.wordCount * ValueLayout.JAVA_LONG.byteSize();
 		if (preAllocated == null || preAllocated.byteSize() < requiredBytes) {
-			throw new IllegalArgumentException(
-					"preAllocated segment too small: required " + requiredBytes + " bytes");
+			throw new IllegalArgumentException("preAllocated segment too small: required " + requiredBytes + " bytes");
 		}
 		this.segment = preAllocated;
 		this.minWord = isZeroed ? this.wordCount : 0;

@@ -2,11 +2,32 @@ package org.impulsegraph.kotlin
 
 import org.impulsegraph.api.ArgType
 import org.impulsegraph.api.ImpulseGraphQuery
+import org.impulsegraph.api.ImpulseGraphSnapshot
 import org.impulsegraph.api.ImpulseQueryBuilder
 import org.impulsegraph.api.ReturnType
+import org.impulsegraph.api.bitset.ImpulseBitSet
+import org.impulsegraph.compiler.ast.ImpScmNode
 
 @DslMarker
 annotation class ImpulseQueryDslMarker
+
+private class SeededImpulseGraphQuery<R>(
+    private val delegate: ImpulseGraphQuery<R>,
+    private val defaultSeed: Long,
+) : ImpulseGraphQuery<R> {
+    override fun execute(
+        snapshot: ImpulseGraphSnapshot,
+        input: Any?,
+    ): R = delegate.execute(snapshot, input ?: defaultSeed)
+
+    override fun getAst(): ImpScmNode = delegate.ast
+
+    override fun getOperationName(): String = delegate.operationName
+
+    override fun getParameters(): Map<String, Any> = delegate.parameters
+
+    override fun exportAst(): String = delegate.exportAst()
+}
 
 /**
  * Type-safe, idiomatic Kotlin DSL builder for constructing Impulse Graph queries.
@@ -15,6 +36,8 @@ annotation class ImpulseQueryDslMarker
 class ImpulseQueryDsl<R>(
     private val builder: ImpulseQueryBuilder<R> = ImpulseQueryBuilder(),
 ) {
+    private var boundSeed: Long? = null
+
     /**
      * Define the input entity type and argument type for the query pipeline.
      */
@@ -27,13 +50,27 @@ class ImpulseQueryDsl<R>(
     }
 
     /**
-     * Define the input entity type and seed node identifier.
+     * Define the input entity type and bind a default [NodeId] seed.
      */
     fun input(
         entityType: String,
         seed: NodeId,
     ): ImpulseQueryDsl<R> {
+        boundSeed = seed.value
         builder.input(entityType, ArgType.SINGLE_NODE)
+        return this
+    }
+
+    fun bindParameter(
+        name: String,
+        value: Any,
+    ): ImpulseQueryDsl<R> {
+        builder.bindParameter(name, value)
+        return this
+    }
+
+    fun bindParameters(params: Map<String, Any>): ImpulseQueryDsl<R> {
+        builder.bindParameters(params)
         return this
     }
 
@@ -53,6 +90,105 @@ class ImpulseQueryDsl<R>(
         return this
     }
 
+    infix fun walkReverse(relationName: String): ImpulseQueryDsl<R> {
+        builder.walkReverse(relationName)
+        return this
+    }
+
+    infix fun walkReverse(relationName: RelationName): ImpulseQueryDsl<R> {
+        builder.walkReverse(relationName.value)
+        return this
+    }
+
+    infix fun walkBoth(relationName: String): ImpulseQueryDsl<R> {
+        builder.walkBoth(relationName)
+        return this
+    }
+
+    infix fun walkBoth(relationName: RelationName): ImpulseQueryDsl<R> {
+        builder.walkBoth(relationName.value)
+        return this
+    }
+
+    fun walkOutUnion(vararg relationNames: String): ImpulseQueryDsl<R> {
+        builder.walkOutUnion(*relationNames)
+        return this
+    }
+
+    fun walkInUnion(vararg relationNames: String): ImpulseQueryDsl<R> {
+        builder.walkInUnion(*relationNames)
+        return this
+    }
+
+    fun walkBothUnion(vararg relationNames: String): ImpulseQueryDsl<R> {
+        builder.walkBothUnion(*relationNames)
+        return this
+    }
+
+    fun walkEdgeWithCel(
+        relationName: String,
+        celExpr: String,
+    ): ImpulseQueryDsl<R> {
+        builder.walkEdgeWithCel(relationName, celExpr)
+        return this
+    }
+
+    fun walkEdgeWithCel(
+        relationName: RelationName,
+        celExpr: String,
+    ): ImpulseQueryDsl<R> {
+        builder.walkEdgeWithCel(relationName.value, celExpr)
+        return this
+    }
+
+    fun walkReverseWithCel(
+        relationName: String,
+        celExpr: String,
+    ): ImpulseQueryDsl<R> {
+        builder.walkReverseWithCel(relationName, celExpr)
+        return this
+    }
+
+    fun walkReverseWithCel(
+        relationName: RelationName,
+        celExpr: String,
+    ): ImpulseQueryDsl<R> {
+        builder.walkReverseWithCel(relationName.value, celExpr)
+        return this
+    }
+
+    fun walkEdgeWithState(
+        relationName: String,
+        stateProjections: String,
+    ): ImpulseQueryDsl<R> {
+        builder.walkEdgeWithState(relationName, stateProjections)
+        return this
+    }
+
+    fun projectState(projectionExpr: String): ImpulseQueryDsl<R> {
+        builder.projectState(projectionExpr)
+        return this
+    }
+
+    fun filterWithCel(celExpr: String): ImpulseQueryDsl<R> {
+        builder.filterWithCel(celExpr)
+        return this
+    }
+
+    fun filter(celExpr: String): ImpulseQueryDsl<R> {
+        builder.filter(celExpr)
+        return this
+    }
+
+    fun vectorRerank(
+        queryVector: FloatArray,
+        attrId: Int,
+        metric: Int,
+    ): ImpulseQueryDsl<R> {
+        builder.vectorRerank(queryVector, attrId, metric)
+        return this
+    }
+
     /**
      * Walk edge with filter label.
      */
@@ -61,6 +197,14 @@ class ImpulseQueryDsl<R>(
         filterLabel: String,
     ): ImpulseQueryDsl<R> {
         builder.walkEdgeFiltered(relationName, filterLabel)
+        return this
+    }
+
+    fun walkEdgeFiltered(
+        relationName: RelationName,
+        filterLabel: String,
+    ): ImpulseQueryDsl<R> {
+        builder.walkEdgeFiltered(relationName.value, filterLabel)
         return this
     }
 
@@ -74,6 +218,16 @@ class ImpulseQueryDsl<R>(
         value: Double,
     ): ImpulseQueryDsl<R> {
         builder.walkEdgeFilteredAttribute(relationName, attributeName, op, value)
+        return this
+    }
+
+    fun walkEdgeFilteredAttribute(
+        relationName: RelationName,
+        attributeName: String,
+        op: String,
+        value: Double,
+    ): ImpulseQueryDsl<R> {
+        builder.walkEdgeFilteredAttribute(relationName.value, attributeName, op, value)
         return this
     }
 
@@ -154,35 +308,48 @@ class ImpulseQueryDsl<R>(
         return this
     }
 
+    private fun <T> wrapSeed(query: ImpulseGraphQuery<T>): ImpulseGraphQuery<T> {
+        val seed = boundSeed
+        return if (seed != null) SeededImpulseGraphQuery(query, seed) else query
+    }
+
     /**
      * Terminal step: sum reduction over projected values.
      */
-    fun <T> reduceSum(): ImpulseGraphQuery<T> = builder.reduceSum()
+    fun reduceSum(): ImpulseGraphQuery<Double> = wrapSeed(builder.reduceSum())
 
     /**
      * Terminal step: max reduction over projected values.
      */
-    fun <T> reduceMax(): ImpulseGraphQuery<T> = builder.reduceMax()
+    fun reduceMax(): ImpulseGraphQuery<Double> = wrapSeed(builder.reduceMax())
 
     /**
      * Terminal step: min reduction over projected values.
      */
-    fun <T> reduceMin(): ImpulseGraphQuery<T> = builder.reduceMin()
+    fun reduceMin(): ImpulseGraphQuery<Double> = wrapSeed(builder.reduceMin())
 
     /**
      * Terminal step: average reduction over projected values.
      */
-    fun <T> reduceAvg(): ImpulseGraphQuery<T> = builder.reduceAvg()
+    fun reduceAvg(): ImpulseGraphQuery<Double> = wrapSeed(builder.reduceAvg())
 
     /**
      * Terminal step: first element reduction.
      */
-    fun <T> reduceFirst(): ImpulseGraphQuery<T> = builder.reduceFirst()
+    fun reduceFirst(): ImpulseGraphQuery<Any> = wrapSeed(builder.reduceFirst())
+
+    fun reduceArgMax(): ImpulseGraphQuery<Int> = wrapSeed(builder.reduceArgMax())
+
+    fun reduceArgMin(): ImpulseGraphQuery<Int> = wrapSeed(builder.reduceArgMin())
 
     /**
      * Terminal collect step: materialize final result in the requested return type format.
      */
-    fun <T> collect(returnType: ReturnType): ImpulseGraphQuery<T> = builder.collect(returnType)
+    fun collect(returnType: ReturnType): ImpulseGraphQuery<R> = wrapSeed(builder.collect(returnType))
+
+    fun collectBitSet(): ImpulseGraphQuery<ImpulseBitSet> = wrapSeed(builder.collect(ReturnType.DENSE_BITSET))
+
+    fun collectCount(): ImpulseGraphQuery<Long> = wrapSeed(builder.collect(ReturnType.COUNT))
 
     /**
      * Underlying Java query builder.
@@ -193,6 +360,7 @@ class ImpulseQueryDsl<R>(
 /**
  * Extended domain opcodes DSL wrapper.
  */
+@ImpulseQueryDslMarker
 class ExtendedOpsDsl<R>(private val extOps: ImpulseQueryBuilder.ExtendedOps<R>) {
     fun islandDetect(
         src1Reg: Int,
