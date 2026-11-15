@@ -41,6 +41,18 @@ public final class ImpulseVmInterpreter {
 	public static Object execute(MemorySegment programSeg, VmHandlers.Instruction[] preDecoded, long instructionCount,
 			ImpulseGraphSnapshot snapshot, Object input, Arena arena, java.util.List<String> stringPool,
 			MemorySegment inlineDataSeg) {
+		return executeInternal(programSeg, preDecoded, instructionCount, snapshot, input, arena, stringPool,
+				inlineDataSeg, 0L);
+	}
+
+	public static Object executeWithFuel(MemorySegment programSeg, long instructionCount, ImpulseGraphSnapshot snapshot,
+			Object input, Arena arena, long maxFuel) {
+		return executeInternal(programSeg, null, instructionCount, snapshot, input, arena, null, null, maxFuel);
+	}
+
+	private static Object executeInternal(MemorySegment programSeg, VmHandlers.Instruction[] preDecoded,
+			long instructionCount, ImpulseGraphSnapshot snapshot, Object input, Arena arena,
+			java.util.List<String> stringPool, MemorySegment inlineDataSeg, long maxFuel) {
 		if (programSeg == null || instructionCount <= 0) {
 			return new OffHeapBitSet(arena, 1000);
 		}
@@ -49,6 +61,9 @@ public final class ImpulseVmInterpreter {
 		}
 
 		try (VmQueryContext ctx = VmQueryContext.acquire(snapshot, arena)) {
+			if (maxFuel > 0L) {
+				ctx.setFuel(maxFuel);
+			}
 			ctx.setStringPool(stringPool);
 			if (inlineDataSeg != null) {
 				ctx.setInlineData(inlineDataSeg, inlineDataSeg.byteSize());

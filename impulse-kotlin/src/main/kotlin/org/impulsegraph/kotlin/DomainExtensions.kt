@@ -3,6 +3,7 @@ package org.impulsegraph.kotlin
 import org.impulsegraph.api.ArgType
 import org.impulsegraph.api.ImpulseGraphQuery
 import org.impulsegraph.api.ReturnType
+import org.impulsegraph.api.bitset.ImpulseBitSet
 
 /**
  * Value class representing a node entity identifier to enforce strong typing without allocation overhead.
@@ -38,11 +39,12 @@ fun buildNHopQuery(
     entityType: String,
     relationName: String,
     hops: Int,
-): ImpulseGraphQuery<Any> {
-    return impulseQuery<Any> {
+): ImpulseGraphQuery<ImpulseBitSet> {
+    require(hops >= 0) { "hops must be non-negative, got $hops" }
+    return impulseQuery<ImpulseBitSet> {
         input(entityType, ArgType.SINGLE_NODE)
         repeat(hops) {
             walkEdge(relationName)
         }
-    }.collect(ReturnType.ROARING_BITSET)
+    }.collectBitSet()
 }

@@ -363,14 +363,15 @@ public final class VmQueryContext implements AutoCloseable {
 		this.maxThreads = DEFAULT_MAX_THREADS;
 		this.mockAttrCount = 0;
 		java.util.Arrays.fill(this.mockSlots, false);
-		this.fuelEnabled = false;
-		this.maxSteps = 0L;
-		this.fuelRemaining = 0L;
+		this.fuelEnabled = true;
+		this.maxSteps = DEFAULT_FUEL;
+		this.fuelRemaining = DEFAULT_FUEL;
 	}
 
-	private boolean fuelEnabled = false;
-	private long maxSteps = 0L;
-	private long fuelRemaining = 0L;
+	public static final long DEFAULT_FUEL = 50_000_000L;
+	private boolean fuelEnabled = true;
+	private long maxSteps = DEFAULT_FUEL;
+	private long fuelRemaining = DEFAULT_FUEL;
 
 	public void setFuel(long maxSteps) {
 		this.fuelEnabled = (maxSteps > 0);
@@ -664,6 +665,9 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 
 		VmLaneFrontier acquireFrontier(VmLaneFrontier.LaneWidth width, int numLanes, long activeMask, int nodeCount) {
+			if (nodeCount < 0 || nodeCount > 16_777_216) {
+				throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+			}
 			VmLaneFrontier lf = freeFrontiers.isEmpty()
 					? new VmLaneFrontier(new int[8], new long[8][], new int[8])
 					: freeFrontiers.remove(freeFrontiers.size() - 1);

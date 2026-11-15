@@ -63,10 +63,11 @@ public final class VmMultiLaneHandlers {
 				best = Math.max(best, fa.length);
 			}
 		}
+		int cappedMin = (minNeeded < 0 || minNeeded > 1_048_576) ? 64 : minNeeded;
 		if (best > 0) {
-			return Math.max(best, minNeeded);
+			return Math.max(best, cappedMin);
 		}
-		return Math.max(64, minNeeded);
+		return Math.max(64, cappedMin);
 	}
 
 	private static int resolveDomainNodeCount(VmQueryContext ctx, String domName) {
@@ -505,7 +506,9 @@ public final class VmMultiLaneHandlers {
 				}
 				int maxSeed = 0;
 				for (int i = 0; i < seedCount; i++) {
-					maxSeed = Math.max(maxSeed, seeds[i]);
+					if (seeds[i] >= 0 && seeds[i] < 1_048_576) {
+						maxSeed = Math.max(maxSeed, seeds[i]);
+					}
 				}
 				int nodeCount;
 				if (domainBound) {

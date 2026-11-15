@@ -80,34 +80,17 @@ class NullabilityStorageTest {
 	void testZeroEdgeV09RelationWithNullableAttribute() throws Exception {
 		byte[] bytes;
 		try (Arena buildArena = Arena.ofConfined()) {
-			RelationSnapshot rel = new RelationSnapshot(
-					buildArena,
-					15,
-					0,
-					MemorySegment.NULL,
-					MemorySegment.NULL,
-					MemorySegment.NULL,
-					MemorySegment.NULL,
-					List.of(MemorySegment.NULL),
-					List.of(MemorySegment.NULL),
-					(byte) 4,
-					(byte) 4
-			);
+			RelationSnapshot rel = new RelationSnapshot(buildArena, 15, 0, MemorySegment.NULL, MemorySegment.NULL,
+					MemorySegment.NULL, MemorySegment.NULL, List.of(MemorySegment.NULL), List.of(MemorySegment.NULL),
+					(byte) 4, (byte) 4);
 			rel.setAttributeNames(List.of("edge_attr"));
 			rel.setAttributeTypeCodes(List.of((byte) 0x82));
 
 			GraphSnapshot graph = new GraphSnapshot(buildArena, Map.of("R_D1_D1_1", rel));
-			bytes = new DefaultSnapshotBuilder()
-					.withDomain(0, "D1", (byte) 0x03, 15L)
+			bytes = new DefaultSnapshotBuilder().withDomain(0, "D1", (byte) 0x03, 15L)
 					.withRelationDomain("R_D1_D1_1", 0, 0)
-					.build(new BinarySnapshotLoader.DefaultLoadedSnapshot(
-							BinarySnapshotLoader.SNAPSHOT_MAGIC,
-							(short) 9,
-							graph,
-							Map.of(),
-							Map.of(),
-							Map.of(),
-							Map.of()));
+					.build(new BinarySnapshotLoader.DefaultLoadedSnapshot(BinarySnapshotLoader.SNAPSHOT_MAGIC,
+							(short) 9, graph, Map.of(), Map.of(), Map.of(), Map.of()));
 		}
 
 		try (Arena arena = Arena.ofShared()) {

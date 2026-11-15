@@ -5,9 +5,40 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.impulsegraph.api.ImpulseGraphQuery
 import org.impulsegraph.api.ImpulseGraphSnapshot
+import org.impulsegraph.api.bitset.ImpulseBitSet
+import org.impulsegraph.api.spi.ImpulseEngineRegistry
+import org.impulsegraph.api.statement.ImpulseStatement
+import org.impulsegraph.api.traversal.DomainView
 import org.impulsegraph.compiler.ast.ImpScmNode
 import org.impulsegraph.compiler.ast.ScmProgram
+import java.lang.foreign.Arena
+import java.nio.file.Path
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration
+
+object ImpulseSnapshots {
+    fun load(path: Path): ImpulseGraphSnapshot = ImpulseGraphSnapshot.load(path)
+
+    fun load(
+        path: Path,
+        arena: Arena,
+    ): ImpulseGraphSnapshot = ImpulseEngineRegistry.getProvider().loadSnapshot(path, arena)
+
+    inline fun <T> withSnapshot(
+        path: Path,
+        block: (ImpulseGraphSnapshot) -> T,
+    ): T {
+        val arena = Arena.ofShared()
+        val snap =
+            try {
+                load(path, arena)
+            } catch (t: Throwable) {
+                arena.close()
+                throw t
+            }
+        return snap.use(block)
+    }
+}
 
 /**
  * Execute an [ImpulseGraphQuery] against an immutable graph snapshot.
@@ -15,9 +46,7 @@ import java.util.concurrent.TimeUnit
 fun <R> ImpulseGraphSnapshot.execute(
     query: ImpulseGraphQuery<R>,
     input: Any? = null,
-): R {
-    return query.execute(this, input)
-}
+): R = query.execute(this, input)
 
 /**
  * Invoke operator allowing queries to be executed directly on snapshots: `val result = snapshot(query, input)`.
@@ -25,19 +54,15 @@ fun <R> ImpulseGraphSnapshot.execute(
 operator fun <R> ImpulseGraphSnapshot.invoke(
     query: ImpulseGraphQuery<R>,
     input: Any? = null,
-): R {
-    return execute(query, input)
-}
+): R = execute(query, input)
 
 /**
  * Invoke operator allowing queries to be called like functions: `val result = query(snapshot, input)`.
  */
 operator fun <R> ImpulseGraphQuery<R>.invoke(
-    snapshot: ImpulseGraphSnapshot?,
+    snapshot: ImpulseGraphSnapshot,
     input: Any? = null,
-): R {
-    return execute(snapshot, input)
-}
+): R = execute(snapshot, input)
 
 /**
  * Extension property to access pipeline AST steps.
@@ -46,24 +71,28 @@ val <R> ImpulseGraphQuery<R>.steps: List<ImpScmNode>
     get() = (getAst() as? ScmProgram)?.steps() ?: emptyList()
 
 /**
- * Get edge count for a relation using array access indexing syntax: `val edges = snapshot["userToGroup"]`.
+ * Get edge count for a relation using array access indexing syntax, or `null` if the relation does not exist.
  */
-operator fun ImpulseGraphSnapshot.get(relationName: String): Long {
-    return getEdgeCount(relationName)
-}
+operator fun ImpulseGraphSnapshot.get(relationName: String): Long? =
+    if (relationNames.contains(relationName)) getEdgeCount(relationName) else null
 
 /**
  * Check if a relation name is present in this snapshot: `"userToGroup" in snapshot`.
  */
-operator fun ImpulseGraphSnapshot.contains(relationName: String): Boolean {
-    return relationNames.contains(relationName)
-}
+operator fun ImpulseGraphSnapshot.contains(relationName: String): Boolean = relationNames.contains(relationName)
 
 /**
  * Total relation count in this snapshot.
  */
 val ImpulseGraphSnapshot.size: Int
     get() = relationCount
+
+fun ImpulseGraphSnapshot.domainView(domainName: String): DomainView = domain(domainName)
+
+inline fun <T> ImpulseGraphSnapshot.useStatement(
+    query: String,
+    block: (ImpulseStatement) -> T,
+): T = prepare(query).use(block)
 
 /**
  * Asynchronously execute a query using Kotlin Coroutines on a worker dispatcher.
@@ -88,3 +117,32 @@ suspend fun ImpulseGraphSnapshot.awaitDrainedAsync(
     withContext(dispatcher) {
         awaitDrained(timeout, unit)
     }
+
+suspend fun ImpulseGraphSnapshot.awaitDrainedAsync(
+    timeout: Duration,
+    dispatcher: CoroutineDispatcher = Dispatchers.IO,
+): Boolean = awaitDrainedAsync(timeout.inWholeMilliseconds, TimeUnit.MILLISECONDS, dispatcher)
+
+suspend fun ImpulseGraphSnapshot.drainAndCloseAsync(
+    timeout: Duration,
+    dispatcher: CoroutineDispatcher = Dispatchers.IO,
+): Unit =
+    withContext(dispatcher) {
+        drainAndClose(timeout.inWholeMilliseconds, TimeUnit.MILLISECONDS)
+    }
+
+fun ImpulseBitSet.asSequence(): Sequence<Int> =
+    sequence {
+        val it = this@asSequence.iterator()
+        while (it.hasNext()) {
+            yield(it.next())
+        }
+    }
+
+operator fun ImpulseBitSet.contains(nodeId: Int): Boolean = get(nodeId)
+
+fun ImpulseBitSet.toList(): List<Int> = asSequence().toList()
+
+fun ImpulseBitSet.toSet(): Set<Int> = asSequence().toSet()
+
+fun ImpulseBitSet.toIntArray(): IntArray = toList().toIntArray()
