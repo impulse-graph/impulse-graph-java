@@ -27,14 +27,16 @@ class ImpulseVmBytecodeFuzzTest {
 		int actualInstrs = Math.max(1, rawBytes.length / 8);
 
 		try (Arena arena = Arena.ofShared()) {
-			MemorySegment offsets = arena.allocate(ValueLayout.JAVA_INT, 5);
+			MemorySegment offsets = arena.allocate(5L * ValueLayout.JAVA_INT.byteSize(),
+					ValueLayout.JAVA_INT.byteAlignment());
 			offsets.setAtIndex(ValueLayout.JAVA_INT, 0, 0);
 			offsets.setAtIndex(ValueLayout.JAVA_INT, 1, 2);
 			offsets.setAtIndex(ValueLayout.JAVA_INT, 2, 3);
 			offsets.setAtIndex(ValueLayout.JAVA_INT, 3, 4);
 			offsets.setAtIndex(ValueLayout.JAVA_INT, 4, 4);
 
-			MemorySegment targets = arena.allocate(ValueLayout.JAVA_INT, 4);
+			MemorySegment targets = arena.allocate(4L * ValueLayout.JAVA_INT.byteSize(),
+					ValueLayout.JAVA_INT.byteAlignment());
 			targets.setAtIndex(ValueLayout.JAVA_INT, 0, 1);
 			targets.setAtIndex(ValueLayout.JAVA_INT, 1, 2);
 			targets.setAtIndex(ValueLayout.JAVA_INT, 2, 3);
