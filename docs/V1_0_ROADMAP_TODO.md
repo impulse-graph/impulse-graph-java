@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
 
-This document outlines the detailed engineering task checklist required to bring **`impulse-graph-java`** from initial public preview (v0.9.0) to **v1.0.0 major production readiness**, aligned with the master ecosystem roadmap ([`impulse-website/docs/roadmap.md`](file:///Users/jesse/impulse/impulse-website/docs/roadmap.md)).
+This document outlines the detailed engineering task checklist required to bring **`impulse-graph-java`** (currently `0.10.0-SNAPSHOT`) to **v1.0.0 major production readiness**, aligned with the master ecosystem roadmap ([`impulse-website/docs/roadmap.md`](file:///Users/jesse/impulse/impulse-website/docs/roadmap.md)).
 
 ---
 
@@ -82,8 +82,9 @@ This document outlines the detailed engineering task checklist required to bring
 - [x] **`impulse-clojure`**: Clojure functional query wrappers and traversal primitives (`org.impulsegraph.core`, `core_test.clj`).
 
 ### 7. Documentation, Supply Chain Security (SLSA L3) & Package Publishing
-- [x] Configure GitHub Actions workflow (`maven-publish.yml`) for automated GPG signing and deployment to **Maven Central** via `central-publishing-maven-plugin`.
+- [x] Configure GitHub Actions workflow (`maven-publish.yml`) for automated GPG signing and deployment to **Maven Central** via `central-publishing-maven-plugin` (excluding `impulse-samples` and pre-release tags).
 - [x] Enable SLSA Level 3 build provenance attestations (`actions/attest-build-provenance` on published JARs) and Sigstore / Cosign keyless signatures (`release.yml`).
+- [x] Configure GitHub Actions JaCoCo + Pitest mutation testing (`mutation-and-coverage.yml`) and Spotless formatting gates (`ci.yml`).
 - [ ] Automated Javadoc generation for `impulse-api`, `impulse-storage`, `impulse-vm`, and `impulse-spec` integrated into hosted docs portal (`docs.impulsegraph.io`).
 
 ---

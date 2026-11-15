@@ -224,4 +224,19 @@
         ;; Kleisli DomainView interop
         (let [dv (imp/domain wrapped :User)
               res (.collect (.out (.from dv (long-array [0])) "follows"))]
-          (is (= [1] (vec (seq res)))))))))
+          (is (= [1] (vec (seq res)))))
+
+        ;; Negative & edge cases: terminal node with 0 outgoing edges, empty traversal
+        (is (= 0 (-> (imp/traverse wrapped :User 3)
+                     (imp/out "follows")
+                     imp/count-nodes)))
+        (is (= #{} (-> (imp/traverse wrapped :User 3)
+                       (imp/out "follows")
+                       imp/to-set)))
+        (is (some? (imp/domain wrapped :NonExistentDomain)))
+        (is (= #{} (-> (imp/traverse wrapped :User 0)
+                       (imp/in "follows")
+                       imp/to-set)))
+        (is (= 0 (-> (imp/traverse wrapped :User 0)
+                     (imp/in "follows")
+                     imp/count-nodes)))))))

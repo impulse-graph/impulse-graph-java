@@ -164,7 +164,53 @@ class ImpulseScalaMcdcTest:
     )
 
     val builderDsl = new ImpulseQueryDsl[ImpulseBitSet]()
-    builderDsl.input("User").walkEdge("follows")
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.input("User"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.bindParameter("p", 1))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.bindParameters(Map("q" -> 2)))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkEdge("follows"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkEdge(RelationName("follows")))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkReverse("follows"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkReverse(RelationName("follows")))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkBoth("follows"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkBoth(RelationName("follows")))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkTarget("User"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkTarget(RelationName("User")))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkOutUnion("follows"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkInUnion("follows"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkBothUnion("follows"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkEdgeWithCel("follows", "node.id >= 0"))
+    org.junit.jupiter.api.Assertions.assertSame(
+      builderDsl,
+      builderDsl.walkEdgeWithCel(RelationName("follows"), "node.id >= 0")
+    )
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkReverseWithCel("follows", "node.id >= 0"))
+    org.junit.jupiter.api.Assertions.assertSame(
+      builderDsl,
+      builderDsl.walkReverseWithCel(RelationName("follows"), "node.id >= 0")
+    )
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkEdgeWithState("follows", "dist + 1"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.projectState("1.0"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.filter("node.id >= 0"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.filterWithCel("node.id >= 0"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.vectorRerank(Array(1.0f, 2.0f), 1, 0))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.walkEdgeFiltered("follows", "x > 0"))
+    org.junit.jupiter.api.Assertions.assertSame(
+      builderDsl,
+      builderDsl.walkEdgeFiltered(RelationName("follows"), "x > 0")
+    )
+    org.junit.jupiter.api.Assertions.assertSame(
+      builderDsl,
+      builderDsl.walkEdgeFilteredAttribute("follows", "age", ">", 10.0)
+    )
+    org.junit.jupiter.api.Assertions.assertSame(
+      builderDsl,
+      builderDsl.walkEdgeFilteredAttribute(RelationName("follows"), "age", ">", 10.0)
+    )
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.filterNodeAttribute("age", ">", 10.0))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.projectExpression("age", "+", "weight"))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.repeat(1)(walkEdge("follows")))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.repeatUntilStable(walkEdge("follows")))
+    org.junit.jupiter.api.Assertions.assertSame(builderDsl, builderDsl.extended(rebacCheck("view")))
     assertNotNull(builderDsl.build())
 
   @Test

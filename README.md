@@ -31,7 +31,10 @@ It acts as the **"Apache Arrow for Graph Analytics"** on the JVM, pairing an imm
 | **`impulse-vm`** | Register VM (`R0`..`R63`), Java Vector API AVX-512 SIMD handlers (`VmHandlers`), `MethodHandle` JIT combinators, and Statement runner. | **0** |
 | **`impulse-compiler`** | ImpScheme S-Expression AST, CEL optimizer, openCypher lowering, 7-stage optimization passes, `impOps` bytecode emitter. | **0** |
 | **`impulse-builder`** | Streaming snapshot builder (`SnapshotBuilder`), single-pass S3/disk serialization, topology sorting, and chunk iterators. | **0** |
-| **`samples`** | Executable Java sample applications and walkthroughs. | **0** (Internal) |
+| **`impulse-kotlin`** | Idiomatic Kotlin 2.1 DSL, coroutine `executeAsync` / `awaitDrainedAsync`, `@JvmInline value class NodeId`, and operator overloads. | Kotlin stdlib + coroutines |
+| **`impulse-scala`** | Scala 3 type-safe query DSL, receiver-less `using` forwarders (`ImpulseDsl`), `RelationName` / `DomainName` opaques, and `Future` async helpers. | Scala 3 library |
+| **`impulse-clojure`** | Clojure / Scheme Lisp functional traversal wrappers (`org.impulsegraph.core`) and `with-arena` / `with-snapshot` macros. | Clojure |
+| **`samples`** | Executable Java sample applications and walkthroughs (excluded from publish/release). | **0** (Internal) |
 
 ---
 
@@ -44,32 +47,34 @@ It acts as the **"Apache Arrow for Graph Analytics"** on the JVM, pairing an imm
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-api</artifactId>
-        <version>0.9.0</version>
+        <version>0.10.0-SNAPSHOT</version>
     </dependency>
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-storage</artifactId>
-        <version>0.9.0</version>
+        <version>0.10.0-SNAPSHOT</version>
     </dependency>
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-vm</artifactId>
-        <version>0.9.0</version>
+        <version>0.10.0-SNAPSHOT</version>
     </dependency>
     <!-- Optional: Add impulse-compiler for openCypher parsing and multi-stage optimizations -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-compiler</artifactId>
-        <version>0.9.0</version>
+        <version>0.10.0-SNAPSHOT</version>
     </dependency>
     <!-- Optional: Add impulse-builder for streaming snapshot generation -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-builder</artifactId>
-        <version>0.9.0</version>
+        <version>0.10.0-SNAPSHOT</version>
     </dependency>
 </dependencies>
 ```
+
+For JVM language extensions, see [impulse-kotlin](impulse-kotlin/README.md), [impulse-scala](impulse-scala/README.md), and [impulse-clojure](impulse-clojure/README.md).
 
 ### Runtime JVM Flags
 
@@ -172,8 +177,19 @@ Check the [`samples/`](samples/src/main/java/org/impulsegraph/samples) directory
 ## 🛠️ Build & Test Instructions
 
 ```bash
-# Full clean reactor build and test run
+# Full clean reactor build and test run (JDK 22+ / Java 25 LTS auto-activated)
 mvn clean test
+
+# Run on Java 21 LTS (Preview FFM)
+mvn clean test -Pjdk21
+
+# Check or apply Spotless formatting (enforced in CI)
+mvn spotless:check
+mvn spotless:apply
+
+# Run JaCoCo coverage or Pitest mutation coverage
+mvn test -Pcoverage
+mvn -Pmutation -pl impulse-compiler org.pitest:pitest-maven:mutationCoverage
 
 # Run individual test suite within a specific module
 mvn test -pl impulse-storage -Dtest=TestVectorSuiteTest
