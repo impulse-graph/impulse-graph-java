@@ -19,11 +19,22 @@ import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.milliseconds
 
 class ImpulseKotlinMcdcTest {
+    private fun allocInts(
+        arena: Arena,
+        vararg values: Int,
+    ): java.lang.foreign.MemorySegment {
+        val seg = arena.allocate(values.size.toLong() * ValueLayout.JAVA_INT.byteSize(), ValueLayout.JAVA_INT.byteAlignment())
+        for (i in values.indices) {
+            seg.setAtIndex(ValueLayout.JAVA_INT, i.toLong(), values[i])
+        }
+        return seg
+    }
+
     private fun createSyntheticGraph(arena: Arena): GraphSnapshot {
-        val fRow = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 1, 2, 3, 3)
-        val fCol = arena.allocateFrom(ValueLayout.JAVA_INT, 1, 2, 3)
-        val fCscRow = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 0, 1, 2, 3)
-        val fCscCol = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 1, 2)
+        val fRow = allocInts(arena, 0, 1, 2, 3, 3)
+        val fCol = allocInts(arena, 1, 2, 3)
+        val fCscRow = allocInts(arena, 0, 0, 1, 2, 3)
+        val fCscCol = allocInts(arena, 0, 1, 2)
         val relFollows = RelationSnapshot(arena, 4, 3, fRow, fCol, fCscRow, fCscCol)
 
         val rels = mapOf("follows" to relFollows)
