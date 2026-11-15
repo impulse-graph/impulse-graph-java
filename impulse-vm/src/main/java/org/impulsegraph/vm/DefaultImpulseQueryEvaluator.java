@@ -61,12 +61,26 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 
 		if (compiled != null) {
 			metrics.recordCacheHit();
-			R result = (R) compiled.execute(graph, input, COMPILER_ARENA);
+			Object rawResult = compiled.execute(graph, input, COMPILER_ARENA);
+			R result = (R) materializeResult(query.getAst(), rawResult);
 			metrics.recordQueryExecution(System.nanoTime() - startNanos);
 			return result;
 		}
 
 		throw new IllegalStateException("Failed to compile query AST to bytecode");
+	}
+
+	private static Object materializeResult(ImpScmNode ast, Object rawResult) {
+		if (rawResult instanceof org.impulsegraph.api.bitset.ImpulseBitSet bs
+				&& ast instanceof org.impulsegraph.compiler.ast.ScmProgram prog && !prog.steps().isEmpty()) {
+			ImpScmNode last = prog.steps().get(prog.steps().size() - 1);
+			if (last instanceof org.impulsegraph.compiler.ast.ScmCollect collect
+					&& (collect.format() == org.impulsegraph.compiler.ast.ScmCollect.Format.COUNT
+							|| collect.format() == org.impulsegraph.compiler.ast.ScmCollect.Format.SCALAR)) {
+				return Long.valueOf(bs.cardinality());
+			}
+		}
+		return rawResult;
 	}
 
 	public static CompiledQuery compileAst(ImpScmNode ast, ImpulseGraphSnapshot snapshot, Arena arena) {

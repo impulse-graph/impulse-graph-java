@@ -47,15 +47,14 @@ class ImpulseScalaMcdcTest:
       walkEdge(RelationName("follows"))
     }.collectCount()
 
-    // Verify boxValue(null) passes null through to ImpulseQueryBuilder
+    // Verify bindParameter rejects null value eagerly
     org.junit.jupiter.api.Assertions.assertThrows(
       classOf[NullPointerException],
       () =>
         impulseQuery[java.lang.Long] {
           input("User")
           bindParameter("n", null)
-          walkEdge("follows")
-        }.collectCount()
+        }
     )
 
     assertNotNull(seededCount.getAst)
@@ -71,6 +70,7 @@ class ImpulseScalaMcdcTest:
 
     Arena.ofConfined().use { arena =>
       val snap = createSyntheticGraph(arena)
+      assertEquals(java.lang.Long.valueOf(1L), snap(seededCount))
       val bs = snap(seededBitSet)
       assertEquals(1, bs.cardinality())
       assertTrue(bs.containsNode(1))
@@ -108,9 +108,9 @@ class ImpulseScalaMcdcTest:
       walkEdgeFiltered(RelationName("follows"), "x > 0")
       walkEdgeFilteredAttribute(RelationName("follows"), "age", ">", 10.0)
       walkEdgeWithCel("follows", "node.id >= 0")
-      summon[ImpulseQueryDsl[AnyRef]].walkEdgeWithCel(RelationName("follows"), "node.id >= 0")
+      walkEdgeWithCel(RelationName("follows"), "node.id >= 0")
       walkReverseWithCel("follows", "node.id >= 0")
-      summon[ImpulseQueryDsl[AnyRef]].walkReverseWithCel(RelationName("follows"), "node.id >= 0")
+      walkReverseWithCel(RelationName("follows"), "node.id >= 0")
       walkEdgeWithState("follows", "dist + 1")
       filter("node.id >= 0")
       filterWithCel("node.id >= 0")

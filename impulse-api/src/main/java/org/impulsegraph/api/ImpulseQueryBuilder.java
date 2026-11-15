@@ -60,9 +60,9 @@ public class ImpulseQueryBuilder<R> {
 	 * @return This builder instance for method chaining
 	 */
 	public ImpulseQueryBuilder<R> bindParameter(String name, Object value) {
-		if (name != null) {
-			this.parameters.put(name, value);
-		}
+		Objects.requireNonNull(name, "parameter name must not be null");
+		Objects.requireNonNull(value, "parameter value must not be null");
+		this.parameters.put(name, value);
 		return this;
 	}
 
@@ -75,7 +75,11 @@ public class ImpulseQueryBuilder<R> {
 	 */
 	public ImpulseQueryBuilder<R> bindParameters(Map<String, Object> params) {
 		if (params != null) {
-			this.parameters.putAll(params);
+			params.forEach((k, v) -> {
+				Objects.requireNonNull(k, "parameter name must not be null");
+				Objects.requireNonNull(v, "parameter value must not be null");
+				this.parameters.put(k, v);
+			});
 		}
 		return this;
 	}

@@ -328,6 +328,11 @@
                             </jvmArgs>
                             <threads>4</threads>
                             <failWhenNoMutations>false</failWhenNoMutations>
+                            <excludedTestClasses>
+                                <param>*Benchmark*</param>
+                                <param>*Fuzz*</param>
+                                <param>*JmhTestRunner*</param>
+                            </excludedTestClasses>
                             <outputFormats>
                                 <outputFormat>HTML</outputFormat>
                                 <outputFormat>XML</outputFormat>

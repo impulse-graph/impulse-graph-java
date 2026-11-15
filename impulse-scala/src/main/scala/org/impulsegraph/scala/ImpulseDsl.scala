@@ -269,7 +269,15 @@ def walkBothUnion(relationNames: String*)(using dsl: ImpulseQueryDsl[?]): Unit =
 def walkEdgeWithCel(relationName: String, celExpr: String)(using dsl: ImpulseQueryDsl[?]): Unit =
   dsl.walkEdgeWithCel(relationName, celExpr)
 
+@targetName("walkEdgeWithCelRel")
+def walkEdgeWithCel(relationName: RelationName, celExpr: String)(using dsl: ImpulseQueryDsl[?]): Unit =
+  dsl.walkEdgeWithCel(relationName, celExpr)
+
 def walkReverseWithCel(relationName: String, celExpr: String)(using dsl: ImpulseQueryDsl[?]): Unit =
+  dsl.walkReverseWithCel(relationName, celExpr)
+
+@targetName("walkReverseWithCelRel")
+def walkReverseWithCel(relationName: RelationName, celExpr: String)(using dsl: ImpulseQueryDsl[?]): Unit =
   dsl.walkReverseWithCel(relationName, celExpr)
 
 def walkEdgeWithState(relationName: String, stateProjections: String)(using dsl: ImpulseQueryDsl[?]): Unit =
