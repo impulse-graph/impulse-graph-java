@@ -19,17 +19,28 @@ import java.lang.foreign.ValueLayout
 import java.nio.file.Files
 
 class ImpulseKotlinDslTest {
+    private fun allocInts(
+        arena: Arena,
+        vararg values: Int,
+    ): java.lang.foreign.MemorySegment {
+        val seg = arena.allocate(values.size.toLong() * ValueLayout.JAVA_INT.byteSize(), ValueLayout.JAVA_INT.byteAlignment())
+        for (i in values.indices) {
+            seg.setAtIndex(ValueLayout.JAVA_INT, i.toLong(), values[i])
+        }
+        return seg
+    }
+
     private fun createSyntheticGraph(arena: Arena): GraphSnapshot {
-        val fRow = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 1, 2, 3, 3)
-        val fCol = arena.allocateFrom(ValueLayout.JAVA_INT, 1, 2, 3)
-        val fCscRow = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 0, 1, 2, 3)
-        val fCscCol = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 1, 2)
+        val fRow = allocInts(arena, 0, 1, 2, 3, 3)
+        val fCol = allocInts(arena, 1, 2, 3)
+        val fCscRow = allocInts(arena, 0, 0, 1, 2, 3)
+        val fCscCol = allocInts(arena, 0, 1, 2)
         val relFollows = RelationSnapshot(arena, 4, 3, fRow, fCol, fCscRow, fCscCol)
 
-        val u2gRow = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 1, 2, 2, 2)
-        val u2gCol = arena.allocateFrom(ValueLayout.JAVA_INT, 1, 2)
-        val u2gCscRow = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 0, 1, 2, 2)
-        val u2gCscCol = arena.allocateFrom(ValueLayout.JAVA_INT, 0, 1)
+        val u2gRow = allocInts(arena, 0, 1, 2, 2, 2)
+        val u2gCol = allocInts(arena, 1, 2)
+        val u2gCscRow = allocInts(arena, 0, 0, 1, 2, 2)
+        val u2gCscCol = allocInts(arena, 0, 1)
         val relU2g = RelationSnapshot(arena, 4, 2, u2gRow, u2gCol, u2gCscRow, u2gCscCol)
 
         val rels =
