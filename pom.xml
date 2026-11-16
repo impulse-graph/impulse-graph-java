@@ -58,7 +58,7 @@
         <archunit.version>1.4.0</archunit.version>
         <jqwik.version>1.10.2</jqwik.version>
         <equalsverifier.version>4.5.2</equalsverifier.version>
-        <jacoco.version>0.8.12</jacoco.version>
+        <jacoco.version>0.8.16</jacoco.version>
         <pitest.version>1.30.2</pitest.version>
         <pitest.junit5.version>1.2.3</pitest.junit5.version>
         <jazzer.version>0.30.0</jazzer.version>
