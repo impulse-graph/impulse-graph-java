@@ -43,7 +43,7 @@ jobs:
 
       - name: Upload JaCoCo Reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jacoco-reports
           path: '**/target/site/jacoco/**'
@@ -81,7 +81,7 @@ jobs:
 
       - name: Upload Pitest Reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pitest-reports
           path: '**/target/pit-reports/**'
