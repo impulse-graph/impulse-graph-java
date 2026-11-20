@@ -88,9 +88,9 @@ public final class VmLaneFrontier {
 		this.activeMask = activeMask;
 		this.nodeCount = nodeCount;
 		this.lanes = lanes;
-		this.tripRelIds = null;
-		this.tripMasks = null;
-		this.tripMaskLengths = null;
+		this.tripRelIds = new int[8];
+		this.tripMasks = new long[8][];
+		this.tripMaskLengths = new int[8];
 		this.tripMaskCount = 0;
 	}
 

@@ -96,7 +96,7 @@ jobs:
       - name: Sign SHA256SUMS with Cosign (Keyless OIDC)
         run: |
           cd release-assets
-          cosign sign-blob --yes --output-signature SHA256SUMS.sig SHA256SUMS
+          cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
 
       - name: Attest Build Provenance (SLSA)
         uses: actions/attest-build-provenance@v1
@@ -152,7 +152,7 @@ jobs:
 
           Every artifact is cryptographically hashed, signed with Sigstore / Cosign keyless OIDC, and attested via GitHub Artifact Attestations:
           - **Checksums**: [\`SHA256SUMS\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/SHA256SUMS)
-          - **Signature**: [\`SHA256SUMS.sig\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/SHA256SUMS.sig)
+          - **Cosign Bundle**: [\`SHA256SUMS.sigstore.json\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/SHA256SUMS.sigstore.json)
 
           \`\`\`bash
           # Verify checksums
@@ -162,7 +162,7 @@ jobs:
           cosign verify-blob \\
             --certificate-identity-regexp "https://github.com/impulse-graph/impulse-graph-java/" \\
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \\
-            --signature SHA256SUMS.sig \\
+            --bundle SHA256SUMS.sigstore.json \\
             SHA256SUMS
           \`\`\`
           EOF
