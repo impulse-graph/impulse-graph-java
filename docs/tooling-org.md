@@ -38,7 +38,7 @@ To support Maven builds, Gradle builds, and direct CLI execution, Java code gene
 * **Standalone CLI Usage**:
   `impulse-codegen` can be executed directly as a standalone CLI application via `GeneratorMain`:
   ```bash
-  java -cp "impulse-codegen-0.9.0.jar:lib/*" \
+  java -cp "impulse-codegen-0.10.0.jar:lib/*" \
       org.impulsegraph.codegen.GeneratorMain <schema.yaml> <target-folder> [package-name]
   ```
 
@@ -80,7 +80,7 @@ To support Maven builds, Gradle builds, and direct CLI execution, Java code gene
 * **Usage**:
   ```groovy
   plugins {
-      id 'org.impulsegraph.impulse' version '0.9.0'
+      id 'org.impulsegraph.impulse' version '0.10.0'
   }
 
   impulse {
@@ -146,7 +146,7 @@ While `impulse-graph-java` generates strongly-typed Java application code, the *
   # Compute degree distributions, multiplicity, zone maps, and CBO sketches
   impulse stats graph.imps
 
-  # Validate Spec v0.9.0 compliance (128-byte alignment, monotonic CSR offsets)
+  # Validate Spec v0.10.0 compliance (128-byte alignment, monotonic CSR offsets)
   impulse snapshot validate graph.imps
   ```
 * **Offline Layout Optimization**:
@@ -235,7 +235,7 @@ impulse run --snapshot graph.imps --bytecode query.impb --input-val 0
 | :--- | :--- |
 | **[`impulse-graph-java`](https://github.com/impulse-graph/impulse-graph-java)** | Java 21 LTS FFM Core Engine: `impulse-codegen`, `impulse-maven-plugin`, `impulse-gradle-plugin`, `impulse-compiler`, `impulse-vm`, `impulse-storage`, `impulse-builder`. |
 | **[`impulse-graph-tooling`](https://github.com/impulse-graph/impulse-graph-tooling)** | Unified Developer Utilities & CLI (`impulse build`, `generate`, `inspect`, `stats`, `validate`, `optimize`, `compile`, `assemble`, `disassemble`, `run`, `crypto`). |
-| **[`impulse-graph-spec`](https://github.com/impulse-graph/impulse-graph-spec)** | Normative C-ABI Binary Snapshot v0.9.0 specification (`FORMAT_SPECIFICATION.md`), test vectors (`tc01`..`tc36`), and polyglot validation suite (`four_way_validation.py`). |
+| **[`impulse-graph-spec`](https://github.com/impulse-graph/impulse-graph-spec)** | Normative C-ABI Binary Snapshot v0.10.0 specification (`FORMAT_SPECIFICATION.md`), test vectors (`tc01`..`tc36`), and polyglot validation suite (`four_way_validation.py`). |
 | **[`impulse-graph-core`](https://github.com/impulse-graph/impulse-graph-core)** | C++20 zero-copy kernel, Rust core crate (`impulse-rust`), and multi-language FFI bindings (Python, C#, Go, Node.js). |
 | **[`impulse-platform`](https://github.com/impulse-graph/impulse-platform)** | Cloud ingestion infrastructure, gRPC services, Kafka WAL streaming, and RocksDB persistence. |
 

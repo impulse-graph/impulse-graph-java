@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Pre-release Documentation**: This documentation describes pre-release software under active development and may be inaccurate, incomplete, or missing.
 
-This document defines the declarative YAML schema and manifest format used across the **Impulse Graph Engine** (`impulse-graph`). The schema acts as the single source of truth for generating strongly-typed Java query builders, configuring zero-copy memory-mapped binary snapshot layouts ([`.imps` v0.9.0](file:///Users/jesse/impulse/impulse-graph-spec/docs/FORMAT_SPECIFICATION.md)), defining multi-tablespace composite graph deployments, and binding bi-directional external key mappers.
+This document defines the declarative YAML schema and manifest format used across the **Impulse Graph Engine** (`impulse-graph`). The schema acts as the single source of truth for generating strongly-typed Java query builders, configuring zero-copy memory-mapped binary snapshot layouts ([`.imps` v0.10.0](file:///Users/jesse/impulse/impulse-graph-spec/docs/FORMAT_SPECIFICATION.md)), defining multi-tablespace composite graph deployments, and binding bi-directional external key mappers.
 
 ## Purpose & Tooling Ecosystem
 The schema/manifest file (typically `schema.yaml` or `manifest.yaml`) is consumed across the Impulse Graph tooling suite:
@@ -88,7 +88,7 @@ relations:
   * `out`: Generates **CSR** (Compressed Sparse Row) indices. Edges are sorted primarily by Source ID. Mandatory for forward edge traversals (`builder.walkEdge(...)` and generated `walk<Relation>()` methods).
   * `in`: Generates **CSC** (Compressed Sparse Column) transpose indices. Edges are sorted primarily by Target ID. Enables instant incoming edge traversals without scanning the full graph.
   * *Allowed values:* `[out]`, `[in]`, or `[out, in]`.
-* **`cardinality`**: Multiplicity layout optimization flag conforming to C-ABI Binary Snapshot v0.9.0 Section 3.3.3:
+* **`cardinality`**: Multiplicity layout optimization flag conforming to C-ABI Binary Snapshot v0.10.0 Section 3.3.3:
   * `many_to_many` (`IMP_REL_CARDINALITY_M_N`): Standard CSR/CSC layout (`offsets` + `columnIndices`). Target $k$ of node $i$ is read at `csrColumnIndices[csrRowOffsets[i] + k]`.
   * `many_to_one` (`IMP_REL_CARDINALITY_M_1`): Flat target array with `CsrRowOffBytes = 0`. Each source node has at most 1 target; target for node $i$ is accessed directly at `csrColumnIndices[i]` in $O(1)$ time.
   * `one_to_many` (`IMP_REL_CARDINALITY_1_M`): Forward standard CSR layout; reverse CSC transpose omits `cscRowOffsets` and stores a flat source ID array.
@@ -244,7 +244,7 @@ Add the plugin to your `pom.xml` to automatically generate strongly-typed query 
 <plugin>
     <groupId>org.impulsegraph</groupId>
     <artifactId>impulse-maven-plugin</artifactId>
-    <version>0.9.0</version>
+    <version>0.10.0</version>
     <executions>
         <execution>
             <goals>

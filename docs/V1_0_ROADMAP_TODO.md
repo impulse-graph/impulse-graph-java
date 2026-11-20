@@ -33,7 +33,7 @@ This document outlines the detailed engineering task checklist required to bring
 - [ ] Add Arrow Columnar and tabular row streaming extractors (`collectRows()`) to `Traversal<T>`.
 
 ### 2. `impulse-storage` & `impulse-vm` (Off-Heap Engine, Vector API & ImpScheme VM)
-- [x] Complete off-heap zero-copy snapshot loader (`MemorySegment` mmap) matching Spec v0.9.0 Page 0 alignment and 128-byte hardware bounds.
+- [x] Complete off-heap zero-copy snapshot loader (`MemorySegment` mmap) matching Spec v0.10.0 Page 0 alignment and 128-byte hardware bounds.
 - [x] Implement self-contained zero-dependency **Google CEL (Common Expression Language)** Pratt parser and optimizer with analytical vector math extensions.
 - [x] Implement Level 2 **`MethodHandle` JIT Combinators** (`MethodHandles.foldArguments()`, `filterArguments()`, `VectorOperators` bindings) for unrolling `impOps` into HotSpot native execution.
 - [x] **Configurable Primitive Node ID Widths (16, 32, 64-bit)**: Support for per-domain variable ID widths (`uint16_t`, `uint32_t`, `uint64_t`) and edge offset widths.
@@ -60,7 +60,7 @@ This document outlines the detailed engineering task checklist required to bring
 - [x] Validate fixed 4KB Page 0 header parsing, `IMPS` magic byte verification (`0x494D5053`), and SHA-256 integrity checksums.
 - [x] Implement global string table pool (Section 2) decoder and primary key catalog mapping.
 - [x] Implement Structure-of-Arrays (SoA) attribute descriptors for primitive types (`INT8`..`FLOAT64`), `FIXED_BYTES`, `VAR_STRING`, `TIMESTAMP_MS`/`TIMESTAMP_NS`, and multidimensional fixed vectors.
-- [x] Binary snapshot layout constants conforming to Normative Format Specification v0.9.0 (`ImpulseLayoutsV0_9`).
+- [x] Binary snapshot layout constants conforming to Normative Format Specification v0.10.0 (`ImpulseLayoutsV0_9`).
 
 ### 4. `impulse-codegen` & `.imps.schema.yaml`
 - [x] Implement `.imps.schema.yaml` schema parser and validation engine in `impulse-codegen` (`ManifestModel`, `GeneratorMain`).
