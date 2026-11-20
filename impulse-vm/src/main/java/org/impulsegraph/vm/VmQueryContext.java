@@ -767,7 +767,7 @@ public final class VmQueryContext implements AutoCloseable {
 						freeFrontierBuffers.add(lanes);
 					}
 				}
-				if (freeFrontiers.size() < 32) {
+				if (lf.hasTripMaskStorage() && freeFrontiers.size() < 32) {
 					boolean dupLf = false;
 					for (int i = 0, n = freeFrontiers.size(); i < n; i++) {
 						if (freeFrontiers.get(i) == lf) {
