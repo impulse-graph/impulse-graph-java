@@ -94,6 +94,10 @@ public final class VmLaneFrontier {
 		this.tripMaskCount = 0;
 	}
 
+	boolean hasTripMaskStorage() {
+		return tripRelIds != null;
+	}
+
 	void reset(LaneWidth width, int numLanes, long activeMask, int nodeCount, long[] lanesBuf) {
 		this.width = width;
 		this.numLanes = numLanes;
