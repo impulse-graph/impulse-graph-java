@@ -2,7 +2,7 @@
 
 > [!NOTE]
 > **Impulse Graph Engine — Java 21 LTS FFM Core Engine Specification**  
-> *Document Version: 2.0.0 | Target Spec: Impulse Binary Snapshot Format (`.imps`) v0.9.0*
+> *Document Version: 2.0.0 | Target Spec: Impulse Binary Snapshot Format (`.imps`) v0.10.0*
 
 ---
 
@@ -147,7 +147,7 @@ Because the query runtime operates directly over memory-mapped `.imps` binary fi
 | **OS Page Cache** | Demand-Paged | Kernel populates physical RAM on demand; prefetched via `segment.load()` (`MADV_WILLNEED`). |
 | **Clean Page Eviction** | Transparent | Under memory pressure, pages are reclaimed instantly without swapping or disk writes. |
 
-### 4.2 Physical Storage Sizing Equations (v0.9.0 Format)
+### 4.2 Physical Storage Sizing Equations (v0.10.0 Format)
 For a graph relation connecting Source Domain $D_s$ (cardinality $|V_s|$) to Target Domain $D_t$ (cardinality $|V_t|$) with $|E|$ edges:
 
 $$\text{CSR Footprint} = (|V_s| + 1) \times W_{\text{edgeIdx}} + |E| \times W_{\text{tgtId}}$$
@@ -273,7 +273,7 @@ public class GraphSnapshotManager implements AutoCloseable {
 
 ---
 
-## 6. Binary `.imps` Metadata & Pod Cold-Start Protocol (Spec v0.9.0)
+## 6. Binary `.imps` Metadata & Pod Cold-Start Protocol (Spec v0.10.0)
 
 To ensure snapshots are self-describing across polyglot runtimes (C++, Java, Rust, Python), streaming ingestion metadata and stream offsets are embedded directly inside the **Footer Custom Metadata Stream**:
 

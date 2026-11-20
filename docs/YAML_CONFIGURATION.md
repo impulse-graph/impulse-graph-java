@@ -1,7 +1,7 @@
 # YAML Manifest & Tablespace Configuration
 
 > [!NOTE]
-> **Normative Specification Alignment**: This documentation defines the multi-file chunking and declarative schema configuration for **Impulse Graph Engine** (`impulse-graph`), conforming to the **Impulse Binary Snapshot Format (`.imps`) v0.9.0** and the Java 21 LTS Foreign Function & Memory (FFM) runtime.
+> **Normative Specification Alignment**: This documentation defines the multi-file chunking and declarative schema configuration for **Impulse Graph Engine** (`impulse-graph`), conforming to the **Impulse Binary Snapshot Format (`.imps`) v0.10.0** and the Java 21 LTS Foreign Function & Memory (FFM) runtime.
 
 For enterprise deployments with datasets exceeding single-file I/O limits, multi-terabyte analytics, or partitioned domain catalogs, Impulse Graph Engine supports multi-file chunking and composite graph loading via a declarative `manifest.yaml` configuration.
 
@@ -25,7 +25,7 @@ Each Node Domain independently configures its physical integer representation wi
 
 ### 1.3 Zero-Copy Off-Heap Execution & 128-Byte Alignment
 All binary tablespaces (`.imps`) are memory-mapped (`mmap`) off-heap using Java 21 LTS FFM `Arena` segments:
-* **Fixed 4KB Page 0 Header**: Baseline header with magic `0x494D5053` (`IMPS`), 16-bit packed version `0x0009` (v0.9.0), timestamp, and section directory offsets.
+* **Fixed 4KB Page 0 Header**: Baseline header with magic `0x494D5053` (`IMPS`), 16-bit packed version `0x000A` (v0.10.0), timestamp, and section directory offsets.
 * **128-Byte Hardware Alignment**: All topological offset sections, target index arrays, and property buffers enforce strict 128-byte alignment for AVX-512 vector units, GPU warp coalescing (NVIDIA GPUDirect Storage `cuFile`), and TPU vector tiles.
 * **Single-Pass Cloud S3 Streaming**: Snapshots are serialized direct-to-disk or cloud object storage (Amazon S3, Google Cloud Storage) with an $O(\text{chunk})$ physical RAM footprint without requiring random file seeks.
 
@@ -189,7 +189,7 @@ In the underlying `.imps` binary format, each topology can independently configu
 
 ## 5. Property Attributes & Supported Data Types
 
-Attributes can be attached to both node domains and edge relations. All attributes are laid out in **Structure-of-Arrays (SoA)** format with strict 128-byte hardware alignment conforming to the C-ABI Binary Snapshot v0.9.0 specification.
+Attributes can be attached to both node domains and edge relations. All attributes are laid out in **Structure-of-Arrays (SoA)** format with strict 128-byte hardware alignment conforming to the C-ABI Binary Snapshot v0.10.0 specification.
 
 ### 5.1 Supported Attribute Types
 
@@ -266,7 +266,7 @@ Impulse snapshots encode key-value string dictionaries, degree distributions, an
 1. **Footer Dictionary**: Key-value pairs stored immediately before the EOF trailer.
 2. **Trailer POD (16 Bytes)**: Conforming to `impulse_footer_trailer_v0_9_t`:
    * `footer_length` (`int64`): Offset distance to footer start.
-   * `spec_version` (`int32`): Packed specification version (`0x0009` for v0.9.0).
+   * `spec_version` (`int32`): Packed specification version (`0x000A` for v0.10.0).
    * `footer_magic` (`int32`): Magic identifier `0x494D5053` (`IMPS`).
 3. **Cryptographic Attestation**: Snapshots can embed a SHA-256 payload digest signed with an enterprise private key and certificate chain for SLSA Level 3 provenance verification.
 

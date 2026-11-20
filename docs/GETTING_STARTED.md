@@ -19,28 +19,28 @@ Add the engine modules to your `pom.xml`:
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-api</artifactId>
-        <version>0.9.0</version>
+        <version>0.10.0</version>
     </dependency>
 
     <!-- Storage Layer & Binary Snapshot Loader / Builder -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-storage</artifactId>
-        <version>0.9.0</version>
+        <version>0.10.0</version>
     </dependency>
 
     <!-- Compute VM & Execution Engine Provider -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-vm</artifactId>
-        <version>0.9.0</version>
+        <version>0.10.0</version>
     </dependency>
 
     <!-- Query Compiler & openCypher Frontend (Optional, for declarative Cypher queries) -->
     <dependency>
         <groupId>org.impulsegraph</groupId>
         <artifactId>impulse-compiler</artifactId>
-        <version>0.9.0</version>
+        <version>0.10.0</version>
     </dependency>
 </dependencies>
 ```
@@ -48,20 +48,20 @@ Add the engine modules to your `pom.xml`:
 #### Gradle (Groovy DSL — `build.gradle`)
 ```groovy
 dependencies {
-    implementation 'org.impulsegraph:impulse-api:0.9.0'
-    implementation 'org.impulsegraph:impulse-storage:0.9.0'
-    implementation 'org.impulsegraph:impulse-vm:0.9.0'
-    implementation 'org.impulsegraph:impulse-compiler:0.9.0' // Optional for Cypher
+    implementation 'org.impulsegraph:impulse-api:0.10.0'
+    implementation 'org.impulsegraph:impulse-storage:0.10.0'
+    implementation 'org.impulsegraph:impulse-vm:0.10.0'
+    implementation 'org.impulsegraph:impulse-compiler:0.10.0' // Optional for Cypher
 }
 ```
 
 #### Gradle (Kotlin DSL — `build.gradle.kts`)
 ```kotlin
 dependencies {
-    implementation("org.impulsegraph:impulse-api:0.9.0")
-    implementation("org.impulsegraph:impulse-storage:0.9.0")
-    implementation("org.impulsegraph:impulse-vm:0.9.0")
-    implementation("org.impulsegraph:impulse-compiler:0.9.0") // Optional for Cypher
+    implementation("org.impulsegraph:impulse-api:0.10.0")
+    implementation("org.impulsegraph:impulse-storage:0.10.0")
+    implementation("org.impulsegraph:impulse-vm:0.10.0")
+    implementation("org.impulsegraph:impulse-compiler:0.10.0") // Optional for Cypher
 }
 ```
 

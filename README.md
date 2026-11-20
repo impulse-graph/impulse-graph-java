@@ -10,7 +10,7 @@ It acts as the **"Apache Arrow for Graph Analytics"** on the JVM, pairing an imm
 
 ## 🚀 Key Architectural Properties
 
-- **Zero Garbage Collection (GC) Overhead**: Memory-maps `.imps` v0.9.0 binary snapshot files off-heap via `java.lang.foreign.MemorySegment`.
+- **Zero Garbage Collection (GC) Overhead**: Memory-maps `.imps` v0.10.0 binary snapshot files off-heap via `java.lang.foreign.MemorySegment`.
 - **Dual Runtime Target (JDK 21 LTS & JDK 22+)**: Multi-Release bytecode architecture supporting enterprise **Java 21 LTS** (FFM Preview 3) and modern **Java 22+ / Java 25 LTS / Java 26+** (standard finalized FFM in `java.base` with zero preview flags).
 - **Zero External Runtime Dependencies**: All core modules maintain **strictly 0 third-party runtime dependencies** (`java.base`, `jdk.incubator.vector`, FFM).
 - **SIMD Vector API Acceleration**: Vectorizes graph traversal steps across unrolled AVX-512 and ARM Neon registers using `jdk.incubator.vector`.

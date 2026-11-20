@@ -1,7 +1,7 @@
 # Memory & Performance Tuning Guide — Impulse Graph Engine (Java)
 
 > [!WARNING]
-> **Pre-release Documentation**: This documentation describes pre-release software under active development and reflects the C-ABI Binary Snapshot v0.9.0 normative format.
+> **Pre-release Documentation**: This documentation describes pre-release software under active development and reflects the C-ABI Binary Snapshot v0.10.0 normative format.
 
 This guide details Foreign Function & Memory (FFM) lifecycle management, off-heap zero-copy memory mapping, 128-byte hardware alignment, hugepage configuration, primitive integer width selection, and JVM Vector API tuning for **`impulse-graph-java`** running on **Java 21 LTS+** (with forward compatibility for Java 22, 23, 24, and 25+).
 
