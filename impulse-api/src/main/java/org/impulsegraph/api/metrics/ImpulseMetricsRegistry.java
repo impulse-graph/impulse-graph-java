@@ -18,6 +18,25 @@ public interface ImpulseMetricsRegistry {
 	void setOffHeapMemoryBytes(long bytes);
 	void setActiveQueries(long count);
 
+	default void recordQueryCompile(long durationNanos) {
+	}
+
+	default void recordQueryError(String stage) {
+	}
+
+	default void recordSlabAllocation() {
+	}
+
+	default void recordBitsetPoolHit() {
+	}
+
+	default void recordBitsetPoolMiss() {
+	}
+
+	default long getOffHeapMemoryBytes() {
+		return 0;
+	}
+
 	default long getCacheHits() {
 		return 0;
 	}

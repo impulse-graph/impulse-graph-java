@@ -8,10 +8,13 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.ByteOrder;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerArray;
 import org.impulsegraph.api.bitset.ImpulseBitSet;
 import org.impulsegraph.api.bitset.OffHeapBitSet;
+import org.impulsegraph.api.metrics.ImpulseMetricsRegistry;
 
 /**
  * Runtime Execution Context for Impulse VM. Holds off-heap buffer pools,
@@ -439,6 +442,10 @@ public final class VmQueryContext implements AutoCloseable {
 		return arena;
 	}
 
+	private static final int MAX_SHARED_STATE_POOL = 512;
+	private static final ConcurrentLinkedDeque<MemorySegment> SHARED_STATE_POOL = new ConcurrentLinkedDeque<>();
+	private static final AtomicInteger SHARED_STATE_POOL_SIZE = new AtomicInteger(0);
+
 	private static final ThreadLocal<ArrayDeque<MemorySegment>> TL_STATE_POOL = ThreadLocal
 			.withInitial(() -> new ArrayDeque<>(4));
 
@@ -457,17 +464,21 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 
 		OffHeapBitSet acquire() {
+			ImpulseMetricsRegistry metrics = ImpulseMetricsRegistry.getInstance();
 			OffHeapBitSet bs = freeList.pollFirst();
 			if (bs != null) {
 				bs.clear();
+				metrics.recordBitsetPoolHit();
 				return bs;
 			}
+			metrics.recordBitsetPoolMiss();
 			if (byteSize >= SLAB_BYTES) {
 				return new OffHeapBitSet(GLOBAL_POOL_ARENA, bitCount);
 			}
 			if (currentSlab == null || slabOffset + byteSize > SLAB_BYTES) {
 				currentSlab = Arena.ofAuto().allocate(SLAB_BYTES, 64);
 				slabOffset = 0L;
+				metrics.recordSlabAllocation();
 			}
 			MemorySegment slice = currentSlab.asSlice(slabOffset, byteSize);
 			slabOffset += byteSize;
@@ -481,6 +492,61 @@ public final class VmQueryContext implements AutoCloseable {
 			}
 		}
 	}
+
+	private static final class SharedBitsetPool {
+		private static final long SLAB_BYTES = 1024L * 1024L;
+		private static final int MAX_POOLED_BITSETS = 512;
+		final int bitCount;
+		final long byteSize;
+		final ConcurrentLinkedDeque<OffHeapBitSet> freeList = new ConcurrentLinkedDeque<>();
+		final AtomicInteger freeCount = new AtomicInteger(0);
+		MemorySegment currentSlab;
+		long slabOffset;
+
+		SharedBitsetPool(int bitCount) {
+			this.bitCount = Math.max(0, bitCount);
+			int words = (int) (((long) this.bitCount + 63L) >>> 6);
+			this.byteSize = ((long) words * 8L + 63L) & ~63L;
+		}
+
+		OffHeapBitSet acquire() {
+			ImpulseMetricsRegistry metrics = ImpulseMetricsRegistry.getInstance();
+			OffHeapBitSet bs = freeList.pollFirst();
+			if (bs != null) {
+				freeCount.decrementAndGet();
+				bs.clear();
+				metrics.recordBitsetPoolHit();
+				return bs;
+			}
+			metrics.recordBitsetPoolMiss();
+			if (byteSize >= SLAB_BYTES) {
+				return new OffHeapBitSet(GLOBAL_POOL_ARENA, bitCount);
+			}
+			synchronized (this) {
+				if (currentSlab == null || slabOffset + byteSize > SLAB_BYTES) {
+					currentSlab = Arena.ofAuto().allocate(SLAB_BYTES, 64);
+					slabOffset = 0L;
+					metrics.recordSlabAllocation();
+				}
+				MemorySegment slice = currentSlab.asSlice(slabOffset, byteSize);
+				slabOffset += byteSize;
+				return new OffHeapBitSet(slice, bitCount, true);
+			}
+		}
+
+		void recycleScratch(OffHeapBitSet bs) {
+			if (freeCount.get() < MAX_POOLED_BITSETS) {
+				bs.clear();
+				if (freeCount.incrementAndGet() <= MAX_POOLED_BITSETS) {
+					freeList.offerFirst(bs);
+				} else {
+					freeCount.decrementAndGet();
+				}
+			}
+		}
+	}
+
+	private static final ConcurrentHashMap<Integer, SharedBitsetPool> SHARED_BITSET_POOL = new ConcurrentHashMap<>();
 
 	private static final ThreadLocal<Map<Integer, ThreadLocalBitsetPool>> TL_BITSET_POOL = ThreadLocal
 			.withInitial(HashMap::new);
@@ -817,16 +883,33 @@ public final class VmQueryContext implements AutoCloseable {
 	}
 
 	private MemorySegment acquiredStateSegment;
+	private boolean stateFromSharedPool;
 	private int acquiredBitsetMaxNodes;
+	private boolean bitsetFromSharedPool;
 
 	/**
 	 * Allocate a 640-byte off-heap MemorySegment representing impulse_vm_state_t.
 	 */
 	public MemorySegment allocateStateSegment() {
-		ArrayDeque<MemorySegment> pool = TL_STATE_POOL.get();
-		MemorySegment state = pool.pollFirst();
-		if (state == null) {
-			state = GLOBAL_POOL_ARENA.allocate(VmStateLayout.VM_STATE_LAYOUT);
+		final MemorySegment state;
+		if (Thread.currentThread().isVirtual()) {
+			MemorySegment pooled = SHARED_STATE_POOL.pollFirst();
+			if (pooled != null) {
+				SHARED_STATE_POOL_SIZE.decrementAndGet();
+				state = pooled;
+			} else {
+				state = GLOBAL_POOL_ARENA.allocate(VmStateLayout.VM_STATE_LAYOUT);
+			}
+			this.stateFromSharedPool = true;
+		} else {
+			ArrayDeque<MemorySegment> pool = TL_STATE_POOL.get();
+			MemorySegment pooled = pool.pollFirst();
+			if (pooled != null) {
+				state = pooled;
+			} else {
+				state = GLOBAL_POOL_ARENA.allocate(VmStateLayout.VM_STATE_LAYOUT);
+			}
+			this.stateFromSharedPool = false;
 		}
 		state.fill((byte) 0);
 		this.acquiredStateSegment = state;
@@ -855,9 +938,16 @@ public final class VmQueryContext implements AutoCloseable {
 		}
 		int maxNodes = getMaxNodeCount(snapshot);
 		this.acquiredBitsetMaxNodes = maxNodes;
-		ThreadLocalBitsetPool pool = TL_BITSET_POOL.get().computeIfAbsent(maxNodes, ThreadLocalBitsetPool::new);
 		int newHandle = bitsets.size();
-		bitsets.add(pool.acquire());
+		if (Thread.currentThread().isVirtual()) {
+			this.bitsetFromSharedPool = true;
+			SharedBitsetPool pool = SHARED_BITSET_POOL.computeIfAbsent(maxNodes, SharedBitsetPool::new);
+			bitsets.add(pool.acquire());
+		} else {
+			this.bitsetFromSharedPool = false;
+			ThreadLocalBitsetPool pool = TL_BITSET_POOL.get().computeIfAbsent(maxNodes, ThreadLocalBitsetPool::new);
+			bitsets.add(pool.acquire());
+		}
 		return newHandle;
 	}
 
@@ -1304,23 +1394,47 @@ public final class VmQueryContext implements AutoCloseable {
 	@Override
 	public void close() {
 		if (acquiredStateSegment != null) {
-			ArrayDeque<MemorySegment> statePool = TL_STATE_POOL.get();
-			if (statePool.size() < 8) {
-				statePool.addFirst(acquiredStateSegment);
+			if (stateFromSharedPool) {
+				if (SHARED_STATE_POOL_SIZE.get() < MAX_SHARED_STATE_POOL
+						&& SHARED_STATE_POOL_SIZE.incrementAndGet() <= MAX_SHARED_STATE_POOL) {
+					SHARED_STATE_POOL.offerFirst(acquiredStateSegment);
+				} else if (SHARED_STATE_POOL_SIZE.get() > MAX_SHARED_STATE_POOL) {
+					SHARED_STATE_POOL_SIZE.decrementAndGet();
+				}
+			} else {
+				ArrayDeque<MemorySegment> statePool = TL_STATE_POOL.get();
+				if (statePool.size() < 8) {
+					statePool.addFirst(acquiredStateSegment);
+				}
 			}
 			acquiredStateSegment = null;
+			stateFromSharedPool = false;
 		}
 		if (!bitsets.isEmpty() && acquiredBitsetMaxNodes > 0) {
-			ThreadLocalBitsetPool pool = TL_BITSET_POOL.get().get(acquiredBitsetMaxNodes);
-			if (pool != null) {
-				for (int i = 0, n = bitsets.size(); i < n; i++) {
-					ImpulseBitSet bs = bitsets.get(i);
-					if (bs instanceof OffHeapBitSet obs && obs != finalResult) {
-						pool.recycleScratch(obs);
+			if (bitsetFromSharedPool) {
+				SharedBitsetPool pool = SHARED_BITSET_POOL.get(acquiredBitsetMaxNodes);
+				if (pool != null) {
+					for (int i = 0, n = bitsets.size(); i < n; i++) {
+						ImpulseBitSet bs = bitsets.get(i);
+						if (bs instanceof OffHeapBitSet obs && obs != finalResult) {
+							pool.recycleScratch(obs);
+						}
+					}
+				}
+			} else {
+				ThreadLocalBitsetPool pool = TL_BITSET_POOL.get().get(acquiredBitsetMaxNodes);
+				if (pool != null) {
+					for (int i = 0, n = bitsets.size(); i < n; i++) {
+						ImpulseBitSet bs = bitsets.get(i);
+						if (bs instanceof OffHeapBitSet obs && obs != finalResult) {
+							pool.recycleScratch(obs);
+						}
 					}
 				}
 			}
 		}
+		acquiredBitsetMaxNodes = 0;
+		bitsetFromSharedPool = false;
 		bitsets.clear();
 		freeBitsetHandles.clear();
 		ThreadLocalBufferPool bufPool = TL_BUFFER_POOL.get();

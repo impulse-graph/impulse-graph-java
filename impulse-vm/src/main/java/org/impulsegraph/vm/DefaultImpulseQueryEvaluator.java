@@ -42,7 +42,6 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 	@Override
 	@SuppressWarnings("unchecked")
 	public <R> R evaluate(ImpulseGraphQuery<R> query, ImpulseGraphSnapshot snapshot, Object input) {
-		long startNanos = System.nanoTime();
 		var metrics = org.impulsegraph.api.metrics.ImpulseMetricsRegistry.getInstance();
 		ImpulseGraphSnapshot graph = snapshot;
 
@@ -52,19 +51,36 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 
 		CompiledQuery compiled = COMPILED_QUERY_CACHE.get(query);
 		if (compiled == null) {
-			metrics.setOffHeapMemoryBytes(graph.getOffHeapMemorySizeBytes());
-			compiled = COMPILED_QUERY_CACHE.computeIfAbsent(query, q -> {
-				metrics.recordCacheMiss();
-				return compileAst(q.getAst(), graph, COMPILER_ARENA);
-			});
+			if (metrics.getOffHeapMemoryBytes() == 0) {
+				metrics.setOffHeapMemoryBytes(graph.getOffHeapMemorySizeBytes());
+			}
+			try {
+				compiled = COMPILED_QUERY_CACHE.computeIfAbsent(query, q -> {
+					metrics.recordCacheMiss();
+					long compileStart = System.nanoTime();
+					CompiledQuery plan = compileAst(q.getAst(), graph, COMPILER_ARENA);
+					metrics.recordQueryCompile(System.nanoTime() - compileStart);
+					return plan;
+				});
+			} catch (RuntimeException | Error e) {
+				metrics.recordQueryError("compile");
+				throw e;
+			}
+		} else {
+			metrics.recordCacheHit();
 		}
 
 		if (compiled != null) {
-			metrics.recordCacheHit();
-			Object rawResult = compiled.execute(graph, input, COMPILER_ARENA);
-			R result = (R) materializeResult(query.getAst(), rawResult);
-			metrics.recordQueryExecution(System.nanoTime() - startNanos);
-			return result;
+			long execStart = System.nanoTime();
+			try {
+				Object rawResult = compiled.execute(graph, input, COMPILER_ARENA);
+				R result = (R) materializeResult(query.getAst(), rawResult);
+				metrics.recordQueryExecution(System.nanoTime() - execStart);
+				return result;
+			} catch (RuntimeException | Error e) {
+				metrics.recordQueryError("execute");
+				throw e;
+			}
 		}
 
 		throw new IllegalStateException("Failed to compile query AST to bytecode");

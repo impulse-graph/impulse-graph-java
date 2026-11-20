@@ -1,5 +1,8 @@
 package org.impulsegraph.api.metrics;
 
+import java.lang.management.BufferPoolMXBean;
+import java.lang.management.ManagementFactory;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -12,11 +15,18 @@ public class PrometheusMetricsExporter implements ImpulseMetricsRegistry {
 
 	private final LongAdder queryCount = new LongAdder();
 	private final LongAdder queryDurationTotalNanos = new LongAdder();
+	private final LongAdder compileCount = new LongAdder();
+	private final LongAdder compileDurationTotalNanos = new LongAdder();
+	private final LongAdder compileErrors = new LongAdder();
+	private final LongAdder executeErrors = new LongAdder();
 	private final LongAdder cacheHits = new LongAdder();
 	private final LongAdder cacheMisses = new LongAdder();
 	private final LongAdder snapshotSwaps = new LongAdder();
 	private final LongAdder snapshotDrains = new LongAdder();
 	private final LongAdder snapshotDrainNanos = new LongAdder();
+	private final LongAdder slabAllocations = new LongAdder();
+	private final LongAdder bitsetPoolHits = new LongAdder();
+	private final LongAdder bitsetPoolMisses = new LongAdder();
 
 	private final AtomicLong activeQueries = new AtomicLong(0);
 	private final AtomicLong offHeapMemoryBytes = new AtomicLong(0);
@@ -31,13 +41,21 @@ public class PrometheusMetricsExporter implements ImpulseMetricsRegistry {
 		return cacheMisses.sum();
 	}
 
-	// Histogram Buckets in Seconds: 50us, 100us, 500us, 1ms, 5ms, 10ms, 50ms, +Inf
+	@Override
+	public long getOffHeapMemoryBytes() {
+		return offHeapMemoryBytes.get();
+	}
+
+	// Histogram Buckets in Seconds: 50us, 100us, 500us, 1ms, 5ms, 10ms, 50ms,
+	// 250ms, +Inf
 	private final LongAdder bucket50us = new LongAdder();
 	private final LongAdder bucket100us = new LongAdder();
 	private final LongAdder bucket500us = new LongAdder();
 	private final LongAdder bucket1ms = new LongAdder();
 	private final LongAdder bucket5ms = new LongAdder();
 	private final LongAdder bucket10ms = new LongAdder();
+	private final LongAdder bucket50ms = new LongAdder();
+	private final LongAdder bucket250ms = new LongAdder();
 	private final LongAdder bucketInf = new LongAdder();
 
 	public static PrometheusMetricsExporter enable() {
@@ -64,7 +82,41 @@ public class PrometheusMetricsExporter implements ImpulseMetricsRegistry {
 			bucket5ms.increment();
 		if (seconds <= 0.01000)
 			bucket10ms.increment();
+		if (seconds <= 0.05000)
+			bucket50ms.increment();
+		if (seconds <= 0.25000)
+			bucket250ms.increment();
 		bucketInf.increment();
+	}
+
+	@Override
+	public void recordQueryCompile(long durationNanos) {
+		compileCount.increment();
+		compileDurationTotalNanos.add(durationNanos);
+	}
+
+	@Override
+	public void recordQueryError(String stage) {
+		if ("compile".equals(stage)) {
+			compileErrors.increment();
+		} else {
+			executeErrors.increment();
+		}
+	}
+
+	@Override
+	public void recordSlabAllocation() {
+		slabAllocations.increment();
+	}
+
+	@Override
+	public void recordBitsetPoolHit() {
+		bitsetPoolHits.increment();
+	}
+
+	@Override
+	public void recordBitsetPoolMiss() {
+		bitsetPoolMisses.increment();
 	}
 
 	@Override
@@ -113,21 +165,67 @@ public class PrometheusMetricsExporter implements ImpulseMetricsRegistry {
 		sb.append("impulse_query_execution_seconds_bucket{le=\"0.00100\"} ").append(bucket1ms.sum()).append("\n");
 		sb.append("impulse_query_execution_seconds_bucket{le=\"0.00500\"} ").append(bucket5ms.sum()).append("\n");
 		sb.append("impulse_query_execution_seconds_bucket{le=\"0.01000\"} ").append(bucket10ms.sum()).append("\n");
+		sb.append("impulse_query_execution_seconds_bucket{le=\"0.05000\"} ").append(bucket50ms.sum()).append("\n");
+		sb.append("impulse_query_execution_seconds_bucket{le=\"0.25000\"} ").append(bucket250ms.sum()).append("\n");
 		sb.append("impulse_query_execution_seconds_bucket{le=\"+Inf\"} ").append(bucketInf.sum()).append("\n");
 		sb.append("impulse_query_execution_seconds_sum ").append(queryDurationTotalNanos.sum() / 1_000_000_000.0)
 				.append("\n");
 		sb.append("impulse_query_execution_seconds_count ").append(queryCount.sum()).append("\n\n");
+
+		// Query Compilation Summary
+		sb.append("# HELP impulse_query_compile_seconds Total time and count spent compiling queries\n");
+		sb.append("# TYPE impulse_query_compile_seconds summary\n");
+		sb.append("impulse_query_compile_seconds_sum ").append(compileDurationTotalNanos.sum() / 1_000_000_000.0)
+				.append("\n");
+		sb.append("impulse_query_compile_seconds_count ").append(compileCount.sum()).append("\n\n");
+
+		// Query Errors Counter
+		sb.append("# HELP impulse_query_errors_total Total query errors tagged by stage\n");
+		sb.append("# TYPE impulse_query_errors_total counter\n");
+		sb.append("impulse_query_errors_total{stage=\"compile\"} ").append(compileErrors.sum()).append("\n");
+		sb.append("impulse_query_errors_total{stage=\"execute\"} ").append(executeErrors.sum()).append("\n\n");
 
 		// Active Queries Gauge
 		sb.append("# HELP impulse_queries_active_count Current count of in-flight active queries\n");
 		sb.append("# TYPE impulse_queries_active_count gauge\n");
 		sb.append("impulse_queries_active_count ").append(activeQueries.get()).append("\n\n");
 
-		// Off-Heap Memory Gauge
+		// Off-Heap & Direct Buffer Memory Gauges
 		sb.append(
 				"# HELP impulse_memory_offheap_bytes Total off-heap FFM Arena memory allocated across live relation snapshots\n");
 		sb.append("# TYPE impulse_memory_offheap_bytes gauge\n");
 		sb.append("impulse_memory_offheap_bytes ").append(offHeapMemoryBytes.get()).append("\n\n");
+
+		long directUsed = 0L;
+		long directCapacity = 0L;
+		List<BufferPoolMXBean> pools = ManagementFactory.getPlatformMXBeans(BufferPoolMXBean.class);
+		for (BufferPoolMXBean pool : pools) {
+			if ("direct".equals(pool.getName())) {
+				directUsed = pool.getMemoryUsed();
+				directCapacity = pool.getTotalCapacity();
+				break;
+			}
+		}
+		sb.append("# HELP impulse_memory_direct_used_bytes JVM direct buffer pool memory currently in use\n");
+		sb.append("# TYPE impulse_memory_direct_used_bytes gauge\n");
+		sb.append("impulse_memory_direct_used_bytes ").append(directUsed).append("\n\n");
+		sb.append("# HELP impulse_memory_direct_capacity_bytes JVM direct buffer pool total capacity\n");
+		sb.append("# TYPE impulse_memory_direct_capacity_bytes gauge\n");
+		sb.append("impulse_memory_direct_capacity_bytes ").append(directCapacity).append("\n\n");
+
+		// VM Slab & Bitset Pool Counters
+		sb.append("# HELP impulse_vm_slab_allocations_total Total 1MB off-heap bitset slabs allocated\n");
+		sb.append("# TYPE impulse_vm_slab_allocations_total counter\n");
+		sb.append("impulse_vm_slab_allocations_total ").append(slabAllocations.sum()).append("\n\n");
+
+		sb.append("# HELP impulse_vm_bitset_pool_hits_total Total bitset acquisitions served from pool free-list\n");
+		sb.append("# TYPE impulse_vm_bitset_pool_hits_total counter\n");
+		sb.append("impulse_vm_bitset_pool_hits_total ").append(bitsetPoolHits.sum()).append("\n\n");
+
+		sb.append(
+				"# HELP impulse_vm_bitset_pool_misses_total Total bitset acquisitions requiring new slab/arena slice\n");
+		sb.append("# TYPE impulse_vm_bitset_pool_misses_total counter\n");
+		sb.append("impulse_vm_bitset_pool_misses_total ").append(bitsetPoolMisses.sum()).append("\n\n");
 
 		// Cache Requests Counter
 		sb.append("# HELP impulse_query_cache_requests_total Total compiled query cache lookups tagged by result\n");
