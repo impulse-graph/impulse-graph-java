@@ -6,6 +6,11 @@ on:
       - 'v*.*.*'
       - '!v*-*-*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag or version to publish (e.g. v0.10.0). Required when running manually from main.'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -45,7 +50,11 @@ jobs:
 
       - name: Set Release Version from Tag
         run: |
-          RAW_TAG="${{ github.ref_name }}"
+          RAW_TAG="${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}"
+          if [[ ! "$RAW_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid release version/tag '$RAW_TAG'. Pass release_tag (e.g. v0.10.0) when running manually."
+            exit 1
+          fi
           CLEAN_VERSION="${RAW_TAG#v}"
           mvn versions:set -DnewVersion="$CLEAN_VERSION" -DgenerateBackupPoms=false --batch-mode
 
