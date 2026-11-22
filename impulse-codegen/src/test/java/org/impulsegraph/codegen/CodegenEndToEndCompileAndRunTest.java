@@ -377,8 +377,13 @@ class CodegenEndToEndCompileAndRunTest {
 			if (extraClasspath != null) {
 				cp = extraClasspath.toAbsolutePath() + System.getProperty("path.separator") + cp;
 			}
-			List<String> options = List.of("-d", outDir.toAbsolutePath().toString(), "-cp", cp, "--add-modules",
-					"jdk.incubator.vector");
+			List<String> options = new ArrayList<>(List.of("-d", outDir.toAbsolutePath().toString(), "-cp", cp,
+					"--add-modules", "jdk.incubator.vector"));
+			if (Runtime.version().feature() == 21) {
+				options.add("--enable-preview");
+				options.add("--release");
+				options.add("21");
+			}
 			boolean ok = Boolean.TRUE.equals(compiler.getTask(null, fm, diagnostics, options, null, units).call());
 			StringBuilder sb = new StringBuilder();
 			for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
