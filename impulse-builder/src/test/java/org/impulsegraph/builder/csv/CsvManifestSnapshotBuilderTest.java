@@ -139,15 +139,16 @@ class CsvManifestSnapshotBuilderTest {
 	}
 
 	@Test
-	void testBuildViaStreamingSnapshotWriterAndDocumentShortcomings(@TempDir Path tempDir) throws Exception {
+	void testBuildViaStreamingSnapshotWriterProducesFullV10Snapshot(@TempDir Path tempDir) throws Exception {
 		Path manifestPath = resolveManifestPath();
-		Path outStreaming = tempDir.resolve("e2e_streaming_writer.imps");
+		Path outStreaming = tempDir.resolve("e2e_streaming_writer_v10.imps");
 
 		CsvManifestSnapshotBuilder.buildViaStreamingSnapshotWriter(manifestPath, outStreaming);
 		assertTrue(Files.exists(outStreaming));
 
 		try (Arena arena = Arena.ofConfined()) {
-			LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(outStreaming, arena);
+			LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(outStreaming, arena, true);
+			assertEquals(10, loaded.version());
 			assertEquals(16, loaded.domainsById().size());
 			assertEquals(26, loaded.relationsById().size());
 
@@ -155,20 +156,53 @@ class CsvManifestSnapshotBuilderTest {
 				LoadedDomain dom = loaded.domainsById().get(d);
 				assertEquals(EXPECTED_DOMAIN_NAMES[d], dom.name());
 				assertEquals(EXPECTED_NODE_COUNTS[d], dom.nodeCount());
-				// Shortcoming documented: StreamingSnapshotWriter hardcodes key_type = 0x03
-				// (String) for all domains
-				assertEquals(3, dom.keyType());
+				assertEquals(0, dom.keyAttrIndex(), "Primary key attribute should be at index 0 for " + dom.name());
+				assertFalse(dom.attributes().isEmpty(), "Expected inline domain attributes for " + dom.name());
 			}
 
+			// Verify primary key round-trip on string-keyed User and uint64-keyed Order
+			var userView = loaded.graph().domain("User");
+			assertEquals("u0", userView.toKey(0));
+			assertEquals("u15", userView.toKey(15));
+			assertEquals(0L, userView.toDenseId("u0"));
+			assertEquals(15L, userView.toDenseId("u15"));
+
+			var orderView = loaded.graph().domain("Order");
+			assertEquals("1000", orderView.toKey(0));
+			assertEquals("1019", orderView.toKey(19));
+			assertEquals(0L, orderView.toDenseId("1000"));
+			assertEquals(19L, orderView.toDenseId("1019"));
+
+			// Verify nullable domain attribute validity bitmaps
+			LoadedDomain matGrid50 = loaded.getDomain("MatGrid50");
+			assertEquals(40, countValidBits(matGrid50.getValiditySegment("opt_obs_f32"), 50));
+			LoadedDomain matNet100 = loaded.getDomain("MatNet100");
+			assertEquals(80, countValidBits(matNet100.getValiditySegment("opt_prior_f32"), 100));
+			LoadedDomain userDom = loaded.getDomain("User");
+			assertEquals(12, countValidBits(userDom.getValiditySegment("opt_nickname_str"), 16));
+
+			// Verify all 26 relations, CSC presence, and relation attributes
 			for (int r = 0; r < 26; r++) {
+				String relName = EXPECTED_RELATION_NAMES[r];
 				LoadedRelation rel = loaded.relationsById().get(r);
-				assertNotNull(loaded.graph().getRelationSnapshot(EXPECTED_RELATION_NAMES[r]));
+				RelationSnapshot csrRel = (RelationSnapshot) loaded.graph().getRelationSnapshot(relName);
+				assertNotNull(csrRel);
 				assertEquals(EXPECTED_EDGE_COUNTS[r], rel.edgeCount());
-				// Shortcoming documented: StreamingSnapshotWriter currently writes attr_count =
-				// 0 for all relations
-				assertEquals(0, rel.attributes().size(),
-						"StreamingSnapshotWriter currently hardcodes attr_count = 0 on relation directory entries");
+				boolean expectedCsc = (r != 3);
+				assertEquals(expectedCsc, csrRel.hasCsc(), "CSC presence mismatch on relation " + relName);
 			}
+
+			// Verify USER_FOLLOWS has both relation attributes (strength_f32, opt_note_str)
+			LoadedRelation userFollows = loaded.relationsById().get(0);
+			assertEquals(2, userFollows.attributes().size());
+			assertEquals("strength_f32", userFollows.attributes().get(0).name());
+			assertEquals("opt_note_str", userFollows.attributes().get(1).name());
+
+			// Verify canonical schema provenance footer metadata
+			assertNotNull(loaded.getMetadata("impulse.schema.name"));
+			assertEquals("0.9.0", loaded.getMetadata("impulse.schema.version"));
+			assertNotNull(loaded.getMetadata("impulse.schema.sha256"));
+			assertEquals(64, loaded.getMetadata("impulse.schema.sha256").length());
 		}
 	}
 

@@ -172,80 +172,36 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			}
 			for (String rName : relationNames) {
 				getOrAddString.apply(rName);
+				RelationDefinition rel = relations.get(rName);
+				if (rel != null) {
+					for (String aName : rel.getAttributes().keySet()) {
+						getOrAddString.apply(aName);
+					}
+				}
 			}
 
 			// 3. Stage Domain Attributes
-			record StagedDomainAttr(String name, byte typeCode, int dimension, long dataBytes, Path dataFile,
-					long validityBytes, Path valFile, long offsBytes, Path offsFile) {
-			}
-
-			List<List<StagedDomainAttr>> stagedDomainAttrs = new ArrayList<>();
+			List<List<StagedAttr>> stagedDomainAttrs = new ArrayList<>();
 			for (int dId = 0; dId < domainNames.size(); dId++) {
 				String dName = domainNames.get(dId);
 				DomainDefinition dom = domains.get(dName);
-				List<StagedDomainAttr> attrs = new ArrayList<>();
+				List<StagedAttr> attrs = new ArrayList<>();
 
 				if (specVersion >= 10 && dom != null) {
 					int aIdx = 0;
 					for (Map.Entry<String, AttributeDataSource> entry : dom.getAttributes().entrySet()) {
-						String aName = entry.getKey();
-						AttributeDataSource ads = entry.getValue();
-						DataType dt = ads.dataType();
-						Nullability nullability = ads.nullability();
-						byte typeCode = dt.typeCode(nullability);
-						int dimension = dt.dimension();
-						boolean isNullable = (nullability == Nullability.NULLABLE);
-
-						Path valFile = null;
-						long valBytes = 0;
-						if (isNullable) {
-							long numBits = dom.getCardinality();
-							long rawBitmapBytes = ((numBits + 63) / 64) * 8;
-							int paddedBitmapBytes = (int) ((rawBitmapBytes + 127) & ~127L);
-							valFile = effectiveStagingDir.resolve("dom_" + dId + "_attr_" + aIdx + "_val.bin");
-							stagedTempFiles.add(valFile);
-							byte[] valData = new byte[paddedBitmapBytes];
-							Arrays.fill(valData, (byte) 0xFF);
-							Files.write(valFile, valData);
-							valBytes = paddedBitmapBytes;
-						}
-
-						Path dataFile = null;
-						long dataBytes = 0;
-						AttributeChunkIterator it = ads.iterator();
-						if (it != null && dom.getCardinality() > 0) {
-							dataFile = effectiveStagingDir.resolve("dom_" + dId + "_attr_" + aIdx + "_data.bin");
-							stagedTempFiles.add(dataFile);
-							int elemBytes = Math.max(1, dt.totalValueBytes());
-							int chunkSize = (int) Math.min(65536L, Math.max(1L, dom.getCardinality()));
-							long chunkByteSize = (long) chunkSize * elemBytes;
-							try (Arena chunkArena = Arena.ofConfined();
-									FileChannel fc = FileChannel.open(dataFile, StandardOpenOption.CREATE,
-											StandardOpenOption.WRITE)) {
-								MemorySegment buf = chunkArena.allocate(chunkByteSize, 128);
-								while (it.hasNext()) {
-									int count = it.nextChunk(buf, chunkSize);
-									if (count <= 0)
-										break;
-									long bytesToWrite = (long) count * elemBytes;
-									fc.write(buf.asSlice(0, bytesToWrite).asByteBuffer());
-									dataBytes += bytesToWrite;
-								}
-							}
-						}
-
-						attrs.add(new StagedDomainAttr(aName, typeCode, dimension, dataBytes, dataFile, valBytes,
-								valFile, 0L, null));
+						attrs.add(stageAttribute("dom_" + dId + "_attr_" + aIdx, entry.getKey(), entry.getValue(),
+								dom.getCardinality(), effectiveStagingDir, stagedTempFiles));
 						aIdx++;
 					}
 				}
 				stagedDomainAttrs.add(attrs);
 			}
 
-			// 4. Stage Relation Topologies to files
+			// 4. Stage Relation Topologies & Relation Attributes to files
 			record StagedRel(int relId, int srcDomId, int tgtDomId, int tgtIdWidth, int edgeIndexWidth, long nodeCount,
 					long edgeCount, ExternalSortStaging.TopologyFiles csr, ExternalSortStaging.TopologyFiles csc,
-					boolean hasCsc) {
+					boolean hasCsc, List<StagedAttr> attributes) {
 			}
 
 			List<StagedRel> stagedRelations = new ArrayList<>();
@@ -275,7 +231,9 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				ExternalSortStaging.TopologyFiles cscFiles = null;
 				boolean includeCsc = relDef.includesTopology(Topology.CSC);
 
-				if (rds != null && edgeCount > 0) {
+				boolean materializeEmptyTopology = (edgeCount == 0 && srcDom.getCardinality() <= Integer.MAX_VALUE
+						&& tgtDom.getCardinality() <= Integer.MAX_VALUE && includeCsc);
+				if (rds != null && (edgeCount > 0 || materializeEmptyTopology)) {
 					EdgeChunkIterator edgeIt = rds.getEdges();
 					Path prefix = effectiveStagingDir.resolve("rel_" + relIdx);
 
@@ -303,8 +261,16 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 					}
 				}
 
+				List<StagedAttr> relAttrs = new ArrayList<>();
+				int rAttrIdx = 0;
+				for (Map.Entry<String, AttributeDataSource> entry : relDef.getAttributes().entrySet()) {
+					relAttrs.add(stageAttribute("rel_" + relIdx + "_attr_" + rAttrIdx, entry.getKey(), entry.getValue(),
+							edgeCount, effectiveStagingDir, stagedTempFiles));
+					rAttrIdx++;
+				}
+
 				stagedRelations.add(new StagedRel(relIdx, srcDomId, tgtDomId, tgtIdWidth, edgeIndexWidth, srcNodeCount,
-						edgeCount, csrFiles, cscFiles, includeCsc));
+						edgeCount, csrFiles, cscFiles, includeCsc, relAttrs));
 			}
 
 			// Calculate Section 2 Directory Table layout length
@@ -321,7 +287,10 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			}
 			int alignedDomTableBytes = (rawDomTableBytes + 127) & ~127;
 
-			int rawRelTableBytes = stagedRelations.size() * 128;
+			int rawRelTableBytes = 0;
+			for (StagedRel sr : stagedRelations) {
+				rawRelTableBytes += 128 + (sr.attributes().size() * 44);
+			}
 			int alignedRelTableBytes = (rawRelTableBytes + 127) & ~127;
 
 			int totalDirLen = alignedStrTableBytes + alignedDomTableBytes + alignedRelTableBytes;
@@ -337,7 +306,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			if (specVersion >= 10) {
 				for (int dId = 0; dId < domainNames.size(); dId++) {
 					List<AttrLayout> layouts = new ArrayList<>();
-					for (StagedDomainAttr a : stagedDomainAttrs.get(dId)) {
+					for (StagedAttr a : stagedDomainAttrs.get(dId)) {
 						long vOff = 0, vLen = 0;
 						if (a.validityBytes() > 0) {
 							currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
@@ -365,7 +334,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				}
 			}
 
-			// Layout relation payload offsets
+			// Layout relation payload offsets (CSR, CSC, and relation attributes)
 			List<ByteBuffer> relEntries = new ArrayList<>();
 
 			for (StagedRel sr : stagedRelations) {
@@ -377,33 +346,68 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				long cscColIdxOffset = 0, cscColIdxBytes = 0;
 
 				if (sr.csr != null) {
-					currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
-					csrRowOffOffset = currentPayloadOffset;
-					csrRowOffBytes = sr.csr.rowOffsetsBytes();
-					currentPayloadOffset += csrRowOffBytes;
+					if (sr.csr.rowOffsetsBytes() > 0) {
+						currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
+						csrRowOffOffset = currentPayloadOffset;
+						csrRowOffBytes = sr.csr.rowOffsetsBytes();
+						currentPayloadOffset += csrRowOffBytes;
+					}
 
-					currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
-					csrColIdxOffset = currentPayloadOffset;
-					csrColIdxBytes = sr.csr.columnTargetsBytes();
-					currentPayloadOffset += csrColIdxBytes;
+					if (sr.csr.columnTargetsBytes() > 0) {
+						currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
+						csrColIdxOffset = currentPayloadOffset;
+						csrColIdxBytes = sr.csr.columnTargetsBytes();
+						currentPayloadOffset += csrColIdxBytes;
+					}
 				}
 
 				if (sr.hasCsc && sr.csc != null) {
-					currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
-					cscRowOffOffset = currentPayloadOffset;
-					cscRowOffBytes = sr.csc.rowOffsetsBytes();
-					currentPayloadOffset += cscRowOffBytes;
+					if (sr.csc.rowOffsetsBytes() > 0) {
+						currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
+						cscRowOffOffset = currentPayloadOffset;
+						cscRowOffBytes = sr.csc.rowOffsetsBytes();
+						currentPayloadOffset += cscRowOffBytes;
+					}
 
-					currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
-					cscColIdxOffset = currentPayloadOffset;
-					cscColIdxBytes = sr.csc.columnTargetsBytes();
-					currentPayloadOffset += cscColIdxBytes;
+					if (sr.csc.columnTargetsBytes() > 0) {
+						currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
+						cscColIdxOffset = currentPayloadOffset;
+						cscColIdxBytes = sr.csc.columnTargetsBytes();
+						currentPayloadOffset += cscColIdxBytes;
+					}
+				}
+
+				List<AttrLayout> relAttrLayouts = new ArrayList<>(sr.attributes().size());
+				for (StagedAttr a : sr.attributes()) {
+					long vOff = 0, vLen = 0;
+					if (a.validityBytes() > 0) {
+						currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
+						vOff = currentPayloadOffset;
+						vLen = a.validityBytes();
+						currentPayloadOffset += vLen;
+					}
+					long dOff = 0, dLen = 0;
+					if (a.dataBytes() > 0) {
+						currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
+						dOff = currentPayloadOffset;
+						dLen = a.dataBytes();
+						currentPayloadOffset += dLen;
+					}
+					long oOff = 0, oLen = 0;
+					if (a.offsBytes() > 0) {
+						currentPayloadOffset = (currentPayloadOffset + 127) & ~127;
+						oOff = currentPayloadOffset;
+						oLen = a.offsBytes();
+						currentPayloadOffset += oLen;
+					}
+					relAttrLayouts.add(new AttrLayout(vOff, vLen, dOff, dLen, oOff, oLen));
 				}
 
 				String rName = relationNames.get(sr.relId);
 				int rNameOff = getOrAddString.apply(rName);
 
-				ByteBuffer relBuf = ByteBuffer.allocate(128).order(ByteOrder.LITTLE_ENDIAN);
+				ByteBuffer relBuf = ByteBuffer.allocate(128 + (sr.attributes().size() * 44))
+						.order(ByteOrder.LITTLE_ENDIAN);
 				relBuf.putShort((short) sr.relId);
 				relBuf.putShort((short) sr.srcDomId);
 				relBuf.putShort((short) sr.tgtDomId);
@@ -423,8 +427,27 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				relBuf.putLong(cscRowOffBytes);
 				relBuf.putLong(cscColIdxOffset);
 				relBuf.putLong(cscColIdxBytes);
-				relBuf.putShort((short) 0); // attr_count
+				relBuf.putShort((short) sr.attributes().size()); // attr_count
 				relBuf.put(new byte[22]); // reserved2
+
+				for (int a = 0; a < sr.attributes().size(); a++) {
+					StagedAttr attr = sr.attributes().get(a);
+					AttrLayout l = relAttrLayouts.get(a);
+					int aNameOff = getOrAddString.apply(attr.name());
+					boolean isNullable = (attr.typeCode() & 0x80) != 0;
+					long descDataOff = isNullable ? l.valOff() : l.dataOff();
+					long descDataBytes = isNullable ? (l.valBytes() + l.dataBytes()) : l.dataBytes();
+
+					relBuf.putInt(aNameOff);
+					relBuf.put(attr.typeCode());
+					relBuf.put((byte) 0); // reserved1
+					relBuf.putShort((short) 0); // reserved2
+					relBuf.putInt(attr.dimension());
+					relBuf.putLong(descDataOff);
+					relBuf.putLong(descDataBytes);
+					relBuf.putLong(l.offsOff());
+					relBuf.putLong(l.offsBytes());
+				}
 				relEntries.add(relBuf);
 			}
 
@@ -445,7 +468,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				int dNameOff = getOrAddString.apply(dName);
 
 				if (specVersion >= 10) {
-					List<StagedDomainAttr> attrs = stagedDomainAttrs.get(dId);
+					List<StagedAttr> attrs = stagedDomainAttrs.get(dId);
 					List<AttrLayout> layouts = domainAttrLayouts.get(dId);
 
 					int keyAttrIdx = -1;
@@ -472,7 +495,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 					dirTableOut.write(domBuf.array());
 
 					for (int a = 0; a < attrs.size(); a++) {
-						StagedDomainAttr attr = attrs.get(a);
+						StagedAttr attr = attrs.get(a);
 						AttrLayout l = layouts.get(a);
 						int aNameOff = getOrAddString.apply(attr.name());
 
@@ -559,8 +582,8 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 
 			if (specVersion >= 10) {
 				for (int dId = 0; dId < domainNames.size(); dId++) {
-					List<StagedDomainAttr> attrs = stagedDomainAttrs.get(dId);
-					for (StagedDomainAttr a : attrs) {
+					List<StagedAttr> attrs = stagedDomainAttrs.get(dId);
+					for (StagedAttr a : attrs) {
 						if (a.valFile() != null && a.validityBytes() > 0) {
 							currentStreamOffset = writeStagedFileAligned(digestChannel, a.valFile(),
 									currentStreamOffset, pad128);
@@ -587,17 +610,40 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				}
 
 				if (sr.csr != null) {
-					currentStreamOffset = writeStagedFileAligned(digestChannel, sr.csr.rowOffsetsFile(),
-							currentStreamOffset, pad128);
-					currentStreamOffset = writeStagedFileAligned(digestChannel, sr.csr.columnTargetsFile(),
-							currentStreamOffset, pad128);
+					if (sr.csr.rowOffsetsBytes() > 0) {
+						currentStreamOffset = writeStagedFileAligned(digestChannel, sr.csr.rowOffsetsFile(),
+								currentStreamOffset, pad128);
+					}
+					if (sr.csr.columnTargetsBytes() > 0) {
+						currentStreamOffset = writeStagedFileAligned(digestChannel, sr.csr.columnTargetsFile(),
+								currentStreamOffset, pad128);
+					}
 				}
 
 				if (sr.hasCsc && sr.csc != null) {
-					currentStreamOffset = writeStagedFileAligned(digestChannel, sr.csc.rowOffsetsFile(),
-							currentStreamOffset, pad128);
-					currentStreamOffset = writeStagedFileAligned(digestChannel, sr.csc.columnTargetsFile(),
-							currentStreamOffset, pad128);
+					if (sr.csc.rowOffsetsBytes() > 0) {
+						currentStreamOffset = writeStagedFileAligned(digestChannel, sr.csc.rowOffsetsFile(),
+								currentStreamOffset, pad128);
+					}
+					if (sr.csc.columnTargetsBytes() > 0) {
+						currentStreamOffset = writeStagedFileAligned(digestChannel, sr.csc.columnTargetsFile(),
+								currentStreamOffset, pad128);
+					}
+				}
+
+				for (StagedAttr a : sr.attributes()) {
+					if (a.valFile() != null && a.validityBytes() > 0) {
+						currentStreamOffset = writeStagedFileAligned(digestChannel, a.valFile(), currentStreamOffset,
+								pad128);
+					}
+					if (a.dataFile() != null && a.dataBytes() > 0) {
+						currentStreamOffset = writeStagedFileAligned(digestChannel, a.dataFile(), currentStreamOffset,
+								pad128);
+					}
+					if (a.offsFile() != null && a.offsBytes() > 0) {
+						currentStreamOffset = writeStagedFileAligned(digestChannel, a.offsFile(), currentStreamOffset,
+								pad128);
+					}
 				}
 			}
 
@@ -758,9 +804,276 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 		return crc & 0xFFFF;
 	}
 
-	private record StagedRel(int relId, int srcDomId, int tgtDomId, int tgtIdWidth, int edgeIndexWidth, long nodeCount,
-			long edgeCount, ExternalSortStaging.TopologyFiles csr, ExternalSortStaging.TopologyFiles csc,
-			boolean hasCsc) {
+	private record StagedAttr(String name, byte typeCode, int dimension, long dataBytes, Path dataFile,
+			long validityBytes, Path valFile, long offsBytes, Path offsFile) {
+	}
+
+	private static StagedAttr stageAttribute(String prefix, String attrName, AttributeDataSource ads, long rowCount,
+			Path effectiveStagingDir, List<Path> stagedTempFiles) throws IOException {
+		DataType dt = ads.dataType();
+		Nullability nullability = ads.nullability();
+		byte typeCode = dt.typeCode(nullability);
+		int dimension = dt.dimension();
+		boolean isNullable = (nullability == Nullability.NULLABLE);
+
+		if (rowCount <= 0) {
+			return new StagedAttr(attrName, typeCode, dimension, 0L, null, 0L, null, 0L, null);
+		}
+
+		long paddedBitmapBytes = isNullable ? ((((rowCount + 63L) / 64L) * 8L + 127L) & ~127L) : 0L;
+		Path valFile = null;
+		if (isNullable) {
+			valFile = effectiveStagingDir.resolve(prefix + "_val.bin");
+			stagedTempFiles.add(valFile);
+		}
+
+		AttributeChunkIterator it = ads.iterator();
+		if (it == null) {
+			if (isNullable) {
+				byte[] emptyVal = new byte[(int) paddedBitmapBytes];
+				Files.write(valFile, emptyVal);
+			}
+			return new StagedAttr(attrName, typeCode, dimension, 0L, null, paddedBitmapBytes, valFile, 0L, null);
+		}
+
+		if (dt.isVariableLength()) {
+			Path dataFile = effectiveStagingDir.resolve(prefix + "_data.bin");
+			Path offsFile = effectiveStagingDir.resolve(prefix + "_offs.bin");
+			stagedTempFiles.add(dataFile);
+			stagedTempFiles.add(offsFile);
+
+			long dataBytes = 0L;
+			long rowsWritten = 0L;
+			int chunkSize = (int) Math.min(8192L, Math.max(1L, rowCount));
+			List<byte[]> chunk = new ArrayList<>(chunkSize);
+			ByteBuffer offsBuf = ByteBuffer.allocate(64 * 1024).order(ByteOrder.LITTLE_ENDIAN);
+			ByteBuffer dataBuf = ByteBuffer.allocate(256 * 1024);
+
+			try (AttributeChunkIterator closeableIt = it;
+					FileChannel dataCh = FileChannel.open(dataFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+							StandardOpenOption.TRUNCATE_EXISTING);
+					FileChannel offsCh = FileChannel.open(offsFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+							StandardOpenOption.TRUNCATE_EXISTING);
+					ValidityBitWriter valWriter = isNullable
+							? new ValidityBitWriter(valFile, paddedBitmapBytes)
+							: null) {
+				// offsets[0] = 0
+				offsBuf.putInt(0);
+				while (closeableIt.hasNext() && rowsWritten < rowCount) {
+					chunk.clear();
+					int limit = (int) Math.min(chunkSize, rowCount - rowsWritten);
+					int count = closeableIt.nextVariableChunk(chunk, limit);
+					if (count <= 0) {
+						break;
+					}
+					for (int i = 0; i < count; i++) {
+						byte[] val = chunk.get(i);
+						if (val != null) {
+							if (valWriter != null) {
+								valWriter.writeBit(true);
+							}
+							if (val.length > 0) {
+								if (dataBytes + val.length > 0xFFFFFFFFL) {
+									throw new IOException("Variable-length attribute '" + attrName
+											+ "' exceeds 4GB uint32 offset limit");
+								}
+								writeBytesBuffered(dataCh, dataBuf, val);
+								dataBytes += val.length;
+							}
+						} else {
+							if (valWriter != null) {
+								valWriter.writeBit(false);
+							}
+						}
+						if (offsBuf.remaining() < 4) {
+							offsBuf.flip();
+							writeFully(offsCh, offsBuf);
+							offsBuf.clear();
+						}
+						offsBuf.putInt((int) dataBytes);
+						rowsWritten++;
+					}
+				}
+				// Pad remaining rows if iterator returned fewer than rowCount
+				while (rowsWritten < rowCount) {
+					if (valWriter != null) {
+						valWriter.writeBit(false);
+					}
+					if (offsBuf.remaining() < 4) {
+						offsBuf.flip();
+						writeFully(offsCh, offsBuf);
+						offsBuf.clear();
+					}
+					offsBuf.putInt((int) dataBytes);
+					rowsWritten++;
+				}
+				if (dataBuf.position() > 0) {
+					dataBuf.flip();
+					writeFully(dataCh, dataBuf);
+				}
+				if (offsBuf.position() > 0) {
+					offsBuf.flip();
+					writeFully(offsCh, offsBuf);
+				}
+				if (valWriter != null) {
+					valWriter.finish();
+				}
+			} catch (IOException e) {
+				throw e;
+			} catch (Exception e) {
+				throw new IOException("Failed to close attribute iterator for '" + attrName + "'", e);
+			}
+
+			long offsBytes = (rowCount + 1L) * 4L;
+			return new StagedAttr(attrName, typeCode, dimension, dataBytes, dataBytes > 0 ? dataFile : null,
+					paddedBitmapBytes, valFile, offsBytes, offsFile);
+		}
+
+		// Fixed-width primitive or fixed-size vector attribute
+		Path dataFile = effectiveStagingDir.resolve(prefix + "_data.bin");
+		stagedTempFiles.add(dataFile);
+		long dataBytes = 0L;
+		int elemBytes = Math.max(1, dt.totalValueBytes());
+		int chunkSize = (int) Math.min(65536L, Math.max(1L, rowCount));
+		long chunkByteSize = (long) chunkSize * elemBytes;
+		byte[] chunkValidity = isNullable ? new byte[(chunkSize + 7) / 8] : null;
+
+		try (AttributeChunkIterator closeableIt = it;
+				Arena chunkArena = Arena.ofConfined();
+				FileChannel fc = FileChannel.open(dataFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+						StandardOpenOption.TRUNCATE_EXISTING);
+				ValidityBitWriter valWriter = isNullable ? new ValidityBitWriter(valFile, paddedBitmapBytes) : null) {
+			MemorySegment buf = chunkArena.allocate(chunkByteSize, 128);
+			long rowsWritten = 0L;
+			while (closeableIt.hasNext() && rowsWritten < rowCount) {
+				int limit = (int) Math.min(chunkSize, rowCount - rowsWritten);
+				int count;
+				if (isNullable) {
+					Arrays.fill(chunkValidity, 0, (limit + 7) / 8, (byte) 0);
+					count = closeableIt.nextChunk(buf, chunkValidity, limit);
+				} else {
+					count = closeableIt.nextChunk(buf, limit);
+				}
+				if (count <= 0) {
+					break;
+				}
+				long bytesToWrite = (long) count * elemBytes;
+				ByteBuffer sliceBuf = buf.asSlice(0, bytesToWrite).asByteBuffer();
+				writeFully(fc, sliceBuf);
+				dataBytes += bytesToWrite;
+				if (valWriter != null) {
+					valWriter.writeBits(chunkValidity, count);
+				}
+				rowsWritten += count;
+			}
+			if (valWriter != null) {
+				valWriter.finish();
+			}
+		} catch (IOException e) {
+			throw e;
+		} catch (Exception e) {
+			throw new IOException("Failed to close attribute iterator for '" + attrName + "'", e);
+		}
+
+		return new StagedAttr(attrName, typeCode, dimension, dataBytes, dataBytes > 0 ? dataFile : null,
+				paddedBitmapBytes, valFile, 0L, null);
+	}
+
+	private static void writeBytesBuffered(FileChannel ch, ByteBuffer buf, byte[] bytes) throws IOException {
+		int offset = 0;
+		while (offset < bytes.length) {
+			int toCopy = Math.min(buf.remaining(), bytes.length - offset);
+			buf.put(bytes, offset, toCopy);
+			offset += toCopy;
+			if (!buf.hasRemaining()) {
+				buf.flip();
+				writeFully(ch, buf);
+				buf.clear();
+			}
+		}
+	}
+
+	private static void writeFully(FileChannel ch, ByteBuffer buf) throws IOException {
+		while (buf.hasRemaining()) {
+			ch.write(buf);
+		}
+	}
+
+	private static final class ValidityBitWriter implements AutoCloseable {
+		private final FileChannel ch;
+		private final long targetPaddedBytes;
+		private final ByteBuffer outBuf = ByteBuffer.allocate(64 * 1024);
+		private long bytesWritten = 0L;
+		private int currentByte = 0;
+		private int bitPos = 0;
+
+		ValidityBitWriter(Path path, long targetPaddedBytes) throws IOException {
+			this.ch = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+					StandardOpenOption.TRUNCATE_EXISTING);
+			this.targetPaddedBytes = targetPaddedBytes;
+		}
+
+		void writeBit(boolean valid) throws IOException {
+			if (valid) {
+				currentByte |= (1 << bitPos);
+			}
+			bitPos++;
+			if (bitPos == 8) {
+				emitByte((byte) currentByte);
+				currentByte = 0;
+				bitPos = 0;
+			}
+		}
+
+		void writeBits(byte[] bits, int count) throws IOException {
+			if (bitPos == 0) {
+				int fullBytes = count >>> 3;
+				for (int i = 0; i < fullBytes; i++) {
+					emitByte(bits[i]);
+				}
+				int rem = count & 7;
+				for (int b = 0; b < rem; b++) {
+					boolean valid = (bits[fullBytes] & (1 << b)) != 0;
+					writeBit(valid);
+				}
+			} else {
+				for (int i = 0; i < count; i++) {
+					boolean valid = (bits[i >>> 3] & (1 << (i & 7))) != 0;
+					writeBit(valid);
+				}
+			}
+		}
+
+		private void emitByte(byte b) throws IOException {
+			if (!outBuf.hasRemaining()) {
+				outBuf.flip();
+				writeFully(ch, outBuf);
+				outBuf.clear();
+			}
+			outBuf.put(b);
+			bytesWritten++;
+		}
+
+		void finish() throws IOException {
+			if (bitPos > 0) {
+				emitByte((byte) currentByte);
+				currentByte = 0;
+				bitPos = 0;
+			}
+			while (bytesWritten < targetPaddedBytes) {
+				emitByte((byte) 0);
+			}
+			if (outBuf.position() > 0) {
+				outBuf.flip();
+				writeFully(ch, outBuf);
+				outBuf.clear();
+			}
+		}
+
+		@Override
+		public void close() throws IOException {
+			ch.close();
+		}
 	}
 
 	private static final class DigestWritableChannel implements WritableByteChannel {

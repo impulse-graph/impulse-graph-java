@@ -21,6 +21,10 @@ import java.util.List;
  */
 public interface SnapshotBuilder {
 
+	String FOOTER_SCHEMA_NAME = "impulse.schema.name";
+	String FOOTER_SCHEMA_VERSION = "impulse.schema.version";
+	String FOOTER_SCHEMA_SHA256 = "impulse.schema.sha256";
+
 	static SnapshotBuilder create() {
 		return new StreamingSnapshotWriter();
 	}
@@ -72,6 +76,24 @@ public interface SnapshotBuilder {
 	 * Adds a raw binary metadata payload to the trailing footer.
 	 */
 	SnapshotBuilder addFooterMetadata(String key, byte[] payload);
+
+	/**
+	 * Records canonical schema provenance keys in the trailing footer dictionary
+	 * ({@code impulse.schema.name}, {@code impulse.schema.version}, and
+	 * {@code impulse.schema.sha256} when non-blank).
+	 */
+	default SnapshotBuilder withSchemaProvenance(String schemaName, String schemaVersion, String schemaSha256) {
+		if (schemaName != null && !schemaName.isBlank()) {
+			addFooterMetadata(FOOTER_SCHEMA_NAME, schemaName);
+		}
+		if (schemaVersion != null && !schemaVersion.isBlank()) {
+			addFooterMetadata(FOOTER_SCHEMA_VERSION, schemaVersion);
+		}
+		if (schemaSha256 != null && !schemaSha256.isBlank()) {
+			addFooterMetadata(FOOTER_SCHEMA_SHA256, schemaSha256);
+		}
+		return this;
+	}
 
 	/**
 	 * Sequentially streams the snapshot binary in a strict single-pass to the
