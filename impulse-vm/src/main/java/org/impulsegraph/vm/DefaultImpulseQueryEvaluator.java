@@ -17,8 +17,10 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 
 	private static final int MAX_CACHE_SIZE = 1024;
 	private static final DefaultImpulseQueryEvaluator INSTANCE = new DefaultImpulseQueryEvaluator();
-	// Lock-free read-hit cache with bounded FIFO eviction; each cached CompiledQuery
-	// owns its own Arena.ofAuto() so evicted off-heap bytecode is reclaimed by GC (#72).
+	// Lock-free read-hit cache with bounded FIFO eviction; each cached
+	// CompiledQuery
+	// owns its own Arena.ofAuto() so evicted off-heap bytecode is reclaimed by GC
+	// (#72).
 	private static final ConcurrentHashMap<ImpulseGraphQuery<?>, CompiledQuery> COMPILED_QUERY_CACHE = new ConcurrentHashMap<>(
 			256);
 	private static final ConcurrentLinkedQueue<ImpulseGraphQuery<?>> EVICTION_QUEUE = new ConcurrentLinkedQueue<>();

@@ -54,7 +54,7 @@ public final class ImpulseVmInterpreter {
 			long instructionCount, ImpulseGraphSnapshot snapshot, Object input, Arena arena,
 			java.util.List<String> stringPool, MemorySegment inlineDataSeg, long maxFuel) {
 		if (programSeg == null || instructionCount <= 0) {
-			return new OffHeapBitSet(arena, 1000);
+			return new OffHeapBitSet(arena != null ? arena : Arena.ofAuto(), 1000);
 		}
 		if (programSeg.byteSize() < (long) instructionCount * 8L) {
 			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
@@ -774,7 +774,9 @@ public final class ImpulseVmInterpreter {
 			if (finalResult == null) {
 				finalResult = ctx.getFinalResult();
 			}
-			return (finalResult != null) ? finalResult : new OffHeapBitSet(arena, 1000);
+			return (finalResult != null)
+					? finalResult
+					: new OffHeapBitSet(arena != null ? arena : Arena.ofAuto(), 1000);
 		}
 	}
 }
