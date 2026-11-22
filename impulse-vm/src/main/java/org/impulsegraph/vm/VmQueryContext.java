@@ -263,6 +263,22 @@ public final class VmQueryContext implements AutoCloseable {
 		mockAttrCount++;
 	}
 
+	public void bindMockFloatVector(int attrId, int vecHandle) {
+		float[] farr = getFloatVector(vecHandle);
+		if (farr != null) {
+			int flen = Math.min(getFloatVectorLength(vecHandle), farr.length);
+			setMockAttribute(attrId, Arrays.copyOf(farr, Math.max(0, flen)));
+		}
+	}
+
+	public void bindMockDoubleVector(int attrId, int vecHandle) {
+		double[] darr = getDoubleVector(vecHandle);
+		if (darr != null) {
+			int dlen = Math.min(getDoubleVectorLength(vecHandle), darr.length);
+			setMockAttribute(attrId, Arrays.copyOf(darr, Math.max(0, dlen)));
+		}
+	}
+
 	public Object getMockAttribute(int attrId) {
 		for (int i = 0; i < mockAttrCount; i++) {
 			if (mockAttrKeys[i] == attrId) {
@@ -396,20 +412,21 @@ public final class VmQueryContext implements AutoCloseable {
 
 	public void consumeFuel(long steps) {
 		if (fuelEnabled) {
-			fuelRemaining -= steps;
-			if (fuelRemaining <= 0) {
+			if (fuelRemaining < steps) {
 				fuelRemaining = 0;
 				throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_FUEL");
 			}
+			fuelRemaining -= steps;
 		}
 	}
 
 	public void consumeFuel() {
 		if (fuelEnabled) {
-			if (--fuelRemaining <= 0) {
+			if (fuelRemaining <= 0) {
 				fuelRemaining = 0;
 				throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_FUEL");
 			}
+			fuelRemaining--;
 		}
 	}
 

@@ -5,6 +5,7 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 
 import static org.impulsegraph.vm.VmRegisterType.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class OpcodeKcoreDecompositionTest {
 
@@ -14,7 +15,7 @@ public class OpcodeKcoreDecompositionTest {
 			MemorySegment prog = arena.allocate(32);
 			prog.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0, OP_KCORE_DECOMPOSITION);
 			prog.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 16, OP_HALT);
-			ImpulseVmInterpreter.execute(prog, 2, null, null, arena);
+			assertThrows(IllegalStateException.class, () -> ImpulseVmInterpreter.execute(prog, 2, null, null, arena));
 		}
 	}
 }

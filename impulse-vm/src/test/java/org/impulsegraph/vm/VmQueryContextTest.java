@@ -110,6 +110,8 @@ class VmQueryContextTest {
 			ctx.setFuel(2);
 			ctx.consumeFuel();
 			assertEquals(1L, ctx.getFuelRemaining());
+			ctx.consumeFuel();
+			assertEquals(0L, ctx.getFuelRemaining());
 			assertThrows(IllegalStateException.class, ctx::consumeFuel);
 			assertEquals(0L, ctx.getFuelRemaining());
 

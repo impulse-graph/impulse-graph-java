@@ -49,7 +49,7 @@ public final class VmMultiLaneHandlers {
 		RelationSnapshot rel = ctx.resolveRelation(relId);
 		if (rel != null) {
 			best = Math.max(best, rel.getNodeCount());
-		} else if (ctx.getSnapshot() != null) {
+		} else {
 			RelationSnapshot rel0 = ctx.resolveRelation(0);
 			if (rel0 != null) {
 				best = Math.max(best, rel0.getNodeCount());
@@ -515,8 +515,7 @@ public final class VmMultiLaneHandlers {
 					int domN = resolveDomainNodeCount(ctx, ctx.getString(pU16High));
 					nodeCount = (domN >= 0) ? domN : resolveNodeCount(ctx, 0, seedCount > 0 ? (maxSeed + 1) : 1);
 				} else {
-					int relOrDom = (tag == VmRegType.T_NULL) ? 0 : pU16High;
-					nodeCount = resolveNodeCount(ctx, relOrDom, maxSeed + 1);
+					nodeCount = resolveNodeCount(ctx, 0, maxSeed + 1);
 				}
 				VmLaneFrontier.LaneWidth width = VmLaneFrontier.selectLaneWidth(Math.max(1, numLanes));
 				long activeMask = VmRegType.makeActiveMaskU64(numLanes);
@@ -1211,7 +1210,7 @@ public final class VmMultiLaneHandlers {
 				int nCnt = lfSrc.nodeCount();
 				float[] attrFloats = resolveAttrFloats(state, ctx, attrOrReg, (flags & 1) != 0, nCnt);
 				int attrLen = ctx.getScratchFloatLen(1);
-				if (attrLen <= 0 || attrLen > attrFloats.length) {
+				if (attrLen < 0 || attrLen > attrFloats.length) {
 					attrLen = Math.min(nCnt, attrFloats.length);
 				}
 				if (redOp == 6 || redOp == 7) { // ARGMIN / ARGMAX
