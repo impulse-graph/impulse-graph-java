@@ -99,7 +99,7 @@ jobs:
           cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
 
       - name: Attest Build Provenance (SLSA)
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             release-assets/*.jar
