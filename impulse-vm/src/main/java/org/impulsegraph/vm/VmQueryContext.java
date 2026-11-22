@@ -473,7 +473,9 @@ public final class VmQueryContext implements AutoCloseable {
 			}
 			metrics.recordBitsetPoolMiss();
 			if (byteSize >= SLAB_BYTES) {
-				return new OffHeapBitSet(GLOBAL_POOL_ARENA, bitCount);
+				// Use a per-bitset automatic arena so oversized bitsets (>= 1 MB) can be
+				// reclaimed by GC instead of leaking permanently in GLOBAL_POOL_ARENA (#71).
+				return new OffHeapBitSet(Arena.ofAuto(), bitCount);
 			}
 			if (currentSlab == null || slabOffset + byteSize > SLAB_BYTES) {
 				currentSlab = Arena.ofAuto().allocate(SLAB_BYTES, 64);
@@ -520,7 +522,9 @@ public final class VmQueryContext implements AutoCloseable {
 			}
 			metrics.recordBitsetPoolMiss();
 			if (byteSize >= SLAB_BYTES) {
-				return new OffHeapBitSet(GLOBAL_POOL_ARENA, bitCount);
+				// Use a per-bitset automatic arena so oversized bitsets (>= 1 MB) can be
+				// reclaimed by GC instead of leaking permanently in GLOBAL_POOL_ARENA (#71).
+				return new OffHeapBitSet(Arena.ofAuto(), bitCount);
 			}
 			synchronized (this) {
 				if (currentSlab == null || slabOffset + byteSize > SLAB_BYTES) {
