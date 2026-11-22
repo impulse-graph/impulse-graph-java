@@ -1100,8 +1100,9 @@ public final class VmHandlers {
 			float[] f2 = (t2 == TYPE_FLOAT_VECTOR) ? ctx.getFloatVector(h2) : null;
 			int len1 = (t1 == TYPE_DOUBLE_VECTOR) ? ctx.getDoubleVectorLength(h1) : ctx.getFloatVectorLength(h1);
 			int len2 = (t2 == TYPE_DOUBLE_VECTOR) ? ctx.getDoubleVectorLength(h2) : ctx.getFloatVectorLength(h2);
-			int len = (len1 > 0 && len2 > 0) ? Math.min(len1, len2) : Math.max(len1, len2);
+			int len = Math.min(len1, len2);
 			int handle = ctx.acquireDoubleVector(len);
+			ctx.setDoubleVectorLength(handle, len);
 			double[] out = ctx.getDoubleVector(handle);
 			for (int i = 0; i < len; i++) {
 				double a = (d1 != null && i < d1.length) ? d1[i] : ((f1 != null && i < f1.length) ? f1[i] : 0.0);
@@ -1163,8 +1164,9 @@ public final class VmHandlers {
 			float[] f2 = (t2 == TYPE_FLOAT_VECTOR) ? ctx.getFloatVector(h2) : null;
 			int len1 = (t1 == TYPE_DOUBLE_VECTOR) ? ctx.getDoubleVectorLength(h1) : ctx.getFloatVectorLength(h1);
 			int len2 = (t2 == TYPE_DOUBLE_VECTOR) ? ctx.getDoubleVectorLength(h2) : ctx.getFloatVectorLength(h2);
-			int len = (len1 > 0 && len2 > 0) ? Math.min(len1, len2) : Math.max(len1, len2);
+			int len = Math.min(len1, len2);
 			int handle = ctx.acquireDoubleVector(len);
+			ctx.setDoubleVectorLength(handle, len);
 			double[] out = ctx.getDoubleVector(handle);
 			for (int i = 0; i < len; i++) {
 				double a = (d1 != null && i < d1.length) ? d1[i] : ((f1 != null && i < f1.length) ? f1[i] : 0.0);
@@ -1677,12 +1679,16 @@ public final class VmHandlers {
 				ImpulseBitSet bs1 = ctx.getBitset((int) getRegisterValue(state, srcReg1));
 				if (bs1 != null) {
 					int tmpHandle = ctx.acquireBitset();
-					ImpulseBitSet tmp = ctx.getBitset(tmpHandle);
-					tmp.clear();
-					tmp.or(bs1);
-					tmp.andNot(outBs);
-					outBs.clear();
-					outBs.or(tmp);
+					try {
+						ImpulseBitSet tmp = ctx.getBitset(tmpHandle);
+						tmp.clear();
+						tmp.or(bs1);
+						tmp.andNot(outBs);
+						outBs.clear();
+						outBs.or(tmp);
+					} finally {
+						ctx.releaseBitset(tmpHandle);
+					}
 				} else {
 					outBs.clear();
 				}
@@ -2060,15 +2066,20 @@ public final class VmHandlers {
 		if (getRegisterType(state, reg1) != TYPE_FLOAT_VECTOR || getRegisterType(state, reg2) != TYPE_FLOAT_VECTOR) {
 			throw new IllegalArgumentException("IMPULSE_VM_ERR_INVALID_REGISTER");
 		}
-		float[] v1 = ctx.getFloatVector((int) getRegisterValue(state, reg1));
-		float[] v2 = ctx.getFloatVector((int) getRegisterValue(state, reg2));
-		if (v1 == null || v2 == null || v1.length != v2.length) {
+		int h1 = (int) getRegisterValue(state, reg1);
+		int h2 = (int) getRegisterValue(state, reg2);
+		float[] v1 = ctx.getFloatVector(h1);
+		float[] v2 = ctx.getFloatVector(h2);
+		if (v1 == null || v2 == null) {
 			setRegister(state, instr.dstReg(), 0L, TYPE_FLOAT);
 			setFlag(state, FLAG_ZF, false);
 			return;
 		}
+		int len1 = Math.min(ctx.getFloatVectorLength(h1), v1.length);
+		int len2 = Math.min(ctx.getFloatVectorLength(h2), v2.length);
+		int len = Math.min(len1, len2);
 		double diffSum = 0.0;
-		for (int i = 0; i < v1.length; i++) {
+		for (int i = 0; i < len; i++) {
 			diffSum += Math.abs(v1[i] - v2[i]);
 		}
 		setRegister(state, instr.dstReg(), Integer.toUnsignedLong(Float.floatToRawIntBits((float) diffSum)),
@@ -4106,23 +4117,9 @@ public final class VmHandlers {
 
 	public static void handleVecMathBinary(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int dst = instr.dstReg();
-		int p0 = instr.payload() & 0xFF;
-		int p1 = (instr.payload() >> 8) & 0xFF;
-		int p2 = (instr.payload() >> 16) & 0xFF;
-		boolean p0IsVal = (p0 < 64 && isMathNumericType(getRegisterType(state, p0)));
-		boolean p2IsVal = (p2 < 64 && isMathNumericType(getRegisterType(state, p2)));
-		int src1;
-		int src2;
-		int funcId;
-		if (!p0IsVal && p2IsVal) {
-			funcId = p0;
-			src1 = p1;
-			src2 = p2;
-		} else {
-			src1 = p0;
-			src2 = p1;
-			funcId = p2;
-		}
+		int src1 = instr.payload() & 0xFF;
+		int src2 = (instr.payload() >> 8) & 0xFF;
+		int funcId = (instr.payload() >> 16) & 0xFF;
 		validateReg(dst);
 		validateReg(src1);
 		validateReg(src2);
@@ -4224,27 +4221,10 @@ public final class VmHandlers {
 
 	public static void handleVecMathTernary(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int dst = instr.dstReg();
-		int p0 = instr.payload() & 0xFF;
-		int p1 = (instr.payload() >> 8) & 0xFF;
-		int p2 = (instr.payload() >> 16) & 0xFF;
-		int p3 = (instr.payload() >>> 24) & 0xFF;
-		boolean p0IsVal = (p0 < 64 && isMathNumericType(getRegisterType(state, p0)));
-		boolean p3IsVal = (p3 < 64 && isMathNumericType(getRegisterType(state, p3)));
-		int src1;
-		int src2;
-		int src3;
-		int funcId;
-		if (!p0IsVal && p3IsVal) {
-			funcId = p0;
-			src1 = p1;
-			src2 = p2;
-			src3 = p3;
-		} else {
-			src1 = p0;
-			src2 = p1;
-			src3 = p2;
-			funcId = p3;
-		}
+		int src1 = instr.payload() & 0xFF;
+		int src2 = (instr.payload() >> 8) & 0xFF;
+		int src3 = (instr.payload() >> 16) & 0xFF;
+		int funcId = (instr.payload() >>> 24) & 0xFF;
 		validateReg(dst);
 		validateReg(src1);
 		validateReg(src2);
