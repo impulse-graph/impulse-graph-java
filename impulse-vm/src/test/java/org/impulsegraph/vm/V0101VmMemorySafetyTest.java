@@ -50,8 +50,8 @@ class V0101VmMemorySafetyTest {
 						inner.getSimpleName() + " must not allocate oversized bitset from GLOBAL_POOL_ARENA");
 				assertNotEquals(globalScope, seg2.scope(),
 						inner.getSimpleName() + " must not allocate oversized bitset from GLOBAL_POOL_ARENA");
-				assertNotEquals(seg1.scope(), seg2.scope(),
-						inner.getSimpleName() + " must give each oversized bitset its own GC-reclaimable Arena.ofAuto()");
+				assertNotEquals(seg1.scope(), seg2.scope(), inner.getSimpleName()
+						+ " must give each oversized bitset its own GC-reclaimable Arena.ofAuto()");
 			}
 		}
 	}
