@@ -73,7 +73,9 @@ public final class CompiledQuery {
 		if (!Boolean.getBoolean("impulse.compiler.disable_jit") && instructionCount > 0) {
 			try {
 				driver = ImpulseMethodHandleCompiler.compileDriver(programSeg, instructionCount);
-			} catch (Exception ignored) {
+			} catch (Exception e) {
+				System.getLogger(CompiledQuery.class.getName()).log(System.Logger.Level.DEBUG,
+						"JIT driver compilation failed; falling back to MethodHandle/interpreter", e);
 			}
 		}
 		this.bindingState = new AtomicReference<>(new QueryBindingState(initialSnapshot, mh, driver, programSeg,
@@ -157,7 +159,9 @@ public final class CompiledQuery {
 		if (!Boolean.getBoolean("impulse.compiler.disable_jit") && currentState.instructionCount() > 0) {
 			try {
 				newDriver = ImpulseMethodHandleCompiler.compileDriver(newProgSeg, currentState.instructionCount());
-			} catch (Exception ignored) {
+			} catch (Exception e) {
+				System.getLogger(CompiledQuery.class.getName()).log(System.Logger.Level.DEBUG,
+						"JIT driver recompilation failed during rebind; falling back to MethodHandle/interpreter", e);
 			}
 		}
 		QueryBindingState newState = new QueryBindingState(newSnapshot, newMh, newDriver, newProgSeg,

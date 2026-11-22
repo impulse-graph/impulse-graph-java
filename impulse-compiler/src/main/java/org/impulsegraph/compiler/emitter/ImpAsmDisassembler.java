@@ -88,8 +88,9 @@ public final class ImpAsmDisassembler {
 					OPCODE_NAMES.putIfAbsent(val, field.getName());
 				}
 			}
-		} catch (Exception e) {
-			// Ignore reflection errors and fallback to hex
+		} catch (IllegalAccessException | SecurityException e) {
+			System.getLogger(ImpAsmDisassembler.class.getName()).log(System.Logger.Level.DEBUG,
+					"Failed to inspect VmRegisterType opcode constants; falling back to hex", e);
 		}
 	}
 

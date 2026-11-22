@@ -679,16 +679,19 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			for (var f : stagedFilesToClean) {
 				f.close();
 			}
+			System.Logger log = System.getLogger(StreamingSnapshotWriter.class.getName());
 			for (var tf : stagedTempFiles) {
 				try {
 					Files.deleteIfExists(tf);
-				} catch (IOException ignored) {
+				} catch (IOException e) {
+					log.log(System.Logger.Level.DEBUG, "Failed to delete staged temp file " + tf, e);
 				}
 			}
 			if (createdTempStaging && effectiveStagingDir != null) {
 				try {
 					Files.deleteIfExists(effectiveStagingDir);
-				} catch (IOException ignored) {
+				} catch (IOException e) {
+					log.log(System.Logger.Level.DEBUG, "Failed to delete temp staging dir " + effectiveStagingDir, e);
 				}
 			}
 		}
@@ -816,7 +819,9 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				if (iterator != null) {
 					iterator.close();
 				}
-			} catch (Exception ignored) {
+			} catch (Exception e) {
+				System.getLogger(StreamingSnapshotWriter.class.getName()).log(System.Logger.Level.WARNING,
+						"Failed to close edge stream iterator during staging cleanup", e);
 			} finally {
 				arena.close();
 			}
