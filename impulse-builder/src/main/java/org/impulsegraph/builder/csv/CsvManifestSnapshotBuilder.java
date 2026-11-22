@@ -1,14 +1,18 @@
 package org.impulsegraph.builder.csv;
 
 import org.impulsegraph.builder.api.CompressionScheme;
+import org.impulsegraph.builder.api.DataType;
 import org.impulsegraph.builder.api.DomainDefinition;
+import org.impulsegraph.builder.api.Nullability;
 import org.impulsegraph.builder.api.PrimitiveWidth;
 import org.impulsegraph.builder.api.RelationDefinition;
 import org.impulsegraph.builder.api.SnapshotBuilder;
 import org.impulsegraph.builder.api.Topology;
+import org.impulsegraph.builder.internal.ExternalSortStaging;
 import org.impulsegraph.builder.spi.EdgeChunkIterator;
 import org.impulsegraph.builder.spi.RelationDataSource;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.lang.foreign.MemorySegment;
@@ -19,11 +23,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -98,32 +105,35 @@ public final class CsvManifestSnapshotBuilder {
 	}
 
 	/**
-	 * Parses {@code manifest.json} at the given path.
+	 * Parses {@code manifest.json} or {@code manifest.yaml}/{@code .yml} at the
+	 * given path.
 	 */
 	@SuppressWarnings("unchecked")
 	public static ManifestSpec parseManifest(Path manifestPath) throws IOException {
 		Objects.requireNonNull(manifestPath, "manifestPath must not be null");
 		Path baseDir = manifestPath.getParent();
-		String jsonText = Files.readString(manifestPath, StandardCharsets.UTF_8);
-		Map<String, Object> root = (Map<String, Object>) MiniJsonParser.parse(jsonText);
+		Map<String, Object> root = parseManifestRoot(manifestPath);
 
 		String formatVersion = String
 				.valueOf(root.getOrDefault("version", root.getOrDefault("format_version", "0.9.0")));
-		String suiteName = String.valueOf(root.getOrDefault("suite_name", "e2e-csv-suite"));
+		String suiteName = String.valueOf(root.getOrDefault("suite_name",
+				root.getOrDefault("schema_name", root.getOrDefault("name", "e2e-csv-suite"))));
 
 		List<DomainSpec> domains = new ArrayList<>();
+		Map<String, Integer> domainNameToId = new HashMap<>();
 		List<Object> domList = (List<Object>) root.getOrDefault("domains", List.of());
 		for (int idx = 0; idx < domList.size(); idx++) {
 			Map<String, Object> m = (Map<String, Object>) domList.get(idx);
 			int id = m.containsKey("id") ? ((Number) m.get("id")).intValue() : idx;
 			String name = (String) m.get("name");
-			String keyType = (String) m.getOrDefault("key_type", "string");
-			String csv = (String) (m.containsKey("file") ? m.get("file") : m.get("csv"));
+			String keyType = String.valueOf(m.getOrDefault("key_type", m.getOrDefault("keyType", "string")));
+			String csv = resolveFileField(m);
 			int nodeCount = m.containsKey("node_count")
 					? ((Number) m.get("node_count")).intValue()
 					: countCsvDataRows(baseDir.resolve(csv));
 			List<AttributeSpec> attrs = parseAttributeSpecs((List<Object>) m.getOrDefault("attributes", List.of()));
 			domains.add(new DomainSpec(id, name, keyType, nodeCount, csv, attrs));
+			domainNameToId.put(name, id);
 		}
 		domains.sort(Comparator.comparingInt(DomainSpec::id));
 
@@ -133,11 +143,13 @@ public final class CsvManifestSnapshotBuilder {
 			Map<String, Object> m = (Map<String, Object>) relList.get(idx);
 			int id = m.containsKey("id") ? ((Number) m.get("id")).intValue() : idx;
 			String name = (String) m.get("name");
-			int srcDom = ((Number) m.get("src_domain")).intValue();
-			int tgtDom = ((Number) m.get("tgt_domain")).intValue();
-			String encoding = (String) m.getOrDefault("encoding", "CSR");
-			boolean includeCsc = Boolean.TRUE.equals(m.get("include_csc"));
-			String csv = (String) (m.containsKey("file") ? m.get("file") : m.get("csv"));
+			int srcDom = resolveDomainRef(m.getOrDefault("src_domain", m.getOrDefault("source_domain", m.get("from"))),
+					domainNameToId);
+			int tgtDom = resolveDomainRef(m.getOrDefault("tgt_domain", m.getOrDefault("target_domain", m.get("to"))),
+					domainNameToId);
+			String encoding = String.valueOf(m.getOrDefault("encoding", "CSR"));
+			boolean includeCsc = resolveIncludeCsc(m);
+			String csv = resolveFileField(m);
 			int edgeCount = m.containsKey("edge_count")
 					? ((Number) m.get("edge_count")).intValue()
 					: countCsvDataRows(baseDir.resolve(csv));
@@ -185,44 +197,650 @@ public final class CsvManifestSnapshotBuilder {
 	}
 
 	/**
-	 * Builds the snapshot via {@link SnapshotBuilder}
-	 * ({@code StreamingSnapshotWriter}) and writes it to {@code outputPath}.
+	 * Builds a streaming Spec {@code v0.10.0} ({@code 0x000A}) snapshot via
+	 * {@link SnapshotBuilder} ({@code StreamingSnapshotWriter}) with zero full-file
+	 * heap buffering. Supports CSV, TSV, and JSONL inputs as well as JSON and YAML
+	 * manifests.
 	 */
 	public static void buildViaStreamingSnapshotWriter(Path manifestPath, Path outputPath) throws IOException {
+		buildV10Snapshot(manifestPath, outputPath);
+	}
+
+	/**
+	 * Canonical streaming Spec {@code v0.10.0} ({@code 0x000A}) snapshot builder
+	 * from a JSON or YAML manifest referencing CSV, TSV, or JSONL domain and
+	 * relation files.
+	 */
+	public static void buildV10Snapshot(Path manifestPath, Path outputPath) throws IOException {
+		buildV10Snapshot(manifestPath, outputPath, null, 64 * 1024 * 1024L);
+	}
+
+	/**
+	 * Canonical streaming Spec {@code v0.10.0} ({@code 0x000A}) snapshot builder
+	 * with configurable disk staging directory and external-sort memory budget.
+	 */
+	public static void buildV10Snapshot(Path manifestPath, Path outputPath, Path stagingDir,
+			long stagingMemoryLimitBytes) throws IOException {
 		Objects.requireNonNull(manifestPath, "manifestPath must not be null");
 		Objects.requireNonNull(outputPath, "outputPath must not be null");
-		Path baseDir = manifestPath.getParent();
-		ManifestSpec manifest = parseManifest(manifestPath);
 
-		Map<Integer, ParsedDomainData> domainMap = new LinkedHashMap<>();
-		for (DomainSpec d : manifest.domains()) {
-			domainMap.put(d.id(), parseDomainCsv(baseDir.resolve(d.csvRelPath()), d));
+		Path baseDir = manifestPath.toAbsolutePath().normalize().getParent();
+		byte[] manifestRawBytes = Files.readAllBytes(manifestPath);
+		String manifestSha256 = computeSha256Hex(manifestRawBytes);
+		V10ManifestSpec manifest = parseV10Manifest(manifestPath, new String(manifestRawBytes, StandardCharsets.UTF_8));
+
+		boolean createdTempStaging = false;
+		Path effectiveStagingDir = stagingDir;
+		if (effectiveStagingDir == null) {
+			effectiveStagingDir = Files.createTempDirectory("impulse_csv_v10_");
+			createdTempStaging = true;
+		} else {
+			Files.createDirectories(effectiveStagingDir);
 		}
+		long effectiveMemLimit = stagingMemoryLimitBytes > 0 ? stagingMemoryLimitBytes : 64 * 1024 * 1024L;
+		List<Path> tempStagedFiles = new ArrayList<>();
 
-		SnapshotBuilder builder = SnapshotBuilder.create();
-		for (DomainSpec d : manifest.domains()) {
-			DomainDefinition domDef = DomainDefinition.builder(d.nodeCount()).idWidth(PrimitiveWidth.UINT32).build();
-			builder.addDomain(d.name(), domDef);
-		}
+		try {
+			ExternalSortStaging sortStaging = new ExternalSortStaging(effectiveStagingDir, effectiveMemLimit);
+			SnapshotBuilder builder = SnapshotBuilder.create().withVersion((short) 10)
+					.withStagingDirectory(effectiveStagingDir).withStagingMemoryLimit(effectiveMemLimit);
 
-		for (RelationSpec r : manifest.relations()) {
-			ParsedDomainData srcDom = domainMap.get(r.srcDomainId());
-			ParsedDomainData tgtDom = domainMap.get(r.tgtDomainId());
-			ParsedRelationData relData = parseRelationCsv(baseDir.resolve(r.csvRelPath()), r, srcDom, tgtDom);
+			Map<Integer, V10DomainSpec> domainSpecById = new LinkedHashMap<>();
+			Map<Integer, Map<String, Long>> domainKeyMaps = new LinkedHashMap<>();
 
-			RelationDefinition.Builder relBuilder = RelationDefinition.builder(srcDom.spec().name(),
-					tgtDom.spec().name());
-			relBuilder.addTopology(Topology.CSR, CompressionScheme.RAW);
-			if (r.includeCsc()) {
-				relBuilder.addTopology(Topology.CSC, CompressionScheme.RAW);
+			// 1. Stream each domain file in O(chunk) memory into staged column files
+			for (V10DomainSpec d : manifest.domains()) {
+				domainSpecById.put(d.id(), d);
+				Path dataPath = baseDir.resolve(d.fileRelPath());
+				Map<String, Long> keyToDense = new HashMap<>();
+
+				// Ensure primary key column is present as a domain attribute
+				List<V10AttrSpec> effectiveAttrs = new ArrayList<>();
+				String pkAttrName = null;
+				for (V10AttrSpec a : d.attributes()) {
+					if (a.name().equalsIgnoreCase(d.idColumn()) || a.column().equalsIgnoreCase(d.idColumn())) {
+						pkAttrName = a.name();
+					}
+					effectiveAttrs.add(a);
+				}
+				if (pkAttrName == null) {
+					pkAttrName = d.idColumn();
+					effectiveAttrs.add(0,
+							new V10AttrSpec(pkAttrName, d.idColumn(), d.keyDataType(), Nullability.NON_NULL));
+				}
+
+				List<StreamingColumnStager.ColumnWriter> colWriters = new ArrayList<>(effectiveAttrs.size());
+				for (int a = 0; a < effectiveAttrs.size(); a++) {
+					V10AttrSpec attr = effectiveAttrs.get(a);
+					Path colFile = Files.createTempFile(effectiveStagingDir, "dom_" + d.id() + "_col_" + a + "_",
+							".bin");
+					tempStagedFiles.add(colFile);
+					colWriters
+							.add(new StreamingColumnStager.ColumnWriter(colFile, attr.dataType(), attr.nullability()));
+				}
+
+				long nodeCount = 0L;
+				try {
+					nodeCount = streamDomainFile(dataPath, d, effectiveAttrs, colWriters, keyToDense);
+				} finally {
+					for (StreamingColumnStager.ColumnWriter cw : colWriters) {
+						cw.close();
+					}
+				}
+
+				domainKeyMaps.put(d.id(), keyToDense);
+
+				DomainDefinition.Builder domBuilder = DomainDefinition.builder(nodeCount).idWidth(d.idWidth())
+						.withPrimaryKeyIndex(true).primaryKeyAttribute(pkAttrName);
+				for (int a = 0; a < effectiveAttrs.size(); a++) {
+					domBuilder.addAttribute(effectiveAttrs.get(a).name(), colWriters.get(a).toAttributeDataSource());
+				}
+				builder.addDomain(d.name(), domBuilder.build());
 			}
-			relBuilder.dataSource(new InMemoryEdgeSource(relData.csrSortedEdges()));
-			builder.addRelation(r.name(), relBuilder.build());
-		}
 
-		builder.addFooterMetadata("suite_name", manifest.suiteName());
-		builder.addFooterMetadata("format_version", manifest.formatVersion());
-		builder.writeTo(outputPath);
+			// 2. Stream each relation file, externally sort edges + edge attributes, and
+			// stage for StreamingSnapshotWriter
+			for (V10RelationSpec r : manifest.relations()) {
+				V10DomainSpec srcDom = domainSpecById.get(r.srcDomainId());
+				V10DomainSpec tgtDom = domainSpecById.get(r.tgtDomainId());
+				if (srcDom == null || tgtDom == null) {
+					throw new IllegalArgumentException("Relation '" + r.name() + "' references unknown domain IDs: "
+							+ r.srcDomainId() + " -> " + r.tgtDomainId());
+				}
+
+				Map<String, Long> srcKeys = domainKeyMaps.get(r.srcDomainId());
+				Map<String, Long> tgtKeys = domainKeyMaps.get(r.tgtDomainId());
+				Path dataPath = baseDir.resolve(r.fileRelPath());
+
+				Path edgesFile = Files.createTempFile(effectiveStagingDir, "rel_" + r.id() + "_edges_", ".bin");
+				tempStagedFiles.add(edgesFile);
+
+				List<StreamingColumnStager.ColumnWriter> relColWriters = new ArrayList<>(r.attributes().size());
+				for (int a = 0; a < r.attributes().size(); a++) {
+					V10AttrSpec attr = r.attributes().get(a);
+					Path colFile = Files.createTempFile(effectiveStagingDir, "rel_" + r.id() + "_col_" + a + "_",
+							".bin");
+					tempStagedFiles.add(colFile);
+					relColWriters
+							.add(new StreamingColumnStager.ColumnWriter(colFile, attr.dataType(), attr.nullability()));
+				}
+
+				int srcWidth = srcDom.idWidth().byteSize();
+				int tgtWidth = tgtDom.idWidth().byteSize();
+				StreamingColumnStager.EdgeFileWriter edgeWriter = new StreamingColumnStager.EdgeFileWriter(edgesFile,
+						srcWidth, tgtWidth);
+
+				try (ExternalSortStaging.EdgeRecordRunSorter sorter = sortStaging.newEdgeRecordSorter("rel_" + r.id(),
+						r.attributes().size())) {
+					streamRelationFileIntoSorter(dataPath, r, srcKeys, tgtKeys, sorter);
+					sorter.drainSorted((srcId, tgtId, attrVals) -> {
+						edgeWriter.writeEdge(srcId, tgtId);
+						for (int a = 0; a < relColWriters.size(); a++) {
+							Object v = (attrVals != null && a < attrVals.length) ? attrVals[a] : null;
+							relColWriters.get(a).writeValue(v);
+						}
+					});
+				} finally {
+					edgeWriter.close();
+					for (StreamingColumnStager.ColumnWriter cw : relColWriters) {
+						cw.close();
+					}
+				}
+
+				RelationDefinition.Builder relBuilder = RelationDefinition.builder(srcDom.name(), tgtDom.name());
+				relBuilder.addTopology(Topology.CSR, CompressionScheme.RAW);
+				if (r.includeCsc()) {
+					relBuilder.addTopology(Topology.CSC, CompressionScheme.RAW);
+				}
+				relBuilder.dataSource(edgeWriter.toRelationDataSource());
+				for (int a = 0; a < r.attributes().size(); a++) {
+					relBuilder.addAttribute(r.attributes().get(a).name(), relColWriters.get(a).toAttributeDataSource());
+				}
+				builder.addRelation(r.name(), relBuilder.build());
+			}
+
+			// 3. Embed canonical schema provenance + legacy metadata keys and stream to
+			// outputPath
+			builder.withSchemaProvenance(manifest.schemaName(), manifest.schemaVersion(), manifestSha256);
+			builder.addFooterMetadata("suite_name", manifest.schemaName());
+			builder.addFooterMetadata("format_version", manifest.schemaVersion());
+			builder.writeTo(outputPath);
+		} finally {
+			System.Logger log = System.getLogger(CsvManifestSnapshotBuilder.class.getName());
+			for (Path f : tempStagedFiles) {
+				try {
+					Files.deleteIfExists(f);
+				} catch (IOException e) {
+					log.log(System.Logger.Level.DEBUG, "Failed to delete staged file " + f, e);
+				}
+			}
+			if (createdTempStaging && effectiveStagingDir != null) {
+				try {
+					Files.deleteIfExists(effectiveStagingDir);
+				} catch (IOException e) {
+					log.log(System.Logger.Level.DEBUG, "Failed to delete temp staging dir " + effectiveStagingDir, e);
+				}
+			}
+		}
+	}
+
+	private enum InputFormat {
+		CSV, TSV, JSONL
+	}
+
+	private record V10AttrSpec(String name, String column, DataType dataType, Nullability nullability) {
+	}
+
+	private record V10DomainSpec(int id, String name, PrimitiveWidth idWidth, DataType keyDataType, String idColumn,
+			String fileRelPath, InputFormat format, char delimiter, List<V10AttrSpec> attributes) {
+	}
+
+	private record V10RelationSpec(int id, String name, int srcDomainId, int tgtDomainId, boolean includeCsc,
+			String srcColumn, String tgtColumn, String fileRelPath, InputFormat format, char delimiter,
+			List<V10AttrSpec> attributes) {
+	}
+
+	private record V10ManifestSpec(String schemaName, String schemaVersion, List<V10DomainSpec> domains,
+			List<V10RelationSpec> relations) {
+	}
+
+	@SuppressWarnings("unchecked")
+	private static Map<String, Object> parseManifestRoot(Path manifestPath) throws IOException {
+		String text = Files.readString(manifestPath, StandardCharsets.UTF_8);
+		return parseManifestRoot(manifestPath, text);
+	}
+
+	@SuppressWarnings("unchecked")
+	private static Map<String, Object> parseManifestRoot(Path manifestPath, String text) {
+		String lowerName = manifestPath.getFileName().toString().toLowerCase(Locale.ROOT);
+		if (lowerName.endsWith(".yaml") || lowerName.endsWith(".yml")) {
+			return (Map<String, Object>) MiniYamlParser.parse(text);
+		}
+		return (Map<String, Object>) MiniJsonParser.parse(text);
+	}
+
+	@SuppressWarnings("unchecked")
+	private static V10ManifestSpec parseV10Manifest(Path manifestPath, String text) {
+		Map<String, Object> root = parseManifestRoot(manifestPath, text);
+
+		String defaultName = manifestPath.getFileName().toString();
+		int dot = defaultName.lastIndexOf('.');
+		if (dot > 0) {
+			defaultName = defaultName.substring(0, dot);
+		}
+		String schemaName = String.valueOf(root.getOrDefault("schema_name",
+				root.getOrDefault("name", root.getOrDefault("suite_name", defaultName))));
+		String schemaVersion = String.valueOf(root.getOrDefault("schema_version",
+				root.getOrDefault("version", root.getOrDefault("format_version", "0.10.0"))));
+		String defaultDelimiterStr = root.containsKey("delimiter") ? String.valueOf(root.get("delimiter")) : null;
+
+		List<V10DomainSpec> domains = new ArrayList<>();
+		Map<String, Integer> domainNameToId = new HashMap<>();
+		List<Object> domList = (List<Object>) root.getOrDefault("domains", List.of());
+		for (int idx = 0; idx < domList.size(); idx++) {
+			Map<String, Object> m = (Map<String, Object>) domList.get(idx);
+			int id = m.containsKey("id") ? ((Number) m.get("id")).intValue() : idx;
+			String name = String.valueOf(m.get("name"));
+			PrimitiveWidth idWidth = parsePrimitiveWidth(m.getOrDefault("id_width", m.get("idWidth")));
+			String keyTypeStr = String.valueOf(m.getOrDefault("key_type", m.getOrDefault("keyType", "string")));
+			DataType keyDataType = parseKeyDataType(keyTypeStr);
+			String idCol = String.valueOf(
+					m.getOrDefault("id_column", m.getOrDefault("key_column", m.getOrDefault("primary_key", "id"))));
+			String fileRel = resolveFileField(m);
+			String delimStr = m.containsKey("delimiter") ? String.valueOf(m.get("delimiter")) : defaultDelimiterStr;
+			String fmtStr = m.containsKey("format") ? String.valueOf(m.get("format")) : null;
+			InputFormat fmt = detectInputFormat(fileRel, fmtStr, delimStr);
+			char delim = resolveDelimiter(fmt, delimStr);
+			List<V10AttrSpec> attrs = parseV10AttributeSpecs((List<Object>) m.getOrDefault("attributes", List.of()));
+			domains.add(new V10DomainSpec(id, name, idWidth, keyDataType, idCol, fileRel, fmt, delim, attrs));
+			domainNameToId.put(name, id);
+		}
+		domains.sort(Comparator.comparingInt(V10DomainSpec::id));
+
+		List<V10RelationSpec> relations = new ArrayList<>();
+		List<Object> relList = (List<Object>) root.getOrDefault("relations", List.of());
+		for (int idx = 0; idx < relList.size(); idx++) {
+			Map<String, Object> m = (Map<String, Object>) relList.get(idx);
+			int id = m.containsKey("id") ? ((Number) m.get("id")).intValue() : idx;
+			String name = String.valueOf(m.get("name"));
+			int srcDom = resolveDomainRef(m.getOrDefault("src_domain", m.getOrDefault("source_domain", m.get("from"))),
+					domainNameToId);
+			int tgtDom = resolveDomainRef(m.getOrDefault("tgt_domain", m.getOrDefault("target_domain", m.get("to"))),
+					domainNameToId);
+			boolean includeCsc = resolveIncludeCsc(m);
+			String srcCol = String.valueOf(m.getOrDefault("src_column", "src"));
+			String tgtCol = String.valueOf(m.getOrDefault("tgt_column", "tgt"));
+			String fileRel = resolveFileField(m);
+			String delimStr = m.containsKey("delimiter") ? String.valueOf(m.get("delimiter")) : defaultDelimiterStr;
+			String fmtStr = m.containsKey("format") ? String.valueOf(m.get("format")) : null;
+			InputFormat fmt = detectInputFormat(fileRel, fmtStr, delimStr);
+			char delim = resolveDelimiter(fmt, delimStr);
+			List<V10AttrSpec> attrs = parseV10AttributeSpecs((List<Object>) m.getOrDefault("attributes", List.of()));
+			relations.add(new V10RelationSpec(id, name, srcDom, tgtDom, includeCsc, srcCol, tgtCol, fileRel, fmt, delim,
+					attrs));
+		}
+		relations.sort(Comparator.comparingInt(V10RelationSpec::id));
+
+		return new V10ManifestSpec(schemaName, schemaVersion, domains, relations);
+	}
+
+	private static String resolveFileField(Map<String, Object> m) {
+		Object v = m.get("file");
+		if (v == null) {
+			v = m.get("csv");
+		}
+		if (v == null) {
+			v = m.get("path");
+		}
+		if (v == null) {
+			throw new IllegalArgumentException("Manifest entry missing 'file'/'csv'/'path': " + m);
+		}
+		return String.valueOf(v);
+	}
+
+	private static int resolveDomainRef(Object ref, Map<String, Integer> domainNameToId) {
+		if (ref instanceof Number n) {
+			return n.intValue();
+		}
+		if (ref instanceof String s) {
+			Integer byName = domainNameToId.get(s);
+			if (byName != null) {
+				return byName;
+			}
+			return Integer.parseInt(s.trim());
+		}
+		throw new IllegalArgumentException("Invalid domain reference in manifest: " + ref);
+	}
+
+	private static boolean resolveIncludeCsc(Map<String, Object> m) {
+		if (m.containsKey("include_csc")) {
+			return Boolean.TRUE.equals(m.get("include_csc"));
+		}
+		Object dir = m.get("direction");
+		if (dir != null) {
+			String d = String.valueOf(dir).trim().toLowerCase(Locale.ROOT);
+			return "bidirectional".equals(d) || "undirected".equals(d) || "both".equals(d) || "csc".equals(d);
+		}
+		return false;
+	}
+
+	private static PrimitiveWidth parsePrimitiveWidth(Object raw) {
+		if (raw == null) {
+			return PrimitiveWidth.UINT32;
+		}
+		String s = String.valueOf(raw).trim().toLowerCase(Locale.ROOT);
+		return switch (s) {
+			case "uint16", "u16", "16", "2" -> PrimitiveWidth.UINT16;
+			case "uint64", "u64", "64", "8" -> PrimitiveWidth.UINT64;
+			default -> PrimitiveWidth.UINT32;
+		};
+	}
+
+	private static DataType parseKeyDataType(String keyType) {
+		if (keyType == null) {
+			return DataType.STRING;
+		}
+		return switch (keyType.trim().toLowerCase(Locale.ROOT)) {
+			case "int8", "uint8" -> DataType.I8;
+			case "int16", "uint16" -> DataType.I16;
+			case "int32", "uint32" -> DataType.I32;
+			case "int64", "uint64" -> DataType.I64;
+			default -> DataType.STRING;
+		};
+	}
+
+	@SuppressWarnings("unchecked")
+	private static List<V10AttrSpec> parseV10AttributeSpecs(List<Object> rawAttrs) {
+		List<V10AttrSpec> out = new ArrayList<>(rawAttrs.size());
+		for (Object obj : rawAttrs) {
+			Map<String, Object> am = (Map<String, Object>) obj;
+			String name = String.valueOf(am.get("name"));
+			String column = am.containsKey("column") ? String.valueOf(am.get("column")) : name;
+			String rawType = String.valueOf(am.get("type")).trim();
+			boolean nullable = rawType.endsWith("?") || Boolean.TRUE.equals(am.get("nullable"));
+			String baseType = rawType.endsWith("?") ? rawType.substring(0, rawType.length() - 1).trim() : rawType;
+			DataType dt = parseV10DataType(baseType);
+			out.add(new V10AttrSpec(name, column, dt, nullable ? Nullability.NULLABLE : Nullability.NON_NULL));
+		}
+		return out;
+	}
+
+	private static DataType parseV10DataType(String typeStr) {
+		String lower = typeStr.trim().toLowerCase(Locale.ROOT);
+		int openBracket = lower.indexOf('[');
+		if (openBracket > 0 && lower.endsWith("]")) {
+			String elemType = lower.substring(0, openBracket).trim();
+			int dim = Integer.parseInt(lower.substring(openBracket + 1, lower.length() - 1).trim());
+			DataType base = parseScalarDataType(elemType);
+			return DataType.vector(base, dim);
+		}
+		return parseScalarDataType(lower);
+	}
+
+	private static DataType parseScalarDataType(String lower) {
+		return switch (lower) {
+			case "int8", "i8", "bool", "boolean" -> DataType.I8;
+			case "int16", "i16" -> DataType.I16;
+			case "int32", "i32", "uint32" -> DataType.I32;
+			case "int64", "i64", "uint64" -> DataType.I64;
+			case "float16", "f16" -> DataType.F16;
+			case "float32", "f32", "float" -> DataType.F32;
+			case "float64", "f64", "double" -> DataType.F64;
+			case "timestamp_ms", "ts_ms" -> DataType.TIMESTAMP_MS;
+			case "timestamp_ns", "ts_ns" -> DataType.TIMESTAMP_NS;
+			case "string", "var_string", "utf8" -> DataType.STRING;
+			case "bytes", "var_bytes" -> DataType.BYTES;
+			default -> throw new IllegalArgumentException("Unsupported attribute type in manifest: " + lower);
+		};
+	}
+
+	private static InputFormat detectInputFormat(String fileRel, String explicitFormat, String explicitDelim) {
+		if (explicitFormat != null && !explicitFormat.isBlank()) {
+			String f = explicitFormat.trim().toLowerCase(Locale.ROOT);
+			if ("jsonl".equals(f) || "ndjson".equals(f)) {
+				return InputFormat.JSONL;
+			}
+			if ("tsv".equals(f)) {
+				return InputFormat.TSV;
+			}
+			if ("csv".equals(f)) {
+				return InputFormat.CSV;
+			}
+		}
+		String lower = fileRel.toLowerCase(Locale.ROOT);
+		if (lower.endsWith(".jsonl") || lower.endsWith(".ndjson")) {
+			return InputFormat.JSONL;
+		}
+		if (lower.endsWith(".tsv")) {
+			return InputFormat.TSV;
+		}
+		if (explicitDelim != null && ("\t".equals(explicitDelim) || "\\t".equals(explicitDelim)
+				|| "tab".equalsIgnoreCase(explicitDelim))) {
+			return InputFormat.TSV;
+		}
+		return InputFormat.CSV;
+	}
+
+	private static char resolveDelimiter(InputFormat fmt, String explicitDelim) {
+		if (explicitDelim != null && !explicitDelim.isEmpty()) {
+			if ("\\t".equals(explicitDelim) || "tab".equalsIgnoreCase(explicitDelim)) {
+				return '\t';
+			}
+			return explicitDelim.charAt(0);
+		}
+		return (fmt == InputFormat.TSV) ? '\t' : ',';
+	}
+
+	@SuppressWarnings("unchecked")
+	private static long streamDomainFile(Path filePath, V10DomainSpec spec, List<V10AttrSpec> effectiveAttrs,
+			List<StreamingColumnStager.ColumnWriter> writers, Map<String, Long> keyToDense) throws IOException {
+		long denseId = 0L;
+		try (BufferedReader br = Files.newBufferedReader(filePath, StandardCharsets.UTF_8)) {
+			if (spec.format() == InputFormat.JSONL) {
+				String line;
+				while ((line = br.readLine()) != null) {
+					if (line.isBlank()) {
+						continue;
+					}
+					Map<String, Object> row = (Map<String, Object>) MiniJsonParser.parse(line);
+					Object rawKey = row.get(spec.idColumn());
+					String key = rawKey != null ? String.valueOf(rawKey) : String.valueOf(denseId);
+					keyToDense.put(key, denseId);
+					for (int a = 0; a < effectiveAttrs.size(); a++) {
+						V10AttrSpec attr = effectiveAttrs.get(a);
+						Object val = row.get(attr.column());
+						if (val == null && attr.column().equalsIgnoreCase(spec.idColumn())) {
+							val = key;
+						}
+						writers.get(a).writeValue(val);
+					}
+					denseId++;
+				}
+				return denseId;
+			}
+
+			// CSV / TSV
+			String headerLine = br.readLine();
+			if (headerLine == null) {
+				return 0L;
+			}
+			String[] headers = splitDelimitedLine(headerLine, spec.delimiter());
+			Map<String, Integer> colIdxByName = new HashMap<>();
+			for (int i = 0; i < headers.length; i++) {
+				colIdxByName.put(headers[i], i);
+				colIdxByName.putIfAbsent(headers[i].toLowerCase(Locale.ROOT), i);
+			}
+			int idColIdx = resolveColumnIndex(colIdxByName, spec.idColumn(), 0);
+			int[] attrColIndices = new int[effectiveAttrs.size()];
+			for (int a = 0; a < effectiveAttrs.size(); a++) {
+				attrColIndices[a] = resolveColumnIndex(colIdxByName, effectiveAttrs.get(a).column(), -1);
+			}
+
+			String line;
+			while ((line = br.readLine()) != null) {
+				if (line.isBlank()) {
+					continue;
+				}
+				String[] cells = splitDelimitedLine(line, spec.delimiter());
+				String key = (idColIdx >= 0 && idColIdx < cells.length) ? cells[idColIdx] : String.valueOf(denseId);
+				keyToDense.put(key, denseId);
+				for (int a = 0; a < effectiveAttrs.size(); a++) {
+					int cIdx = attrColIndices[a];
+					String cell = (cIdx >= 0 && cIdx < cells.length) ? cells[cIdx] : null;
+					if (cell == null && effectiveAttrs.get(a).column().equalsIgnoreCase(spec.idColumn())) {
+						cell = key;
+					}
+					writers.get(a).writeValue(cell);
+				}
+				denseId++;
+			}
+		}
+		return denseId;
+	}
+
+	@SuppressWarnings("unchecked")
+	private static void streamRelationFileIntoSorter(Path filePath, V10RelationSpec spec, Map<String, Long> srcKeys,
+			Map<String, Long> tgtKeys, ExternalSortStaging.EdgeRecordRunSorter sorter) throws IOException {
+		int attrCount = spec.attributes().size();
+		long rowIdx = 0L;
+		try (BufferedReader br = Files.newBufferedReader(filePath, StandardCharsets.UTF_8)) {
+			if (spec.format() == InputFormat.JSONL) {
+				String line;
+				while ((line = br.readLine()) != null) {
+					if (line.isBlank()) {
+						continue;
+					}
+					Map<String, Object> row = (Map<String, Object>) MiniJsonParser.parse(line);
+					long srcId = resolveDenseIdLong(String.valueOf(row.get(spec.srcColumn())), srcKeys);
+					long tgtId = resolveDenseIdLong(String.valueOf(row.get(spec.tgtColumn())), tgtKeys);
+					String[] attrVals = attrCount > 0 ? new String[attrCount] : null;
+					for (int a = 0; a < attrCount; a++) {
+						Object val = row.get(spec.attributes().get(a).column());
+						attrVals[a] = formatJsonAttrValue(val);
+					}
+					sorter.add(srcId, tgtId, rowIdx++, attrVals);
+				}
+				return;
+			}
+
+			// CSV / TSV
+			String headerLine = br.readLine();
+			if (headerLine == null) {
+				return;
+			}
+			String[] headers = splitDelimitedLine(headerLine, spec.delimiter());
+			Map<String, Integer> colIdxByName = new HashMap<>();
+			for (int i = 0; i < headers.length; i++) {
+				colIdxByName.put(headers[i], i);
+				colIdxByName.putIfAbsent(headers[i].toLowerCase(Locale.ROOT), i);
+			}
+			int srcColIdx = resolveColumnIndex(colIdxByName, spec.srcColumn(), 0);
+			int tgtColIdx = resolveColumnIndex(colIdxByName, spec.tgtColumn(), 1);
+			int[] attrColIndices = new int[attrCount];
+			for (int a = 0; a < attrCount; a++) {
+				attrColIndices[a] = resolveColumnIndex(colIdxByName, spec.attributes().get(a).column(), -1);
+			}
+
+			String line;
+			while ((line = br.readLine()) != null) {
+				if (line.isBlank()) {
+					continue;
+				}
+				String[] cells = splitDelimitedLine(line, spec.delimiter());
+				long srcId = resolveDenseIdLong(cells[srcColIdx], srcKeys);
+				long tgtId = resolveDenseIdLong(cells[tgtColIdx], tgtKeys);
+				String[] attrVals = attrCount > 0 ? new String[attrCount] : null;
+				for (int a = 0; a < attrCount; a++) {
+					int cIdx = attrColIndices[a];
+					String cell = (cIdx >= 0 && cIdx < cells.length) ? cells[cIdx] : null;
+					attrVals[a] = (cell != null && cell.isEmpty()
+							&& spec.attributes().get(a).nullability() == Nullability.NULLABLE) ? null : cell;
+				}
+				sorter.add(srcId, tgtId, rowIdx++, attrVals);
+			}
+		}
+	}
+
+	private static String formatJsonAttrValue(Object val) {
+		if (val == null) {
+			return null;
+		}
+		if (val instanceof List<?> list) {
+			StringBuilder sb = new StringBuilder("[");
+			for (int i = 0; i < list.size(); i++) {
+				if (i > 0) {
+					sb.append(',');
+				}
+				sb.append(list.get(i));
+			}
+			sb.append(']');
+			return sb.toString();
+		}
+		return String.valueOf(val);
+	}
+
+	private static int resolveColumnIndex(Map<String, Integer> colIdxByName, String colName, int fallback) {
+		Integer idx = colIdxByName.get(colName);
+		if (idx != null) {
+			return idx;
+		}
+		idx = colIdxByName.get(colName.toLowerCase(Locale.ROOT));
+		return idx != null ? idx : fallback;
+	}
+
+	private static long resolveDenseIdLong(String rawKey, Map<String, Long> keyMap) {
+		if (rawKey == null) {
+			throw new IllegalArgumentException("Null edge endpoint key");
+		}
+		Long mapped = keyMap.get(rawKey);
+		if (mapped != null) {
+			return mapped;
+		}
+		String trimmed = rawKey.trim();
+		mapped = keyMap.get(trimmed);
+		if (mapped != null) {
+			return mapped;
+		}
+		return Long.parseLong(trimmed);
+	}
+
+	private static String[] splitDelimitedLine(String line, char delimiter) {
+		List<String> tokens = new ArrayList<>();
+		StringBuilder current = new StringBuilder();
+		boolean inQuotes = false;
+		for (int i = 0; i < line.length(); i++) {
+			char c = line.charAt(i);
+			if (inQuotes) {
+				if (c == '"') {
+					if (i + 1 < line.length() && line.charAt(i + 1) == '"') {
+						current.append('"');
+						i++;
+					} else {
+						inQuotes = false;
+					}
+				} else {
+					current.append(c);
+				}
+			} else if (c == '"' && current.isEmpty()) {
+				inQuotes = true;
+			} else if (c == delimiter) {
+				tokens.add(current.toString().trim());
+				current.setLength(0);
+			} else {
+				current.append(c);
+			}
+		}
+		tokens.add(current.toString().trim());
+		return tokens.toArray(new String[0]);
+	}
+
+	private static String computeSha256Hex(byte[] data) {
+		try {
+			MessageDigest md = MessageDigest.getInstance("SHA-256");
+			return HexFormat.of().formatHex(md.digest(data));
+		} catch (NoSuchAlgorithmException e) {
+			throw new IllegalStateException("SHA-256 algorithm not available", e);
+		}
 	}
 
 	/**

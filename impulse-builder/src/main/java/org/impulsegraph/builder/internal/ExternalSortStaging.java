@@ -10,8 +10,11 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.PriorityQueue;
 
 /**
  * Manages off-heap and on-disk staging for external sorting and topology
@@ -285,6 +288,210 @@ public final class ExternalSortStaging {
 					rowOffsets[(int) u + 1]++;
 				}
 			}
+		}
+	}
+
+	/**
+	 * Creates a disk-spilling external merge sorter for unsorted edge records with
+	 * optional raw attribute strings, bounded by {@code memoryLimitBytes}.
+	 */
+	public EdgeRecordRunSorter newEdgeRecordSorter(String prefix, int attrCount) {
+		return new EdgeRecordRunSorter(stagingDir, memoryLimitBytes, prefix, attrCount);
+	}
+
+	public record EdgeRecord(long srcId, long tgtId, long rowIdx,
+			String[] attrValues) implements Comparable<EdgeRecord> {
+		@Override
+		public int compareTo(EdgeRecord o) {
+			int cmp = Long.compare(this.srcId, o.srcId);
+			if (cmp != 0) {
+				return cmp;
+			}
+			cmp = Long.compare(this.tgtId, o.tgtId);
+			if (cmp != 0) {
+				return cmp;
+			}
+			return Long.compare(this.rowIdx, o.rowIdx);
+		}
+	}
+
+	@FunctionalInterface
+	public interface EdgeRecordConsumer {
+		void accept(long srcId, long tgtId, String[] attrValues) throws IOException;
+	}
+
+	/**
+	 * Disk-spilling external sort for edge records + edge attributes. Sorts
+	 * incoming records into runs bounded by {@code memoryLimitBytes} and merges
+	 * them in CSR order {@code (srcId, tgtId, rowIdx)}.
+	 */
+	public static final class EdgeRecordRunSorter implements AutoCloseable {
+		private final Path stagingDir;
+		private final long memoryLimitBytes;
+		private final String prefix;
+		private final int attrCount;
+		private final List<EdgeRecord> buffer = new ArrayList<>();
+		private final List<Path> runFiles = new ArrayList<>();
+		private long estimatedBytes = 0L;
+		private long totalEdges = 0L;
+
+		EdgeRecordRunSorter(Path stagingDir, long memoryLimitBytes, String prefix, int attrCount) {
+			this.stagingDir = stagingDir;
+			this.memoryLimitBytes = Math.max(64 * 1024L, memoryLimitBytes);
+			this.prefix = prefix;
+			this.attrCount = attrCount;
+		}
+
+		public void add(long srcId, long tgtId, long rowIdx, String[] attrValues) throws IOException {
+			buffer.add(new EdgeRecord(srcId, tgtId, rowIdx, attrValues));
+			totalEdges++;
+			long rowBytes = 64L + ((long) attrCount * 16L);
+			if (attrValues != null) {
+				for (String s : attrValues) {
+					if (s != null) {
+						rowBytes += 40L + (s.length() * 2L);
+					}
+				}
+			}
+			estimatedBytes += rowBytes;
+			if (estimatedBytes >= memoryLimitBytes) {
+				spillRun();
+			}
+		}
+
+		private void spillRun() throws IOException {
+			if (buffer.isEmpty()) {
+				return;
+			}
+			buffer.sort(Comparator.naturalOrder());
+			Path runPath = Files.createTempFile(stagingDir, prefix + "_run_", ".bin");
+			runFiles.add(runPath);
+			try (DataOutputStream out = new DataOutputStream(
+					new BufferedOutputStream(Files.newOutputStream(runPath), 64 * 1024))) {
+				for (EdgeRecord rec : buffer) {
+					writeEdgeRecord(out, rec, attrCount);
+				}
+			}
+			buffer.clear();
+			estimatedBytes = 0L;
+		}
+
+		public long edgeCount() {
+			return totalEdges;
+		}
+
+		/**
+		 * Streams all added edges in sorted {@code (srcId, tgtId, rowIdx)} order to the
+		 * given consumer.
+		 */
+		public void drainSorted(EdgeRecordConsumer consumer) throws IOException {
+			if (runFiles.isEmpty()) {
+				buffer.sort(Comparator.naturalOrder());
+				for (EdgeRecord rec : buffer) {
+					consumer.accept(rec.srcId(), rec.tgtId(), rec.attrValues());
+				}
+				buffer.clear();
+				estimatedBytes = 0L;
+				return;
+			}
+
+			if (!buffer.isEmpty()) {
+				spillRun();
+			}
+
+			record RunCursor(EdgeRecord current, DataInputStream in, int runIdx) implements Comparable<RunCursor> {
+				@Override
+				public int compareTo(RunCursor o) {
+					return this.current.compareTo(o.current);
+				}
+			}
+
+			List<DataInputStream> openStreams = new ArrayList<>(runFiles.size());
+			PriorityQueue<RunCursor> pq = new PriorityQueue<>(runFiles.size());
+			try {
+				for (int i = 0; i < runFiles.size(); i++) {
+					DataInputStream in = new DataInputStream(
+							new BufferedInputStream(Files.newInputStream(runFiles.get(i)), 64 * 1024));
+					openStreams.add(in);
+					EdgeRecord first = readEdgeRecord(in, attrCount);
+					if (first != null) {
+						pq.add(new RunCursor(first, in, i));
+					}
+				}
+				while (!pq.isEmpty()) {
+					RunCursor top = pq.poll();
+					EdgeRecord rec = top.current();
+					consumer.accept(rec.srcId(), rec.tgtId(), rec.attrValues());
+					EdgeRecord next = readEdgeRecord(top.in(), attrCount);
+					if (next != null) {
+						pq.add(new RunCursor(next, top.in(), top.runIdx()));
+					}
+				}
+			} finally {
+				for (DataInputStream in : openStreams) {
+					try {
+						in.close();
+					} catch (IOException ignored) {
+					}
+				}
+			}
+		}
+
+		@Override
+		public void close() {
+			buffer.clear();
+			System.Logger log = System.getLogger(ExternalSortStaging.class.getName());
+			for (Path runFile : runFiles) {
+				try {
+					Files.deleteIfExists(runFile);
+				} catch (IOException e) {
+					log.log(System.Logger.Level.DEBUG, "Failed to delete sort run file " + runFile, e);
+				}
+			}
+			runFiles.clear();
+		}
+
+		private static void writeEdgeRecord(DataOutputStream out, EdgeRecord rec, int attrCount) throws IOException {
+			out.writeLong(rec.srcId());
+			out.writeLong(rec.tgtId());
+			out.writeLong(rec.rowIdx());
+			String[] vals = rec.attrValues();
+			for (int i = 0; i < attrCount; i++) {
+				String s = (vals != null && i < vals.length) ? vals[i] : null;
+				if (s == null) {
+					out.writeInt(-1);
+				} else {
+					byte[] b = s.getBytes(StandardCharsets.UTF_8);
+					out.writeInt(b.length);
+					if (b.length > 0) {
+						out.write(b);
+					}
+				}
+			}
+		}
+
+		private static EdgeRecord readEdgeRecord(DataInputStream in, int attrCount) throws IOException {
+			long srcId;
+			try {
+				srcId = in.readLong();
+			} catch (EOFException eof) {
+				return null;
+			}
+			long tgtId = in.readLong();
+			long rowIdx = in.readLong();
+			String[] vals = attrCount > 0 ? new String[attrCount] : null;
+			for (int i = 0; i < attrCount; i++) {
+				int len = in.readInt();
+				if (len < 0) {
+					vals[i] = null;
+				} else if (len == 0) {
+					vals[i] = "";
+				} else {
+					byte[] b = in.readNBytes(len);
+					vals[i] = new String(b, StandardCharsets.UTF_8);
+				}
+			}
+			return new EdgeRecord(srcId, tgtId, rowIdx, vals);
 		}
 	}
 }
