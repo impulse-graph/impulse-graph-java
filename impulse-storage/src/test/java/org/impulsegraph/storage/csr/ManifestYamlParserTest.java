@@ -87,8 +87,8 @@ class ManifestYamlParserTest {
 		assertThat(manifest.domains()).hasSize(2);
 		GraphManifest.DomainDef userDomain = manifest.domains().get("User");
 		assertThat(userDomain.tablespace()).isEqualTo("core_ts");
-		assertThat(userDomain.attributes()).containsEntry("userId", "INT32").containsEntry("username", "STRING")
-				.containsEntry("reputation", "FLOAT64");
+		assertThat(userDomain.attributeTypeNames()).containsEntry("userId", "int32")
+				.containsEntry("username", "var_string").containsEntry("reputation", "float64");
 
 		// Relations
 		assertThat(manifest.relations()).hasSize(2);
@@ -96,7 +96,7 @@ class ManifestYamlParserTest {
 		assertThat(followsRel.source()).isEqualTo("User");
 		assertThat(followsRel.target()).isEqualTo("User");
 		assertThat(followsRel.tablespace()).isEqualTo("core_ts");
-		assertThat(followsRel.attributes()).containsEntry("since", "INT64");
+		assertThat(followsRel.attributeTypeNames()).containsEntry("since", "int64");
 
 		// Virtual Relations
 		assertThat(manifest.virtualRelations()).hasSize(1);

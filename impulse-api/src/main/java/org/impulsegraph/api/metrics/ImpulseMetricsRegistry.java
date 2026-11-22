@@ -33,6 +33,21 @@ public interface ImpulseMetricsRegistry {
 	default void recordBitsetPoolMiss() {
 	}
 
+	default void recordSnapshotSwapSuccess() {
+		recordSnapshotSwap();
+	}
+
+	default void recordSnapshotSwapRejected() {
+	}
+
+	default long getSwapSuccessCount() {
+		return 0;
+	}
+
+	default long getSwapRejectedCount() {
+		return 0;
+	}
+
 	default long getOffHeapMemoryBytes() {
 		return 0;
 	}

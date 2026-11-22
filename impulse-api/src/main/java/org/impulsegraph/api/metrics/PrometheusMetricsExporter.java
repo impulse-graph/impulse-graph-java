@@ -30,6 +30,18 @@ public class PrometheusMetricsExporter implements ImpulseMetricsRegistry {
 
 	private final AtomicLong activeQueries = new AtomicLong(0);
 	private final AtomicLong offHeapMemoryBytes = new AtomicLong(0);
+	private final AtomicLong swapSuccessCount = new AtomicLong(0);
+	private final AtomicLong swapRejectedCount = new AtomicLong(0);
+
+	@Override
+	public long getSwapSuccessCount() {
+		return swapSuccessCount.get();
+	}
+
+	@Override
+	public long getSwapRejectedCount() {
+		return swapRejectedCount.get();
+	}
 
 	@Override
 	public long getCacheHits() {
@@ -132,6 +144,18 @@ public class PrometheusMetricsExporter implements ImpulseMetricsRegistry {
 	@Override
 	public void recordSnapshotSwap() {
 		snapshotSwaps.increment();
+		swapSuccessCount.incrementAndGet();
+	}
+
+	@Override
+	public void recordSnapshotSwapSuccess() {
+		snapshotSwaps.increment();
+		swapSuccessCount.incrementAndGet();
+	}
+
+	@Override
+	public void recordSnapshotSwapRejected() {
+		swapRejectedCount.incrementAndGet();
 	}
 
 	@Override
@@ -236,7 +260,16 @@ public class PrometheusMetricsExporter implements ImpulseMetricsRegistry {
 		// Snapshot Swaps Counter
 		sb.append("# HELP impulse_snapshot_swaps_total Total zero-delay blue/green snapshot swaps\n");
 		sb.append("# TYPE impulse_snapshot_swaps_total counter\n");
-		sb.append("impulse_snapshot_swaps_total ").append(snapshotSwaps.sum()).append("\n");
+		sb.append("impulse_snapshot_swaps_total ").append(snapshotSwaps.sum()).append("\n\n");
+
+		sb.append("# HELP impulse_snapshot_swap_success_total Total accepted transactional snapshot swaps\n");
+		sb.append("# TYPE impulse_snapshot_swap_success_total counter\n");
+		sb.append("impulse_snapshot_swap_success_total ").append(swapSuccessCount.get()).append("\n\n");
+
+		sb.append(
+				"# HELP impulse_snapshot_swap_rejected_total Total rejected candidate snapshot swaps (schema/load/bind failure)\n");
+		sb.append("# TYPE impulse_snapshot_swap_rejected_total counter\n");
+		sb.append("impulse_snapshot_swap_rejected_total ").append(swapRejectedCount.get()).append("\n");
 
 		return sb.toString();
 	}

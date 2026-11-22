@@ -65,7 +65,7 @@ class StorageOpsAndMBeanTest {
 		@Test
 		@DisplayName("Health indicator reports DOWN when snapshot is null")
 		void testHealthReportWithNullSnapshot() {
-			ImpulseHealthIndicator indicator = new ImpulseHealthIndicator(null);
+			ImpulseHealthIndicator indicator = new ImpulseHealthIndicator((GraphSnapshot) null);
 			HealthReport report = indicator.getHealth();
 
 			assertThat(report.status()).isEqualTo(Status.DOWN);

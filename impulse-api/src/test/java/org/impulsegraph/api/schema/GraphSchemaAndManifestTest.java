@@ -77,13 +77,17 @@ class GraphSchemaAndManifestTest {
 
 		GraphManifest.DomainDef dd = new GraphManifest.DomainDef("ts1", Map.of("email", "string"));
 		assertThat(dd.tablespace()).isEqualTo("ts1");
-		assertThat(dd.attributes()).containsEntry("email", "string");
+		assertThat(dd.attributes()).containsKey("email");
+		assertThat(dd.attributes().get("email").type()).isEqualTo(GraphManifest.AttributeType.VAR_STRING);
+		assertThat(dd.attributeTypeNames()).containsEntry("email", "var_string");
 
 		GraphManifest.RelationDef rd = new GraphManifest.RelationDef("User", "Post", "ts1", Map.of("weight", "float"));
 		assertThat(rd.source()).isEqualTo("User");
 		assertThat(rd.target()).isEqualTo("Post");
 		assertThat(rd.tablespace()).isEqualTo("ts1");
-		assertThat(rd.attributes()).containsEntry("weight", "float");
+		assertThat(rd.attributes()).containsKey("weight");
+		assertThat(rd.attributes().get("weight").type()).isEqualTo(GraphManifest.AttributeType.FLOAT32);
+		assertThat(rd.attributeTypeNames()).containsEntry("weight", "float32");
 
 		GraphManifest.VirtualRelationDef vrd = new GraphManifest.VirtualRelationDef(List.of("relA", "relB"));
 		assertThat(vrd.components()).containsExactly("relA", "relB");
