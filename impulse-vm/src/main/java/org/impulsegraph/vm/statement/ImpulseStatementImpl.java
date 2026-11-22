@@ -37,6 +37,8 @@ public class ImpulseStatementImpl implements ImpulseStatement {
 	private final String queryString;
 	private final ImpScmNode ast;
 	private final CompiledQuery precompiledQuery;
+	private CompiledQuery cachedAstQuery;
+	private ImpulseGraphQuery<ImpulseBitSet> cachedPipelineQuery;
 	private final Map<String, Object> namedBindings = new HashMap<>();
 	private final Map<Integer, Object> positionalBindings = new HashMap<>();
 	private boolean closed = false;
@@ -138,48 +140,50 @@ public class ImpulseStatementImpl implements ImpulseStatement {
 		checkNotClosed();
 		Object input = resolvePrimaryInput();
 		if (precompiledQuery != null) {
-			return precompiledQuery.execute(snapshot, input, Arena.ofAuto());
+			return precompiledQuery.execute(snapshot, input, null);
 		}
 		if (ast != null || (queryString != null && queryString.trim().startsWith("("))) {
-			ImpScmNode targetAst = ast != null ? ast : ImpScmParser.parse(queryString.trim());
-			CompilerContext ctx = new CompilerContext(snapshot, CompilerOptions.DEFAULT,
-					new PassTracer(CompilerOptions.DEFAULT));
-			ImpScmNode bound = PhysicalBindingPass.INSTANCE.transform(targetAst, ctx);
-			Arena arena = Arena.ofAuto();
-			CompiledQuery cq = ImpOpsBytecodeEmitter.compileToExecutable(bound, snapshot, arena);
-			return cq.execute(snapshot, input, arena);
+			if (cachedAstQuery == null) {
+				ImpScmNode targetAst = ast != null ? ast : ImpScmParser.parse(queryString.trim());
+				CompilerContext ctx = new CompilerContext(snapshot, CompilerOptions.DEFAULT,
+						new PassTracer(CompilerOptions.DEFAULT));
+				ImpScmNode bound = PhysicalBindingPass.INSTANCE.transform(targetAst, ctx);
+				cachedAstQuery = ImpOpsBytecodeEmitter.compileToExecutable(bound, snapshot, Arena.ofAuto());
+			}
+			return cachedAstQuery.execute(snapshot, input, null);
 		}
-		// Simple pipeline parsing for statements like "FROM User WHERE id = $id ->
-		// out('knows')"
-		ImpulseQueryBuilder<ImpulseBitSet> qb = new ImpulseQueryBuilder<>();
-		qb.input("node", org.impulsegraph.api.ArgType.SINGLE_NODE);
+		if (cachedPipelineQuery == null) {
+			// Simple pipeline parsing for statements like "FROM User WHERE id = $id ->
+			// out('knows')"
+			ImpulseQueryBuilder<ImpulseBitSet> qb = new ImpulseQueryBuilder<>();
+			qb.input("node", org.impulsegraph.api.ArgType.SINGLE_NODE);
 
-		// Parse simple traversal arrows e.g. "-> knows" or "-> rel_name"
-		String[] parts = queryString.split("->");
-		for (int i = 1; i < parts.length; i++) {
-			String seg = parts[i].trim();
-			if (seg.startsWith("out(")) {
-				int start = seg.indexOf('(');
-				int end = seg.indexOf(')', start);
-				if (start >= 0 && end > start) {
-					String rel = seg.substring(start + 1, end).replace("'", "").replace("\"", "").trim();
+			// Parse simple traversal arrows e.g. "-> knows" or "-> rel_name"
+			String[] parts = queryString.split("->");
+			for (int i = 1; i < parts.length; i++) {
+				String seg = parts[i].trim();
+				if (seg.startsWith("out(")) {
+					int start = seg.indexOf('(');
+					int end = seg.indexOf(')', start);
+					if (start >= 0 && end > start) {
+						String rel = seg.substring(start + 1, end).replace("'", "").replace("\"", "").trim();
+						qb.walkEdge(rel);
+					}
+				} else if (seg.startsWith("in(")) {
+					int start = seg.indexOf('(');
+					int end = seg.indexOf(')', start);
+					if (start >= 0 && end > start) {
+						String rel = seg.substring(start + 1, end).replace("'", "").replace("\"", "").trim();
+						qb.walkReverse(rel);
+					}
+				} else {
+					String rel = seg.replace("'", "").replace("\"", "").trim();
 					qb.walkEdge(rel);
 				}
-			} else if (seg.startsWith("in(")) {
-				int start = seg.indexOf('(');
-				int end = seg.indexOf(')', start);
-				if (start >= 0 && end > start) {
-					String rel = seg.substring(start + 1, end).replace("'", "").replace("\"", "").trim();
-					qb.walkReverse(rel);
-				}
-			} else {
-				String rel = seg.replace("'", "").replace("\"", "").trim();
-				qb.walkEdge(rel);
 			}
+			cachedPipelineQuery = qb.collectRoaringBitset();
 		}
-
-		ImpulseGraphQuery<ImpulseBitSet> query = qb.collectRoaringBitset();
-		return DefaultImpulseQueryEvaluator.getInstance().evaluate(query, snapshot, input);
+		return DefaultImpulseQueryEvaluator.getInstance().evaluate(cachedPipelineQuery, snapshot, input);
 	}
 
 	@Override
