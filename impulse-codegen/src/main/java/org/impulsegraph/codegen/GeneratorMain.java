@@ -1,111 +1,108 @@
 package org.impulsegraph.codegen;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import org.impulsegraph.api.schema.GraphSchema;
-import org.impulsegraph.api.schema.SchemaCodeGenerator;
+import org.impulsegraph.api.schema.GraphManifest;
+import org.impulsegraph.api.schema.SchemaValidator;
+import org.impulsegraph.api.schema.SchemaYamlCodec;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import org.impulsegraph.storage.schema.SnapshotSchemaExtractor;
 
-import java.io.File;
 import java.io.IOException;
+import java.lang.foreign.Arena;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
 
 /**
- * CLI and Library Entry Point for Impulse Graph Schema Code Generation.
+ * Public CLI and library entrypoint for Impulse Graph Engine v2 typed Java code
+ * generation from either {@code .yaml}/{@code .yml} schema manifests or mounted
+ * binary {@code .imps} snapshots.
  */
-public class GeneratorMain {
+public final class GeneratorMain {
+
+	public static final String DEFAULT_PACKAGE = "org.impulsegraph.generated";
+
+	private GeneratorMain() {
+	}
 
 	public static void main(String[] args) {
 		if (args.length < 2) {
-			System.err.println("Usage: GeneratorMain <yaml-file> <target-folder> [package-name]");
+			System.err.println("Usage: GeneratorMain <schema.yaml|snapshot.imps> <target-folder> [package-name]");
 			System.exit(1);
 		}
-
-		String yamlPath = args[0];
+		String inputPath = args[0];
 		String targetFolder = args[1];
 		String packageNameOverride = args.length >= 3 ? args[2] : null;
-
 		try {
-			generate(yamlPath, targetFolder, packageNameOverride);
-			System.out.println("Successfully generated code to " + targetFolder);
+			generate(inputPath, targetFolder, packageNameOverride);
+			System.out.println("Successfully generated Impulse Graph sources to " + targetFolder);
 		} catch (Exception e) {
 			System.err.println("Generation failed: " + e.getMessage());
-			e.printStackTrace();
 			System.exit(1);
 		}
 	}
 
-	public static void generate(String yamlPath, String targetFolder) throws IOException {
-		generate(yamlPath, targetFolder, null);
+	public static void generate(String schemaOrImpsPath, String targetFolder) throws IOException {
+		generate(schemaOrImpsPath, targetFolder, null);
 	}
 
-	public static void generate(String yamlPath, String targetFolder, String packageNameOverride) throws IOException {
-		Path targetPath = Paths.get(targetFolder);
-		Files.createDirectories(targetPath);
+	public static void generate(String schemaOrImpsPath, String targetFolder, String packageNameOverride)
+			throws IOException {
+		Objects.requireNonNull(schemaOrImpsPath, "schemaOrImpsPath must not be null");
+		Objects.requireNonNull(targetFolder, "targetFolder must not be null");
+		generate(Paths.get(schemaOrImpsPath), Paths.get(targetFolder), packageNameOverride);
+	}
 
-		File schemaFile = new File(yamlPath);
-		if (!schemaFile.exists()) {
-			throw new IllegalArgumentException("Schema file not found: " + yamlPath);
+	public static void generate(Path schemaOrImpsPath, Path targetFolder, String packageNameOverride)
+			throws IOException {
+		Objects.requireNonNull(schemaOrImpsPath, "schemaOrImpsPath must not be null");
+		Objects.requireNonNull(targetFolder, "targetFolder must not be null");
+		if (!Files.exists(schemaOrImpsPath)) {
+			throw new IllegalArgumentException("Schema or snapshot file does not exist: " + schemaOrImpsPath);
 		}
 
-		ManifestModel model;
-		if (schemaFile.length() == 0) {
-			model = new ManifestModel();
+		GraphManifest manifest;
+		String fileName = schemaOrImpsPath.getFileName().toString().toLowerCase(Locale.ROOT);
+		if (fileName.endsWith(".imps")) {
+			try (Arena arena = Arena.ofConfined()) {
+				BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(schemaOrImpsPath, arena);
+				manifest = SnapshotSchemaExtractor.extract(loaded);
+			}
 		} else {
-			ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
-			model = mapper.readValue(schemaFile, ManifestModel.class);
+			manifest = SchemaYamlCodec.parse(schemaOrImpsPath);
 		}
 
-		String packageName = (packageNameOverride != null && !packageNameOverride.isBlank())
-				? packageNameOverride
-				: (model.packageName != null && !model.packageName.isBlank()
-						? model.packageName
-						: "org.impulsegraph.generated");
+		generateFromManifest(manifest, targetFolder, packageNameOverride);
+	}
 
-		String graphName = (model.graphName != null) ? model.graphName : "ImpulseGraph";
+	public static List<Path> generateFromManifest(GraphManifest manifest, Path targetFolder, String packageNameOverride)
+			throws IOException {
+		Objects.requireNonNull(manifest, "manifest must not be null");
+		Objects.requireNonNull(targetFolder, "targetFolder must not be null");
 
-		List<GraphSchema.EntityDef> entities = new ArrayList<>();
-		if (model.domains != null) {
-			for (Map.Entry<String, ManifestModel.DomainDef> entry : model.domains.entrySet()) {
-				entities.add(new GraphSchema.EntityDef(entry.getKey(), entry.getValue().attributes));
-			}
+		List<String> errors = SchemaValidator.validate(manifest);
+		if (!errors.isEmpty()) {
+			throw new IllegalArgumentException("Invalid Impulse Graph schema: " + String.join("; ", errors));
+		}
+		if (manifest.domains().isEmpty()) {
+			throw new IllegalArgumentException(
+					"Invalid Impulse Graph schema: schema must declare at least one domain (domains: or nodes:)");
 		}
 
-		List<GraphSchema.RelationDef> relations = new ArrayList<>();
-		if (model.relations != null) {
-			for (Map.Entry<String, ManifestModel.RelationDef> entry : model.relations.entrySet()) {
-				ManifestModel.RelationDef rel = entry.getValue();
-				relations.add(new GraphSchema.RelationDef(entry.getKey(), rel.source, rel.target));
-			}
+		String resolvedPackage = resolvePackageName(manifest, packageNameOverride);
+		SchemaCodeEmitter emitter = new SchemaCodeEmitter(manifest, resolvedPackage);
+		return emitter.emitAll(targetFolder);
+	}
+
+	private static String resolvePackageName(GraphManifest manifest, String packageNameOverride) {
+		if (packageNameOverride != null && !packageNameOverride.isBlank()) {
+			return packageNameOverride.trim();
 		}
-
-		if (entities.isEmpty()) {
-			entities.add(new GraphSchema.EntityDef("User", Map.of("fuelSurcharge", "DOUBLE")));
-			entities.add(new GraphSchema.EntityDef("Group", Map.of()));
-			relations.add(new GraphSchema.RelationDef("userToGroup", "User", "Group"));
+		if (manifest.packageName() != null && !manifest.packageName().isBlank()) {
+			return manifest.packageName().trim();
 		}
-
-		GraphSchema schema = new GraphSchema(entities, relations);
-		SchemaCodeGenerator generator = new SchemaCodeGenerator(packageName);
-		Map<String, String> classes = generator.generateClasses(schema);
-
-		Path packageDir = targetPath.resolve(packageName.replace('.', '/'));
-		Files.createDirectories(packageDir);
-
-		for (Map.Entry<String, String> entry : classes.entrySet()) {
-			String className = entry.getKey();
-			String code = entry.getValue();
-			Path javaFile = packageDir.resolve(className + ".java");
-			Files.writeString(javaFile, code);
-		}
-
-		// Generate GraphSnapshot wrapper class for legacy compatibility
-		Path snapshotFile = packageDir.resolve(graphName + "Snapshot.java");
-		String snapshotCode = "package " + packageName + ";\n\n" + "/** Generated snapshot class for " + graphName
-				+ " */\n" + "public class " + graphName + "Snapshot {\n" + "    public String getName() { return \""
-				+ graphName + "\"; }\n" + "}\n";
-		Files.writeString(snapshotFile, snapshotCode);
+		return DEFAULT_PACKAGE;
 	}
 }

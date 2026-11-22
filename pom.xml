@@ -42,6 +42,7 @@
         <module>impulse-vm</module>
         <module>impulse-compiler</module>
         <module>impulse-builder</module>
+        <module>impulse-codegen</module>
         <module>impulse-kotlin</module>
         <module>impulse-scala</module>
         <module>impulse-clojure</module>
