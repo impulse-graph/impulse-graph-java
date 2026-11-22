@@ -246,7 +246,7 @@ public final class ExternalSortStaging {
 				if (edgeIndexWidth == 8) {
 					rBuf.putLong(offset);
 				} else {
-					rBuf.putInt((int) offset);
+					rBuf.putInt(Math.toIntExact(offset));
 				}
 			}
 			if (rBuf.position() > 0) {
