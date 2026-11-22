@@ -45,6 +45,7 @@ public final class SchemaCommand implements Runnable {
 				} else {
 					String yaml = SchemaService.extractYaml(snapshot);
 					spec.commandLine().getOut().print(yaml);
+					spec.commandLine().getOut().flush();
 				}
 				return 0;
 			} catch (Exception e) {
@@ -77,6 +78,7 @@ public final class SchemaCommand implements Runnable {
 					spec.commandLine().getOut().println(report.toJson());
 				} else {
 					spec.commandLine().getOut().print(report.toText());
+					spec.commandLine().getOut().flush();
 				}
 				return report.valid() ? 0 : 1;
 			} catch (Exception e) {
@@ -109,6 +111,7 @@ public final class SchemaCommand implements Runnable {
 					spec.commandLine().getOut().println(report.toJson());
 				} else {
 					spec.commandLine().getOut().print(report.toText());
+					spec.commandLine().getOut().flush();
 				}
 				return report.allCompatible() ? 0 : 1;
 			} catch (Exception e) {

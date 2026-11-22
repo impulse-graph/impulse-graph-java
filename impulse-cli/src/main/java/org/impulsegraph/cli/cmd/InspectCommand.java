@@ -44,6 +44,7 @@ public final class InspectCommand implements Callable<Integer> {
 				spec.commandLine().getOut().println(report.toJson(pageMap));
 			} else {
 				spec.commandLine().getOut().print(report.toText(pageMap));
+				spec.commandLine().getOut().flush();
 			}
 			return 0;
 		} catch (Exception e) {

@@ -40,6 +40,7 @@ public final class RunCommand implements Callable<Integer> {
 				spec.commandLine().getOut().println(report.toJson());
 			} else {
 				spec.commandLine().getOut().print(report.toText());
+				spec.commandLine().getOut().flush();
 			}
 			return 0;
 		} catch (Exception e) {

@@ -35,6 +35,7 @@ public final class DisassembleCommand implements Callable<Integer> {
 				spec.commandLine().getOut().println("Disassembled -> " + output.toAbsolutePath());
 			} else {
 				spec.commandLine().getOut().print(asm);
+				spec.commandLine().getOut().flush();
 			}
 			return 0;
 		} catch (Exception e) {

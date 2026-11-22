@@ -1407,7 +1407,12 @@ public final class BinarySnapshotLoader {
 							throw new IllegalArgumentException(
 									"Secondary index " + idxId + " references nonexistent domain ID " + domId);
 						}
-						if (attrIdx >= targetDom.attributes().size()) {
+						// Spec v0.10 / Rust impulse-graph generate emits a domain-key MPHF index
+						// (index_type = 4, "_domain_index") with attrIdx = 0 (or 0xFFFF) even when
+						// the domain has 0 regular attributes.
+						boolean isDomainKeyMphf = (idxTypeUnsigned == 4
+								&& (attrIdx == 0xFFFF || (attrIdx == 0 && targetDom.attributes().isEmpty())));
+						if (!isDomainKeyMphf && attrIdx >= targetDom.attributes().size()) {
 							ImpulseAssert.checkWellFormed(false,
 									() -> "Secondary index " + idxId + " attrIdx " + attrIdx
 											+ " out of bounds for domain " + domId + " (attrCount="

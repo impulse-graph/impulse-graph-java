@@ -38,6 +38,7 @@ public final class StatsCommand implements Callable<Integer> {
 				spec.commandLine().getOut().println(report.toJson());
 			} else {
 				spec.commandLine().getOut().print(report.toText(verbose));
+				spec.commandLine().getOut().flush();
 			}
 			return 0;
 		} catch (Exception e) {

@@ -1622,7 +1622,10 @@ public final class CsvManifestSnapshotBuilder {
 				}
 			}
 			String tok = s.substring(start, pos);
-			return isFloat ? Double.parseDouble(tok) : Long.parseLong(tok);
+			if (isFloat) {
+				return Double.parseDouble(tok);
+			}
+			return Long.parseLong(tok);
 		}
 	}
 }

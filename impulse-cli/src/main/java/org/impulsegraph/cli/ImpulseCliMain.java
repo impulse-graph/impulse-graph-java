@@ -39,7 +39,10 @@ public final class ImpulseCliMain implements Runnable {
 	}
 
 	public static void main(String[] args) {
-		int exitCode = createCommandLine().execute(args);
+		CommandLine cmd = createCommandLine();
+		int exitCode = cmd.execute(args);
+		cmd.getOut().flush();
+		cmd.getErr().flush();
 		System.exit(exitCode);
 	}
 }

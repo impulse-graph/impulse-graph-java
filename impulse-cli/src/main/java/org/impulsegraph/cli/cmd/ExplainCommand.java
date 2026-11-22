@@ -35,6 +35,7 @@ public final class ExplainCommand implements Callable<Integer> {
 			CompilerService.QueryLanguage parsedLang = CompilerService.QueryLanguage.parse(lang);
 			String report = CompilerService.explain(query, parsedLang, snapshot, schema);
 			spec.commandLine().getOut().print(report);
+			spec.commandLine().getOut().flush();
 			return 0;
 		} catch (Exception e) {
 			spec.commandLine().getErr().println("explain failed: " + e.getMessage());

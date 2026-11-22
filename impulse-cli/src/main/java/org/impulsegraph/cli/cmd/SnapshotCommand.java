@@ -55,6 +55,7 @@ public final class SnapshotCommand implements Runnable {
 					spec.commandLine().getOut().println(report.toJson());
 				} else {
 					spec.commandLine().getOut().print(report.toText());
+					spec.commandLine().getOut().flush();
 				}
 				return report.valid() ? 0 : 1;
 			} catch (Exception e) {

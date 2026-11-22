@@ -26,7 +26,15 @@ if [ -z "${JAR_PATH}" ]; then
     exit 1
 fi
 
+PREVIEW_FLAG=""
+case "$("${JAVA_CMD}" -version 2>&1 | head -n 1)" in
+    *'"21.'*|*'"21"'*)
+        PREVIEW_FLAG="--enable-preview"
+        ;;
+esac
+
 exec "${JAVA_CMD}" \
+    ${PREVIEW_FLAG} \
     --add-modules jdk.incubator.vector \
     --enable-native-access=ALL-UNNAMED \
     ${IMPULSE_J_OPTS:-} \
