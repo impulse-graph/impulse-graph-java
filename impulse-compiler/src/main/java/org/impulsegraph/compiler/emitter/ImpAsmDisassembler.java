@@ -2,10 +2,10 @@ package org.impulsegraph.compiler.emitter;
 
 import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter.EmittedProgram;
 import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter.InstructionWord;
-import org.impulsegraph.vm.VmHandlers;
 
-import java.lang.foreign.MemorySegment;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.impulsegraph.vm.VmRegisterType.*;
 
@@ -18,24 +18,37 @@ public final class ImpAsmDisassembler {
 	private ImpAsmDisassembler() {
 	}
 
+	/**
+	 * Disassembles a standalone instruction list (e.g., decoded from an
+	 * {@code .impb} file via {@link ImpOpsBinaryCodec}) into canonical ImpAsm text.
+	 */
+	public static String disassemble(List<InstructionWord> instructions) {
+		Objects.requireNonNull(instructions, "instructions must not be null");
+		return disassembleInternal(instructions, Map.of());
+	}
+
 	public static String disassemble(EmittedProgram program) {
+		Objects.requireNonNull(program, "program must not be null");
+		Map<Long, String> patchMap = new java.util.HashMap<>();
+		for (var patch : program.patches()) {
+			patchMap.put(patch.pc(), patch.logicalRelationName());
+		}
+		return disassembleInternal(program.instructionList(), patchMap);
+	}
+
+	private static String disassembleInternal(List<InstructionWord> instructions, Map<Long, String> patchMap) {
 		StringBuilder sb = new StringBuilder();
 		sb.append("; =========================================================================\n");
 		sb.append(";                  IMPULSE VM BYTECODE DISASSEMBLY (.impas)               \n");
 		sb.append("; =========================================================================\n");
 		sb.append(".version 0.9.0\n");
-		sb.append(String.format(".instructions %d\n\n", program.instructionCount()));
+		sb.append(String.format(".instructions %d\n\n", instructions.size()));
 
-		Map<Long, String> patchMap = new java.util.HashMap<>();
-		for (var patch : program.patches()) {
-			patchMap.put(patch.pc(), patch.logicalRelationName());
-		}
-
-		for (int pc = 0; pc < program.instructionList().size(); pc++) {
-			InstructionWord w = program.instructionList().get(pc);
+		for (int pc = 0; pc < instructions.size(); pc++) {
+			InstructionWord w = instructions.get(pc);
 			String opName = getOpcodeName(w.opcode());
 			sb.append(String.format("  0x%04X:  %-24s flags=0x%02X, dst=R%-2d, payload=0x%08X", pc, opName, w.flags(),
-					w.dstReg(), w.payload()));
+					Short.toUnsignedInt(w.dstReg()), w.payload()));
 
 			if (w.opcode() == OP_CSR_WALK || w.opcode() == OP_CSC_WALK || w.opcode() == OP_CSR_WALK_FILTERED) {
 				int srcReg = w.payload() & 0xFFFF;
