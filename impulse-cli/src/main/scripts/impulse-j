@@ -1,0 +1,33 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+JAVA_CMD="${JAVA_HOME:+${JAVA_HOME}/bin/}java"
+
+if [ -n "${IMPULSE_J_JAR:-}" ] && [ -f "${IMPULSE_J_JAR}" ]; then
+    JAR_PATH="${IMPULSE_J_JAR}"
+else
+    JAR_PATH=""
+    for candidate in \
+        "${SCRIPT_DIR}"/impulse-cli-*-all.jar \
+        "${SCRIPT_DIR}"/../lib/impulse-cli-*-all.jar \
+        "${SCRIPT_DIR}"/../../../target/impulse-cli-*-all.jar \
+        "${SCRIPT_DIR}"/../target/impulse-cli-*-all.jar
+    do
+        if [ -f "${candidate}" ]; then
+            JAR_PATH="${candidate}"
+            break
+        fi
+    done
+fi
+
+if [ -z "${JAR_PATH}" ]; then
+    echo "Error: Unable to locate impulse-cli-*-all.jar. Set IMPULSE_J_JAR or build impulse-cli first." >&2
+    exit 1
+fi
+
+exec "${JAVA_CMD}" \
+    --add-modules jdk.incubator.vector \
+    --enable-native-access=ALL-UNNAMED \
+    ${IMPULSE_J_OPTS:-} \
+    -jar "${JAR_PATH}" "$@"

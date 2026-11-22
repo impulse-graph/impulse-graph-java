@@ -1,0 +1,15 @@
+{
+  "catalogs": {},
+  "aliases": {
+    "impulse-j": {
+      "script-ref": "org.impulsegraph:impulse-cli:0.11.0-SNAPSHOT:all",
+      "main": "org.impulsegraph.cli.ImpulseCliMain",
+      "description": "Impulse Graph Engine Java CLI (impulse-j) for schema, snapshot, compiler, and VM operations",
+      "java-options": [
+        "--add-modules",
+        "jdk.incubator.vector",
+        "--enable-native-access=ALL-UNNAMED"
+      ]
+    }
+  }
+}

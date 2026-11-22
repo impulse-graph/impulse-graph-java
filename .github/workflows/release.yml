@@ -74,10 +74,16 @@ jobs:
           mkdir -p "$DIST_DIR"
           mkdir -p release-assets
 
-          # Copy all generated jars from publishable impulse-* submodules (excluding samples)
-          find . -maxdepth 3 -path "./impulse-*/target/*.jar" ! -path "*/target/*-sources.jar" ! -path "*/target/*-javadoc.jar" -exec cp {} "$DIST_DIR/" \;
+          # Copy all generated jars from publishable impulse-* submodules (excluding samples and shade originals)
+          find . -maxdepth 3 -path "./impulse-*/target/*.jar" ! -path "*/target/original-*.jar" ! -path "*/target/*-sources.jar" ! -path "*/target/*-javadoc.jar" -exec cp {} "$DIST_DIR/" \;
           find . -maxdepth 3 -path "./impulse-*/target/*-sources.jar" -exec cp {} "$DIST_DIR/" \;
           find . -maxdepth 3 -path "./impulse-*/target/*-javadoc.jar" -exec cp {} "$DIST_DIR/" \;
+
+          # Include impulse-j POSIX launcher script alongside shaded CLI JAR
+          mkdir -p "$DIST_DIR/bin"
+          cp impulse-cli/src/main/scripts/impulse-j "$DIST_DIR/bin/impulse-j"
+          chmod +x "$DIST_DIR/bin/impulse-j"
+          cp "$DIST_DIR/bin/impulse-j" release-assets/impulse-j
 
           # Also copy individual JARs to release-assets
           cp "$DIST_DIR"/*.jar release-assets/ || true
@@ -104,6 +110,7 @@ jobs:
           subject-path: |
             release-assets/*.jar
             release-assets/*.tar.gz
+            release-assets/impulse-j
 
       - name: Determine Pre-release Status
         id: prerelease_check
@@ -142,6 +149,10 @@ jobs:
           | **\`impulse-vm\`** | [\`impulse-vm-${CLEAN_VERSION}.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-vm-${CLEAN_VERSION}.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-vm-${CLEAN_VERSION}-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-vm-${CLEAN_VERSION}-javadoc.jar) |
           | **\`impulse-compiler\`** | [\`impulse-compiler-${CLEAN_VERSION}.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-compiler-${CLEAN_VERSION}.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-compiler-${CLEAN_VERSION}-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-compiler-${CLEAN_VERSION}-javadoc.jar) |
           | **\`impulse-builder\`** | [\`impulse-builder-${CLEAN_VERSION}.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-builder-${CLEAN_VERSION}.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-builder-${CLEAN_VERSION}-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-builder-${CLEAN_VERSION}-javadoc.jar) |
+          | **\`impulse-codegen\`** | [\`impulse-codegen-${CLEAN_VERSION}.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-codegen-${CLEAN_VERSION}.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-codegen-${CLEAN_VERSION}-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-codegen-${CLEAN_VERSION}-javadoc.jar) |
+          | **\`impulse-cli\` (\`impulse-j\`)** | [\`impulse-cli-${CLEAN_VERSION}-all.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-cli-${CLEAN_VERSION}-all.jar) + [\`impulse-j\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-j) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-cli-${CLEAN_VERSION}-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-cli-${CLEAN_VERSION}-javadoc.jar) |
+          | **\`impulse-maven-plugin\`** | [\`impulse-maven-plugin-${CLEAN_VERSION}.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-maven-plugin-${CLEAN_VERSION}.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-maven-plugin-${CLEAN_VERSION}-sources.jar) | [javadoc](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-maven-plugin-${CLEAN_VERSION}-javadoc.jar) |
+          | **\`impulse-bom\`** | POM BOM (\`org.impulsegraph:impulse-bom:${CLEAN_VERSION}\`) | — | — |
           | **\`impulse-kotlin\`** | [\`impulse-kotlin-${CLEAN_VERSION}.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-kotlin-${CLEAN_VERSION}.jar) | — | — |
           | **\`impulse-scala_3\`** | [\`impulse-scala_3-${CLEAN_VERSION}.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-scala_3-${CLEAN_VERSION}.jar) | [sources](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-scala_3-${CLEAN_VERSION}-sources.jar) | — |
           | **\`impulse-clojure\`** | [\`impulse-clojure-${CLEAN_VERSION}.jar\`](https://github.com/impulse-graph/impulse-graph-java/releases/download/${TAG_NAME}/impulse-clojure-${CLEAN_VERSION}.jar) | — | — |
