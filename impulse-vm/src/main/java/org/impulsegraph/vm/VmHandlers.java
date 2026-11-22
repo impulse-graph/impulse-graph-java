@@ -896,13 +896,18 @@ public final class VmHandlers {
 
 		int rowCount = rel.getNodeCount();
 		int colCount = rel.getCscNodeCount() > 0 ? rel.getCscNodeCount() : rowCount;
-		float[] x = ctx.getFloatVector((int) getRegisterValue(state, xReg));
-		if (x == null || x.length < colCount) {
-			int outHandle = ctx.acquireFloatVector(rowCount > 0 ? rowCount : 1024);
+		int xHandle = (int) getRegisterValue(state, xReg);
+		float[] x = ctx.getFloatVector(xHandle);
+		if (x == null) {
+			int outLen = rowCount > 0 ? rowCount : 1024;
+			int outHandle = ctx.acquireFloatVector(outLen);
+			ctx.setFloatVectorLength(outHandle, outLen);
 			setRegister(state, dst, outHandle, TYPE_FLOAT_VECTOR);
 			setFlag(state, FLAG_ZF, false);
 			return;
 		}
+		int rawXLen = ctx.getFloatVectorLength(xHandle);
+		final int xLen = (rawXLen >= 0 && rawXLen <= x.length) ? rawXLen : x.length;
 
 		int outHandle = ctx.acquireFloatVector(rowCount);
 		ctx.setFloatVectorLength(outHandle, rowCount);
@@ -942,7 +947,7 @@ public final class VmHandlers {
 					float minVal = Float.POSITIVE_INFINITY;
 					for (int idx = start; idx < end; idx++) {
 						int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
-						if (v >= 0 && v < x.length) {
+						if (v >= 0 && v < xLen) {
 							float w = (edgeWeights != null && (long) (idx + 1) * 4L <= edgeWeights.byteSize())
 									? edgeWeights.getAtIndex(ValueLayout.JAVA_FLOAT_UNALIGNED, idx)
 									: 1.0f;
@@ -954,7 +959,7 @@ public final class VmHandlers {
 					float sum = 0.0f;
 					for (int idx = start; idx < end; idx++) {
 						int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
-						if (v >= 0 && v < x.length) {
+						if (v >= 0 && v < xLen) {
 							float w = ((long) (idx + 1) * 4L <= edgeWeights.byteSize())
 									? edgeWeights.getAtIndex(ValueLayout.JAVA_FLOAT_UNALIGNED, idx)
 									: 1.0f;
@@ -962,7 +967,7 @@ public final class VmHandlers {
 						}
 					}
 					y[u] = sum;
-				} else {
+				} else if (xLen >= colCount) {
 					int count = end - start;
 					float sum = 0.0f;
 					int idx = start;
@@ -978,6 +983,15 @@ public final class VmHandlers {
 					for (; idx < end; idx++) {
 						int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
 						sum += x[v];
+					}
+					y[u] = sum;
+				} else {
+					float sum = 0.0f;
+					for (int idx = start; idx < end; idx++) {
+						int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
+						if (v >= 0 && v < xLen) {
+							sum += x[v];
+						}
 					}
 					y[u] = sum;
 				}
@@ -1010,13 +1024,18 @@ public final class VmHandlers {
 
 		int rowCount = rel.getNodeCount();
 		int colCount = rel.getCscNodeCount() > 0 ? rel.getCscNodeCount() : rowCount;
-		float[] x = ctx.getFloatVector((int) getRegisterValue(state, xReg));
+		int xHandle = (int) getRegisterValue(state, xReg);
+		float[] x = ctx.getFloatVector(xHandle);
 		if (x == null) {
-			int outHandle = ctx.acquireFloatVector(colCount > 0 ? colCount : 1024);
+			int outLen = colCount > 0 ? colCount : 1024;
+			int outHandle = ctx.acquireFloatVector(outLen);
+			ctx.setFloatVectorLength(outHandle, outLen);
 			setRegister(state, dst, outHandle, TYPE_FLOAT_VECTOR);
 			setFlag(state, FLAG_ZF, false);
 			return;
 		}
+		int rawXLen = ctx.getFloatVectorLength(xHandle);
+		final int xLen = (rawXLen >= 0 && rawXLen <= x.length) ? rawXLen : x.length;
 
 		int outHandle = ctx.acquireFloatVector(colCount);
 		ctx.setFloatVectorLength(outHandle, colCount);
@@ -1040,7 +1059,7 @@ public final class VmHandlers {
 		for (int u = 0; u < rowCount; u++) {
 			int start = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
 			int end = rowOff.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
-			float xu = (u < x.length) ? x[u] : 0.0f;
+			float xu = (u < xLen) ? x[u] : 0.0f;
 			for (int idx = start; idx < end; idx++) {
 				int v = colIdx.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, idx);
 				if (v >= 0 && v < colCount) {
@@ -4017,20 +4036,10 @@ public final class VmHandlers {
 
 	public static void handleVecMathUnary(MemorySegment state, VmQueryContext ctx, Instruction instr) {
 		int dst = instr.dstReg();
-		int p0 = instr.payload() & 0xFF;
+		int src = instr.payload() & 0xFF;
 		int p1 = (instr.payload() >> 8) & 0xFF;
 		int p2 = (instr.payload() >> 16) & 0xFF;
-		boolean p0IsVal = (p0 < 64 && isMathNumericType(getRegisterType(state, p0)));
-		boolean p1IsVal = (p1 < 64 && isMathNumericType(getRegisterType(state, p1)));
-		int src;
-		int funcId;
-		if (!p0IsVal && p1IsVal) {
-			src = p1;
-			funcId = p0;
-		} else {
-			src = p0;
-			funcId = (p1 != 0) ? p1 : p2;
-		}
+		int funcId = (p1 != 0) ? p1 : p2;
 		validateReg(dst);
 		validateReg(src);
 
