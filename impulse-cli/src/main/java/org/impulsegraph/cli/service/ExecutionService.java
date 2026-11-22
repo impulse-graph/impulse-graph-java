@@ -34,7 +34,8 @@ public final class ExecutionService {
 	}
 
 	public record ExecutionReport(Path snapshotPath, Path programPath, int instructionCount, boolean verified,
-			long elapsedMicros, String resultType, String summary, long cardinality, List<Long> sampleNodeIds) {
+			long elapsedMicros, String resultType, String summary, long cardinality, List<Long> sampleNodeIds,
+			Object scalarValue) {
 
 		public String toText() {
 			StringBuilder sb = new StringBuilder();
@@ -46,6 +47,9 @@ public final class ExecutionService {
 			sb.append("  Elapsed (us) : ").append(elapsedMicros).append('\n');
 			sb.append("  Result Type  : ").append(resultType).append('\n');
 			sb.append("  Summary      : ").append(summary).append('\n');
+			if (scalarValue != null) {
+				sb.append("  Scalar Return Value: ").append(scalarValue).append('\n');
+			}
 			if (!sampleNodeIds.isEmpty()) {
 				sb.append("  Node IDs     : ").append(sampleNodeIds).append('\n');
 			}
@@ -63,6 +67,9 @@ public final class ExecutionService {
 			root.put("summary", summary);
 			root.put("cardinality", cardinality);
 			root.put("sampleNodeIds", sampleNodeIds);
+			if (scalarValue != null) {
+				root.put("scalarValue", scalarValue);
+			}
 			return JsonWriter.toJson(root);
 		}
 	}
@@ -135,7 +142,7 @@ public final class ExecutionService {
 			boolean verified, long elapsedMicros, Object result) {
 		if (result == null) {
 			return new ExecutionReport(snapshotPath, programPath, instructionCount, verified, elapsedMicros, "null",
-					"null", 0L, List.of());
+					"null", 0L, List.of(), null);
 		}
 		if (result instanceof ImpulseBitSet bs) {
 			long card = bs.cardinality();
@@ -144,9 +151,22 @@ public final class ExecutionService {
 				samples.add((long) i);
 			}
 			return new ExecutionReport(snapshotPath, programPath, instructionCount, verified, elapsedMicros,
-					"ImpulseBitSet", "cardinality=" + card, card, List.copyOf(samples));
+					"ImpulseBitSet", "cardinality=" + card, card, List.copyOf(samples), null);
+		}
+		if (result instanceof Long || result instanceof Integer || result instanceof Short || result instanceof Byte) {
+			long val = ((Number) result).longValue();
+			return new ExecutionReport(snapshotPath, programPath, instructionCount, verified, elapsedMicros,
+					"SCALAR_INT", String.valueOf(val), 0L, List.of(), val);
+		}
+		if (result instanceof Float f) {
+			return new ExecutionReport(snapshotPath, programPath, instructionCount, verified, elapsedMicros,
+					"SCALAR_FLOAT", String.valueOf(f), 0L, List.of(), f);
+		}
+		if (result instanceof Double d) {
+			return new ExecutionReport(snapshotPath, programPath, instructionCount, verified, elapsedMicros,
+					"SCALAR_DOUBLE", String.valueOf(d), 0L, List.of(), d);
 		}
 		return new ExecutionReport(snapshotPath, programPath, instructionCount, verified, elapsedMicros,
-				result.getClass().getSimpleName(), String.valueOf(result), 0L, List.of());
+				result.getClass().getSimpleName(), String.valueOf(result), 0L, List.of(), null);
 	}
 }

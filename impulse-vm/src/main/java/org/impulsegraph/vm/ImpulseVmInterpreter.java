@@ -774,6 +774,17 @@ public final class ImpulseVmInterpreter {
 			if (finalResult == null) {
 				finalResult = ctx.getFinalResult();
 			}
+			if (finalResult == null) {
+				byte r63Type = VmHandlers.getRegisterType(state, 63);
+				long r63Val = VmHandlers.getRegisterValue(state, 63);
+				if (r63Type == TYPE_INT64 || r63Type == TYPE_NODE_ID || r63Type == TYPE_BOOLEAN) {
+					finalResult = r63Val;
+				} else if (r63Type == TYPE_FLOAT) {
+					finalResult = Float.intBitsToFloat((int) r63Val);
+				} else if (r63Type == TYPE_DOUBLE) {
+					finalResult = Double.longBitsToDouble(r63Val);
+				}
+			}
 			return (finalResult != null)
 					? finalResult
 					: new OffHeapBitSet(arena != null ? arena : Arena.ofAuto(), 1000);

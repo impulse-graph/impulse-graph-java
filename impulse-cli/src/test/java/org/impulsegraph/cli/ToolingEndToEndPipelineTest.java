@@ -92,8 +92,13 @@ class ToolingEndToEndPipelineTest {
 		CliResult inspectAnon = exec("inspect", v1Imps.toString(), "--anonymize", "--domain", "User", "--relation",
 				"userFollowsUser");
 		assertThat(inspectAnon.exitCode()).isEqualTo(0);
-		assertThat(inspectAnon.out()).contains("domain_0").contains("rel_0").doesNotContain("userFollowsUser")
-				.doesNotContain("userPostsPost");
+		assertThat(inspectAnon.out()).contains("domain_0").contains("rel_0").doesNotContain("User")
+				.doesNotContain("Post").doesNotContain("userFollowsUser").doesNotContain("userPostsPost");
+
+		CliResult inspectAnonJson = exec("inspect", v1Imps.toString(), "--anonymize", "--format", "json");
+		assertThat(inspectAnonJson.exitCode()).isEqualTo(0);
+		assertThat(inspectAnonJson.out()).contains("domain_0").contains("rel_0").doesNotContain("User")
+				.doesNotContain("Post").doesNotContain("userFollowsUser").doesNotContain("userPostsPost");
 
 		CliResult statsJson = exec("stats", v1Imps.toString(), "--format", "json", "--verbose");
 		assertThat(statsJson.exitCode()).isEqualTo(0);
@@ -586,6 +591,28 @@ class ToolingEndToEndPipelineTest {
 				"--input-val", "0", "--format", "json");
 		assertThat(runRes.exitCode()).withFailMessage("run failed: %s\n%s", runRes.out(), runRes.err()).isEqualTo(0);
 		assertThat(runRes.out()).contains("\"verified\": true").contains("\"cardinality\": 2");
+
+		// 4c-ii. Scalar R63 return value (OP_CSR_DEGREE -> R63, no OP_COLLECT_BITSET)
+		Path degAsm = tmp.resolve("degree.impas");
+		Files.writeString(degAsm, """
+				OP_INIT_INPUT_NODE dst=R1
+				OP_CSR_DEGREE R63, R1, 0
+				OP_HALT
+				""");
+		Path degImpb = tmp.resolve("degree.impb");
+		CliResult degAsmRes = exec("assemble", "-i", degAsm.toString(), "-o", degImpb.toString());
+		assertThat(degAsmRes.exitCode()).withFailMessage("assemble degree failed: %s", degAsmRes.err()).isEqualTo(0);
+
+		CliResult degRunText = exec("run", "--snapshot", v1Imps.toString(), "--bytecode", degImpb.toString(),
+				"--verify", "--input-val", "0");
+		assertThat(degRunText.exitCode())
+				.withFailMessage("run degree text failed: %s\n%s", degRunText.out(), degRunText.err()).isEqualTo(0);
+		assertThat(degRunText.out()).contains("Result Type  : SCALAR_INT").contains("Scalar Return Value: 2");
+
+		CliResult degRunJson = exec("run", "--snapshot", v1Imps.toString(), "--bytecode", degImpb.toString(),
+				"--verify", "--input-val", "0", "--format", "json");
+		assertThat(degRunJson.exitCode()).isEqualTo(0);
+		assertThat(degRunJson.out()).contains("\"resultType\": \"SCALAR_INT\"").contains("\"scalarValue\": 2");
 
 		// 4d. Negative: invalid .impas and truncated .impb
 		Path badAsm = tmp.resolve("bad.impas");

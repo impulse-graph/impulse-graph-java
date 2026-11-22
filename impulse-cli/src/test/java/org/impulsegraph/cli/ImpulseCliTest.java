@@ -95,7 +95,13 @@ class ImpulseCliTest {
 
 		CliResult anonRes = exec("inspect", snapshotPath.toString(), "--anonymize");
 		assertThat(anonRes.exitCode()).isEqualTo(0);
-		assertThat(anonRes.out()).contains("domain_0").contains("rel_0").doesNotContain("FOLLOWS");
+		assertThat(anonRes.out()).contains("domain_0").contains("rel_0").doesNotContain("User")
+				.doesNotContain("FOLLOWS");
+
+		CliResult anonJsonRes = exec("inspect", snapshotPath.toString(), "--anonymize", "--format", "json");
+		assertThat(anonJsonRes.exitCode()).isEqualTo(0);
+		assertThat(anonJsonRes.out()).contains("domain_0").contains("rel_0").doesNotContain("User")
+				.doesNotContain("FOLLOWS");
 	}
 
 	@Test

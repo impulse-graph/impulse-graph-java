@@ -215,16 +215,16 @@ public final class SnapshotService {
 		try (Arena arena = Arena.ofConfined()) {
 			BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(snapshotPath, arena, false);
 			sha256 = loaded.getSha256Checksum();
-			if (loaded.getMetadataMap() != null) {
-				for (Map.Entry<String, String> entry : loaded.getMetadataMap().entrySet()) {
-					metadata.put(entry.getKey(), effective.anonymize() ? "<redacted>" : entry.getValue());
-				}
-			}
 
 			Map<Integer, String> domainNames = new HashMap<>();
 			List<BinarySnapshotLoader.LoadedDomain> sortedDoms = new ArrayList<>(loaded.domainsById().values());
 			sortedDoms.sort(Comparator.comparingInt(BinarySnapshotLoader.LoadedDomain::domainId));
-			for (BinarySnapshotLoader.LoadedDomain d : sortedDoms) {
+			Map<String, String> anonNameReplacements = new LinkedHashMap<>();
+			for (int di = 0; di < sortedDoms.size(); di++) {
+				BinarySnapshotLoader.LoadedDomain d = sortedDoms.get(di);
+				if (d.name() != null && !d.name().isEmpty()) {
+					anonNameReplacements.put(d.name(), "Domain_" + (di + 1));
+				}
 				String displayName = effective.anonymize() ? ("domain_" + d.domainId()) : d.name();
 				domainNames.put(d.domainId(), displayName);
 				if (effective.domainFilter() != null && !effective.domainFilter().isBlank()
@@ -254,6 +254,28 @@ public final class SnapshotService {
 
 			List<BinarySnapshotLoader.LoadedRelation> sortedRels = new ArrayList<>(loaded.relationsById().values());
 			sortedRels.sort(Comparator.comparingInt(BinarySnapshotLoader.LoadedRelation::relationId));
+			for (int ri = 0; ri < sortedRels.size(); ri++) {
+				BinarySnapshotLoader.LoadedRelation lr = sortedRels.get(ri);
+				String rawName = relIdToName.getOrDefault(lr.relationId(), "rel_" + lr.relationId());
+				if (rawName != null && !rawName.isEmpty()) {
+					anonNameReplacements.putIfAbsent(rawName, "Relation_" + (ri + 1));
+				}
+			}
+
+			if (loaded.getMetadataMap() != null) {
+				List<Map.Entry<String, String>> sortedReplacements = new ArrayList<>(anonNameReplacements.entrySet());
+				sortedReplacements.sort((a, b) -> Integer.compare(b.getKey().length(), a.getKey().length()));
+				for (Map.Entry<String, String> entry : loaded.getMetadataMap().entrySet()) {
+					String key = entry.getKey();
+					if (effective.anonymize()) {
+						for (Map.Entry<String, String> rep : sortedReplacements) {
+							key = key.replace(rep.getKey(), rep.getValue());
+						}
+					}
+					metadata.put(key, effective.anonymize() ? "<redacted>" : entry.getValue());
+				}
+			}
+
 			for (BinarySnapshotLoader.LoadedRelation lr : sortedRels) {
 				String rawName = relIdToName.getOrDefault(lr.relationId(), "rel_" + lr.relationId());
 				if (effective.relationFilter() != null && !effective.relationFilter().isBlank()
