@@ -222,7 +222,8 @@ public record SchemaView(Map<String, DomainInfo> domains, Map<String, RelationIn
 		if (manifest.domains() != null) {
 			for (var entry : manifest.domains().entrySet()) {
 				GraphManifest.DomainDef def = entry.getValue();
-				domainMap.put(entry.getKey(), DomainInfo.of(entry.getKey(), def != null ? def.attributes() : Map.of()));
+				domainMap.put(entry.getKey(),
+						DomainInfo.of(entry.getKey(), def != null ? def.attributeTypeNames() : Map.of()));
 			}
 		}
 
@@ -231,8 +232,10 @@ public record SchemaView(Map<String, DomainInfo> domains, Map<String, RelationIn
 			for (var entry : manifest.relations().entrySet()) {
 				GraphManifest.RelationDef def = entry.getValue();
 				if (def != null) {
-					relMap.put(entry.getKey(),
-							RelationInfo.of(entry.getKey(), def.source(), def.target(), true, true, def.attributes()));
+					boolean hasOut = def.directions().contains(GraphManifest.Direction.OUT);
+					boolean hasIn = def.directions().contains(GraphManifest.Direction.IN) || def.symmetric();
+					relMap.put(entry.getKey(), RelationInfo.of(entry.getKey(), def.source(), def.target(), hasOut,
+							hasIn, def.attributeTypeNames()));
 				}
 			}
 		}
