@@ -36,6 +36,7 @@
     </scm>
 
     <modules>
+        <module>impulse-bom</module>
         <module>impulse-spec</module>
         <module>impulse-api</module>
         <module>impulse-storage</module>
@@ -43,6 +44,8 @@
         <module>impulse-compiler</module>
         <module>impulse-builder</module>
         <module>impulse-codegen</module>
+        <module>impulse-cli</module>
+        <module>impulse-maven-plugin</module>
         <module>impulse-kotlin</module>
         <module>impulse-scala</module>
         <module>impulse-clojure</module>

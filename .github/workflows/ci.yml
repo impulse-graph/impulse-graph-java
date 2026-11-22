@@ -72,6 +72,13 @@ jobs:
       - name: Build & Run Test Suites (${{ matrix.name }})
         run: mvn clean test ${{ matrix.profile }} --batch-mode --errors
 
+      - name: Verify impulse-j Shaded CLI & Maven Plugin Packaging
+        if: matrix.check_format
+        run: |
+          mvn package -pl impulse-bom,impulse-codegen,impulse-cli,impulse-maven-plugin -DskipTests=true ${{ matrix.profile }} --batch-mode --errors
+          chmod +x impulse-cli/src/main/scripts/impulse-j
+          ./impulse-cli/src/main/scripts/impulse-j --version
+
       - name: Upload test reports on failure
         if: failure()
         uses: actions/upload-artifact@v7

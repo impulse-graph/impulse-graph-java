@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.impulsegraph</groupId>
+        <artifactId>impulse-java-parent</artifactId>
+        <version>0.10.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>impulse-bom</artifactId>
+    <packaging>pom</packaging>
+
+    <name>Impulse Graph Engine - Bill of Materials (BOM)</name>
+    <description>Maven Bill of Materials (BOM) aligning all org.impulsegraph JVM module versions</description>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.impulsegraph</groupId>
+                <artifactId>impulse-spec</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.impulsegraph</groupId>
+                <artifactId>impulse-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.impulsegraph</groupId>
+                <artifactId>impulse-storage</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.impulsegraph</groupId>
+                <artifactId>impulse-vm</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.impulsegraph</groupId>
+                <artifactId>impulse-compiler</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.impulsegraph</groupId>
+                <artifactId>impulse-builder</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.impulsegraph</groupId>
+                <artifactId>impulse-codegen</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.impulsegraph</groupId>
+                <artifactId>impulse-cli</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.impulsegraph</groupId>
+                <artifactId>impulse-kotlin</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.impulsegraph</groupId>
+                <artifactId>impulse-scala_3</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.impulsegraph</groupId>
+                <artifactId>impulse-clojure</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>
