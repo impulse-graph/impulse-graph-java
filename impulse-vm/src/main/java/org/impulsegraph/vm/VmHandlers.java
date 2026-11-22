@@ -2775,8 +2775,9 @@ public final class VmHandlers {
 									: rel.getEdgeCount();
 							int typeCode = resolveEffectiveAttrTypeCode(csrRel.getAttributeTypeCode(attrIdx) & 0x7F,
 									fullAttrName);
-							int handle = ctx.acquireFloatVector((int) count);
-							ctx.setFloatVectorLength(handle, (int) count);
+							int countInt = Math.toIntExact(count);
+							int handle = ctx.acquireFloatVector(countInt);
+							ctx.setFloatVectorLength(handle, countInt);
 							float[] vec = ctx.getFloatVector(handle);
 							java.lang.foreign.MemorySegment dataSeg = csrRel.getAttributeSegments().get(attrIdx);
 							java.lang.foreign.MemorySegment validSeg = null;
@@ -4976,14 +4977,15 @@ public final class VmHandlers {
 								: rel.getEdgeCount();
 						int typeCode = resolveEffectiveAttrTypeCode(csrRel.getAttributeTypeCode(idx) & 0x7F,
 								fullAttrName);
+						int countInt = Math.toIntExact(count);
 						int h = (getRegisterType(state, dst) == TYPE_FLOAT_VECTOR)
 								? (int) getRegisterValue(state, dst)
-								: ctx.acquireFloatVector((int) count);
-						ctx.setFloatVectorLength(h, (int) count);
+								: ctx.acquireFloatVector(countInt);
+						ctx.setFloatVectorLength(h, countInt);
 						float[] vec = ctx.getFloatVector(h);
-						if (vec == null || vec.length < count) {
-							h = ctx.acquireFloatVector((int) count);
-							ctx.setFloatVectorLength(h, (int) count);
+						if (vec == null || vec.length < countInt) {
+							h = ctx.acquireFloatVector(countInt);
+							ctx.setFloatVectorLength(h, countInt);
 							vec = ctx.getFloatVector(h);
 						}
 						java.lang.foreign.MemorySegment dataSeg = csrRel.getAttributeSegments().get(idx);

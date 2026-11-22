@@ -1315,9 +1315,9 @@ public final class BinarySnapshotLoader {
 					}
 				}
 
-				RelationSnapshot relSnap = new RelationSnapshot(arena, (int) nodeCount, (int) edgeCount, offsetsSeg,
-						targetsSeg, cscOffsetsSeg, cscTargetsSeg, attrSegments, validitySegments, nodeIdWidth,
-						edgeIndexWidth);
+				RelationSnapshot relSnap = new RelationSnapshot(arena, Math.toIntExact(nodeCount),
+						Math.toIntExact(edgeCount), offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg, attrSegments,
+						validitySegments, nodeIdWidth, edgeIndexWidth);
 				relSnap.setCatalogMetadata(relId, srcDomId, tgtDomId, encodingId, secFeatures, virtualComponentIds);
 				relSnap.setLoadedAttributes(attributes, attrOffsetsSegments);
 				long effectiveTgtNodeCount = (tgtDomainNodeCount > 0) ? tgtDomainNodeCount : nodeCount;
@@ -1579,8 +1579,8 @@ public final class BinarySnapshotLoader {
 						tgtDomainNodeCount, (byte) 4, (byte) 4, offsetsSeg, targetsSeg, MemorySegment.NULL,
 						MemorySegment.NULL);
 
-				RelationSnapshot relSnap = new RelationSnapshot(arena, (int) nodeCount, (int) edgeCount, offsetsSeg,
-						targetsSeg);
+				RelationSnapshot relSnap = new RelationSnapshot(arena, Math.toIntExact(nodeCount),
+						Math.toIntExact(edgeCount), offsetsSeg, targetsSeg);
 				relationSnapshots.put(relName, relSnap);
 				relIdToSnapshot.put(relId, relSnap);
 

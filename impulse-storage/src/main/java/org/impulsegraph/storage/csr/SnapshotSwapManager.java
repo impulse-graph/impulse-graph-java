@@ -1,7 +1,11 @@
 package org.impulsegraph.storage.csr;
 
+import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
+import java.util.function.Consumer;
 
 /**
  * Generic thread-safe A/B pointer swap manager for off-heap graph containers
@@ -9,6 +13,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * per epoch so old off-heap Arenas can be safely closed.
  */
 public class SnapshotSwapManager<T extends AutoCloseable> implements AutoCloseable {
+
+	private static final System.Logger LOGGER = System.getLogger(SnapshotSwapManager.class.getName());
+	private static final long DEFAULT_SWAP_DRAIN_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(30);
+	private static final long DEFAULT_CLOSE_DRAIN_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(5);
 
 	public static class Holder<T extends AutoCloseable> {
 		private final T resource;
@@ -39,8 +47,26 @@ public class SnapshotSwapManager<T extends AutoCloseable> implements AutoCloseab
 	}
 
 	private final AtomicReference<Holder<T>> currentHolder = new AtomicReference<>();
+	private final long swapDrainTimeoutNanos;
+	private final long closeDrainTimeoutNanos;
+	private final Consumer<Throwable> errorHandler;
 
 	public SnapshotSwapManager(T initialResource) {
+		this(initialResource, DEFAULT_SWAP_DRAIN_TIMEOUT_NANOS, DEFAULT_CLOSE_DRAIN_TIMEOUT_NANOS,
+				ex -> LOGGER.log(System.Logger.Level.WARNING, "SnapshotSwapManager lifecycle error", ex));
+	}
+
+	public SnapshotSwapManager(T initialResource, long swapDrainTimeout, long closeDrainTimeout, TimeUnit unit,
+			Consumer<Throwable> errorHandler) {
+		this(initialResource, unit.toNanos(swapDrainTimeout), unit.toNanos(closeDrainTimeout),
+				Objects.requireNonNull(errorHandler, "errorHandler must not be null"));
+	}
+
+	private SnapshotSwapManager(T initialResource, long swapDrainTimeoutNanos, long closeDrainTimeoutNanos,
+			Consumer<Throwable> errorHandler) {
+		this.swapDrainTimeoutNanos = Math.max(0L, swapDrainTimeoutNanos);
+		this.closeDrainTimeoutNanos = Math.max(0L, closeDrainTimeoutNanos);
+		this.errorHandler = errorHandler;
 		if (initialResource != null) {
 			currentHolder.set(new Holder<>(initialResource));
 		}
@@ -70,8 +96,8 @@ public class SnapshotSwapManager<T extends AutoCloseable> implements AutoCloseab
 	}
 
 	/**
-	 * Atomically swaps the active resource to a new instance and schedules closing
-	 * of the previous one.
+	 * Atomically swaps the active resource to a new instance and schedules bounded
+	 * draining and closing of the previous one.
 	 */
 	public void swap(T newResource) {
 		Holder<T> newHolder = new Holder<>(newResource);
@@ -79,12 +105,20 @@ public class SnapshotSwapManager<T extends AutoCloseable> implements AutoCloseab
 
 		if (oldHolder != null) {
 			Thread.startVirtualThread(() -> {
+				long deadlineNanos = System.nanoTime() + swapDrainTimeoutNanos;
 				while (oldHolder.getActiveReaders() > 0) {
-					java.util.concurrent.locks.LockSupport.parkNanos(100_000L);
+					if (System.nanoTime() >= deadlineNanos) {
+						errorHandler.accept(new IllegalStateException(
+								"Timed out waiting to drain previous snapshot holder; activeReaders="
+										+ oldHolder.getActiveReaders() + " (skipping unsafe close)"));
+						return;
+					}
+					LockSupport.parkNanos(100_000L);
 				}
 				try {
 					oldHolder.getResource().close();
-				} catch (Exception ignored) {
+				} catch (Exception e) {
+					errorHandler.accept(e);
 				}
 			});
 		}
@@ -94,13 +128,21 @@ public class SnapshotSwapManager<T extends AutoCloseable> implements AutoCloseab
 	public void close() {
 		Holder<T> holder = currentHolder.getAndSet(null);
 		if (holder != null) {
-			long deadlineNanos = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+			long deadlineNanos = System.nanoTime() + closeDrainTimeoutNanos;
 			while (holder.getActiveReaders() > 0 && System.nanoTime() < deadlineNanos) {
-				java.util.concurrent.locks.LockSupport.parkNanos(100_000L);
+				LockSupport.parkNanos(100_000L);
+			}
+			int remaining = holder.getActiveReaders();
+			if (remaining > 0) {
+				IllegalStateException err = new IllegalStateException(
+						"Cannot close snapshot while " + remaining + " reader(s) remain active after drain timeout");
+				errorHandler.accept(err);
+				throw err;
 			}
 			try {
 				holder.getResource().close();
-			} catch (Exception ignored) {
+			} catch (Exception e) {
+				errorHandler.accept(e);
 			}
 		}
 	}
