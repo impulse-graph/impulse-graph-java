@@ -891,12 +891,12 @@ public final class VmHandlers {
 		}
 		int relId = (instr.payload() >> 8) & 0xFF;
 		int semiring = (instr.payload() >> 16) & 0xFFFF;
-		if (relId >= 16) {
-			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
-		}
 
 		RelationSnapshot rel = resolveRelation(ctx, relId);
 		if (rel == null) {
+			if (relId >= 16) {
+				throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+			}
 			int outHandle = ctx.acquireFloatVector(1024);
 			setRegister(state, dst, outHandle, TYPE_FLOAT_VECTOR);
 			setFlag(state, FLAG_ZF, false);
@@ -1086,12 +1086,12 @@ public final class VmHandlers {
 		}
 		int relId = (instr.payload() >> 8) & 0xFF;
 		int semiring = (instr.payload() >> 16) & 0xFFFF;
-		if (relId >= 16) {
-			throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
-		}
 
 		RelationSnapshot rel = resolveRelation(ctx, relId);
 		if (rel == null) {
+			if (relId >= 16) {
+				throw new IllegalStateException("IMPULSE_VM_ERR_OUT_OF_BOUNDS");
+			}
 			int outHandle = ctx.acquireFloatVector(1024);
 			setRegister(state, dst, outHandle, TYPE_FLOAT_VECTOR);
 			setFlag(state, FLAG_ZF, false);
@@ -4580,7 +4580,16 @@ public final class VmHandlers {
 
 		int relId = (int) getRegisterValue(state, rSrc);
 
-		RelationSnapshot rel = resolveRelation(ctx, relId);
+		RelationSnapshot rel = null;
+		if (relId == 0 && rSrcType == TYPE_NULL && rSrc > 0) {
+			rel = resolveRelation(ctx, rSrc);
+			if (rel == null && ctx.snapshot() != null) {
+				rel = ctx.snapshot().getRelationSnapshot(rSrc);
+			}
+		}
+		if (rel == null) {
+			rel = resolveRelation(ctx, relId);
+		}
 		if (rel == null && relId > 0 && ctx.snapshot() != null) {
 			rel = ctx.snapshot().getRelationSnapshot(relId);
 		}
