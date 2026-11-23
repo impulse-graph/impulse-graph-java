@@ -11,18 +11,49 @@ import org.impulsegraph.api.ImpulseGraphSnapshot;
 public class JavaVmJsonRunner {
 	public static void main(String[] args) throws Exception {
 		if (args.length < 1) {
-			System.err.println("Usage: JavaVmJsonRunner <path-to-impas> [path-to-impb] [path-to-impb-data]");
+			System.err.println("Usage: JavaVmJsonRunner <path-to-impas> [path-to-impb] [path-to-impb-data] | --batch");
 			System.exit(1);
 		}
-		java.nio.file.Path impasFile = java.nio.file.Paths.get(args[0]);
-		java.nio.file.Path impbFile = args.length > 1 ? java.nio.file.Paths.get(args[1]) : null;
-		java.nio.file.Path impbDataFile = args.length > 2 ? java.nio.file.Paths.get(args[2]) : null;
 		JavaVmPolyglotAssemblyVerifierTest verifier = new JavaVmPolyglotAssemblyVerifierTest();
-
-		// Use reflection to access parseImpasFile
 		java.lang.reflect.Method parseMethod = JavaVmPolyglotAssemblyVerifierTest.class
 				.getDeclaredMethod("parseImpasFile", Path.class);
 		parseMethod.setAccessible(true);
+
+		if ("--batch".equals(args[0])) {
+			try (java.io.BufferedReader br = new java.io.BufferedReader(
+					new java.io.InputStreamReader(System.in, java.nio.charset.StandardCharsets.UTF_8))) {
+				String line;
+				while ((line = br.readLine()) != null) {
+					line = line.trim();
+					if (line.isEmpty()) {
+						continue;
+					}
+					String[] parts = line.split("\t", -1);
+					Path impasFile = Paths.get(parts[0]);
+					Path impbFile = (parts.length > 1 && !parts[1].isEmpty()) ? Paths.get(parts[1]) : null;
+					Path impbDataFile = (parts.length > 2 && !parts[2].isEmpty()) ? Paths.get(parts[2]) : null;
+					try {
+						String json = runSingle(verifier, parseMethod, impasFile, impbFile, impbDataFile);
+						System.out.println(json);
+					} catch (Throwable t) {
+						String msg = String.valueOf(t).replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ");
+						System.out.println("{\"error\":\"" + msg + "\"}");
+					}
+					System.out.flush();
+				}
+			}
+			return;
+		}
+
+		Path impasFile = Paths.get(args[0]);
+		Path impbFile = args.length > 1 ? Paths.get(args[1]) : null;
+		Path impbDataFile = args.length > 2 ? Paths.get(args[2]) : null;
+		System.out.println(runSingle(verifier, parseMethod, impasFile, impbFile, impbDataFile));
+		System.out.flush();
+	}
+
+	private static String runSingle(JavaVmPolyglotAssemblyVerifierTest verifier, java.lang.reflect.Method parseMethod,
+			Path impasFile, Path impbFile, Path impbDataFile) throws Exception {
 		JavaVmPolyglotAssemblyVerifierTest.ParsedAssembly asm = (JavaVmPolyglotAssemblyVerifierTest.ParsedAssembly) parseMethod
 				.invoke(verifier, impasFile);
 
@@ -96,15 +127,16 @@ public class JavaVmJsonRunner {
 					// Fallback to strict step-by-step for gas exhaustion tests
 					loop : while (actualStatus.equals("IMPULSE_VM_OK") && pc >= 0 && pc < instructionCount
 							&& stepCount++ < 2000000000) {
-						if (fuel > 0) {
-							fuel--;
+						VmHandlers.Instruction instr = VmHandlers.decodeInstruction(progSeg, pc);
+						if (instr.opcode() != VmRegisterType.OP_HALT) {
 							if (fuel == 0) {
 								actualStatus = "IMPULSE_VM_ERR_GAS_EXHAUSTED";
 								break;
 							}
+							if (fuel > 0) {
+								fuel--;
+							}
 						}
-
-						VmHandlers.Instruction instr = VmHandlers.decodeInstruction(progSeg, pc);
 						boolean isExtended = (instr.flags() & VmRegisterType.OP_FLAG_EXTENDED) != 0;
 						if (isExtended) {
 							try {
@@ -762,37 +794,38 @@ public class JavaVmJsonRunner {
 				}
 
 				// JSON Output
-				System.out.print("{");
-				System.out.print("\"status\":\"" + actualStatus + "\",");
-				System.out.print("\"pc\":" + pc + ",");
+				StringBuilder sb = new StringBuilder(2048);
+				sb.append('{');
+				sb.append("\"status\":\"").append(actualStatus).append("\",");
+				sb.append("\"pc\":").append(pc).append(',');
 
 				boolean zf = VmHandlers.checkFlag(state, VmRegisterType.FLAG_ZF);
 				boolean st = VmHandlers.checkFlag(state, VmRegisterType.FLAG_ST);
-				System.out.print("\"flags\":{\"zf\":" + zf + ",\"st\":" + st + "},");
+				sb.append("\"flags\":{\"zf\":").append(zf).append(",\"st\":").append(st).append("},");
 
 				VmStateLayout.PC_HANDLE.set(state, 0L, (int) pc);
 				int statusCode = VmContextHash.statusCodeFromString(actualStatus);
 				String contextHash = VmContextHash.computeStateHashHex(state, statusCode, ctx);
-				System.out.print("\"context_hash\":\"" + contextHash + "\",");
+				sb.append("\"context_hash\":\"").append(contextHash).append("\",");
 
-				System.out.print("\"registers\":{");
+				sb.append("\"registers\":{");
 				for (int r = 0; r < 64; r++) {
 					long val = VmHandlers.getRegisterValue(state, r);
-					System.out.print("\"R" + r + "\":" + val);
+					sb.append("\"R").append(r).append("\":").append(val);
 					if (r < 63)
-						System.out.print(",");
+						sb.append(',');
 				}
-				System.out.print("},");
+				sb.append("},");
 
-				System.out.print("\"register_types\":{");
+				sb.append("\"register_types\":{");
 				for (int r = 0; r < 64; r++) {
 					byte t = VmHandlers.getRegisterType(state, r);
-					System.out.print("\"R" + r + "\":" + (t & 0xFF));
+					sb.append("\"R").append(r).append("\":").append(t & 0xFF);
 					if (r < 63)
-						System.out.print(",");
+						sb.append(',');
 				}
-				System.out.print("}");
-				System.out.println("}");
+				sb.append("}}");
+				return sb.toString();
 			}
 		}
 	}

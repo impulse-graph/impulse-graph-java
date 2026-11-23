@@ -6,9 +6,8 @@ import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.compiler.ast.ImpScmNode;
 
 import java.lang.foreign.Arena;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * High-performance query evaluator caching compiled bytecode execution plans
@@ -18,14 +17,13 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 
 	private static final int MAX_CACHE_SIZE = 1024;
 	private static final DefaultImpulseQueryEvaluator INSTANCE = new DefaultImpulseQueryEvaluator();
-	private static final Map<ImpulseGraphQuery<?>, CompiledQuery> COMPILED_QUERY_CACHE = Collections
-			.synchronizedMap(new LinkedHashMap<>(256, 0.75f, true) {
-				@Override
-				protected boolean removeEldestEntry(Map.Entry<ImpulseGraphQuery<?>, CompiledQuery> eldest) {
-					return size() > MAX_CACHE_SIZE;
-				}
-			});
-	private static final Arena COMPILER_ARENA = Arena.ofAuto();
+	// Lock-free read-hit cache with bounded FIFO eviction; each cached
+	// CompiledQuery
+	// owns its own Arena.ofAuto() so evicted off-heap bytecode is reclaimed by GC
+	// (#72).
+	private static final ConcurrentHashMap<ImpulseGraphQuery<?>, CompiledQuery> COMPILED_QUERY_CACHE = new ConcurrentHashMap<>(
+			256);
+	private static final ConcurrentLinkedQueue<ImpulseGraphQuery<?>> EVICTION_QUEUE = new ConcurrentLinkedQueue<>();
 
 	public static DefaultImpulseQueryEvaluator getInstance() {
 		return INSTANCE;
@@ -37,6 +35,7 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 
 	public static void clearCache() {
 		COMPILED_QUERY_CACHE.clear();
+		EVICTION_QUEUE.clear();
 	}
 
 	@Override
@@ -55,13 +54,24 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 				metrics.setOffHeapMemoryBytes(graph.getOffHeapMemorySizeBytes());
 			}
 			try {
-				compiled = COMPILED_QUERY_CACHE.computeIfAbsent(query, q -> {
-					metrics.recordCacheMiss();
-					long compileStart = System.nanoTime();
-					CompiledQuery plan = compileAst(q.getAst(), graph, COMPILER_ARENA);
-					metrics.recordQueryCompile(System.nanoTime() - compileStart);
-					return plan;
-				});
+				metrics.recordCacheMiss();
+				long compileStart = System.nanoTime();
+				CompiledQuery plan = compileAst(query.getAst(), graph, Arena.ofAuto());
+				metrics.recordQueryCompile(System.nanoTime() - compileStart);
+				CompiledQuery existing = COMPILED_QUERY_CACHE.putIfAbsent(query, plan);
+				if (existing == null) {
+					compiled = plan;
+					EVICTION_QUEUE.offer(query);
+					while (COMPILED_QUERY_CACHE.size() > MAX_CACHE_SIZE) {
+						ImpulseGraphQuery<?> oldest = EVICTION_QUEUE.poll();
+						if (oldest == null) {
+							break;
+						}
+						COMPILED_QUERY_CACHE.remove(oldest);
+					}
+				} else {
+					compiled = existing;
+				}
 			} catch (RuntimeException | Error e) {
 				metrics.recordQueryError("compile");
 				throw e;
@@ -73,7 +83,7 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 		if (compiled != null) {
 			long execStart = System.nanoTime();
 			try {
-				Object rawResult = compiled.execute(graph, input, COMPILER_ARENA);
+				Object rawResult = compiled.execute(graph, input, null);
 				R result = (R) materializeResult(query.getAst(), rawResult);
 				metrics.recordQueryExecution(System.nanoTime() - execStart);
 				return result;

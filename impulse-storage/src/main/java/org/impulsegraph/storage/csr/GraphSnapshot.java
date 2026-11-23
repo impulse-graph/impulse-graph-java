@@ -365,32 +365,42 @@ public class GraphSnapshot
 		return Collections.unmodifiableMap(metadata);
 	}
 
-	private final java.util.concurrent.atomic.LongAdder activeQueryCount = new java.util.concurrent.atomic.LongAdder();
+	private final java.util.concurrent.atomic.AtomicLong activeQueryCount = new java.util.concurrent.atomic.AtomicLong(
+			0L);
+	private final java.util.concurrent.atomic.AtomicBoolean retiring = new java.util.concurrent.atomic.AtomicBoolean(
+			false);
 
 	public void enterQuery() {
-		activeQueryCount.increment();
+		if (retiring.get()) {
+			throw new IllegalStateException("Snapshot is draining or closed");
+		}
+		activeQueryCount.incrementAndGet();
+		if (retiring.get()) {
+			activeQueryCount.decrementAndGet();
+			throw new IllegalStateException("Snapshot is draining or closed");
+		}
 	}
 
 	public void exitQuery() {
-		activeQueryCount.decrement();
+		activeQueryCount.updateAndGet(v -> v > 0L ? v - 1L : 0L);
 	}
 
 	@Override
 	public long getActiveQueryCount() {
-		return activeQueryCount.sum();
+		return activeQueryCount.get();
 	}
 
 	@Override
 	public boolean isDrained() {
-		return activeQueryCount.sum() <= 0;
+		return activeQueryCount.get() == 0L;
 	}
 
 	@Override
 	public boolean awaitDrained(long timeout, java.util.concurrent.TimeUnit unit) throws InterruptedException {
 		long deadlineNanos = System.nanoTime() + unit.toNanos(timeout);
-		while (activeQueryCount.sum() > 0) {
+		while (activeQueryCount.get() > 0L) {
 			if (System.nanoTime() >= deadlineNanos) {
-				return activeQueryCount.sum() <= 0;
+				return activeQueryCount.get() == 0L;
 			}
 			Thread.onSpinWait();
 			Thread.sleep(1);
@@ -400,6 +410,7 @@ public class GraphSnapshot
 
 	@Override
 	public void drainAndClose(long timeout, java.util.concurrent.TimeUnit unit) throws InterruptedException {
+		retiring.set(true);
 		if (!awaitDrained(timeout, unit)) {
 			throw new IllegalStateException("Timed out waiting for in-flight queries to drain before closing snapshot");
 		}

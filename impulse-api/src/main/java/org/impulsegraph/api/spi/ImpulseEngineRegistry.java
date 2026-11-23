@@ -51,7 +51,9 @@ public final class ImpulseEngineRegistry {
 			ImpulseEngineProvider provider = (ImpulseEngineProvider) defaultCls.getDeclaredConstructor().newInstance();
 			REGISTERED_PROVIDER.compareAndSet(null, provider);
 			return REGISTERED_PROVIDER.get();
-		} catch (Throwable ignored) {
+		} catch (ReflectiveOperationException | SecurityException e) {
+			System.getLogger(ImpulseEngineRegistry.class.getName()).log(System.Logger.Level.DEBUG,
+					"DefaultImpulseEngineProvider not available via reflection", e);
 		}
 
 		throw new IllegalStateException("No ImpulseEngineProvider registered or discovered on classpath.");

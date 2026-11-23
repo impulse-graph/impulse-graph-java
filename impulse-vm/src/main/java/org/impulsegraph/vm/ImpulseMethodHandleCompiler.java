@@ -785,7 +785,7 @@ public final class ImpulseMethodHandleCompiler {
 			}
 			MemorySegment state = ctx.allocateStateSegment();
 			Object res = driver.execute(ctx, state, input, instructionCount);
-			return res != null ? res : new OffHeapBitSet(arena, 1000);
+			return res != null ? res : new OffHeapBitSet(arena != null ? arena : Arena.ofAuto(), 1000);
 		}
 	}
 }

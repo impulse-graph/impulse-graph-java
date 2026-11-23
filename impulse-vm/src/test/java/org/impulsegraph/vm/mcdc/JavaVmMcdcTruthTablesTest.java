@@ -288,7 +288,8 @@ public class JavaVmMcdcTruthTablesTest {
 				VmHandlers.handleVecCmpGt(state, ctx, makeInstr(OP_VEC_CMP_GT, (byte) 0, 11, (20 << 8) | 10));
 				VmHandlers.handleVecCmpLt(state, ctx, makeInstr(OP_VEC_CMP_LT, (byte) 0, 12, (21 << 8) | 10));
 				VmHandlers.handleVecCmpEq(state, ctx, makeInstr(OP_VEC_CMP_EQ, (byte) 0, 13, (22 << 8) | 10));
-				VmHandlers.handleVecCmpBetween(state, ctx, makeInstr(OP_VEC_CMP_BETWEEN, (byte) 0, 14, 10));
+				VmHandlers.handleVecCmpBetween(state, ctx,
+						makeInstr(OP_VEC_CMP_BETWEEN, (byte) 0, 14, (21 << 16) | (20 << 8) | 10));
 
 				// 5. Masks & Blending
 				VmHandlers.handleMaskAnd(state, ctx, makeInstr(OP_MASK_AND, (byte) 0, 15, (11 << 16) | 12));
@@ -312,25 +313,25 @@ public class JavaVmMcdcTruthTablesTest {
 				}
 
 				// 7. Vector Reductions (Sum, Min, Max, ArgMin, ArgMax, Reduce dispatch)
-				VmHandlers.handleVectorReduceSum(state, ctx, makeInstr(OP_VECTOR_REDUCE_SUM, (byte) 0, 10, 0));
+				VmHandlers.handleVectorReduceSum(state, ctx, makeInstr(OP_VECTOR_REDUCE_SUM, (byte) 0, 30, 10));
 
-				Object maxRes = VmHandlers.handleVectorReduceMax(state, ctx, makeInstr(OP_REDUCE, (byte) 0, 10, 0));
+				Object maxRes = VmHandlers.handleVectorReduceMax(state, ctx, makeInstr(OP_REDUCE, (byte) 0, 31, 10));
 				assertNotNull(maxRes);
 
-				Object minRes = VmHandlers.handleVectorReduceMin(state, ctx, makeInstr(OP_REDUCE, (byte) 0, 10, 0));
+				Object minRes = VmHandlers.handleVectorReduceMin(state, ctx, makeInstr(OP_REDUCE, (byte) 0, 32, 10));
 				assertNotNull(minRes);
 
 				Object argMaxRes = VmHandlers.handleVectorReduceArgMax(state, ctx,
-						makeInstr(OP_REDUCE, (byte) 0, 10, 0));
+						makeInstr(OP_REDUCE, (byte) 0, 33, 10));
 				assertNotNull(argMaxRes);
 
 				Object argMinRes = VmHandlers.handleVectorReduceArgMin(state, ctx,
-						makeInstr(OP_REDUCE, (byte) 0, 10, 0));
+						makeInstr(OP_REDUCE, (byte) 0, 34, 10));
 				assertNotNull(argMinRes);
 
 				for (int opId = 0; opId <= 5; opId++) {
 					Object redDispatch = VmHandlers.handleReduce(state, ctx,
-							makeInstr(OP_REDUCE, (byte) 0, 10, (opId << 16)));
+							makeInstr(OP_REDUCE, (byte) 0, 35, (opId << 16) | 10));
 					assertNotNull(redDispatch);
 				}
 			}
@@ -389,7 +390,7 @@ public class JavaVmMcdcTruthTablesTest {
 				VmHandlers.handleCollectBitset(state, ctx, makeInstr(OP_COLLECT_BITSET, (byte) 0, 2, 0));
 				VmHandlers.handleCollectArray(state, ctx, makeInstr(OP_COLLECT_ARRAY, (byte) 0, 2, 0));
 				VmHandlers.handleMapDenseToKeys(state, ctx, makeInstr(OP_MAP_DENSE_TO_KEYS, (byte) 0, 2, 0));
-				VmHandlers.handleCollectValueMap(state, ctx, makeInstr(OP_COLLECT_VALUE_MAP, (byte) 0, 2, 0));
+				VmHandlers.handleCollectValueMap(state, ctx, makeInstr(OP_COLLECT_VALUE_MAP, (byte) 0, 2, (63 << 8)));
 			}
 		}
 	}

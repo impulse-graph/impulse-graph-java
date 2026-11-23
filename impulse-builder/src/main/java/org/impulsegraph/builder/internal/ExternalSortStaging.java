@@ -31,13 +31,16 @@ public final class ExternalSortStaging {
 			long columnTargetsBytes) implements AutoCloseable {
 		@Override
 		public void close() {
+			System.Logger log = System.getLogger(ExternalSortStaging.class.getName());
 			try {
 				Files.deleteIfExists(rowOffsetsFile);
-			} catch (IOException ignored) {
+			} catch (IOException e) {
+				log.log(System.Logger.Level.DEBUG, "Failed to delete staged rowOffsetsFile " + rowOffsetsFile, e);
 			}
 			try {
 				Files.deleteIfExists(columnTargetsFile);
-			} catch (IOException ignored) {
+			} catch (IOException e) {
+				log.log(System.Logger.Level.DEBUG, "Failed to delete staged columnTargetsFile " + columnTargetsFile, e);
 			}
 		}
 	}
@@ -246,7 +249,7 @@ public final class ExternalSortStaging {
 				if (edgeIndexWidth == 8) {
 					rBuf.putLong(offset);
 				} else {
-					rBuf.putInt((int) offset);
+					rBuf.putInt(Math.toIntExact(offset));
 				}
 			}
 			if (rBuf.position() > 0) {
