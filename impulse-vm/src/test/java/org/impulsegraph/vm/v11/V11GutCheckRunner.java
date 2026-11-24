@@ -194,6 +194,14 @@ public final class V11GutCheckRunner {
             if (engine.equals("all") || engine.equals("v11")) {
                 bench("W1 v0.11-interp", warmup, iters, () -> V11Interpreter.execute(v11Prog, bind, ws));
             }
+            if (engine.equals("all") || engine.equals("v11-jit")) {
+                MethodHandle v11Jit = V11MethodHandleCompiler.compile(v11Prog, bind);
+                v11Jit.invokeExact(ws);
+                if (!Arrays.equals(a10, ws.fRegs[2].toSortedArray())) {
+                    throw new AssertionError("W1 v0.11-jit PARITY MISMATCH");
+                }
+                bench("W1 v0.11-jit   ", warmup, iters, () -> { v11Jit.invokeExact(ws); });
+            }
         }
     }
 
@@ -258,6 +266,14 @@ public final class V11GutCheckRunner {
             if (engine.equals("all") || engine.equals("v11")) {
                 bench("W2 v0.11-interp", warmup, iters, () -> V11Interpreter.execute(v11Prog, bind, ws));
             }
+            if (engine.equals("all") || engine.equals("v11-jit")) {
+                MethodHandle v11Jit = V11MethodHandleCompiler.compile(v11Prog, bind);
+                v11Jit.invokeExact(ws);
+                if (!Arrays.equals(a10, ws.fRegs[1].toSortedArray())) {
+                    throw new AssertionError("W2 v0.11-jit PARITY MISMATCH");
+                }
+                bench("W2 v0.11-jit   ", warmup, iters, () -> { v11Jit.invokeExact(ws); });
+            }
         }
     }
 
@@ -292,6 +308,11 @@ public final class V11GutCheckRunner {
 
         if (engine.equals("all") || engine.equals("v11")) {
             bench("W3 v0.11-morsel", warmup, iters, () -> V11Interpreter.execute(v11Prog, bind, ws));
+        }
+        if (engine.equals("all") || engine.equals("v11-jit")) {
+            MethodHandle v11Jit = V11MethodHandleCompiler.compile(v11Prog, bind);
+            v11Jit.invokeExact(ws);
+            bench("W3 v0.11-jit   ", warmup, iters, () -> { v11Jit.invokeExact(ws); });
         }
     }
 
