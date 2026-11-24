@@ -21,6 +21,7 @@ public final class V11Frontier {
     public static final int PAGE_WORDS    = 64;
     public static final int PAGE_MASK     = (1 << PAGE_SHIFT) - 1;
     public static final int TIER2_DENOM   = 64;
+    private static final boolean FORCE_TIER1 = Boolean.getBoolean("v11.forceTier1");
 
     // Open-addressed page directory (power-of-two capacity, epoch-stamped for O(1) clear)
     private static final int DIR_CAP       = 512;
@@ -95,10 +96,19 @@ public final class V11Frontier {
     public void add(int nodeId) {
         switch (tier) {
             case TIER_EMPTY -> {
-                inlineIds[0] = nodeId;
-                inlineCount = 1;
-                tier = TIER0_INLINE;
-                cachedCard = 1;
+                if (FORCE_TIER1) {
+                    bumpPageEpoch();
+                    tier = TIER1_PAGED;
+                    int slot = findOrAllocPage(nodeId >>> PAGE_SHIFT);
+                    int local = nodeId & PAGE_MASK;
+                    pageBits[(slot << 6) + (local >>> 6)] |= (1L << local);
+                    cachedCard = -1;
+                } else {
+                    inlineIds[0] = nodeId;
+                    inlineCount = 1;
+                    tier = TIER0_INLINE;
+                    cachedCard = 1;
+                }
             }
             case TIER0_INLINE -> {
                 for (int i = 0; i < inlineCount; i++) {
@@ -179,7 +189,7 @@ public final class V11Frontier {
             return -1;
         }
         int totalPages = (domainCard + PAGE_MASK) >>> PAGE_SHIFT;
-        if ((long) (dirtyPageCount + 1) * TIER2_DENOM >= totalPages && totalPages > 0) {
+        if (!FORCE_TIER1 && (long) (dirtyPageCount + 1) * TIER2_DENOM >= totalPages && totalPages > 0) {
             return -1;
         }
         int slot = dirtyPageCount++;
