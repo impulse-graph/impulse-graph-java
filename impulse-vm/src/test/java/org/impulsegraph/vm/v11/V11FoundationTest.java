@@ -85,4 +85,62 @@ class V11FoundationTest {
         V11ContextHash.Digest digest = V11ContextHash.compute(ws);
         assertThat(digest.logicalHash()).isNotEqualTo(0L);
     }
+
+    @Test
+    void sweSweepFrontierSelfCopyPreservesTier1Paged() {
+        V11Frontier f = new V11Frontier(100_000);
+        f.resetEmpty(0, 100_000);
+        // Add 65 nodes to promote from TIER0_INLINE (max 64) to TIER1_PAGED (dirtyPageCount >= 0)
+        for (int i = 0; i < 65; i++) {
+            f.add(i * 10);
+        }
+        assertThat(f.tier).isEqualTo(V11Frontier.TIER1_PAGED);
+        f.copyFrom(f);
+        assertThat(f.cardinality()).isEqualTo(65);
+        assertThat(f.contains(0)).isTrue();
+        assertThat(f.contains(640)).isTrue();
+    }
+
+    @Test
+    void sweSweepTier1InitFromValidatedIdsSupportsContainsAndAdd() {
+        V11Frontier f = new V11Frontier(100);
+        // Under P1_FORCE_TIER1 (tier0Max=2, pageShift=2, tier2Denom=2), 3 nodes in domCard=100 -> TIER1_PAGED
+        f.initFromValidatedIds(0, 100, new int[]{1, 10, 50}, V11Geometry.P1_FORCE_TIER1, true);
+        assertThat(f.tier).isEqualTo(V11Frontier.TIER1_PAGED);
+        assertThat(f.contains(10)).isTrue();
+        assertThat(f.contains(50)).isTrue();
+        assertThat(f.contains(11)).isFalse();
+        f.add(75);
+        assertThat(f.contains(10)).isTrue();
+        assertThat(f.contains(75)).isTrue();
+        assertThat(f.cardinality()).isEqualTo(4);
+    }
+
+    @Test
+    void sweSweepValidatorConvergingBranchesDoNotOverflowDfsStack() {
+        // SAMPLE_NEIGHBORS.vec_wr followed by converging JCC branches that push the same join PC multiple times
+        int k = 12;
+        long[] prog = new long[k + 3];
+        prog[0] = V11IsaTables.encode(OP_SAMPLE_NEIGHBORS, 0, 1, 1, 0, 0, 0, 1);
+        for (int i = 1; i <= k; i++) {
+            // JCC.jz -> jump to join pc (k + 1)
+            prog[i] = V11IsaTables.encode(OP_JCC, 0, 0, 0, 0, 0, 0, (k + 1) - i);
+        }
+        prog[k + 1] = V11IsaTables.encode(OP_NOP, 0, 0, 0, 0, 0, 0, 0);
+        prog[k + 2] = V11IsaTables.encode(OP_HALT, 0, 0, 0, 0, 0, 0, 0);
+        assertThat(V11Validator.validate(prog).isOk()).isTrue();
+    }
+
+    @Test
+    void sweSweepMiniJsonParserPreservesUnsigned64BitMax() {
+        // LOAD_PARAM.scalar R0, param=0, type=u64; HALT
+        long load = V11IsaTables.encode(OP_LOAD_PARAM, 0, 0, 0, 0, 0, 0, (SCALAR_U64 << 16));
+        long halt = V11IsaTables.encode(OP_HALT, 0, 0, 0, 0, 0, 0, 0);
+        String json = String.format(
+                "{\"data_directives\":[{\"directive\":\".param\",\"args\":[0],\"kv\":{\"type\":\"u64\",\"value\":18446744073709551615}}],"
+                        + "\"const_pool\":[],\"words_hex\":[\"0x%016X\",\"0x%016X\"]}",
+                load, halt);
+        String resp = V11FixtureBatchMain.runFixtureJson("P0", null, json);
+        assertThat(resp).contains("\"R0\":-1,");
+    }
 }
