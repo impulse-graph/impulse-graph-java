@@ -1473,7 +1473,8 @@ public final class V11Pillar4Ops {
 
         boolean desc = (subop == SUBOP_TOP_K_DESC_IDS || subop == SUBOP_TOP_K_DESC_SCORES);
         Arrays.sort(idxs, 0, m, (a, b) -> {
-            int cmp = desc ? Double.compare(vals[b], vals[a]) : Double.compare(vals[a], vals[b]);
+            double va = vals[a], vb = vals[b];
+            int cmp = desc ? (vb < va ? -1 : vb > va ? 1 : 0) : (va < vb ? -1 : va > vb ? 1 : 0);
             return cmp != 0 ? cmp : Integer.compare(a, b);
         });
 
@@ -1876,9 +1877,6 @@ public final class V11Pillar4Ops {
                     isZero = (s == null || s.isEmpty());
                 } else if (ty == SCALAR_U64) {
                     out = V11Vector.ofU64(new long[]{val}, new long[]{1L});
-                    isZero = (val == 0L);
-                } else if (ty == SCALAR_BOOL_3VL) {
-                    out = V11Vector.ofBool3vl(1, new long[]{1L}, new long[]{val != 0L ? 1L : 0L});
                     isZero = (val == 0L);
                 } else {
                     out = V11Vector.ofI64(new long[]{val}, new long[]{1L});
