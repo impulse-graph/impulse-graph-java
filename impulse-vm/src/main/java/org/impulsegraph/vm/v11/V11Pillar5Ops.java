@@ -1014,15 +1014,15 @@ public final class V11Pillar5Ops {
                 ws.pc++;
             }
             case 2 -> { // prune_hub_quorum
-                int q = ((flags & FLAG_SCALAR_RHS) != 0)
-                        ? (ws.isRValid(s2) ? (int) ws.rRegs[s2] : 1) : imm32;
+                long q = ((flags & FLAG_SCALAR_RHS) != 0)
+                        ? (ws.isRValid(s2) ? ws.rRegs[s2] : 1L) : (long) imm32;
                 double[][] vals = new double[n][k];
                 boolean[][] valid = new boolean[n][k];
                 boolean any = false;
                 for (int u = 0; u < n; u++) {
                     int cnt = 0;
                     for (int l = 0; l < k; l++) if (ls.lsValid[u][l]) cnt++;
-                    if (cnt >= q) {
+                    if ((long) cnt >= q) {
                         any = true;
                         System.arraycopy(ls.lsVals[u], 0, vals[u], 0, k);
                         System.arraycopy(ls.lsValid[u], 0, valid[u], 0, k);
@@ -1047,14 +1047,14 @@ public final class V11Pillar5Ops {
                 ws.pc++;
             }
             case 4 -> { // to_quorum_frontier
-                int q = ((flags & FLAG_SCALAR_RHS) != 0)
-                        ? (ws.isRValid(s2) ? (int) ws.rRegs[s2] : 1) : imm32;
+                long q = ((flags & FLAG_SCALAR_RHS) != 0)
+                        ? (ws.isRValid(s2) ? ws.rRegs[s2] : 1L) : (long) imm32;
                 V11Frontier out = new V11Frontier(Math.max(n, 64));
                 out.resetEmpty(dom, n);
                 for (int u = 0; u < n; u++) {
                     int cnt = 0;
                     for (int l = 0; l < k; l++) if (ls.lsValid[u][l]) cnt++;
-                    if (cnt >= q) out.add(u);
+                    if ((long) cnt >= q) out.add(u);
                 }
                 writeF1Bit(ws, dst, dom, n, out);
                 ws.zf = out.isEmpty();
@@ -1136,8 +1136,9 @@ public final class V11Pillar5Ops {
             return;
         }
         if (subop == 6) { // trace_path
-            int lane = ((flags & FLAG_SCALAR_RHS) != 0 && ws.isRValid(s2)) ? (int) ws.rRegs[s2] : 0;
-            if (lane < 0 || lane >= k) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
+            long lane64 = ((flags & FLAG_SCALAR_RHS) != 0 && ws.isRValid(s2)) ? ws.rRegs[s2] : 0L;
+            if (lane64 < 0L || lane64 >= (long) k) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
+            int lane = (int) lane64;
             long[] out = new long[n];
             long[] valid = new long[words];
             boolean any = false;
