@@ -641,7 +641,7 @@ public final class V11Pillar5Ops {
             if (!Double.isNaN(sc)) scored.add(new double[]{sc, u});
         }
         scored.sort((a, b) -> {
-            int c = Double.compare(b[0], a[0]);
+            int c = b[0] < a[0] ? -1 : (b[0] > a[0] ? 1 : 0);
             return c != 0 ? c : Integer.compare((int) a[1], (int) b[1]);
         });
 
