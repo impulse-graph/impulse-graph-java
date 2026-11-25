@@ -22,9 +22,16 @@ import static org.impulsegraph.vm.v11.V11IsaTables.*;
  */
 public final class V11FixtureBatchMain {
 
+    private static boolean useJit = false;
+
     private V11FixtureBatchMain() {}
 
     public static void main(String[] args) throws Exception {
+        for (String arg : args) {
+            if ("--jit".equals(arg)) {
+                useJit = true;
+            }
+        }
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
         BufferedWriter out = new BufferedWriter(new OutputStreamWriter(System.out, StandardCharsets.UTF_8));
         String line;
@@ -359,7 +366,12 @@ public final class V11FixtureBatchMain {
             }
         }
 
-        V11Interpreter.executeValidated(words, bind, ws, maxSteps);
+        if (useJit) {
+            V11MethodHandleCompiler.CompiledProgram compiled = V11MethodHandleCompiler.compileValidated(words, bind);
+            compiled.execute(ws, maxSteps);
+        } else {
+            V11Interpreter.executeValidated(words, bind, ws, maxSteps);
+        }
         V11ContextHash.Digest digest = V11ContextHash.compute(ws);
         return formatResultJson(ws, digest);
     }

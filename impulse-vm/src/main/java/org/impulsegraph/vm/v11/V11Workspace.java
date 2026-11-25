@@ -35,6 +35,7 @@ public final class V11Workspace {
     public boolean hasUserThrowPayload;
     public long userThrowPayload;
     public long gasRemaining = Long.MAX_VALUE;
+    public final long[] stepsScratch = new long[1];
     public V11Geometry geometry = V11Geometry.P0_DEFAULT;
 
     // Frontier register bank F0..F15 (F8..F15 = MF0..MF7) + initialized mask
