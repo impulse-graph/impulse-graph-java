@@ -267,7 +267,7 @@ public final class V11Pillar4Ops {
             ws.status = IMPULSE_VM_ERR_INVALID_OPCODE;
             return;
         }
-        ws.vVectors[dst] = col.shallowCopy();
+        ws.vVectors[dst] = ws.arena.shallowCopyVec(col);
         ws.pc++;
     }
 
@@ -1213,8 +1213,11 @@ public final class V11Pillar4Ops {
                 int words = Math.max(1, (vd.length + 63) >>> 6);
                 switch (vd.elemTag) {
                     case V11Vector.TAG_I64, V11Vector.TAG_U64 -> {
-                        long[] arr = vd.i64Data.clone();
-                        long[] valid = vd.validBits != null ? vd.validBits.clone() : V11Vector.allocValidAllTrue(vd.length);
+                        long[] arr = ws.arena.allocLong(vd.length);
+                        System.arraycopy(vd.i64Data, 0, arr, 0, vd.length);
+                        long[] valid = ws.arena.allocLong(words);
+                        if (vd.validBits != null) System.arraycopy(vd.validBits, 0, valid, 0, words);
+                        else valid = ws.arena.allocValidAllTrue(vd.length);
                         if (valValid) {
                             arr[idx] = ws.rRegs[s2];
                             valid[idx >>> 6] |= (1L << (idx & 63));
@@ -1222,22 +1225,29 @@ public final class V11Pillar4Ops {
                             valid[idx >>> 6] &= ~(1L << (idx & 63));
                         }
                         ws.vVectors[dst] = vd.elemTag == V11Vector.TAG_U64
-                                ? V11Vector.ofU64(arr, valid) : V11Vector.ofI64(arr, valid);
+                                ? ws.arena.allocU64(arr, vd.length, valid)
+                                : ws.arena.allocI64(arr, vd.length, valid);
                     }
                     case V11Vector.TAG_F64 -> {
-                        double[] arr = vd.f64Data.clone();
-                        long[] valid = vd.validBits != null ? vd.validBits.clone() : V11Vector.allocValidAllTrue(vd.length);
+                        double[] arr = ws.arena.allocDouble(vd.length);
+                        System.arraycopy(vd.f64Data, 0, arr, 0, vd.length);
+                        long[] valid = ws.arena.allocLong(words);
+                        if (vd.validBits != null) System.arraycopy(vd.validBits, 0, valid, 0, words);
+                        else valid = ws.arena.allocValidAllTrue(vd.length);
                         if (valValid && V11Pillar4MathOps.isScalarF64BitsValid(ws, s2)) {
                             arr[idx] = V11Pillar4MathOps.readScalarF64Bits(ws, s2);
                             valid[idx >>> 6] |= (1L << (idx & 63));
                         } else {
                             valid[idx >>> 6] &= ~(1L << (idx & 63));
                         }
-                        ws.vVectors[dst] = V11Vector.ofF64(arr, valid);
+                        ws.vVectors[dst] = ws.arena.allocF64(arr, vd.length, valid);
                     }
                     case V11Vector.TAG_BOOL_3VL -> {
-                        long[] valid = vd.validBits != null ? vd.validBits.clone() : V11Vector.allocValidAllTrue(vd.length);
-                        long[] data = vd.boolDataBits != null ? vd.boolDataBits.clone() : new long[words];
+                        long[] valid = ws.arena.allocLong(words);
+                        if (vd.validBits != null) System.arraycopy(vd.validBits, 0, valid, 0, words);
+                        else valid = ws.arena.allocValidAllTrue(vd.length);
+                        long[] data = ws.arena.allocLongZeroed(words);
+                        if (vd.boolDataBits != null) System.arraycopy(vd.boolDataBits, 0, data, 0, words);
                         if (valValid) {
                             valid[idx >>> 6] |= (1L << (idx & 63));
                             if (ws.rRegs[s2] != 0L) data[idx >>> 6] |= (1L << (idx & 63));
@@ -1246,7 +1256,7 @@ public final class V11Pillar4Ops {
                             valid[idx >>> 6] &= ~(1L << (idx & 63));
                             data[idx >>> 6] &= ~(1L << (idx & 63));
                         }
-                        ws.vVectors[dst] = V11Vector.ofBool3vl(vd.length, valid, data);
+                        ws.vVectors[dst] = ws.arena.allocBool3vl(vd.length, valid, data);
                     }
                     case V11Vector.TAG_STR -> {
                         String[] arr = vd.strData.clone();

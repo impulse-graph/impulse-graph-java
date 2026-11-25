@@ -178,17 +178,18 @@ public final class V11Pillar5Ops {
         };
     }
 
-    private static V11Vector makeLaneState(int dom, int n, int k, double[][] vals, boolean[][] valid,
-                                           long[][] wit, boolean[][] witValid) {
-        V11Vector v = new V11Vector();
+    private static V11Vector makeLaneStateFlat(V11Workspace ws, int dom, int n, int k,
+                                               double[] vals, byte[] valid,
+                                               long[] wit, byte[] witValid) {
+        V11Vector v = ws.arena.allocVec();
         v.elemTag = V11Vector.TAG_LANE_STATE;
         v.length = n;
         v.lsDom = dom;
         v.lsK = k;
-        v.lsVals = vals;
-        v.lsValid = valid;
-        v.lsWitness = wit;
-        v.lsWitnessValid = witValid;
+        v.lsValsFlat = vals;
+        v.lsValidFlat = valid;
+        v.lsWitnessFlat = wit;
+        v.lsWitnessValidFlat = witValid;
         return v;
     }
 
@@ -207,7 +208,9 @@ public final class V11Pillar5Ops {
         }
         int k = seeds.length;
         if (k > 64) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
-        TreeMap<Long, Long> map = new TreeMap<>();
+        long[] outNodes = ws.arena.allocLong(k);
+        long[] outMasks = ws.arena.allocLong(k);
+        int cnt = 0;
         for (int lane = 0; lane < k; lane++) {
             if (!seeds.isValidAt(lane)) continue;
             long u = seeds.i64Data[lane];
@@ -215,12 +218,23 @@ public final class V11Pillar5Ops {
                 ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
                 return;
             }
-            long prev = map.getOrDefault(u, 0L);
-            map.put(u, prev | (1L << lane));
+            long bit = 1L << lane;
+            int pos = Arrays.binarySearch(outNodes, 0, cnt, u);
+            if (pos >= 0) {
+                outMasks[pos] |= bit;
+            } else {
+                int ins = -pos - 1;
+                System.arraycopy(outNodes, ins, outNodes, ins + 1, cnt - ins);
+                System.arraycopy(outMasks, ins, outMasks, ins + 1, cnt - ins);
+                outNodes[ins] = u;
+                outMasks[ins] = bit;
+                cnt++;
+            }
         }
         int allocWidth = (subop == 1) ? 64 : chooseWidth(k);
-        writeFml(ws, dst, dom, (int) dcard, allocWidth, k, map);
-        ws.zf = map.isEmpty();
+        ws.fRegs[dst].initMultiLane(dom, (int) dcard, allocWidth, k, outNodes, outMasks, cnt, ws.geometry);
+        ws.setFInitialized(dst, true);
+        ws.zf = (cnt == 0);
         ws.pc++;
     }
 
@@ -363,7 +377,7 @@ public final class V11Pillar5Ops {
         if (subop == 0 && (flags & (FLAG_MASKED_S3 | FLAG_ACCUM)) == 0) {
             int outCard = (int) bind.view.domainCards[outDom];
             if (outCard >= 0 && outCard <= 1_000_000) {
-                long[] dense = new long[outCard];
+                long[] dense = ws.arena.allocLongZeroed(outCard);
                 int[] roff = rel.rowOffsets;
                 long[] ctgt = rel.colTargets;
                 int srcCnt = fSrc.mlCount;
@@ -384,8 +398,8 @@ public final class V11Pillar5Ops {
                 for (int v = 0; v < outCard; v++) {
                     if (dense[v] != 0L) cnt++;
                 }
-                long[] outNodes = new long[cnt];
-                long[] outMasks = new long[cnt];
+                long[] outNodes = ws.arena.allocLong(cnt);
+                long[] outMasks = ws.arena.allocLong(cnt);
                 int k = 0;
                 for (int v = 0; v < outCard; v++) {
                     long m = dense[v];
@@ -397,7 +411,7 @@ public final class V11Pillar5Ops {
                 }
                 int aw = fSrc.allocWidth;
                 int ac = fSrc.activeLaneCount;
-                ws.fRegs[dst].initMultiLane(outDom, outCard, aw, ac, outNodes, outMasks, ws.geometry);
+                ws.fRegs[dst].initMultiLane(outDom, outCard, aw, ac, outNodes, outMasks, cnt, ws.geometry);
                 ws.setFInitialized(dst, true);
                 ws.zf = (cnt == 0);
                 ws.pc++;
@@ -810,12 +824,11 @@ public final class V11Pillar5Ops {
         if (subop <= 3) {
             int k = Math.max(1, imm16Hi);
             boolean isZero = (subop == 0 || subop == 2);
-            double[][] vals = new double[n][k];
-            boolean[][] valid = new boolean[n][k];
-            if (isZero) {
-                for (int u = 0; u < n; u++) Arrays.fill(valid[u], true);
-            }
-            ws.vVectors[dst] = makeLaneState(dom, n, k, vals, valid, null, null);
+            int total = n * k;
+            double[] vals = ws.arena.allocDoubleZeroed(total);
+            byte[] valid = ws.arena.allocByte(total);
+            Arrays.fill(valid, 0, total, isZero ? (byte) 1 : (byte) 0);
+            ws.vVectors[dst] = makeLaneStateFlat(ws, dom, n, k, vals, valid, null, null);
             ws.zf = (n == 0);
             ws.pc++;
             return;
@@ -828,27 +841,29 @@ public final class V11Pillar5Ops {
             boolean seedValid = (flags & FLAG_SCALAR_RHS) == 0 || V11Pillar4MathOps.isScalarF64BitsValid(ws, s2);
             double seedVal = ((flags & FLAG_SCALAR_RHS) != 0 && seedValid)
                     ? V11Pillar4MathOps.readScalarF64Bits(ws, s2) : 0.0;
-            double[][] vals = new double[n][kk];
-            boolean[][] valid = new boolean[n][kk];
-            long[][] wit = (subop == 5) ? new long[n][kk] : null;
-            boolean[][] witValid = (subop == 5) ? new boolean[n][kk] : null;
+            int total = n * kk;
+            double[] vals = ws.arena.allocDoubleZeroed(total);
+            byte[] valid = ws.arena.allocByteZeroed(total);
+            long[] wit = (subop == 5) ? ws.arena.allocLongZeroed(total) : null;
+            byte[] witValid = (subop == 5) ? ws.arena.allocByteZeroed(total) : null;
             for (int i = 0; i < fa.mlCount; i++) {
                 int u = (int) fa.mlNodes[i];
                 long lm = fa.mlMasks[i];
+                int base = u * kk;
                 for (int l = 0; l < kk; l++) {
                     if ((lm & (1L << l)) != 0L) {
                         if (seedValid) {
-                            vals[u][l] = seedVal;
-                            valid[u][l] = true;
+                            vals[base + l] = seedVal;
+                            valid[base + l] = 1;
                         }
                         if (wit != null) {
-                            wit[u][l] = u & 0xFFFFFFFFL;
-                            witValid[u][l] = true;
+                            wit[base + l] = u & 0xFFFFFFFFL;
+                            witValid[base + l] = 1;
                         }
                     }
                 }
             }
-            ws.vVectors[dst] = makeLaneState(dom, n, kk, vals, valid, wit, witValid);
+            ws.vVectors[dst] = makeLaneStateFlat(ws, dom, n, kk, vals, valid, wit, witValid);
             ws.zf = (fa.mlCount == 0);
             ws.pc++;
             return;
@@ -896,10 +911,12 @@ public final class V11Pillar5Ops {
 
         int nOut = (int) bind.view.domainCards[outDom];
         int k = ls.lsK;
-        double[][] outVals = new double[nOut][k];
-        boolean[][] outValid = new boolean[nOut][k];
-        long[][] outWit = (ls.lsWitness != null) ? new long[nOut][k] : null;
-        boolean[][] outWitValid = (ls.lsWitness != null) ? new boolean[nOut][k] : null;
+        int totalOut = nOut * k;
+        double[] outVals = ws.arena.allocDoubleZeroed(totalOut);
+        byte[] outValid = ws.arena.allocByteZeroed(totalOut);
+        boolean hasWit = ls.lsHasWitness();
+        long[] outWit = hasWit ? ws.arena.allocLongZeroed(totalOut) : null;
+        byte[] outWitValid = hasWit ? ws.arena.allocByteZeroed(totalOut) : null;
 
         if ((flags & FLAG_ACCUM) != 0) {
             V11Vector dstLs = ws.vVectors[dst];
@@ -909,104 +926,105 @@ public final class V11Pillar5Ops {
             }
             if (dstLs.lsDom != outDom) { ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH; return; }
             if (dstLs.length != nOut || dstLs.lsK != k) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
-            for (int u = 0; u < nOut; u++) {
-                System.arraycopy(dstLs.lsVals[u], 0, outVals[u], 0, k);
-                System.arraycopy(dstLs.lsValid[u], 0, outValid[u], 0, k);
-                if (outWit != null && dstLs.lsWitness != null) {
-                    System.arraycopy(dstLs.lsWitness[u], 0, outWit[u], 0, k);
-                    System.arraycopy(dstLs.lsWitnessValid[u], 0, outWitValid[u], 0, k);
-                }
+            System.arraycopy(dstLs.lsValsFlat, 0, outVals, 0, totalOut);
+            System.arraycopy(dstLs.lsValidFlat, 0, outValid, 0, totalOut);
+            if (outWit != null && dstLs.lsWitnessFlat != null) {
+                System.arraycopy(dstLs.lsWitnessFlat, 0, outWit, 0, totalOut);
+                System.arraycopy(dstLs.lsWitnessValidFlat, 0, outWitValid, 0, totalOut);
             }
         } else if (semi == 3) {
-            for (int u = 0; u < nOut; u++) Arrays.fill(outValid[u], true);
+            Arrays.fill(outValid, 0, totalOut, (byte) 1);
         }
 
-        // Jacobi-safe input snapshot
-        double[][] snapIn = new double[ls.length][k];
-        boolean[][] snapInValid = new boolean[ls.length][k];
-        for (int u = 0; u < ls.length; u++) {
-            System.arraycopy(ls.lsVals[u], 0, snapIn[u], 0, k);
-            System.arraycopy(ls.lsValid[u], 0, snapInValid[u], 0, k);
-        }
-
-        int[] hits = new int[]{0};
+        // Read directly from ls.lsValsFlat / ls.lsValidFlat (outVals is freshly carved from arena -> Jacobi-safe!)
+        double[] snapIn = ls.lsValsFlat;
+        byte[] snapInValid = ls.lsValidFlat;
+        int hits = 0;
         if (!isRev) {
+            int[] roff = rel.rowOffsets;
+            long[] ctgt = rel.colTargets;
             for (int u = 0; u < ls.length; u++) {
-                for (int e = rel.rowOffsets[u]; e < rel.rowOffsets[u + 1]; e++) {
-                    int v = (int) rel.colTargets[e];
-                    relaxLaneEdge(u, v, e, k, semi, mask, scalarW, scalarWValid, scalarWVal, weightCol,
-                            snapIn, snapInValid, outVals, outValid, outWit, outWitValid, hits);
+                int uBase = u * k;
+                for (int e = roff[u]; e < roff[u + 1]; e++) {
+                    int v = (int) ctgt[e];
+                    hits += relaxLaneEdgeFlat(u, uBase, v, v * k, e, k, semi, mask, scalarW, scalarWValid, scalarWVal, weightCol,
+                            snapIn, snapInValid, outVals, outValid, outWit, outWitValid);
                 }
             }
         } else {
             List<int[]>[] revAdj = buildRevAdj(bind.view, rel);
             for (int v = 0; v < ls.length; v++) {
+                int vBase = v * k;
                 for (int[] pair : revAdj[v]) {
-                    relaxLaneEdge(v, pair[0], pair[1], k, semi, mask, scalarW, scalarWValid, scalarWVal, weightCol,
-                            snapIn, snapInValid, outVals, outValid, outWit, outWitValid, hits);
+                    int u = pair[0];
+                    hits += relaxLaneEdgeFlat(v, vBase, u, u * k, pair[1], k, semi, mask, scalarW, scalarWValid, scalarWVal, weightCol,
+                            snapIn, snapInValid, outVals, outValid, outWit, outWitValid);
                 }
             }
         }
 
-        ws.vVectors[dst] = makeLaneState(outDom, nOut, k, outVals, outValid, outWit, outWitValid);
-        ws.zf = (hits[0] == 0);
-        ws.st = (hits[0] == 0);
+        ws.vVectors[dst] = makeLaneStateFlat(ws, outDom, nOut, k, outVals, outValid, outWit, outWitValid);
+        ws.zf = (hits == 0);
+        ws.st = (hits == 0);
         ws.pc++;
     }
 
-    private static void relaxLaneEdge(
-            int u, int v, int e, int k, int semi, V11Frontier mask,
+    private static int relaxLaneEdgeFlat(
+            int u, int uBase, int v, int vBase, int e, int k, int semi, V11Frontier mask,
             boolean scalarW, boolean scalarWValid, double scalarWVal, V11Vector weightCol,
-            double[][] snapIn, boolean[][] snapInValid,
-            double[][] outVals, boolean[][] outValid,
-            long[][] outWit, boolean[][] outWitValid, int[] hits) {
-        if (mask != null && !mask.contains(v)) return;
+            double[] snapIn, byte[] snapInValid,
+            double[] outVals, byte[] outValid,
+            long[] outWit, byte[] outWitValid) {
+        if (mask != null && !mask.contains(v)) return 0;
         double w;
         if (scalarW) {
-            if (!scalarWValid) return;
+            if (!scalarWValid) return 0;
             w = scalarWVal;
         } else if (weightCol == null) {
             w = 1.0;
         } else {
-            if (!weightCol.isValidAt(e)) return;
+            if (!weightCol.isValidAt(e)) return 0;
             w = (weightCol.elemTag == V11Vector.TAG_F64) ? weightCol.f64Data[e] : (double) weightCol.i64Data[e];
         }
+        int hits = 0;
         for (int l = 0; l < k; l++) {
-            if (!snapInValid[u][l]) continue;
-            double du = snapIn[u][l];
+            if (snapInValid[uBase + l] == 0) continue;
+            double du = snapIn[uBase + l];
             double cand = switch (semi) {
                 case 0, 1 -> du + w;
                 case 2, 3 -> du * w;
                 default -> V11Pillar4MathOps.ieeeMaxF64(du, w);
             };
             if (Double.isNaN(cand)) continue;
+            int vo = vBase + l;
             boolean updated = false;
-            boolean has = outValid[v][l];
+            boolean has = outValid[vo] != 0;
             if (semi == 3) {
-                outVals[v][l] = has ? (outVals[v][l] + cand) : cand;
-                outValid[v][l] = true;
+                outVals[vo] = has ? (outVals[vo] + cand) : cand;
+                outValid[vo] = 1;
                 updated = true;
             } else if (semi == 0 || semi == 4) {
-                if (!has || cand < outVals[v][l]) {
-                    outVals[v][l] = cand;
-                    outValid[v][l] = true;
+                if (!has || cand < outVals[vo]) {
+                    outVals[vo] = cand;
+                    outValid[vo] = 1;
                     updated = true;
                 }
             } else {
-                if (!has || cand > outVals[v][l]) {
-                    outVals[v][l] = cand;
-                    outValid[v][l] = true;
+                if (!has || cand > outVals[vo]) {
+                    outVals[vo] = cand;
+                    outValid[vo] = 1;
                     updated = true;
                 }
             }
             if (updated) {
-                hits[0]++;
+                hits++;
                 if (outWit != null) {
-                    outWit[v][l] = u & 0xFFFFFFFFL;
-                    outWitValid[v][l] = true;
+                    outWit[vo] = u & 0xFFFFFFFFL;
+                    outWitValid[vo] = 1;
                 }
             }
         }
+        return hits;
     }
 
     // --- 0x6D OP_LANE_STATE_OP ---
@@ -1019,90 +1037,100 @@ public final class V11Pillar5Ops {
             return;
         }
         int n = ls.length, k = ls.lsK, dom = ls.lsDom;
+        int total = n * k;
+        double[] srcVals = ls.lsValsFlat;
+        byte[] srcValid = ls.lsValidFlat;
         switch (subop) {
             case 0 -> { // project_affine: fma(a, x, b)
                 double a = V11Pillar4MathOps.isScalarF64BitsValid(ws, s2) ? V11Pillar4MathOps.readScalarF64Bits(ws, s2) : 1.0;
                 double b = V11Pillar4MathOps.isScalarF64BitsValid(ws, s3) ? V11Pillar4MathOps.readScalarF64Bits(ws, s3) : 0.0;
-                double[][] vals = new double[n][k];
-                boolean[][] valid = new boolean[n][k];
-                for (int u = 0; u < n; u++) {
-                    for (int l = 0; l < k; l++) {
-                        if (!ls.lsValid[u][l]) continue;
-                        double r = Math.fma(a, ls.lsVals[u][l], b);
-                        if (!Double.isNaN(r)) {
-                            vals[u][l] = r;
-                            valid[u][l] = true;
-                        }
+                double[] vals = ws.arena.allocDoubleZeroed(total);
+                byte[] valid = ws.arena.allocByteZeroed(total);
+                for (int i = 0; i < total; i++) {
+                    if (srcValid[i] == 0) continue;
+                    double r = Math.fma(a, srcVals[i], b);
+                    if (!Double.isNaN(r)) {
+                        vals[i] = r;
+                        valid[i] = 1;
                     }
                 }
-                ws.vVectors[dst] = makeLaneState(dom, n, k, vals, valid, ls.lsWitness, ls.lsWitnessValid);
+                ws.vVectors[dst] = makeLaneStateFlat(ws, dom, n, k, vals, valid, ls.lsWitnessFlat, ls.lsWitnessValidFlat);
                 ws.zf = false;
                 ws.pc++;
             }
             case 1 -> { // prune_cutoff
                 double cut = V11Pillar4MathOps.isScalarF64BitsValid(ws, s2)
                         ? V11Pillar4MathOps.readScalarF64Bits(ws, s2) : Double.POSITIVE_INFINITY;
-                double[][] vals = new double[n][k];
-                boolean[][] valid = new boolean[n][k];
+                double[] vals = ws.arena.allocDoubleZeroed(total);
+                byte[] valid = ws.arena.allocByteZeroed(total);
                 boolean any = false;
-                for (int u = 0; u < n; u++) {
-                    for (int l = 0; l < k; l++) {
-                        if (ls.lsValid[u][l] && ls.lsVals[u][l] <= cut) {
-                            vals[u][l] = ls.lsVals[u][l];
-                            valid[u][l] = true;
-                            any = true;
-                        }
+                for (int i = 0; i < total; i++) {
+                    if (srcValid[i] != 0 && srcVals[i] <= cut) {
+                        vals[i] = srcVals[i];
+                        valid[i] = 1;
+                        any = true;
                     }
                 }
-                ws.vVectors[dst] = makeLaneState(dom, n, k, vals, valid, ls.lsWitness, ls.lsWitnessValid);
+                ws.vVectors[dst] = makeLaneStateFlat(ws, dom, n, k, vals, valid, ls.lsWitnessFlat, ls.lsWitnessValidFlat);
                 ws.zf = !any;
                 ws.pc++;
             }
             case 2 -> { // prune_hub_quorum
                 long q = ((flags & FLAG_SCALAR_RHS) != 0)
                         ? (ws.isRValid(s2) ? ws.rRegs[s2] : 1L) : (long) imm32;
-                double[][] vals = new double[n][k];
-                boolean[][] valid = new boolean[n][k];
+                double[] vals = ws.arena.allocDoubleZeroed(total);
+                byte[] valid = ws.arena.allocByteZeroed(total);
                 boolean any = false;
                 for (int u = 0; u < n; u++) {
+                    int base = u * k;
                     int cnt = 0;
-                    for (int l = 0; l < k; l++) if (ls.lsValid[u][l]) cnt++;
+                    for (int l = 0; l < k; l++) if (srcValid[base + l] != 0) cnt++;
                     if ((long) cnt >= q) {
                         any = true;
-                        System.arraycopy(ls.lsVals[u], 0, vals[u], 0, k);
-                        System.arraycopy(ls.lsValid[u], 0, valid[u], 0, k);
+                        System.arraycopy(srcVals, base, vals, base, k);
+                        System.arraycopy(srcValid, base, valid, base, k);
                     }
                 }
-                ws.vVectors[dst] = makeLaneState(dom, n, k, vals, valid, ls.lsWitness, ls.lsWitnessValid);
+                ws.vVectors[dst] = makeLaneStateFlat(ws, dom, n, k, vals, valid, ls.lsWitnessFlat, ls.lsWitnessValidFlat);
                 ws.zf = !any;
                 ws.pc++;
             }
             case 3 -> { // to_lane_frontier
-                TreeMap<Long, Long> map = new TreeMap<>();
                 int lim = Math.min(64, k);
+                long[] outNodes = ws.arena.allocLong(n);
+                long[] outMasks = ws.arena.allocLong(n);
+                int cnt = 0;
                 for (int u = 0; u < n; u++) {
+                    int base = u * k;
                     long m = 0L;
                     for (int l = 0; l < lim; l++) {
-                        if (ls.lsValid[u][l]) m |= (1L << l);
+                        if (srcValid[base + l] != 0) m |= (1L << l);
                     }
-                    if (m != 0L) map.put(u & 0xFFFFFFFFL, m);
+                    if (m != 0L) {
+                        outNodes[cnt] = u & 0xFFFFFFFFL;
+                        outMasks[cnt] = m;
+                        cnt++;
+                    }
                 }
-                writeFml(ws, dst, dom, n, chooseWidth(lim), lim, map);
-                ws.zf = map.isEmpty();
+                ws.fRegs[dst].initMultiLane(dom, n, chooseWidth(lim), lim, outNodes, outMasks, cnt, ws.geometry);
+                ws.setFInitialized(dst, true);
+                ws.zf = (cnt == 0);
                 ws.pc++;
             }
             case 4 -> { // to_quorum_frontier
                 long q = ((flags & FLAG_SCALAR_RHS) != 0)
                         ? (ws.isRValid(s2) ? ws.rRegs[s2] : 1L) : (long) imm32;
-                V11Frontier out = new V11Frontier(Math.max(n, 64));
-                out.resetEmpty(dom, n);
+                int[] ids = ws.arena.allocInt(n);
+                int cnt = 0;
                 for (int u = 0; u < n; u++) {
-                    int cnt = 0;
-                    for (int l = 0; l < k; l++) if (ls.lsValid[u][l]) cnt++;
-                    if ((long) cnt >= q) out.add(u);
+                    int base = u * k;
+                    int lc = 0;
+                    for (int l = 0; l < k; l++) if (srcValid[base + l] != 0) lc++;
+                    if ((long) lc >= q) ids[cnt++] = u;
                 }
-                writeF1Bit(ws, dst, dom, n, out);
-                ws.zf = out.isEmpty();
+                ws.fRegs[dst].initFromValidatedIds(dom, n, ids, cnt, ws.geometry, true);
+                ws.setFInitialized(dst, true);
+                ws.zf = (cnt == 0);
                 ws.pc++;
             }
             default -> ws.status = IMPULSE_VM_ERR_INVALID_OPCODE;
@@ -1119,18 +1147,21 @@ public final class V11Pillar5Ops {
         }
         int n = ls.length, k = ls.lsK;
         int words = Math.max(1, (n + 63) >>> 6);
+        double[] srcVals = ls.lsValsFlat;
+        byte[] srcValid = ls.lsValidFlat;
 
         if (subop <= 3) {
-            double[] out = new double[n];
-            long[] valid = new long[words];
+            double[] out = ws.arena.allocDoubleZeroed(n);
+            long[] valid = ws.arena.allocLongZeroed(words);
             boolean any = false;
             for (int u = 0; u < n; u++) {
+                int base = u * k;
                 int cnt = 0;
                 double sum = 0.0, mn = 0.0, mx = 0.0;
                 boolean hasMn = false, hasMx = false;
                 for (int l = 0; l < k; l++) {
-                    if (!ls.lsValid[u][l]) continue;
-                    double x = ls.lsVals[u][l];
+                    if (srcValid[base + l] == 0) continue;
+                    double x = srcVals[base + l];
                     cnt++;
                     sum += x;
                     mn = hasMn ? V11Pillar4MathOps.ieeeMinF64(mn, x) : x;
@@ -1149,22 +1180,23 @@ public final class V11Pillar5Ops {
                     any = true;
                 }
             }
-            ws.vVectors[dst] = V11Vector.ofF64(out, valid);
+            ws.vVectors[dst] = ws.arena.allocF64(out, n, valid);
             ws.zf = !any;
             ws.pc++;
             return;
         }
         if (subop == 4 || subop == 5) {
-            long[] out = new long[n];
-            long[] valid = new long[words];
+            long[] out = ws.arena.allocLongZeroed(n);
+            long[] valid = ws.arena.allocLongZeroed(words);
             boolean any = false;
             for (int u = 0; u < n; u++) {
+                int base = u * k;
                 boolean has = false;
                 double bestV = 0.0;
                 int bestL = -1;
                 for (int l = 0; l < k; l++) {
-                    if (!ls.lsValid[u][l]) continue;
-                    double x = ls.lsVals[u][l];
+                    if (srcValid[base + l] == 0) continue;
+                    double x = srcVals[base + l];
                     if (!has || (subop == 4 ? x < bestV : x > bestV)) {
                         has = true; bestV = x; bestL = l;
                     }
@@ -1175,7 +1207,7 @@ public final class V11Pillar5Ops {
                     any = true;
                 }
             }
-            ws.vVectors[dst] = V11Vector.ofU64(out, valid);
+            ws.vVectors[dst] = ws.arena.allocU64(out, n, valid);
             ws.zf = !any;
             ws.pc++;
             return;
@@ -1184,19 +1216,20 @@ public final class V11Pillar5Ops {
             long lane64 = ((flags & FLAG_SCALAR_RHS) != 0 && ws.isRValid(s2)) ? ws.rRegs[s2] : 0L;
             if (lane64 < 0L || lane64 >= (long) k) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
             int lane = (int) lane64;
-            long[] out = new long[n];
-            long[] valid = new long[words];
+            long[] out = ws.arena.allocLongZeroed(n);
+            long[] valid = ws.arena.allocLongZeroed(words);
             boolean any = false;
-            if (ls.lsWitness != null) {
+            if (ls.lsWitnessFlat != null) {
                 for (int u = 0; u < n; u++) {
-                    if (ls.lsWitnessValid[u][lane]) {
-                        out[u] = ls.lsWitness[u][lane];
+                    int idx = u * k + lane;
+                    if (ls.lsWitnessValidFlat[idx] != 0) {
+                        out[u] = ls.lsWitnessFlat[idx];
                         valid[u >>> 6] |= (1L << (u & 63));
                         any = true;
                     }
                 }
             }
-            ws.vVectors[dst] = V11Vector.ofU64(out, valid);
+            ws.vVectors[dst] = ws.arena.allocU64(out, n, valid);
             ws.zf = !any;
             ws.pc++;
             return;

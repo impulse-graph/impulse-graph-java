@@ -172,8 +172,9 @@ public final class V11Pillar4MathOps {
         boolean sValid = isBinary && scalarRhs && isScalarF64BitsValid(ws, s2);
         double sVal = sValid ? readScalarF64Bits(ws, s2) : Double.NaN;
 
-        double[] out = new double[n];
-        long[] outValid = new long[Math.max(1, (n + 63) >>> 6)];
+        int words = Math.max(1, (n + 63) >>> 6);
+        double[] out = ws.arena.allocDoubleZeroed(n);
+        long[] outValid = ws.arena.allocLongZeroed(words);
 
         for (int i = 0; i < n; i++) {
             if (!laneActive(mask, i) || !va.isValidAt(i)) continue;
@@ -213,7 +214,7 @@ public final class V11Pillar4MathOps {
                 outValid[i >>> 6] |= (1L << (i & 63));
             }
         }
-        ws.vVectors[dst] = V11Vector.ofF64(out, outValid);
+        ws.vVectors[dst] = ws.arena.allocF64(out, n, outValid);
         ws.pc++;
     }
 
@@ -245,8 +246,9 @@ public final class V11Pillar4MathOps {
         boolean sValid = isBinary && scalarRhs && isScalarF64BitsValid(ws, s2);
         double sVal = sValid ? readScalarF64Bits(ws, s2) : Double.NaN;
 
-        double[] out = new double[n];
-        long[] outValid = new long[Math.max(1, (n + 63) >>> 6)];
+        int words = Math.max(1, (n + 63) >>> 6);
+        double[] out = ws.arena.allocDoubleZeroed(n);
+        long[] outValid = ws.arena.allocLongZeroed(words);
 
         for (int i = 0; i < n; i++) {
             if (!laneActive(mask, i) || !va.isValidAt(i)) continue;
@@ -280,7 +282,7 @@ public final class V11Pillar4MathOps {
                 outValid[i >>> 6] |= (1L << (i & 63));
             }
         }
-        ws.vVectors[dst] = V11Vector.ofF64(out, outValid);
+        ws.vVectors[dst] = ws.arena.allocF64(out, n, outValid);
         ws.pc++;
     }
 
@@ -312,8 +314,9 @@ public final class V11Pillar4MathOps {
         boolean sValid = isBinary && scalarRhs && isScalarF64BitsValid(ws, s2);
         double sVal = sValid ? readScalarF64Bits(ws, s2) : Double.NaN;
 
-        double[] out = new double[n];
-        long[] outValid = new long[Math.max(1, (n + 63) >>> 6)];
+        int words = Math.max(1, (n + 63) >>> 6);
+        double[] out = ws.arena.allocDoubleZeroed(n);
+        long[] outValid = ws.arena.allocLongZeroed(words);
 
         for (int i = 0; i < n; i++) {
             if (!laneActive(mask, i) || !va.isValidAt(i)) continue;
@@ -372,7 +375,7 @@ public final class V11Pillar4MathOps {
                 outValid[i >>> 6] |= (1L << (i & 63));
             }
         }
-        ws.vVectors[dst] = V11Vector.ofF64(out, outValid);
+        ws.vVectors[dst] = ws.arena.allocF64(out, n, outValid);
         ws.pc++;
     }
 
@@ -404,8 +407,9 @@ public final class V11Pillar4MathOps {
         boolean sValid = isLeaky && scalarRhs && isScalarF64BitsValid(ws, s2);
         double sVal = sValid ? readScalarF64Bits(ws, s2) : Double.NaN;
 
-        double[] out = new double[n];
-        long[] outValid = new long[Math.max(1, (n + 63) >>> 6)];
+        int words = Math.max(1, (n + 63) >>> 6);
+        double[] out = ws.arena.allocDoubleZeroed(n);
+        long[] outValid = ws.arena.allocLongZeroed(words);
 
         for (int i = 0; i < n; i++) {
             if (!laneActive(mask, i) || !va.isValidAt(i)) continue;
@@ -431,7 +435,7 @@ public final class V11Pillar4MathOps {
                 outValid[i >>> 6] |= (1L << (i & 63));
             }
         }
-        ws.vVectors[dst] = V11Vector.ofF64(out, outValid);
+        ws.vVectors[dst] = ws.arena.allocF64(out, n, outValid);
         ws.pc++;
     }
 
@@ -629,8 +633,9 @@ public final class V11Pillar4MathOps {
         double sbVal = sbValid ? readScalarF64Bits(ws, s2) : Double.NaN;
         double scVal = scValid ? readScalarF64Bits(ws, s3) : Double.NaN;
 
-        double[] out = new double[n];
-        long[] outValid = new long[Math.max(1, (n + 63) >>> 6)];
+        int words = Math.max(1, (n + 63) >>> 6);
+        double[] out = ws.arena.allocDoubleZeroed(n);
+        long[] outValid = ws.arena.allocLongZeroed(words);
 
         for (int i = 0; i < n; i++) {
             boolean aValid = va.isValidAt(i);
@@ -674,7 +679,7 @@ public final class V11Pillar4MathOps {
                 outValid[i >>> 6] |= (1L << (i & 63));
             }
         }
-        ws.vVectors[dst] = V11Vector.ofF64(out, outValid);
+        ws.vVectors[dst] = ws.arena.allocF64(out, n, outValid);
         ws.pc++;
     }
 }

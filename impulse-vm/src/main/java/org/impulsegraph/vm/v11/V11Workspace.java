@@ -89,6 +89,7 @@ public final class V11Workspace {
     public final Map<Integer, V11Vector> outputs = new HashMap<>();
 
     public final int maxDomainCard;
+    public final V11Arena arena;
 
     public sealed interface ConstPoolEntry permits PoolVec, PoolFrontier, PoolStr {}
     public record PoolVec(V11Vector vec) implements ConstPoolEntry {}
@@ -104,6 +105,7 @@ public final class V11Workspace {
 
     public V11Workspace(int maxDomainCard) {
         this.maxDomainCard = Math.max(64, maxDomainCard);
+        this.arena = new V11Arena(this.maxDomainCard);
         for (int i = 0; i < 8; i++) {
             fRegs[i] = new V11Frontier(this.maxDomainCard);
             vF64[i] = new double[this.maxDomainCard];
@@ -150,6 +152,7 @@ public final class V11Workspace {
             vLen[i] = 0;
         }
         outputs.clear();
+        arena.reset();
     }
 
     public void resetAllWithBindings() {

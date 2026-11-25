@@ -31,15 +31,87 @@ public final class V11Vector {
     public int embDim;          // TAG_EMB
     public double[][] embData;  // TAG_EMB (null row => Kleene NULL)
 
-    // TAG_LANE_STATE (MITra)
+    // TAG_LANE_STATE (MITra): flat contiguous buffers (row-major [u * lsK + l]) + optional legacy 2D
     public int lsDom;
     public int lsK;
+    public double[] lsValsFlat;
+    public byte[] lsValidFlat;
+    public long[] lsWitnessFlat;
+    public byte[] lsWitnessValidFlat;
     public double[][] lsVals;   // [node][lane], NaN => NULL when lsValid is null
     public boolean[][] lsValid; // [node][lane]
     public long[][] lsWitness;  // optional predecessor [node][lane]
     public boolean[][] lsWitnessValid;
 
     public V11Vector() {}
+
+    public void reset() {
+        elemTag = 0;
+        length = 0;
+        i64Data = null;
+        f64Data = null;
+        validBits = null;
+        boolDataBits = null;
+        strData = null;
+        embDim = 0;
+        embData = null;
+        lsDom = 0;
+        lsK = 0;
+        lsValsFlat = null;
+        lsValidFlat = null;
+        lsWitnessFlat = null;
+        lsWitnessValidFlat = null;
+        lsVals = null;
+        lsValid = null;
+        lsWitness = null;
+        lsWitnessValid = null;
+    }
+
+    public void copyFieldsFrom(V11Vector src) {
+        this.elemTag = src.elemTag;
+        this.length = src.length;
+        this.i64Data = src.i64Data;
+        this.f64Data = src.f64Data;
+        this.validBits = src.validBits;
+        this.boolDataBits = src.boolDataBits;
+        this.strData = src.strData;
+        this.embDim = src.embDim;
+        this.embData = src.embData;
+        this.lsDom = src.lsDom;
+        this.lsK = src.lsK;
+        this.lsValsFlat = src.lsValsFlat;
+        this.lsValidFlat = src.lsValidFlat;
+        this.lsWitnessFlat = src.lsWitnessFlat;
+        this.lsWitnessValidFlat = src.lsWitnessValidFlat;
+        this.lsVals = src.lsVals;
+        this.lsValid = src.lsValid;
+        this.lsWitness = src.lsWitness;
+        this.lsWitnessValid = src.lsWitnessValid;
+    }
+
+    public boolean lsIsValid(int u, int l) {
+        if (lsValidFlat != null) return lsValidFlat[u * lsK + l] != 0;
+        return lsValid != null && lsValid[u][l];
+    }
+
+    public double lsGetVal(int u, int l) {
+        if (lsValsFlat != null) return lsValsFlat[u * lsK + l];
+        return lsVals[u][l];
+    }
+
+    public boolean lsHasWitness() {
+        return lsWitnessFlat != null || lsWitness != null;
+    }
+
+    public boolean lsIsWitnessValid(int u, int l) {
+        if (lsWitnessValidFlat != null) return lsWitnessValidFlat[u * lsK + l] != 0;
+        return lsWitnessValid != null && lsWitnessValid[u][l];
+    }
+
+    public long lsGetWitness(int u, int l) {
+        if (lsWitnessFlat != null) return lsWitnessFlat[u * lsK + l];
+        return lsWitness[u][l];
+    }
 
     public static V11Vector ofI64(long[] values, long[] validBits) {
         V11Vector v = new V11Vector();
@@ -128,21 +200,7 @@ public final class V11Vector {
 
     public V11Vector shallowCopy() {
         V11Vector c = new V11Vector();
-        c.elemTag = this.elemTag;
-        c.length = this.length;
-        c.i64Data = this.i64Data;
-        c.f64Data = this.f64Data;
-        c.validBits = this.validBits;
-        c.boolDataBits = this.boolDataBits;
-        c.strData = this.strData;
-        c.embDim = this.embDim;
-        c.embData = this.embData;
-        c.lsDom = this.lsDom;
-        c.lsK = this.lsK;
-        c.lsVals = this.lsVals;
-        c.lsValid = this.lsValid;
-        c.lsWitness = this.lsWitness;
-        c.lsWitnessValid = this.lsWitnessValid;
+        c.copyFieldsFrom(this);
         return c;
     }
 

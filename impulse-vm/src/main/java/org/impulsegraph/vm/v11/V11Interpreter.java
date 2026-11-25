@@ -126,16 +126,14 @@ public final class V11Interpreter {
      * <p>Returns the final status code ({@link V11IsaTables#IMPULSE_VM_OK} = 0 on normal HALT).
      */
     public static int executeValidated(long[] program, SnapshotBinding bind, V11Workspace ws, long maxSteps) {
-        V11Validator.ValidationResult vr = V11Validator.validate(program);
-        if (!vr.isOk()) {
-            ws.pc = vr.badPc();
-            ws.status = vr.status();
+        if (!V11Validator.validateInto(program, ws)) {
             return ws.status;
         }
         ws.pc = 0;
         ws.status = V11IsaTables.IMPULSE_VM_OK;
         final int n = program.length;
-        long[] stepsRef = new long[]{0L};
+        long[] stepsRef = ws.stepsScratch;
+        stepsRef[0] = 0L;
 
         while (ws.status == V11IsaTables.IMPULSE_VM_OK) {
             if (stepsRef[0] >= maxSteps) {
