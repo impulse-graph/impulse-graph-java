@@ -34,6 +34,13 @@ public final class V11MethodHandleCompiler {
     private static final MethodHandle MH_MORSEL_B2F;
     private static final MethodHandle MH_MORSEL_COMMIT_FRONTIER;
     private static final MethodHandle MH_MORSEL_COMMIT_SCATTER_ADD;
+    private static final MethodHandle MH_LEAF_P1;
+    private static final MethodHandle MH_LEAF_P2;
+    private static final MethodHandle MH_LEAF_P3;
+    private static final MethodHandle MH_LEAF_P4_MATH;
+    private static final MethodHandle MH_LEAF_P4;
+    private static final MethodHandle MH_LEAF_P5;
+    private static final MethodHandle MH_LEAF_INVALID;
 
     static {
         try {
@@ -67,9 +74,239 @@ public final class V11MethodHandleCompiler {
                     MethodType.methodType(void.class, int.class, int.class, int.class, boolean.class, V11Workspace.class, int.class));
             MH_MORSEL_COMMIT_SCATTER_ADD = LOOKUP.findStatic(V11MethodHandleCompiler.class, "morselCommitScatterAdd",
                     MethodType.methodType(void.class, int.class, int.class, int.class, int.class, boolean.class, V11Workspace.class, int.class));
+            MH_LEAF_P1 = LOOKUP.findStatic(V11MethodHandleCompiler.class, "leafP1",
+                    MethodType.methodType(void.class, V11Interpreter.SnapshotBinding.class, long[].class, long.class, V11Workspace.class, long.class));
+            MH_LEAF_P2 = LOOKUP.findStatic(V11MethodHandleCompiler.class, "leafP2",
+                    MethodType.methodType(void.class, V11Interpreter.SnapshotBinding.class, long.class, V11Workspace.class, long.class));
+            MH_LEAF_P3 = LOOKUP.findStatic(V11MethodHandleCompiler.class, "leafP3",
+                    MethodType.methodType(void.class, V11Interpreter.SnapshotBinding.class, long[].class, long.class, V11Workspace.class, long.class));
+            MH_LEAF_P4_MATH = LOOKUP.findStatic(V11MethodHandleCompiler.class, "leafP4Math",
+                    MethodType.methodType(void.class, long.class, V11Workspace.class, long.class));
+            MH_LEAF_P4 = LOOKUP.findStatic(V11MethodHandleCompiler.class, "leafP4",
+                    MethodType.methodType(void.class, V11Interpreter.SnapshotBinding.class, long.class, V11Workspace.class, long.class));
+            MH_LEAF_P5 = LOOKUP.findStatic(V11MethodHandleCompiler.class, "leafP5",
+                    MethodType.methodType(void.class, V11Interpreter.SnapshotBinding.class, long.class, V11Workspace.class, long.class));
+            MH_LEAF_INVALID = LOOKUP.findStatic(V11MethodHandleCompiler.class, "leafInvalid",
+                    MethodType.methodType(void.class, V11Workspace.class, long.class));
         } catch (ReflectiveOperationException e) {
             throw new ExceptionInInitializerError(e);
         }
+    }
+
+    /**
+     * Compiled full-ISA ImpulseVM v0.11.0 program backed by statically-resolved,
+     * basic-block-fused {@link MethodHandle}s.
+     */
+    public static final class CompiledProgram {
+        private final V11Validator.ValidationResult validation;
+        private final MethodHandle[] blockHandles;
+        private final int programLength;
+        private final int fusedBlockCount;
+
+        CompiledProgram(V11Validator.ValidationResult validation, MethodHandle[] blockHandles,
+                        int programLength, int fusedBlockCount) {
+            this.validation = validation;
+            this.blockHandles = blockHandles;
+            this.programLength = programLength;
+            this.fusedBlockCount = fusedBlockCount;
+        }
+
+        public boolean isValid() {
+            return validation.isOk();
+        }
+
+        public int fusedBlockCount() {
+            return fusedBlockCount;
+        }
+
+        /** Execute the compiled program to HALT or error with zero per-step allocation. */
+        public int execute(V11Workspace ws, long maxSteps) {
+            if (!validation.isOk()) {
+                ws.pc = validation.badPc();
+                ws.status = validation.status();
+                return ws.status;
+            }
+            ws.pc = 0;
+            ws.status = V11IsaTables.IMPULSE_VM_OK;
+            ws.stepsScratch[0] = 0L;
+            final MethodHandle[] handles = this.blockHandles;
+            final int n = this.programLength;
+            try {
+                while (ws.status == V11IsaTables.IMPULSE_VM_OK) {
+                    int pc = ws.pc;
+                    if (pc < 0 || pc >= n) {
+                        if (ws.stepsScratch[0] >= maxSteps) {
+                            ws.status = V11IsaTables.IMPULSE_VM_ERR_GAS_EXHAUSTED;
+                        } else {
+                            ws.status = V11IsaTables.IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                        }
+                        return ws.status;
+                    }
+                    handles[pc].invokeExact(ws, maxSteps);
+                    if (ws.status == V11IsaTables.IMPULSE_VM_OK && pc == ws.pc && handles[pc] == null) {
+                        break;
+                    }
+                    // HALT leaves status == OK and sets stepsScratch[0] < 0 sentinel
+                    if (ws.stepsScratch[0] < 0L) {
+                        return ws.status;
+                    }
+                }
+            } catch (Throwable t) {
+                throw new RuntimeException("V11MethodHandleCompiler execution error", t);
+            }
+            return ws.status;
+        }
+    }
+
+    private static final int MAX_FUSED_BLOCK = 16;
+
+    /**
+     * Validate and compile any v0.11.0 program (all 5 pillars, control flow, calls, morsels)
+     * into statically-bound, basic-block-fused {@link MethodHandle} chains.
+     */
+    public static CompiledProgram compileValidated(long[] program, V11Interpreter.SnapshotBinding bind) {
+        V11Validator.ValidationResult vr = V11Validator.validate(program);
+        if (!vr.isOk()) {
+            return new CompiledProgram(vr, new MethodHandle[0], program.length, 0);
+        }
+        int n = program.length;
+        boolean[] isLeader = new boolean[n];
+        if (n > 0) isLeader[0] = true;
+        for (int pc = 0; pc < n; pc++) {
+            long w = program[pc];
+            int op = (int) (w & 0xFFL);
+            if (isControlOrMorselOp(op, w)) {
+                isLeader[pc] = true;
+                if (pc + 1 < n) isLeader[pc + 1] = true;
+                if (((int) ((w >>> 12) & 0xFL) & V11IsaTables.FLAG_EXTENDED) != 0 && pc + 2 < n) {
+                    isLeader[pc + 2] = true;
+                }
+                if (op == V11IsaTables.OP_JMP || op == V11IsaTables.OP_JCC
+                        || op == V11IsaTables.OP_LOOP_DECR || op == V11IsaTables.OP_CALL) {
+                    int imm32 = (int) (w >>> 32);
+                    int target = (op == V11IsaTables.OP_CALL) ? (pc + (short) (imm32 & 0xFFFF)) : (pc + imm32);
+                    if (target >= 0 && target < n) isLeader[target] = true;
+                } else if (op == V11IsaTables.OP_WALK_MORSEL || op == V11IsaTables.OP_FILTER_MORSEL) {
+                    int endOff = (int) ((w >>> 48) & 0xFFFFL);
+                    int after = pc + endOff + 1;
+                    if (after >= 0 && after < n) isLeader[after] = true;
+                }
+            }
+        }
+
+        MethodHandle[] leaf = new MethodHandle[n];
+        for (int pc = 0; pc < n; pc++) {
+            leaf[pc] = bindLeaf(program, bind, program[pc]);
+        }
+
+        MethodHandle[] blocks = new MethodHandle[n];
+        int fusedBlocks = 0;
+        for (int pc = 0; pc < n; pc++) {
+            long w = program[pc];
+            int op = (int) (w & 0xFFL);
+            if (isControlOrMorselOp(op, w)) {
+                blocks[pc] = leaf[pc];
+                continue;
+            }
+            MethodHandle chain = leaf[pc];
+            int len = 1;
+            while (len < MAX_FUSED_BLOCK && pc + len < n && !isLeader[pc + len]) {
+                long nw = program[pc + len];
+                int nextOp = (int) (nw & 0xFFL);
+                if (isControlOrMorselOp(nextOp, nw)) break;
+                chain = MethodHandles.foldArguments(leaf[pc + len], chain);
+                len++;
+            }
+            blocks[pc] = chain;
+            if (len > 1) fusedBlocks++;
+        }
+        return new CompiledProgram(vr, blocks, n, fusedBlocks);
+    }
+
+    private static boolean isControlOrMorselOp(int op, long w) {
+        if (((int) ((w >>> 12) & 0xFL) & V11IsaTables.FLAG_EXTENDED) != 0) {
+            return true;
+        }
+        return op == V11IsaTables.OP_HALT
+                || op == V11IsaTables.OP_TRAP
+                || op == V11IsaTables.OP_THROW
+                || op == V11IsaTables.OP_JMP
+                || op == V11IsaTables.OP_JCC
+                || op == V11IsaTables.OP_LOOP_DECR
+                || op == V11IsaTables.OP_CALL
+                || op == V11IsaTables.OP_RET
+                || op == V11IsaTables.OP_WALK_MORSEL
+                || op == V11IsaTables.OP_FILTER_MORSEL
+                || op == V11IsaTables.OP_MORSEL_COMMIT
+                || op == V11IsaTables.OP_MORSEL_END
+                || op == V11IsaTables.OP_EXTENSION_PAYLOAD;
+    }
+
+    private static MethodHandle bindLeaf(long[] program, V11Interpreter.SnapshotBinding bind, long w) {
+        int op = (int) (w & 0xFFL);
+        int pillar = V11IsaTables.PILLAR[op];
+        return switch (pillar) {
+            case 1 -> MethodHandles.insertArguments(MH_LEAF_P1, 0, bind, program, w);
+            case 2 -> MethodHandles.insertArguments(MH_LEAF_P2, 0, bind, w);
+            case 3 -> MethodHandles.insertArguments(MH_LEAF_P3, 0, bind, program, w);
+            case 4 -> (op >= V11IsaTables.OP_VEC_MATH_ARITH && op <= V11IsaTables.OP_VEC_TERNARY)
+                    ? MethodHandles.insertArguments(MH_LEAF_P4_MATH, 0, w)
+                    : MethodHandles.insertArguments(MH_LEAF_P4, 0, bind, w);
+            case 5 -> MethodHandles.insertArguments(MH_LEAF_P5, 0, bind, w);
+            default -> MH_LEAF_INVALID;
+        };
+    }
+
+    private static boolean preStep(V11Workspace ws, long maxSteps) {
+        if (ws.status != V11IsaTables.IMPULSE_VM_OK || ws.stepsScratch[0] < 0L) {
+            return false;
+        }
+        if (ws.stepsScratch[0] >= maxSteps) {
+            ws.status = V11IsaTables.IMPULSE_VM_ERR_GAS_EXHAUSTED;
+            return false;
+        }
+        ws.stepsScratch[0]++;
+        return true;
+    }
+
+    private static void leafP1(V11Interpreter.SnapshotBinding bind, long[] program, long w,
+                               V11Workspace ws, long maxSteps) {
+        if (!preStep(ws, maxSteps)) return;
+        int r = V11Pillar1Ops.step(ws, bind, program, w);
+        if (r == V11Pillar1Ops.RESULT_HALTED) {
+            ws.stepsScratch[0] = -1L;
+        }
+    }
+
+    private static void leafP2(V11Interpreter.SnapshotBinding bind, long w, V11Workspace ws, long maxSteps) {
+        if (!preStep(ws, maxSteps)) return;
+        V11Pillar2Ops.step(ws, bind, w);
+    }
+
+    private static void leafP3(V11Interpreter.SnapshotBinding bind, long[] program, long w,
+                               V11Workspace ws, long maxSteps) {
+        if (!preStep(ws, maxSteps)) return;
+        V11Pillar3Ops.step(ws, bind, program, w, ws.stepsScratch, maxSteps);
+    }
+
+    private static void leafP4Math(long w, V11Workspace ws, long maxSteps) {
+        if (!preStep(ws, maxSteps)) return;
+        V11Pillar4MathOps.step(ws, w);
+    }
+
+    private static void leafP4(V11Interpreter.SnapshotBinding bind, long w, V11Workspace ws, long maxSteps) {
+        if (!preStep(ws, maxSteps)) return;
+        V11Pillar4Ops.step(ws, bind, w);
+    }
+
+    private static void leafP5(V11Interpreter.SnapshotBinding bind, long w, V11Workspace ws, long maxSteps) {
+        if (!preStep(ws, maxSteps)) return;
+        V11Pillar5Ops.step(ws, bind, w);
+    }
+
+    private static void leafInvalid(V11Workspace ws, long maxSteps) {
+        if (!preStep(ws, maxSteps)) return;
+        ws.status = V11IsaTables.IMPULSE_VM_ERR_INVALID_OPCODE;
     }
 
     private V11MethodHandleCompiler() {}
