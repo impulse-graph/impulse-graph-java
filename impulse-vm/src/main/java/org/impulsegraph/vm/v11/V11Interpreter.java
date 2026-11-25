@@ -148,9 +148,12 @@ public final class V11Interpreter {
             if (p1 == V11Pillar1Ops.RESULT_STEPPED) {
                 continue;
             }
-            int op = (int) (w & 0xFFL);
-            if (op == V11IsaTables.OP_STABLE_CHECK) {
-                execStableCheck(ws, w);
+            int p2 = V11Pillar2Ops.step(ws, bind, w);
+            if (p2 == V11Pillar2Ops.RESULT_STEPPED) {
+                continue;
+            }
+            if ((int) (w & 0xFFL) == V11IsaTables.OP_COLLECT) {
+                execCollectBasic(ws, w);
                 continue;
             }
             ws.status = V11IsaTables.IMPULSE_VM_ERR_INVALID_OPCODE;
@@ -159,37 +162,91 @@ public final class V11Interpreter {
         return ws.status;
     }
 
-    private static void execStableCheck(V11Workspace ws, long w) {
+    private static void execCollectBasic(V11Workspace ws, long w) {
         int subop = (int) ((w >>> 8) & 0xFL);
+        int flags = (int) ((w >>> 12) & 0xFL);
         int s1 = (int) ((w >>> 16) & 0xFL);
-        int s2 = (int) ((w >>> 28) & 0xFL);
-        if (subop == 0) { // .frontier_eq
-            if (!ws.isFInitialized(s1) || !ws.isFInitialized(s2)) {
-                ws.status = V11IsaTables.IMPULSE_VM_ERR_TYPE_MISMATCH;
-                return;
+        int s3 = (int) ((w >>> 24) & 0xFL);
+        int slot = (int) ((w >>> 32) & 0xFFFFL);
+        boolean masked = (flags & V11IsaTables.FLAG_MASKED_S3) != 0;
+        switch (subop) {
+            case 0 -> { // .frontier_bitset
+                if (!ws.isFInitialized(s1) || ws.fRegs[s1].multiLane) {
+                    ws.status = V11IsaTables.IMPULSE_VM_ERR_TYPE_MISMATCH;
+                    return;
+                }
+                V11Frontier fa = ws.fRegs[s1];
+                int n = fa.domainCard;
+                int words = Math.max(1, (n + 63) >>> 6);
+                long[] valid = new long[words];
+                long[] data = new long[words];
+                for (int i = 0; i < n; i++) valid[i >>> 6] |= (1L << (i & 63));
+                int[] ids = fa.toSortedArray();
+                for (int u : ids) data[u >>> 6] |= (1L << (u & 63));
+                ws.outputs.put(slot, V11Vector.ofBool3vl(n, valid, data));
+                ws.zf = (ids.length == 0);
+                ws.pc++;
             }
-            V11Frontier fa = ws.fRegs[s1];
-            V11Frontier fb = ws.fRegs[s2];
-            if (fa.domainId != fb.domainId) {
-                ws.status = V11IsaTables.IMPULSE_VM_ERR_DOMAIN_MISMATCH;
-                return;
+            case 1 -> { // .frontier_ids
+                if (!ws.isFInitialized(s1) || ws.fRegs[s1].multiLane) {
+                    ws.status = V11IsaTables.IMPULSE_VM_ERR_TYPE_MISMATCH;
+                    return;
+                }
+                int[] ids = ws.fRegs[s1].toSortedArray();
+                long[] vals = new long[ids.length];
+                for (int i = 0; i < ids.length; i++) vals[i] = ids[i] & 0xFFFFFFFFL;
+                ws.outputs.put(slot, V11Vector.ofU64(vals, V11Vector.allocValidAllTrue(ids.length)));
+                ws.zf = (ids.length == 0);
+                ws.pc++;
             }
-            if (fa.multiLane != fb.multiLane) {
-                ws.status = V11IsaTables.IMPULSE_VM_ERR_TYPE_MISMATCH;
-                return;
+            case 2, 4 -> { // .vec / .table_col
+                if (masked) {
+                    ws.status = V11IsaTables.IMPULSE_VM_ERR_INVALID_OPCODE;
+                    return;
+                }
+                V11Vector v = ws.vVectors[s1];
+                if (v == null) {
+                    ws.status = V11IsaTables.IMPULSE_VM_ERR_TYPE_MISMATCH;
+                    return;
+                }
+                ws.outputs.put(slot, v);
+                ws.zf = (v.length == 0);
+                ws.pc++;
             }
-            boolean eq;
-            if (!fa.multiLane) {
-                eq = Arrays.equals(fa.toSortedArray(), fb.toSortedArray());
-            } else {
-                eq = Arrays.equals(fa.mlSortedNodes(), fb.mlSortedNodes())
-                        && Arrays.equals(fa.mlSortedMasks(), fb.mlSortedMasks());
+            case 3 -> { // .scalar
+                boolean valid = ws.isRValid(s1);
+                int ty = ws.readRType(s1);
+                long val = ws.rRegs[s1];
+                V11Vector out;
+                boolean isZero;
+                if (!valid) {
+                    out = V11Vector.ofI64(new long[1], new long[1]);
+                    isZero = true;
+                } else if (ty == V11IsaTables.SCALAR_F64) {
+                    double f = Double.longBitsToDouble(val);
+                    if (Double.isNaN(f)) {
+                        out = V11Vector.ofF64(new double[1], new long[1]);
+                        isZero = true;
+                    } else {
+                        out = V11Vector.ofF64(new double[]{f}, new long[]{1L});
+                        isZero = (f == 0.0);
+                    }
+                } else if (ty == V11IsaTables.SCALAR_STR_HANDLE) {
+                    String s = ws.resolveScalarStr(val);
+                    out = V11Vector.ofStr(new String[]{s});
+                    isZero = (s == null || s.isEmpty());
+                } else if (ty == V11IsaTables.SCALAR_U64) {
+                    out = V11Vector.ofU64(new long[]{val}, new long[]{1L});
+                    isZero = (val == 0L);
+                } else {
+                    out = V11Vector.ofI64(new long[]{val}, new long[]{1L});
+                    isZero = (val == 0L);
+                }
+                ws.outputs.put(slot, out);
+                ws.zf = isZero;
+                ws.pc++;
             }
-            ws.st = eq;
-            ws.zf = eq;
-            ws.pc++;
-        } else {
-            ws.status = V11IsaTables.IMPULSE_VM_ERR_INVALID_OPCODE;
+            default -> ws.status = V11IsaTables.IMPULSE_VM_ERR_INVALID_OPCODE;
         }
     }
 
