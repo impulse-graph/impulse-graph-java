@@ -1258,6 +1258,14 @@ public final class V11Pillar3Ops {
                 int immLo = (int) ((w >>> 32) & 0xFFFFL);
                 int immHi = (int) ((w >>> 48) & 0xFFFFL);
 
+                long mProfT0 = 0L;
+                if (V11Workspace.OPCODE_PROFILE) {
+                    if (op >= 0x20 && op < 128) {
+                        mProfT0 = System.nanoTime();
+                    } else if (op < 128) {
+                        ws.opCalls[op]++;
+                    }
+                }
                 switch (op) {
                     case OP_GATHER_EDGE_ATTR -> {
                         if (immLo >= view.relations.length || view.relations[immLo] == null) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; break; }
@@ -1358,6 +1366,9 @@ public final class V11Pillar3Ops {
                             }
                         }
                     }
+                }
+                if (V11Workspace.OPCODE_PROFILE && op >= 0x20 && op < 128) {
+                    ws.recordOpcode(op, System.nanoTime() - mProfT0);
                 }
                 if (ws.status == IMPULSE_VM_OK) ws.pc = pc + 1;
             }

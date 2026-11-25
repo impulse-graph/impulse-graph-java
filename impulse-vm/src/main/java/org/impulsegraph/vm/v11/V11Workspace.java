@@ -91,6 +91,17 @@ public final class V11Workspace {
     public final int maxDomainCard;
     public final V11Arena arena;
 
+    /**
+     * Optional per-opcode profiling toggle ({@code -Dimpulse.v11.opcodeProfile=true}).
+     * C2 JIT dead-code-eliminates all profiling checks when {@code false} (zero overhead).
+     * Counts all opcodes (0x00..0x7F); records nanosecond timings for bulk opcodes (op >= 0x20).
+     */
+    public static final boolean OPCODE_PROFILE = Boolean.getBoolean("impulse.v11.opcodeProfile");
+    public final long[] opCalls;
+    public final long[] opTotalNs;
+    public final long[] opMinNs;
+    public final long[] opMaxNs;
+
     public sealed interface ConstPoolEntry permits PoolVec, PoolFrontier, PoolStr {}
     public record PoolVec(V11Vector vec) implements ConstPoolEntry {}
     public record PoolFrontier(long[] ids) implements ConstPoolEntry {}
@@ -106,6 +117,18 @@ public final class V11Workspace {
     public V11Workspace(int maxDomainCard) {
         this.maxDomainCard = Math.max(64, maxDomainCard);
         this.arena = new V11Arena(this.maxDomainCard);
+        if (OPCODE_PROFILE) {
+            this.opCalls = new long[128];
+            this.opTotalNs = new long[128];
+            this.opMinNs = new long[128];
+            this.opMaxNs = new long[128];
+            Arrays.fill(this.opMinNs, Long.MAX_VALUE);
+        } else {
+            this.opCalls = null;
+            this.opTotalNs = null;
+            this.opMinNs = null;
+            this.opMaxNs = null;
+        }
         for (int i = 0; i < 8; i++) {
             fRegs[i] = new V11Frontier(this.maxDomainCard);
             vF64[i] = new double[this.maxDomainCard];
@@ -237,5 +260,21 @@ public final class V11Workspace {
         }
         Arrays.sort(slots);
         return slots;
+    }
+
+    public void resetOpcodeStats() {
+        if (OPCODE_PROFILE) {
+            Arrays.fill(opCalls, 0L);
+            Arrays.fill(opTotalNs, 0L);
+            Arrays.fill(opMinNs, Long.MAX_VALUE);
+            Arrays.fill(opMaxNs, 0L);
+        }
+    }
+
+    public void recordOpcode(int op, long dtNs) {
+        opCalls[op]++;
+        opTotalNs[op] += dtNs;
+        if (dtNs < opMinNs[op]) opMinNs[op] = dtNs;
+        if (dtNs > opMaxNs[op]) opMaxNs[op] = dtNs;
     }
 }
