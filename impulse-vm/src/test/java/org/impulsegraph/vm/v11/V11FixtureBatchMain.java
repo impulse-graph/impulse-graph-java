@@ -24,6 +24,10 @@ public final class V11FixtureBatchMain {
 
     private static boolean useJit = false;
 
+    static void setUseJit(boolean enabled) {
+        useJit = enabled;
+    }
+
     private V11FixtureBatchMain() {}
 
     public static void main(String[] args) throws Exception {

@@ -1,6 +1,7 @@
 package org.impulsegraph.vm.v11;
 
 import com.sun.management.ThreadMXBean;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 import java.lang.management.ManagementFactory;
@@ -15,6 +16,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  */
 public final class V11ZeroAllocationTest {
 
+    private static boolean isJacocoAgentAttached() {
+        for (String arg : ManagementFactory.getRuntimeMXBean().getInputArguments()) {
+            if (arg.contains("jacoco")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static long enc(int op, int flags, int subop, int dst, int s1, int s2, int s3, long imm32) {
         long b0 = op & 0xFFL;
         long b1 = (((flags & 0xF) << 4) | (subop & 0xF)) & 0xFFL;
@@ -25,6 +35,7 @@ public final class V11ZeroAllocationTest {
 
     @Test
     void steadyStateHotPathPerformsZeroHeapAllocationsAcrossPillars1To5() {
+        Assumptions.assumeFalse(isJacocoAgentAttached(), "Skipped under JaCoCo bytecode instrumentation");
         final int N = 256;
         final int DEG = 4;
         final int E = N * DEG;
