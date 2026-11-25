@@ -54,8 +54,13 @@ public final class V11Interpreter {
         public final RelationSnapshot[] rels;
         public final int[] domainCards;
         public final int maxDomainCard;
+        public final V11SnapshotView view;
 
         public SnapshotBinding(int[] domainCards) {
+            this(domainCards, null);
+        }
+
+        public SnapshotBinding(int[] domainCards, V11SnapshotView view) {
             this.rels = new RelationSnapshot[0];
             this.domainCards = domainCards != null ? domainCards.clone() : new int[0];
             int maxCard = 64;
@@ -63,9 +68,11 @@ public final class V11Interpreter {
                 if (c > maxCard) maxCard = c;
             }
             this.maxDomainCard = maxCard;
+            this.view = view;
         }
 
         public SnapshotBinding(ImpulseGraphSnapshot snap) {
+            this.view = null;
             int maxRelId = -1;
             int maxDomId = 0;
             for (RelationSnapshot r : snap.getAllRelationSnapshots().values()) {
@@ -128,10 +135,10 @@ public final class V11Interpreter {
         ws.pc = 0;
         ws.status = V11IsaTables.IMPULSE_VM_OK;
         final int n = program.length;
-        long steps = 0L;
+        long[] stepsRef = new long[]{0L};
 
         while (ws.status == V11IsaTables.IMPULSE_VM_OK) {
-            if (steps >= maxSteps) {
+            if (stepsRef[0] >= maxSteps) {
                 ws.status = V11IsaTables.IMPULSE_VM_ERR_GAS_EXHAUSTED;
                 return ws.status;
             }
@@ -139,7 +146,7 @@ public final class V11Interpreter {
                 ws.status = V11IsaTables.IMPULSE_VM_ERR_OUT_OF_BOUNDS;
                 return ws.status;
             }
-            steps++;
+            stepsRef[0]++;
             long w = program[ws.pc];
             int p1 = V11Pillar1Ops.step(ws, bind, program, w);
             if (p1 == V11Pillar1Ops.RESULT_HALTED) {
@@ -152,8 +159,29 @@ public final class V11Interpreter {
             if (p2 == V11Pillar2Ops.RESULT_STEPPED) {
                 continue;
             }
-            if ((int) (w & 0xFFL) == V11IsaTables.OP_COLLECT) {
+            int p3 = V11Pillar3Ops.step(ws, bind, program, w, stepsRef, maxSteps);
+            if (p3 == V11Pillar3Ops.RESULT_STEPPED) {
+                continue;
+            }
+            int op = (int) (w & 0xFFL);
+            if (op == V11IsaTables.OP_COLLECT) {
                 execCollectBasic(ws, w);
+                continue;
+            }
+            if (op == V11IsaTables.OP_VEC_REDUCE && ((int) ((w >>> 8) & 0xFL)) == 3) {
+                int s1 = (int) ((w >>> 16) & 0xFL);
+                int dst = (int) ((w >>> 20) & 0xFL);
+                V11Vector v = ws.vVectors[s1];
+                if (v == null) {
+                    ws.status = V11IsaTables.IMPULSE_VM_ERR_TYPE_MISMATCH;
+                    return ws.status;
+                }
+                long cnt = 0L;
+                for (int i = 0; i < v.length; i++) if (v.isValidAt(i)) cnt++;
+                ws.writeR(dst, V11IsaTables.SCALAR_U64, cnt);
+                ws.zf = (cnt == 0L);
+                ws.nf = false;
+                ws.pc++;
                 continue;
             }
             ws.status = V11IsaTables.IMPULSE_VM_ERR_INVALID_OPCODE;

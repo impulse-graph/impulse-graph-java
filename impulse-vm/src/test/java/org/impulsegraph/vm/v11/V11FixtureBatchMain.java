@@ -65,7 +65,15 @@ public final class V11FixtureBatchMain {
         List<Object> poolDirs = asList(root.get("const_pool"));
 
         Map<Integer, Long> domTbl = new HashMap<>();
-        boolean hasRelMeta = false;
+        Map<Integer, int[]> relMeta = new HashMap<>();
+        Map<Integer, Object[]> relCsr = new HashMap<>();
+        Map<Integer, boolean[]> relFlags = new HashMap<>();
+        Map<Integer, Object[]> relCoo = new HashMap<>();
+        Map<Integer, List<List<Integer>>> relDense = new HashMap<>();
+        Map<Integer, Map<Integer, V11Vector>> edgeAttrsTbl = new HashMap<>();
+        Map<Long, V11Vector> nodeAttrs = new HashMap<>();
+        Map<Integer, String[]> keyCatalogs = new HashMap<>();
+        Map<Long, String> indexes = new HashMap<>();
         V11Geometry geom = V11Geometry.ofProfile(profile);
         List<Object[]> paramsList = new ArrayList<>();
 
@@ -80,7 +88,78 @@ public final class V11FixtureBatchMain {
                     long count = kv.containsKey("count") ? asLong(kv.get("count")) : 0L;
                     domTbl.put(id, count);
                 }
-                case ".relation" -> hasRelMeta = true;
+                case ".relation" -> {
+                    int id = dArgs.isEmpty() ? 0 : asInt(dArgs.get(0));
+                    int sd = kv.containsKey("src_dom") ? asInt(kv.get("src_dom")) : 0;
+                    int td = kv.containsKey("tgt_dom") ? asInt(kv.get("tgt_dom")) : 0;
+                    relMeta.put(id, new int[]{sd, td});
+                }
+                case ".csr_inline" -> {
+                    int rid = kv.containsKey("rel") ? asInt(kv.get("rel")) : 0;
+                    List<Object> oL = asList(kv.get("offsets"));
+                    List<Object> tL = asList(kv.get("targets"));
+                    int[] offs = new int[oL.size()];
+                    for (int i = 0; i < oL.size(); i++) offs[i] = asInt(oL.get(i));
+                    long[] tgts = new long[tL.size()];
+                    for (int i = 0; i < tL.size(); i++) tgts[i] = asLong(tL.get(i));
+                    relCsr.put(rid, new Object[]{offs, tgts});
+                    relFlags.computeIfAbsent(rid, k -> new boolean[4])[0] = true;
+                }
+                case ".csc_inline" -> {
+                    int rid = kv.containsKey("rel") ? asInt(kv.get("rel")) : 0;
+                    relFlags.computeIfAbsent(rid, k -> new boolean[4])[1] = true;
+                }
+                case ".coo_inline" -> {
+                    int rid = kv.containsKey("rel") ? asInt(kv.get("rel")) : 0;
+                    List<Object> sL = asList(kv.get("sources"));
+                    List<Object> tL = asList(kv.get("targets"));
+                    int[] srcs = new int[sL.size()];
+                    for (int i = 0; i < sL.size(); i++) srcs[i] = asInt(sL.get(i));
+                    long[] tgts = new long[tL.size()];
+                    for (int i = 0; i < tL.size(); i++) tgts[i] = asLong(tL.get(i));
+                    relCoo.put(rid, new Object[]{srcs, tgts});
+                    relFlags.computeIfAbsent(rid, k -> new boolean[4])[2] = true;
+                }
+                case ".dense_inline" -> {
+                    int rid = kv.containsKey("rel") ? asInt(kv.get("rel")) : 0;
+                    List<Object> rL = asList(kv.get("rows"));
+                    List<List<Integer>> rows = new ArrayList<>();
+                    for (Object rObj : rL) {
+                        List<Object> rowObjs = asList(rObj);
+                        List<Integer> row = new ArrayList<>(rowObjs.size());
+                        for (Object x : rowObjs) row.add(asInt(x));
+                        rows.add(row);
+                    }
+                    relDense.put(rid, rows);
+                    relFlags.computeIfAbsent(rid, k -> new boolean[4])[3] = true;
+                }
+                case ".key_catalog" -> {
+                    int dom = kv.containsKey("dom") ? asInt(kv.get("dom")) : 0;
+                    List<Object> kL = asList(kv.get("keys"));
+                    String[] keys = new String[kL.size()];
+                    for (int i = 0; i < kL.size(); i++) keys[i] = asStr(kL.get(i));
+                    keyCatalogs.put(dom, keys);
+                }
+                case ".index" -> {
+                    int dom = kv.containsKey("dom") ? asInt(kv.get("dom")) : 0;
+                    int attr = kv.containsKey("attr") ? asInt(kv.get("attr")) : 0;
+                    String idxKind = kv.containsKey("kind") ? asStr(kv.get("kind")) : "sorted";
+                    indexes.put(V11SnapshotView.domAttrKey(dom, attr), idxKind);
+                }
+                case ".node_attr" -> {
+                    int dom = kv.containsKey("dom") ? asInt(kv.get("dom")) : 0;
+                    int aid = kv.containsKey("attr") ? asInt(kv.get("attr")) : 0;
+                    String ty = kv.containsKey("type") ? asStr(kv.get("type")) : "f64";
+                    List<Object> vals = asList(kv.get("values"));
+                    nodeAttrs.put(V11SnapshotView.domAttrKey(dom, aid), parseVecFromJson(ty, vals));
+                }
+                case ".edge_attr" -> {
+                    int rid = kv.containsKey("rel") ? asInt(kv.get("rel")) : 0;
+                    int aid = kv.containsKey("attr") ? asInt(kv.get("attr")) : 0;
+                    String ty = kv.containsKey("type") ? asStr(kv.get("type")) : "f64";
+                    List<Object> vals = asList(kv.get("values"));
+                    edgeAttrsTbl.computeIfAbsent(rid, k -> new HashMap<>()).put(aid, parseVecFromJson(ty, vals));
+                }
                 case ".tier_thresholds" -> {
                     int t0 = kv.containsKey("tier0_max") ? asInt(kv.get("tier0_max")) : geom.tier0Max();
                     int ps = kv.containsKey("page_shift") ? asInt(kv.get("page_shift")) : geom.pageShift();
@@ -98,18 +177,81 @@ public final class V11FixtureBatchMain {
 
         V11Interpreter.SnapshotBinding bind = null;
         int maxDomCard = 64;
-        if (!domTbl.isEmpty() || hasRelMeta) {
+        if (!domTbl.isEmpty() || !relMeta.isEmpty()) {
             int maxDom = -1;
             for (int k : domTbl.keySet()) {
                 if (k > maxDom) maxDom = k;
             }
             int[] domCards = new int[maxDom + 1];
+            long[] domCardsL = new long[maxDom + 1];
             for (var e : domTbl.entrySet()) {
                 int c = (int) Math.min(Integer.MAX_VALUE, e.getValue());
                 domCards[e.getKey()] = c;
+                domCardsL[e.getKey()] = e.getValue();
                 if (c > maxDomCard) maxDomCard = c;
             }
-            bind = new V11Interpreter.SnapshotBinding(domCards);
+            int maxRel = -1;
+            for (int k : relMeta.keySet()) {
+                if (k > maxRel) maxRel = k;
+            }
+            V11SnapshotView.RelView[] relViews = new V11SnapshotView.RelView[maxRel + 1];
+            for (int rid = 0; rid <= maxRel; rid++) {
+                int[] sdtd = relMeta.getOrDefault(rid, new int[]{0, 0});
+                int sd = sdtd[0], td = sdtd[1];
+                int nSrc = (sd < domCards.length) ? domCards[sd] : 0;
+                boolean[] fl = relFlags.getOrDefault(rid, new boolean[4]);
+                int[] rowOff;
+                long[] colTgt;
+                if (relCsr.containsKey(rid)) {
+                    Object[] p = relCsr.get(rid);
+                    rowOff = (int[]) p[0];
+                    colTgt = (long[]) p[1];
+                } else if (relCoo.containsKey(rid)) {
+                    Object[] p = relCoo.get(rid);
+                    int[] srcs = (int[]) p[0];
+                    long[] tgts = (long[]) p[1];
+                    @SuppressWarnings("unchecked")
+                    List<Long>[] buckets = new List[nSrc];
+                    for (int u = 0; u < nSrc; u++) buckets[u] = new ArrayList<>();
+                    int lim = Math.min(srcs.length, tgts.length);
+                    for (int i = 0; i < lim; i++) {
+                        int u = srcs[i];
+                        if (u >= 0 && u < nSrc) buckets[u].add(tgts[i]);
+                    }
+                    rowOff = new int[nSrc + 1];
+                    List<Long> flat = new ArrayList<>();
+                    for (int u = 0; u < nSrc; u++) {
+                        rowOff[u + 1] = rowOff[u] + buckets[u].size();
+                        flat.addAll(buckets[u]);
+                    }
+                    colTgt = new long[flat.size()];
+                    for (int i = 0; i < flat.size(); i++) colTgt[i] = flat.get(i);
+                } else if (relDense.containsKey(rid)) {
+                    List<List<Integer>> rows = relDense.get(rid);
+                    rowOff = new int[nSrc + 1];
+                    List<Long> flat = new ArrayList<>();
+                    for (int u = 0; u < nSrc; u++) {
+                        List<Integer> row = (u < rows.size()) ? rows.get(u) : List.of();
+                        int cnt = 0;
+                        for (int v = 0; v < row.size(); v++) {
+                            if (row.get(v) != 0) {
+                                flat.add((long) v);
+                                cnt++;
+                            }
+                        }
+                        rowOff[u + 1] = rowOff[u] + cnt;
+                    }
+                    colTgt = new long[flat.size()];
+                    for (int i = 0; i < flat.size(); i++) colTgt[i] = flat.get(i);
+                } else {
+                    rowOff = new int[nSrc + 1];
+                    colTgt = new long[0];
+                }
+                relViews[rid] = new V11SnapshotView.RelView(
+                        rid, sd, td, rowOff, colTgt, edgeAttrsTbl.get(rid), fl[0], fl[1], fl[2], fl[3]);
+            }
+            V11SnapshotView view = new V11SnapshotView(domCardsL, relViews, nodeAttrs, keyCatalogs, indexes);
+            bind = new V11Interpreter.SnapshotBinding(domCards, view);
         }
 
         V11Workspace ws = new V11Workspace(maxDomCard);
