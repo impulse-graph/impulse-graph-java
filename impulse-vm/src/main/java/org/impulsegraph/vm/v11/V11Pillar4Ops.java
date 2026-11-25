@@ -404,7 +404,7 @@ public final class V11Pillar4Ops {
         if (ws.status != IMPULSE_VM_OK) return;
         V11Vector srcVec = ws.vVectors[s1];
         V11Vector idxVec = ws.vVectors[s2];
-        if (srcVec == null || idxVec == null
+        if (srcVec == null || srcVec.elemTag == V11Vector.TAG_LANE_STATE || idxVec == null
                 || (idxVec.elemTag != V11Vector.TAG_I64 && idxVec.elemTag != V11Vector.TAG_U64)) {
             ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
             return;
@@ -1850,6 +1850,10 @@ public final class V11Pillar4Ops {
                 if (v == null) { ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; return; }
                 V11Vector out;
                 if (masked) {
+                    if (v.elemTag == V11Vector.TAG_LANE_STATE) {
+                        ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+                        return;
+                    }
                     int[] ids = mask.toSortedArray();
                     for (int idx : ids) {
                         if (idx < 0 || idx >= v.length) {
