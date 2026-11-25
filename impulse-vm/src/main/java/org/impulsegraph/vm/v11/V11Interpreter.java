@@ -55,6 +55,16 @@ public final class V11Interpreter {
         public final int[] domainCards;
         public final int maxDomainCard;
 
+        public SnapshotBinding(int[] domainCards) {
+            this.rels = new RelationSnapshot[0];
+            this.domainCards = domainCards != null ? domainCards.clone() : new int[0];
+            int maxCard = 64;
+            for (int c : this.domainCards) {
+                if (c > maxCard) maxCard = c;
+            }
+            this.maxDomainCard = maxCard;
+        }
+
         public SnapshotBinding(ImpulseGraphSnapshot snap) {
             int maxRelId = -1;
             int maxDomId = 0;
@@ -100,6 +110,87 @@ public final class V11Interpreter {
 
     public static int packImm16(int lo, int hi) {
         return (lo & 0xFFFF) | ((hi & 0xFFFF) << 16);
+    }
+
+    /**
+     * Validate and execute a v0.11 program using caller-owned workspace {@code ws}
+     * (retaining pre-populated {@code constPool}, {@code params}, and {@code geometry}).
+     *
+     * <p>Returns the final status code ({@link V11IsaTables#IMPULSE_VM_OK} = 0 on normal HALT).
+     */
+    public static int executeValidated(long[] program, SnapshotBinding bind, V11Workspace ws, long maxSteps) {
+        V11Validator.ValidationResult vr = V11Validator.validate(program);
+        if (!vr.isOk()) {
+            ws.pc = vr.badPc();
+            ws.status = vr.status();
+            return ws.status;
+        }
+        ws.pc = 0;
+        ws.status = V11IsaTables.IMPULSE_VM_OK;
+        final int n = program.length;
+        long steps = 0L;
+
+        while (ws.status == V11IsaTables.IMPULSE_VM_OK) {
+            if (steps >= maxSteps) {
+                ws.status = V11IsaTables.IMPULSE_VM_ERR_GAS_EXHAUSTED;
+                return ws.status;
+            }
+            if (ws.pc < 0 || ws.pc >= n) {
+                ws.status = V11IsaTables.IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                return ws.status;
+            }
+            steps++;
+            long w = program[ws.pc];
+            int p1 = V11Pillar1Ops.step(ws, bind, program, w);
+            if (p1 == V11Pillar1Ops.RESULT_HALTED) {
+                return ws.status;
+            }
+            if (p1 == V11Pillar1Ops.RESULT_STEPPED) {
+                continue;
+            }
+            int op = (int) (w & 0xFFL);
+            if (op == V11IsaTables.OP_STABLE_CHECK) {
+                execStableCheck(ws, w);
+                continue;
+            }
+            ws.status = V11IsaTables.IMPULSE_VM_ERR_INVALID_OPCODE;
+            return ws.status;
+        }
+        return ws.status;
+    }
+
+    private static void execStableCheck(V11Workspace ws, long w) {
+        int subop = (int) ((w >>> 8) & 0xFL);
+        int s1 = (int) ((w >>> 16) & 0xFL);
+        int s2 = (int) ((w >>> 28) & 0xFL);
+        if (subop == 0) { // .frontier_eq
+            if (!ws.isFInitialized(s1) || !ws.isFInitialized(s2)) {
+                ws.status = V11IsaTables.IMPULSE_VM_ERR_TYPE_MISMATCH;
+                return;
+            }
+            V11Frontier fa = ws.fRegs[s1];
+            V11Frontier fb = ws.fRegs[s2];
+            if (fa.domainId != fb.domainId) {
+                ws.status = V11IsaTables.IMPULSE_VM_ERR_DOMAIN_MISMATCH;
+                return;
+            }
+            if (fa.multiLane != fb.multiLane) {
+                ws.status = V11IsaTables.IMPULSE_VM_ERR_TYPE_MISMATCH;
+                return;
+            }
+            boolean eq;
+            if (!fa.multiLane) {
+                eq = Arrays.equals(fa.toSortedArray(), fb.toSortedArray());
+            } else {
+                eq = Arrays.equals(fa.mlSortedNodes(), fb.mlSortedNodes())
+                        && Arrays.equals(fa.mlSortedMasks(), fb.mlSortedMasks());
+            }
+            ws.st = eq;
+            ws.zf = eq;
+            ws.pc++;
+        } else {
+            ws.status = V11IsaTables.IMPULSE_VM_ERR_INVALID_OPCODE;
+        }
     }
 
     /** Execute a v0.11 program to HALT using caller-owned workspace [ws]. */
