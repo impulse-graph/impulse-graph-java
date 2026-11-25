@@ -167,6 +167,10 @@ public final class V11Interpreter {
             if (p4 == V11Pillar4Ops.RESULT_STEPPED) {
                 continue;
             }
+            int p5 = V11Pillar5Ops.step(ws, bind, w);
+            if (p5 == V11Pillar5Ops.RESULT_STEPPED) {
+                continue;
+            }
             ws.status = V11IsaTables.IMPULSE_VM_ERR_INVALID_OPCODE;
             return ws.status;
         }
