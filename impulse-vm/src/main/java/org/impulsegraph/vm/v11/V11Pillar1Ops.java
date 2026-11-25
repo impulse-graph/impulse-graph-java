@@ -788,10 +788,13 @@ public final class V11Pillar1Ops {
     }
 
     private static double roundHalfAway(double x) {
-        if (Double.isNaN(x) || Double.isInfinite(x)) {
+        if (Double.isNaN(x) || Double.isInfinite(x) || Math.abs(x) >= 4503599627370496.0) {
             return x;
         }
-        return Math.copySign(Math.floor(Math.abs(x) + 0.5), x);
+        double a = Math.abs(x);
+        double f = Math.floor(a);
+        double r = (a - f >= 0.5) ? (f + 1.0) : f;
+        return Math.copySign(r, x);
     }
 
     private static void writeF64Result(V11Workspace ws, int dst, boolean valid, double f) {

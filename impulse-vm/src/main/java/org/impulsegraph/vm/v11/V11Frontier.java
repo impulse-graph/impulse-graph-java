@@ -203,15 +203,19 @@ public final class V11Frontier {
                 }
             }
             case TIER1_PAGED -> {
-                int pageId = nodeId >>> PAGE_SHIFT;
-                int slot = findOrAllocPage(pageId);
-                if (slot < 0) {
-                    promoteTier1ToTier2();
+                if (dirtyPageCount < 0) {
                     addDense(nodeId);
                 } else {
-                    int local = nodeId & PAGE_MASK;
-                    pageBits[(slot << 6) + (local >>> 6)] |= (1L << local);
-                    cachedCard = -1;
+                    int pageId = nodeId >>> PAGE_SHIFT;
+                    int slot = findOrAllocPage(pageId);
+                    if (slot < 0) {
+                        promoteTier1ToTier2();
+                        addDense(nodeId);
+                    } else {
+                        int local = nodeId & PAGE_MASK;
+                        pageBits[(slot << 6) + (local >>> 6)] |= (1L << local);
+                        cachedCard = -1;
+                    }
                 }
             }
             case TIER2_DENSE -> addDense(nodeId);
@@ -281,6 +285,10 @@ public final class V11Frontier {
     }
 
     public void promoteTier1ToTier2() {
+        if (dirtyPageCount < 0) {
+            tier = TIER2_DENSE;
+            return;
+        }
         Arrays.fill(denseWords, 0, denseWordCount, 0L);
         for (int s = 0; s < dirtyPageCount; s++) {
             int dstBase = dirtyPageIds[s] << 6;
@@ -294,9 +302,12 @@ public final class V11Frontier {
     }
 
     public boolean contains(int nodeId) {
+        if (nodeId < 0 || nodeId >= domainCard) {
+            return false;
+        }
         return switch (tier) {
             case TIER_EMPTY -> false;
-            case TIER_ALL_SPAN -> nodeId >= 0 && nodeId < domainCard;
+            case TIER_ALL_SPAN -> true;
             case TIER0_INLINE -> {
                 for (int i = 0; i < inlineCount; i++) {
                     if (inlineIds[i] == nodeId) yield true;
@@ -304,6 +315,9 @@ public final class V11Frontier {
                 yield false;
             }
             case TIER1_PAGED -> {
+                if (dirtyPageCount < 0) {
+                    yield (denseWords[nodeId >>> 6] & (1L << nodeId)) != 0L;
+                }
                 int pageId = nodeId >>> PAGE_SHIFT;
                 int idx = (pageId * 0x9E3779B9) & DIR_MASK;
                 while (dirEpoch[idx] == pageEpoch) {
@@ -350,6 +364,9 @@ public final class V11Frontier {
 
     /** Copy contents of [src] into this frontier without heap allocation (for 1-bit hot path). */
     public void copyFrom(V11Frontier src) {
+        if (this == src) {
+            return;
+        }
         this.domainId = src.domainId;
         this.domainCard = src.domainCard;
         this.tier = src.tier;

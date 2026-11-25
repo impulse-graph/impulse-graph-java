@@ -69,6 +69,8 @@ public final class V11Validator {
             }
             case OP_SPILL, OP_RELOAD ->
                     imm16Lo < 16 && imm16Hi == 0;
+            case OP_SCALAR_INT_ALU ->
+                    s3 <= 1;
             case OP_JMP ->
                     dst == 0 && s1 == 0 && s2 == 0 && s3 == 0;
             case OP_SPMV ->
@@ -154,7 +156,9 @@ public final class V11Validator {
         int mEndPc = -1;
         int mOuterSrcF = -1;
         int mOuterMaskF = -1;
+        boolean[][] mJoinWritten = null;
         boolean[] mWrittenV = null;
+        boolean[] inMorselInterior = new boolean[n];
 
         pc = 0;
         while (pc < n) {
@@ -188,11 +192,15 @@ public final class V11Validator {
                     if (endOp != OP_MORSEL_END || endImm16Hi != endOff) {
                         return new ValidationResult(IMPULSE_VM_ERR_VALIDATION_FAILED, pc);
                     }
+                    for (int mp = pc + 1; mp <= endPc; mp++) {
+                        inMorselInterior[mp] = true;
+                    }
                     boolean isFilter = (op == OP_FILTER_MORSEL);
                     mHdrPc = pc;
                     mEndPc = endPc;
                     mOuterSrcF = s1;
                     mOuterMaskF = mask ? s3 : -1;
+                    mJoinWritten = new boolean[endPc - pc + 1][];
                     mWrittenV = new boolean[8];
                     mWrittenV[0] = true; // M0
                     mWrittenV[3] = true; // M3
@@ -210,8 +218,15 @@ public final class V11Validator {
                 if (pc == mEndPc) {
                     mHdrPc = -1;
                     mEndPc = -1;
+                    mJoinWritten = null;
                     mWrittenV = null;
                 } else {
+                    boolean[] jwAtPc = mJoinWritten[pc - mHdrPc];
+                    if (jwAtPc != null) {
+                        for (int k = 0; k < 8; k++) {
+                            mWrittenV[k] &= jwAtPc[k];
+                        }
+                    }
                     // Check uninitialized morsel vector reads (e.g. M1/M2 inside OP_FILTER_MORSEL)
                     if (hasUninitializedMorselVRead(op, subop, scalar, dst, s1, s2, s3, mWrittenV)) {
                         return new ValidationResult(IMPULSE_VM_ERR_VALIDATION_FAILED, pc);
@@ -228,8 +243,17 @@ public final class V11Validator {
                                 return new ValidationResult(IMPULSE_VM_ERR_VALIDATION_FAILED, pc);
                             }
                             int st = checkJumpTarget(words, pc, imm32);
-                            if (st != IMPULSE_VM_OK || pc + imm32 > mEndPc) {
+                            int tgt = pc + imm32;
+                            if (st != IMPULSE_VM_OK || tgt > mEndPc) {
                                 return new ValidationResult(IMPULSE_VM_ERR_VALIDATION_FAILED, pc);
+                            }
+                            int rel = tgt - mHdrPc;
+                            if (mJoinWritten[rel] == null) {
+                                mJoinWritten[rel] = mWrittenV.clone();
+                            } else {
+                                for (int k = 0; k < 8; k++) {
+                                    mJoinWritten[rel][k] &= mWrittenV[k];
+                                }
                             }
                         }
                         case MORSEL_COMMIT_ONLY -> {
@@ -295,7 +319,22 @@ public final class V11Validator {
             return new ValidationResult(IMPULSE_VM_ERR_VALIDATION_FAILED, mHdrPc);
         }
 
-        // Pass 3: Reject OP_SAMPLE_NEIGHBORS.vec_wr (subop=1) inside any CFG loop cycle
+        // Pass 2b: Forbid outer branches/calls from jumping into the interior of any morsel block
+        pc = 0;
+        while (pc < n) {
+            long w = words[pc];
+            int op = (int) (w & 0xFFL);
+            boolean ext = ((w >>> 12) & FLAG_EXTENDED) != 0;
+            if (!inMorselInterior[pc] && (op == OP_JMP || op == OP_JCC || op == OP_LOOP_DECR || op == OP_CALL)) {
+                int tgt = pc + (int) (w >>> 32);
+                if (tgt >= 0 && tgt < n && inMorselInterior[tgt]) {
+                    return new ValidationResult(IMPULSE_VM_ERR_VALIDATION_FAILED, pc);
+                }
+            }
+            pc += ext ? 2 : 1;
+        }
+
+        // Pass 3: Reject OP_SAMPLE_NEIGHBORS.vec_wr (subop=1) inside any CFG loop cycle (including CALL edges)
         pc = 0;
         while (pc < n) {
             long w = words[pc];
@@ -330,17 +369,12 @@ public final class V11Validator {
         int top = 0;
         int start = targetPc + ((((words[targetPc] >>> 12) & FLAG_EXTENDED) != 0) ? 2 : 1);
         if (start >= 0 && start < n) {
+            if (start == targetPc) return true;
+            visited[start] = true;
             stack[top++] = start;
         }
         while (top > 0) {
             int cur = stack[--top];
-            if (cur == targetPc) {
-                return true;
-            }
-            if (cur < 0 || cur >= n || visited[cur]) {
-                continue;
-            }
-            visited[cur] = true;
             long w = words[cur];
             int op = (int) (w & 0xFFL);
             boolean ext = ((w >>> 12) & FLAG_EXTENDED) != 0;
@@ -351,17 +385,29 @@ public final class V11Validator {
                 case OP_JMP -> {
                     int t = cur + imm32;
                     if (t == targetPc) return true;
-                    if (t >= 0 && t < n && !visited[t]) stack[top++] = t;
+                    if (t >= 0 && t < n && !visited[t]) {
+                        visited[t] = true;
+                        stack[top++] = t;
+                    }
                 }
-                case OP_JCC, OP_LOOP_DECR -> {
+                case OP_JCC, OP_LOOP_DECR, OP_CALL -> {
                     int t = cur + imm32;
                     if (t == targetPc || nextPc == targetPc) return true;
-                    if (nextPc >= 0 && nextPc < n && !visited[nextPc]) stack[top++] = nextPc;
-                    if (t >= 0 && t < n && !visited[t]) stack[top++] = t;
+                    if (nextPc >= 0 && nextPc < n && !visited[nextPc]) {
+                        visited[nextPc] = true;
+                        stack[top++] = nextPc;
+                    }
+                    if (t >= 0 && t < n && !visited[t]) {
+                        visited[t] = true;
+                        stack[top++] = t;
+                    }
                 }
                 default -> {
                     if (nextPc == targetPc) return true;
-                    if (nextPc >= 0 && nextPc < n && !visited[nextPc]) stack[top++] = nextPc;
+                    if (nextPc >= 0 && nextPc < n && !visited[nextPc]) {
+                        visited[nextPc] = true;
+                        stack[top++] = nextPc;
+                    }
                 }
             }
         }
