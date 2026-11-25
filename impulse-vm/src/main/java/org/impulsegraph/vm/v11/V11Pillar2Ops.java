@@ -90,35 +90,35 @@ public final class V11Pillar2Ops {
         }
     }
 
-    private static int[] addSortedUnique(int[] base, int u) {
-        int pos = Arrays.binarySearch(base, u);
+    private static int addSortedUniqueInto(int[] base, int baseLen, int u, int[] out) {
+        int pos = Arrays.binarySearch(base, 0, baseLen, u);
         if (pos >= 0) {
-            return base;
+            if (out != base) System.arraycopy(base, 0, out, 0, baseLen);
+            return baseLen;
         }
         int ins = -pos - 1;
-        int[] out = new int[base.length + 1];
         System.arraycopy(base, 0, out, 0, ins);
         out[ins] = u;
-        System.arraycopy(base, ins, out, ins + 1, base.length - ins);
-        return out;
+        System.arraycopy(base, ins, out, ins + 1, baseLen - ins);
+        return baseLen + 1;
     }
 
-    private static int[] removeSorted(int[] base, int u) {
-        int pos = Arrays.binarySearch(base, u);
+    private static int removeSortedInto(int[] base, int baseLen, int u, int[] out) {
+        int pos = Arrays.binarySearch(base, 0, baseLen, u);
         if (pos < 0) {
-            return base;
+            if (out != base) System.arraycopy(base, 0, out, 0, baseLen);
+            return baseLen;
         }
-        int[] out = new int[base.length - 1];
         System.arraycopy(base, 0, out, 0, pos);
-        System.arraycopy(base, pos + 1, out, pos, base.length - pos - 1);
-        return out;
+        System.arraycopy(base, pos + 1, out, pos, baseLen - pos - 1);
+        return baseLen - 1;
     }
 
-    private static void setF1Bit(V11Workspace ws, int dst, int domId, int domCard, int[] sortedIds, boolean isAllSpan, boolean knowCard) {
-        if (isAllSpan && sortedIds.length == domCard && domCard > 0) {
+    private static void setF1Bit(V11Workspace ws, int dst, int domId, int domCard, int[] sortedIds, int len, boolean isAllSpan, boolean knowCard) {
+        if (isAllSpan && len == domCard && domCard > 0) {
             ws.fRegs[dst].initAllSpan(domId, domCard);
         } else {
-            ws.fRegs[dst].initFromValidatedIds(domId, domCard, sortedIds, ws.geometry, knowCard);
+            ws.fRegs[dst].initFromValidatedIds(domId, domCard, sortedIds, len, ws.geometry, knowCard);
         }
         ws.setFInitialized(dst, true);
     }
@@ -133,7 +133,8 @@ public final class V11Pillar2Ops {
                 ws.status = -domCard;
                 return;
             }
-            int[] base;
+            int[] base = null;
+            int baseLen = 0;
             if (accum) {
                 if (!ws.isFInitialized(dst)) {
                     ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
@@ -148,9 +149,11 @@ public final class V11Pillar2Ops {
                     ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
                     return;
                 }
-                base = existing.toSortedArray();
+                int card = existing.cardinality();
+                base = ws.arena.allocInt(card);
+                baseLen = existing.toSortedArrayInto(base);
             } else {
-                base = new int[0];
+                base = ws.arena.allocInt(1);
             }
 
             switch (subop) {
@@ -164,25 +167,27 @@ public final class V11Pillar2Ops {
                     if (imm16Lo >= domCard) {
                         ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
                     } else {
-                        int[] next = addSortedUnique(base, imm16Lo);
-                        setF1Bit(ws, dst, domId, domCard, next, false, true);
-                        ws.zf = (next.length == 0);
+                        int[] next = ws.arena.allocInt(baseLen + 1);
+                        int nextLen = addSortedUniqueInto(base, baseLen, imm16Lo, next);
+                        setF1Bit(ws, dst, domId, domCard, next, nextLen, false, true);
+                        ws.zf = (nextLen == 0);
                         ws.pc++;
                     }
                 }
                 case 2 -> { // .single_reg
                     if (!ws.isRValid(s1)) {
-                        setF1Bit(ws, dst, domId, domCard, base, false, true);
-                        ws.zf = (base.length == 0);
+                        setF1Bit(ws, dst, domId, domCard, base, baseLen, false, true);
+                        ws.zf = (baseLen == 0);
                         ws.pc++;
                     } else {
                         long u = ws.rRegs[s1];
                         if (u < 0L || Long.compareUnsigned(u, domCard) >= 0) {
                             ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
                         } else {
-                            int[] next = addSortedUnique(base, (int) u);
-                            setF1Bit(ws, dst, domId, domCard, next, false, true);
-                            ws.zf = (next.length == 0);
+                            int[] next = ws.arena.allocInt(baseLen + 1);
+                            int nextLen = addSortedUniqueInto(base, baseLen, (int) u, next);
+                            setF1Bit(ws, dst, domId, domCard, next, nextLen, false, true);
+                            ws.zf = (nextLen == 0);
                             ws.pc++;
                         }
                     }
@@ -205,11 +210,16 @@ public final class V11Pillar2Ops {
                 ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
                 return;
             }
-            int[] cur = fd.toSortedArray();
+            int card = fd.cardinality();
+            int[] cur = ws.arena.allocInt(card);
+            int curLen = fd.toSortedArrayInto(cur);
             boolean knowCard = fd.cachedCard >= 0;
-            int[] next = (subop == 3) ? addSortedUnique(cur, (int) u) : removeSorted(cur, (int) u);
-            setF1Bit(ws, dst, fd.domainId, fd.domainCard, next, false, knowCard);
-            ws.zf = (next.length == 0);
+            int[] next = ws.arena.allocInt(curLen + 1);
+            int nextLen = (subop == 3)
+                    ? addSortedUniqueInto(cur, curLen, (int) u, next)
+                    : removeSortedInto(cur, curLen, (int) u, next);
+            setF1Bit(ws, dst, fd.domainId, fd.domainCard, next, nextLen, false, knowCard);
+            ws.zf = (nextLen == 0);
             ws.pc++;
         } else {
             ws.status = IMPULSE_VM_ERR_INVALID_OPCODE;
@@ -247,36 +257,43 @@ public final class V11Pillar2Ops {
         int domCard = fa.domainCard;
 
         if (!fa.multiLane) {
-            int[] a = fa.toSortedArray();
-            int[] b = fb.toSortedArray();
-            int[] res = switch (subop) {
-                case 0 -> sortedUnion(a, b);
-                case 1 -> sortedIntersect(a, b);
-                case 2 -> sortedDiff(a, b);
-                case 3 -> sortedSymDiff(a, b);
-                default -> new int[0];
+            int ca = fa.cardinality();
+            int cb = fb.cardinality();
+            int[] a = ws.arena.allocInt(ca);
+            int na = fa.toSortedArrayInto(a);
+            int[] b = ws.arena.allocInt(cb);
+            int nb = fb.toSortedArrayInto(b);
+            int[] out = ws.arena.allocInt(na + nb);
+            int resLen = switch (subop) {
+                case 0 -> sortedUnionInto(a, na, b, nb, out);
+                case 1 -> sortedIntersectInto(a, na, b, nb, out);
+                case 2 -> sortedDiffInto(a, na, b, nb, out);
+                case 3 -> sortedSymDiffInto(a, na, b, nb, out);
+                default -> 0;
             };
-            boolean isAll = (res.length == domCard && domCard > 0);
-            setF1Bit(ws, dst, domId, domCard, res, isAll, true);
-            ws.zf = (res.length == 0);
+            boolean isAll = (resLen == domCard && domCard > 0);
+            setF1Bit(ws, dst, domId, domCard, out, resLen, isAll, true);
+            ws.zf = (resLen == 0);
             ws.pc++;
         } else {
             if (fa.allocWidth != fb.allocWidth) {
                 ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
                 return;
             }
-            long[] an = fa.mlSortedNodes();
-            long[] am = fa.mlSortedMasks();
-            long[] bn = fb.mlSortedNodes();
-            long[] bm = fb.mlSortedMasks();
-            long[] outN = new long[an.length + bn.length];
-            long[] outM = new long[an.length + bn.length];
+            long[] an = fa.mlNodes;
+            long[] am = fa.mlMasks;
+            int aLen = fa.mlCount;
+            long[] bn = fb.mlNodes;
+            long[] bm = fb.mlMasks;
+            int bLen = fb.mlCount;
+            long[] outN = ws.arena.allocLong(aLen + bLen);
+            long[] outM = ws.arena.allocLong(aLen + bLen);
             int i = 0, j = 0, k = 0;
-            while (i < an.length || j < bn.length) {
+            while (i < aLen || j < bLen) {
                 long u, va, vb;
-                if (j >= bn.length || (i < an.length && an[i] < bn[j])) {
+                if (j >= bLen || (i < aLen && an[i] < bn[j])) {
                     u = an[i]; va = am[i++]; vb = 0L;
-                } else if (i >= an.length || bn[j] < an[i]) {
+                } else if (i >= aLen || bn[j] < an[i]) {
                     u = bn[j]; va = 0L; vb = bm[j++];
                 } else {
                     u = an[i]; va = am[i++]; vb = bm[j++];
@@ -294,63 +311,57 @@ public final class V11Pillar2Ops {
                     k++;
                 }
             }
-            long[] fn = (k == outN.length) ? outN : Arrays.copyOf(outN, k);
-            long[] fm = (k == outM.length) ? outM : Arrays.copyOf(outM, k);
             int activeLanes = Math.max(fa.activeLaneCount, fb.activeLaneCount);
-            ws.fRegs[dst].initMultiLane(domId, domCard, fa.allocWidth, activeLanes, fn, fm, ws.geometry);
+            ws.fRegs[dst].initMultiLane(domId, domCard, fa.allocWidth, activeLanes, outN, outM, k, ws.geometry);
             ws.setFInitialized(dst, true);
             ws.zf = (k == 0);
             ws.pc++;
         }
     }
 
-    private static int[] sortedUnion(int[] a, int[] b) {
-        int[] out = new int[a.length + b.length];
+    private static int sortedUnionInto(int[] a, int na, int[] b, int nb, int[] out) {
         int i = 0, j = 0, k = 0;
-        while (i < a.length && j < b.length) {
+        while (i < na && j < nb) {
             if (a[i] < b[j]) out[k++] = a[i++];
             else if (b[j] < a[i]) out[k++] = b[j++];
             else { out[k++] = a[i++]; j++; }
         }
-        while (i < a.length) out[k++] = a[i++];
-        while (j < b.length) out[k++] = b[j++];
-        return k == out.length ? out : Arrays.copyOf(out, k);
+        while (i < na) out[k++] = a[i++];
+        while (j < nb) out[k++] = b[j++];
+        return k;
     }
 
-    private static int[] sortedIntersect(int[] a, int[] b) {
-        int[] out = new int[Math.min(a.length, b.length)];
+    private static int sortedIntersectInto(int[] a, int na, int[] b, int nb, int[] out) {
         int i = 0, j = 0, k = 0;
-        while (i < a.length && j < b.length) {
+        while (i < na && j < nb) {
             if (a[i] < b[j]) i++;
             else if (b[j] < a[i]) j++;
             else { out[k++] = a[i++]; j++; }
         }
-        return k == out.length ? out : Arrays.copyOf(out, k);
+        return k;
     }
 
-    private static int[] sortedDiff(int[] a, int[] b) {
-        int[] out = new int[a.length];
+    private static int sortedDiffInto(int[] a, int na, int[] b, int nb, int[] out) {
         int i = 0, j = 0, k = 0;
-        while (i < a.length && j < b.length) {
+        while (i < na && j < nb) {
             if (a[i] < b[j]) out[k++] = a[i++];
             else if (b[j] < a[i]) j++;
             else { i++; j++; }
         }
-        while (i < a.length) out[k++] = a[i++];
-        return k == out.length ? out : Arrays.copyOf(out, k);
+        while (i < na) out[k++] = a[i++];
+        return k;
     }
 
-    private static int[] sortedSymDiff(int[] a, int[] b) {
-        int[] out = new int[a.length + b.length];
+    private static int sortedSymDiffInto(int[] a, int na, int[] b, int nb, int[] out) {
         int i = 0, j = 0, k = 0;
-        while (i < a.length && j < b.length) {
+        while (i < na && j < nb) {
             if (a[i] < b[j]) out[k++] = a[i++];
             else if (b[j] < a[i]) out[k++] = b[j++];
             else { i++; j++; }
         }
-        while (i < a.length) out[k++] = a[i++];
-        while (j < b.length) out[k++] = b[j++];
-        return k == out.length ? out : Arrays.copyOf(out, k);
+        while (i < na) out[k++] = a[i++];
+        while (j < nb) out[k++] = b[j++];
+        return k;
     }
 
     private static void execSetComplement(V11Workspace ws, int dst, int s1) {
@@ -361,19 +372,21 @@ public final class V11Pillar2Ops {
         V11Frontier fa = ws.fRegs[s1];
         int domId = fa.domainId;
         int n = fa.domainCard;
-        int[] sa = fa.toSortedArray();
-        int[] comp = new int[n - sa.length];
+        int ca = fa.cardinality();
+        int[] sa = ws.arena.allocInt(ca);
+        int na = fa.toSortedArrayInto(sa);
+        int[] comp = ws.arena.allocInt(n);
         int p = 0, k = 0;
         for (int u = 0; u < n; u++) {
-            if (p < sa.length && sa[p] == u) {
+            if (p < na && sa[p] == u) {
                 p++;
             } else {
                 comp[k++] = u;
             }
         }
-        boolean isAll = (sa.length == 0 && n > 0);
-        setF1Bit(ws, dst, domId, n, comp, isAll, true);
-        ws.zf = (comp.length == 0);
+        boolean isAll = (na == 0 && n > 0);
+        setF1Bit(ws, dst, domId, n, comp, k, isAll, true);
+        ws.zf = (k == 0);
         ws.pc++;
     }
 
@@ -511,11 +524,14 @@ public final class V11Pillar2Ops {
                     ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
                     return;
                 }
-                int[] ids = ws.fRegs[s1].toSortedArray();
-                long[] vals = new long[ids.length];
-                for (int i = 0; i < ids.length; i++) vals[i] = ids[i] & 0xFFFFFFFFL;
-                ws.vVectors[dst] = V11Vector.ofU64(vals, V11Vector.allocValidAllTrue(ids.length));
-                ws.zf = (ids.length == 0);
+                V11Frontier f = ws.fRegs[s1];
+                int card = f.cardinality();
+                int[] ids = ws.arena.allocInt(card);
+                int n = f.toSortedArrayInto(ids);
+                long[] vals = ws.arena.allocLong(n);
+                for (int i = 0; i < n; i++) vals[i] = ids[i] & 0xFFFFFFFFL;
+                ws.vVectors[dst] = ws.arena.allocU64(vals, n, ws.arena.allocValidAllTrue(n));
+                ws.zf = (n == 0);
                 ws.pc++;
             }
             case 1 -> { // .v2f_ids
@@ -529,7 +545,8 @@ public final class V11Pillar2Ops {
                     ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
                     return;
                 }
-                int[] base;
+                int baseLen = 0;
+                int[] base = null;
                 if (accum) {
                     if (!ws.isFInitialized(dst)) {
                         ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
@@ -544,13 +561,12 @@ public final class V11Pillar2Ops {
                         ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
                         return;
                     }
-                    base = ex.toSortedArray();
-                } else {
-                    base = new int[0];
+                    base = ws.arena.allocInt(ex.cardinality());
+                    baseLen = ex.toSortedArrayInto(base);
                 }
-                int[] buf = new int[base.length + vec.length];
-                System.arraycopy(base, 0, buf, 0, base.length);
-                int cnt = base.length;
+                int[] buf = ws.arena.allocInt(baseLen + vec.length);
+                if (baseLen > 0) System.arraycopy(base, 0, buf, 0, baseLen);
+                int cnt = baseLen;
                 for (int i = 0; i < vec.length; i++) {
                     if (!vec.isValidAt(i)) continue;
                     long u = vec.i64Data[i];
@@ -560,9 +576,9 @@ public final class V11Pillar2Ops {
                     }
                     buf[cnt++] = (int) u;
                 }
-                int[] res = dedupeSorted(buf, cnt);
-                setF1Bit(ws, dst, domId, domCard, res, false, true);
-                ws.zf = (res.length == 0);
+                int uniq = dedupeSortedInPlace(buf, cnt);
+                setF1Bit(ws, dst, domId, domCard, buf, uniq, false, true);
+                ws.zf = (uniq == 0);
                 ws.pc++;
             }
             case 2 -> { // .b2f
@@ -585,7 +601,8 @@ public final class V11Pillar2Ops {
                     ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
                     return;
                 }
-                int[] base;
+                int baseLen = 0;
+                int[] base = null;
                 if (accum) {
                     if (!ws.isFInitialized(dst)) {
                         ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
@@ -600,21 +617,20 @@ public final class V11Pillar2Ops {
                         ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
                         return;
                     }
-                    base = ex.toSortedArray();
-                } else {
-                    base = new int[0];
+                    base = ws.arena.allocInt(ex.cardinality());
+                    baseLen = ex.toSortedArrayInto(base);
                 }
-                int[] buf = new int[base.length + vec.length];
-                System.arraycopy(base, 0, buf, 0, base.length);
-                int cnt = base.length;
+                int[] buf = ws.arena.allocInt(baseLen + vec.length);
+                if (baseLen > 0) System.arraycopy(base, 0, buf, 0, baseLen);
+                int cnt = baseLen;
                 for (int i = 0; i < vec.length; i++) {
                     if (vec.isValidAt(i) && vec.boolDataAt(i)) {
                         buf[cnt++] = i;
                     }
                 }
-                int[] res = dedupeSorted(buf, cnt);
-                setF1Bit(ws, dst, domId, domCard, res, false, true);
-                ws.zf = (res.length == 0);
+                int uniq = dedupeSortedInPlace(buf, cnt);
+                setF1Bit(ws, dst, domId, domCard, buf, uniq, false, true);
+                ws.zf = (uniq == 0);
                 ws.pc++;
             }
             case 3 -> { // .f2b
@@ -625,25 +641,25 @@ public final class V11Pillar2Ops {
                 V11Frontier fa = ws.fRegs[s1];
                 int n = fa.domainCard;
                 int words = Math.max(1, (n + 63) >>> 6);
-                long[] valid = new long[words];
-                long[] data = new long[words];
-                for (int i = 0; i < n; i++) {
-                    valid[i >>> 6] |= (1L << (i & 63));
-                }
-                int[] ids = fa.toSortedArray();
-                for (int u : ids) {
+                long[] valid = ws.arena.allocValidAllTrue(n);
+                long[] data = ws.arena.allocLongZeroed(words);
+                int card = fa.cardinality();
+                int[] ids = ws.arena.allocInt(card);
+                int cnt = fa.toSortedArrayInto(ids);
+                for (int i = 0; i < cnt; i++) {
+                    int u = ids[i];
                     data[u >>> 6] |= (1L << (u & 63));
                 }
-                ws.vVectors[dst] = V11Vector.ofBool3vl(n, valid, data);
-                ws.zf = (ids.length == 0);
+                ws.vVectors[dst] = ws.arena.allocBool3vl(n, valid, data);
+                ws.zf = (cnt == 0);
                 ws.pc++;
             }
             default -> ws.status = IMPULSE_VM_ERR_INVALID_OPCODE;
         }
     }
 
-    private static int[] dedupeSorted(int[] buf, int len) {
-        if (len == 0) return new int[0];
+    private static int dedupeSortedInPlace(int[] buf, int len) {
+        if (len == 0) return 0;
         Arrays.sort(buf, 0, len);
         int uniq = 1;
         for (int i = 1; i < len; i++) {
@@ -651,7 +667,7 @@ public final class V11Pillar2Ops {
                 buf[uniq++] = buf[i];
             }
         }
-        return Arrays.copyOf(buf, uniq);
+        return uniq;
     }
 
     private static void execStableCheck(V11Workspace ws, int subop, int dst, int s1, int s2, int s3) {
@@ -672,14 +688,25 @@ public final class V11Pillar2Ops {
             }
             boolean eq;
             if (!fa.multiLane) {
-                eq = Arrays.equals(fa.toSortedArray(), fb.toSortedArray());
+                int ca = fa.cardinality();
+                int cb = fb.cardinality();
+                if (ca != cb) {
+                    eq = false;
+                } else {
+                    int[] a = ws.arena.allocInt(ca);
+                    int[] b = ws.arena.allocInt(cb);
+                    int na = fa.toSortedArrayInto(a);
+                    int nb = fb.toSortedArrayInto(b);
+                    eq = (na == nb) && Arrays.equals(a, 0, na, b, 0, nb);
+                }
             } else {
                 if (fa.allocWidth != fb.allocWidth) {
                     ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
                     return;
                 }
-                eq = Arrays.equals(fa.mlSortedNodes(), fb.mlSortedNodes())
-                        && Arrays.equals(fa.mlSortedMasks(), fb.mlSortedMasks());
+                eq = (fa.mlCount == fb.mlCount)
+                        && Arrays.equals(fa.mlNodes, 0, fa.mlCount, fb.mlNodes, 0, fb.mlCount)
+                        && Arrays.equals(fa.mlMasks, 0, fa.mlCount, fb.mlMasks, 0, fb.mlCount);
             }
             ws.st = eq;
             ws.zf = eq;

@@ -211,12 +211,11 @@ public final class V11ContextHash {
                 b.addU16Le(v.lsK);
                 for (int u = 0; u < v.length; u++) {
                     for (int l = 0; l < v.lsK; l++) {
-                        boolean valid = v.lsValid != null && v.lsValid[u][l];
-                        if (!valid) {
+                        if (!v.lsIsValid(u, l)) {
                             b.addU8(0);
                         } else {
                             b.addU8(1);
-                            b.addU64Le(Double.doubleToRawLongBits(v.lsVals[u][l]));
+                            b.addU64Le(Double.doubleToRawLongBits(v.lsGetVal(u, l)));
                         }
                     }
                 }

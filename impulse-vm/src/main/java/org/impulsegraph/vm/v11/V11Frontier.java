@@ -101,8 +101,12 @@ public final class V11Frontier {
 
     /** Initialize a 1-bit frontier from a list of validated node IDs using normative geometry tiers. */
     public void initFromValidatedIds(int domainId, int domainCard, int[] sortedUniqueIds, V11Geometry geom, boolean knowCard) {
+        initFromValidatedIds(domainId, domainCard, sortedUniqueIds, sortedUniqueIds.length, geom, knowCard);
+    }
+
+    /** Zero-allocation overload taking an explicit count into a caller/arena-owned buffer. */
+    public void initFromValidatedIds(int domainId, int domainCard, int[] sortedUniqueIds, int c, V11Geometry geom, boolean knowCard) {
         resetEmpty(domainId, domainCard);
-        int c = sortedUniqueIds.length;
         if (c == 0) {
             return;
         }
@@ -113,18 +117,16 @@ public final class V11Frontier {
             tier = TIER0_INLINE;
             cachedCard = c;
         } else {
-            // Store in denseWords for exact membership regardless of small P1 pageShift,
-            // while recording the normative tier tag for physical_hash parity.
             if (denseWords.length >= denseWordCount) {
                 Arrays.fill(denseWords, 0, denseWordCount, 0L);
-                for (int u : sortedUniqueIds) {
+                for (int i = 0; i < c; i++) {
+                    int u = sortedUniqueIds[i];
                     denseWords[u >>> 6] |= (1L << u);
                 }
             }
             if (targetTier == TIER1_PAGED) {
-                // Also populate inline/paged representation using denseWords fallback in toSortedArray
                 tier = TIER1_PAGED;
-                dirtyPageCount = -1; // sentinel indicating denseWords backs this Tier1_paged fixture
+                dirtyPageCount = -1;
             } else {
                 tier = TIER2_DENSE;
             }
@@ -132,16 +134,55 @@ public final class V11Frontier {
         }
     }
 
+    /** Zero-allocation initialization directly from a dense bitset (words[0..wordCount-1]). */
+    public void initFromDenseBits(int domainId, int domainCard, long[] bits, int wordCount, int card, V11Geometry geom, boolean knowCard) {
+        resetEmpty(domainId, domainCard);
+        if (card == 0) {
+            return;
+        }
+        int targetTier = geom.computeTier(domainCard, card, false);
+        if (targetTier == TIER0_INLINE && card <= TIER0_MAX) {
+            int p = 0;
+            for (int w = 0; w < wordCount; w++) {
+                long m = bits[w];
+                while (m != 0L) {
+                    inlineIds[p++] = (w << 6) + Long.numberOfTrailingZeros(m);
+                    m &= (m - 1L);
+                }
+            }
+            inlineCount = p;
+            tier = TIER0_INLINE;
+            cachedCard = p;
+        } else {
+            if (denseWords.length >= wordCount) {
+                System.arraycopy(bits, 0, denseWords, 0, wordCount);
+            }
+            if (targetTier == TIER1_PAGED) {
+                tier = TIER1_PAGED;
+                dirtyPageCount = -1;
+            } else {
+                tier = TIER2_DENSE;
+            }
+            cachedCard = (knowCard || targetTier == TIER0_INLINE || targetTier == TIER_ALL_SPAN) ? card : -1;
+        }
+    }
+
     /** Initialize a multi-lane frontier from validated (node, mask) entries. */
     public void initMultiLane(int domainId, int domainCard, int allocWidth, int activeLaneCount,
                               long[] sortedNodes, long[] sortedMasks, V11Geometry geom) {
+        initMultiLane(domainId, domainCard, allocWidth, activeLaneCount, sortedNodes, sortedMasks, sortedNodes.length, geom);
+    }
+
+    /** Zero-allocation multi-lane initialization taking explicit count. */
+    public void initMultiLane(int domainId, int domainCard, int allocWidth, int activeLaneCount,
+                              long[] sortedNodes, long[] sortedMasks, int count, V11Geometry geom) {
         resetEmpty(domainId, domainCard);
         this.multiLane = true;
         this.allocWidth = allocWidth;
         this.activeLaneCount = activeLaneCount;
         this.mlNodes = sortedNodes;
         this.mlMasks = sortedMasks;
-        this.mlCount = sortedNodes.length;
+        this.mlCount = count;
         this.tier = geom.computeTier(domainCard, this.mlCount, false);
         this.cachedCard = this.mlCount;
     }
@@ -401,10 +442,16 @@ public final class V11Frontier {
         }
     }
 
-    /** Extract all node IDs into a sorted int[] (for parity verification outside timed loops). */
+    /** Extract all node IDs into a sorted int[] (allocates; prefer toSortedArrayInto on hot paths). */
     public int[] toSortedArray() {
         int card = cardinality();
         int[] out = new int[card];
+        toSortedArrayInto(out);
+        return out;
+    }
+
+    /** Zero-allocation extraction of sorted node IDs into caller/arena-owned [out]; returns count written. */
+    public int toSortedArrayInto(int[] out) {
         int p = 0;
         switch (tier) {
             case TIER_EMPTY -> {}
@@ -413,7 +460,8 @@ public final class V11Frontier {
             }
             case TIER0_INLINE -> {
                 System.arraycopy(inlineIds, 0, out, 0, inlineCount);
-                Arrays.sort(out);
+                p = inlineCount;
+                Arrays.sort(out, 0, p);
             }
             case TIER1_PAGED -> {
                 if (dirtyPageCount < 0) {
@@ -438,7 +486,7 @@ public final class V11Frontier {
                             }
                         }
                     }
-                    Arrays.sort(out);
+                    Arrays.sort(out, 0, p);
                 }
             }
             case TIER2_DENSE -> {
@@ -452,6 +500,6 @@ public final class V11Frontier {
                 }
             }
         }
-        return out;
+        return p;
     }
 }

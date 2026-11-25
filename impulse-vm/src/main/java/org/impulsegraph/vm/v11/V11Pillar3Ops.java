@@ -219,6 +219,112 @@ public final class V11Pillar3Ops {
             return;
         }
 
+        int fastOutCard = (int) view.domainCards[outDom];
+        int outWords = Math.max(1, (fastOutCard + 63) >>> 6);
+
+        // Zero-alloc fast path for forward walks (subop 0=fwd, 3=fwd_fixpoint_plus, 4=fwd_fixpoint_star, 7=fwd_bounded)
+        if (subop == 0 || subop == 3 || subop == 4 || subop == 7) {
+            V11Frontier fe = null;
+            if ((flags & FLAG_MASKED_S3) != 0) {
+                fe = getF1Bit(ws, s3);
+                if (fe == null) return;
+                if (fe.domainId != outDom) { ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH; return; }
+            }
+            V11Frontier fd = null;
+            if ((flags & FLAG_ACCUM) != 0) {
+                fd = getF1Bit(ws, dst);
+                if (fd == null) return;
+                if (fd.domainId != outDom) { ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH; return; }
+            }
+            long[] exclBits = null;
+            if (fe != null && !fe.isEmpty()) {
+                exclBits = ws.arena.allocLongZeroed(outWords);
+                int fc = fe.cardinality();
+                int[] fids = ws.arena.allocInt(fc);
+                int fn = fe.toSortedArrayInto(fids);
+                for (int i = 0; i < fn; i++) {
+                    int u = fids[i];
+                    exclBits[u >>> 6] |= (1L << u);
+                }
+            }
+            long[] outBits = ws.arena.allocLongZeroed(outWords);
+            int[] roff = rel.rowOffsets;
+            long[] ctgt = rel.colTargets;
+            int srcCard = fSrc.cardinality();
+            int[] curQ = ws.arena.allocInt(Math.max(srcCard, fastOutCard));
+            int curLen = fSrc.toSortedArrayInto(curQ);
+            boolean stFlag = ws.st;
+
+            if (subop == 0) {
+                for (int i = 0; i < curLen; i++) {
+                    int u = curQ[i];
+                    for (int e = roff[u]; e < roff[u + 1]; e++) {
+                        int v = (int) ctgt[e];
+                        if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
+                            outBits[v >>> 6] |= (1L << v);
+                        }
+                    }
+                }
+            } else {
+                int[] nextQ = ws.arena.allocInt(Math.max(fastOutCard, 1));
+                int maxHops = (subop == 7) ? imm16Hi : Integer.MAX_VALUE;
+                boolean converged = false;
+                if (subop == 4) { // fixpoint_star: seed visited with src \ excl
+                    int w = 0;
+                    for (int i = 0; i < curLen; i++) {
+                        int u = curQ[i];
+                        if (exclBits == null || (exclBits[u >>> 6] & (1L << u)) == 0L) {
+                            long bit = 1L << u;
+                            if ((outBits[u >>> 6] & bit) == 0L) {
+                                outBits[u >>> 6] |= bit;
+                                curQ[w++] = u;
+                            }
+                        }
+                    }
+                    curLen = w;
+                }
+                for (int hop = 0; hop < maxHops; hop++) {
+                    int nextLen = 0;
+                    for (int i = 0; i < curLen; i++) {
+                        int u = curQ[i];
+                        for (int e = roff[u]; e < roff[u + 1]; e++) {
+                            int v = (int) ctgt[e];
+                            long bit = 1L << v;
+                            int wi = v >>> 6;
+                            if ((outBits[wi] & bit) == 0L && (exclBits == null || (exclBits[wi] & bit) == 0L)) {
+                                outBits[wi] |= bit;
+                                nextQ[nextLen++] = v;
+                            }
+                        }
+                    }
+                    if (nextLen == 0) {
+                        converged = true;
+                        break;
+                    }
+                    int[] tmp = curQ; curQ = nextQ; nextQ = tmp;
+                    curLen = nextLen;
+                }
+                stFlag = (subop == 7) ? converged : true;
+            }
+            if (fd != null && !fd.isEmpty()) {
+                int ac = fd.cardinality();
+                int[] aids = ws.arena.allocInt(ac);
+                int an = fd.toSortedArrayInto(aids);
+                for (int i = 0; i < an; i++) {
+                    int u = aids[i];
+                    outBits[u >>> 6] |= (1L << u);
+                }
+            }
+            int card = 0;
+            for (int w = 0; w < outWords; w++) card += Long.bitCount(outBits[w]);
+            ws.fRegs[dst].initFromDenseBits(outDom, fastOutCard, outBits, outWords, card, ws.geometry, false);
+            ws.setFInitialized(dst, true);
+            ws.zf = (card == 0);
+            ws.st = stFlag;
+            ws.pc++;
+            return;
+        }
+
         Set<Integer> sExcl = Set.of();
         if ((flags & FLAG_MASKED_S3) != 0) {
             V11Frontier fe = getF1Bit(ws, s3);
@@ -629,6 +735,155 @@ public final class V11Pillar3Ops {
 
         int nIn = (int) view.domainCards[inDom];
         int nOut = (int) view.domainCards[outDom];
+
+        // Zero-alloc fast path for forward SpMV (subop 0=plus_times, 2=min_plus, 4=max_plus, 5=max_times, 6=min_max, 7=first_src, 8=argmin_plus)
+        if (!isRev && (flags & FLAG_MASKED_S3) == 0) {
+            int srcCard = fSrc.cardinality();
+            int[] srcIds = ws.arena.allocInt(srcCard);
+            int srcLen = fSrc.toSortedArrayInto(srcIds);
+            int[] roff = rel.rowOffsets;
+            long[] ctgt = rel.colTargets;
+            int outWords = Math.max(1, (nOut + 63) >>> 6);
+
+            if (subop == 7) { // .fwd_first_src
+                long[] out = ws.arena.allocLong(nOut);
+                long[] valid = ws.arena.allocLongZeroed(outWords);
+                int hits = 0;
+                for (int si = 0; si < srcLen; si++) {
+                    int u = srcIds[si];
+                    long u64 = u & 0xFFFFFFFFL;
+                    for (int e = roff[u]; e < roff[u + 1]; e++) {
+                        int v = (int) ctgt[e];
+                        boolean has = ((valid[v >>> 6] >>> (v & 63)) & 1L) != 0L;
+                        if (!has) {
+                            out[v] = u64;
+                            valid[v >>> 6] |= (1L << (v & 63));
+                            hits++;
+                        } else if (Long.compareUnsigned(u64, out[v]) < 0) {
+                            out[v] = u64;
+                        }
+                    }
+                }
+                ws.vVectors[dst] = ws.arena.allocU64(out, nOut, valid);
+                ws.zf = (hits == 0);
+                ws.pc++;
+                return;
+            }
+
+            boolean scalarRhs = (flags & FLAG_SCALAR_RHS) != 0;
+            boolean scalarValid = scalarRhs && ws.isRValid(s2);
+            double scalarVal = scalarValid ? Double.longBitsToDouble(ws.rRegs[s2]) : Double.NaN;
+            double[] rhsSnap = null;
+            boolean[] rhsSnapValid = null;
+            if (!scalarRhs) {
+                V11Vector rv = ws.vVectors[s2];
+                if (rv == null || (rv.elemTag != V11Vector.TAG_F64 && rv.elemTag != V11Vector.TAG_I64 && rv.elemTag != V11Vector.TAG_U64)) {
+                    ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+                    return;
+                }
+                if (rv.length < nIn) {
+                    ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                    return;
+                }
+                rhsSnap = ws.arena.allocDouble(nIn);
+                rhsSnapValid = ws.arena.allocBool(nIn);
+                for (int i = 0; i < nIn; i++) {
+                    boolean ok = rv.isValidAt(i);
+                    rhsSnapValid[i] = ok;
+                    if (ok) rhsSnap[i] = (rv.elemTag == V11Vector.TAG_F64) ? rv.f64Data[i] : (double) rv.i64Data[i];
+                }
+            }
+
+            if (subop == 8) { // .fwd_argmin_plus
+                double[] bestCost = ws.arena.allocDouble(nOut);
+                long[] bestSrc = ws.arena.allocLong(nOut);
+                long[] valid = ws.arena.allocLongZeroed(outWords);
+                int hits = 0;
+                for (int si = 0; si < srcLen; si++) {
+                    int u = srcIds[si];
+                    if (scalarRhs ? !scalarValid : !rhsSnapValid[u]) continue;
+                    double du = scalarRhs ? scalarVal : rhsSnap[u];
+                    long u64 = u & 0xFFFFFFFFL;
+                    for (int e = roff[u]; e < roff[u + 1]; e++) {
+                        int v = (int) ctgt[e];
+                        if (weightCol != null && !weightCol.isValidAt(e)) continue;
+                        double w = (weightCol == null) ? 1.0
+                                : (weightCol.elemTag == V11Vector.TAG_F64 ? weightCol.f64Data[e] : (double) weightCol.i64Data[e]);
+                        double c = du + w;
+                        if (Double.isNaN(c)) continue;
+                        boolean has = ((valid[v >>> 6] >>> (v & 63)) & 1L) != 0L;
+                        if (!has) {
+                            bestCost[v] = c; bestSrc[v] = u64;
+                            valid[v >>> 6] |= (1L << (v & 63));
+                            hits++;
+                        } else if (c < bestCost[v] || (c == bestCost[v] && Long.compareUnsigned(u64, bestSrc[v]) < 0)) {
+                            bestCost[v] = c; bestSrc[v] = u64;
+                        }
+                    }
+                }
+                ws.vVectors[dst] = ws.arena.allocU64(bestSrc, nOut, valid);
+                ws.zf = (hits == 0);
+                ws.pc++;
+                return;
+            }
+
+            boolean isPlusTimes = (subop == 0);
+            double[] out = ws.arena.allocDoubleZeroed(nOut);
+            long[] outValid = ws.arena.allocLongZeroed(outWords);
+            if ((flags & FLAG_ACCUM) != 0) {
+                V11Vector dv = ws.vVectors[dst];
+                if (dv == null) { ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; return; }
+                if (dv.elemTag != V11Vector.TAG_F64 || dv.length != nOut) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
+                System.arraycopy(dv.f64Data, 0, out, 0, nOut);
+                for (int i = 0; i < nOut; i++) if (dv.isValidAt(i)) outValid[i >>> 6] |= (1L << (i & 63));
+            } else if (isPlusTimes) {
+                for (int i = 0; i < nOut; i++) outValid[i >>> 6] |= (1L << (i & 63));
+            }
+
+            int hits = 0;
+            for (int si = 0; si < srcLen; si++) {
+                int u = srcIds[si];
+                if (scalarRhs ? !scalarValid : !rhsSnapValid[u]) continue;
+                double ru = scalarRhs ? scalarVal : rhsSnap[u];
+                for (int e = roff[u]; e < roff[u + 1]; e++) {
+                    int v = (int) ctgt[e];
+                    if (weightCol != null && !weightCol.isValidAt(e)) continue;
+                    double w = (weightCol == null) ? 1.0
+                            : (weightCol.elemTag == V11Vector.TAG_F64 ? weightCol.f64Data[e] : (double) weightCol.i64Data[e]);
+                    double contrib = switch (subop) {
+                        case 0, 5 -> ru * w;
+                        case 2, 4 -> ru + w;
+                        case 6 -> ieeeMaxF64(ru, w);
+                        default -> ru;
+                    };
+                    if (Double.isNaN(contrib)) continue;
+                    hits++;
+                    boolean has = ((outValid[v >>> 6] >>> (v & 63)) & 1L) != 0L;
+                    switch (subop) {
+                        case 0 -> {
+                            double prev = has ? out[v] : 0.0;
+                            double sum = prev + contrib;
+                            if (Double.isNaN(sum)) outValid[v >>> 6] &= ~(1L << (v & 63));
+                            else { out[v] = sum; outValid[v >>> 6] |= (1L << (v & 63)); }
+                        }
+                        case 2, 6 -> {
+                            out[v] = has ? ieeeMinF64(out[v], contrib) : contrib;
+                            outValid[v >>> 6] |= (1L << (v & 63));
+                        }
+                        case 4, 5 -> {
+                            out[v] = has ? ieeeMaxF64(out[v], contrib) : contrib;
+                            outValid[v >>> 6] |= (1L << (v & 63));
+                        }
+                        default -> {}
+                    }
+                }
+            }
+            ws.vVectors[dst] = ws.arena.allocF64(out, nOut, outValid);
+            ws.zf = (hits == 0);
+            ws.pc++;
+            return;
+        }
+
         List<int[]> edges = new ArrayList<>();
         int[] srcIds = fSrc.toSortedArray();
         if (!isRev) {
@@ -822,6 +1077,11 @@ public final class V11Pillar3Ops {
             ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
             return;
         }
+        if (!isRev && (flags & FLAG_MASKED_S3) == 0 && canRunForwardMorselZeroAlloc(program, hdrPc, endPc)) {
+            runForwardWalkMorselZeroAlloc(ws, view, rel, fSrc, program, hdrPc, endPc, outDom, stepsRef, maxSteps);
+            return;
+        }
+
         Set<Integer> sExcl = Set.of();
         if ((flags & FLAG_MASKED_S3) != 0) {
             V11Frontier fe = getF1Bit(ws, s3);
@@ -857,6 +1117,285 @@ public final class V11Pillar3Ops {
             }
         }
         runMorselBlock(ws, view, program, hdrPc, endPc, outDom, false, items, stepsRef, maxSteps);
+    }
+
+    private static boolean canRunForwardMorselZeroAlloc(long[] program, int hdrPc, int endPc) {
+        for (int p = hdrPc + 1; p < endPc; p++) {
+            long w = program[p];
+            int op = (int) (w & 0xFFL);
+            int subop = (int) ((w >>> 8) & 0xFL);
+            int flags = (int) ((w >>> 12) & 0xFL);
+            switch (op) {
+                case OP_GATHER_EDGE_ATTR -> {
+                    if (subop != 0 || (flags & FLAG_MASKED_S3) != 0) return false;
+                }
+                case OP_VEC_CMP -> {
+                    if (subop > 5 || (flags & FLAG_MASKED_S3) != 0) return false;
+                }
+                case OP_SET_CONVERT -> {
+                    if (subop != 2) return false;
+                }
+                case OP_MORSEL_COMMIT -> {
+                    if (subop != 0 || (flags & FLAG_ACCUM) != 0) return false;
+                }
+                default -> { return false; }
+            }
+        }
+        return true;
+    }
+
+    private static void runForwardWalkMorselZeroAlloc(
+            V11Workspace ws, V11SnapshotView view, V11SnapshotView.RelView rel, V11Frontier fSrc,
+            long[] program, int hdrPc, int endPc, int defaultDom, long[] stepsRef, long maxSteps) {
+        int mMax = Math.max(1, ws.geometry.morselMax());
+        int mWords = Math.max(1, (mMax + 63) >>> 6);
+
+        // Pre-scan commit sinks (0..7)
+        int commitMaskBits = 0;
+        int[] sinkDom = ws.arena.allocInt(8);
+        for (int d = 0; d < 8; d++) sinkDom[d] = -1;
+        for (int p = hdrPc + 1; p < endPc; p++) {
+            long cw = program[p];
+            if ((int) (cw & 0xFFL) == OP_MORSEL_COMMIT) {
+                int cDst = (int) ((cw >>> 20) & 0xFL);
+                int cLo = (int) ((cw >>> 32) & 0xFFFFL);
+                int dom = (cLo == 0xFFFF) ? defaultDom : cLo;
+                sinkDom[cDst] = dom;
+                commitMaskBits |= (1 << cDst);
+            }
+        }
+
+        // Allocate dense bitset per committed sink (zero TreeSet/boxing)
+        long[] sinkBits0 = null, sinkBits1 = null, sinkBits2 = null, sinkBits3 = null;
+        long[] sinkBits4 = null, sinkBits5 = null, sinkBits6 = null, sinkBits7 = null;
+        for (int d = 0; d < 8; d++) {
+            if ((commitMaskBits & (1 << d)) != 0 && sinkDom[d] < view.domainCards.length) {
+                int dcard = (int) view.domainCards[sinkDom[d]];
+                int dw = Math.max(1, (dcard + 63) >>> 6);
+                long[] b = ws.arena.allocLongZeroed(dw);
+                switch (d) {
+                    case 0 -> sinkBits0 = b; case 1 -> sinkBits1 = b; case 2 -> sinkBits2 = b; case 3 -> sinkBits3 = b;
+                    case 4 -> sinkBits4 = b; case 5 -> sinkBits5 = b; case 6 -> sinkBits6 = b; case 7 -> sinkBits7 = b;
+                }
+            }
+        }
+
+        // Allocate reusable chunk buffers ONCE for the entire morsel loop
+        long[] m0 = ws.arena.allocLong(mMax);
+        long[] m1 = ws.arena.allocLong(mMax);
+        long[] m2 = ws.arena.allocLong(mMax);
+        long[] m3 = ws.arena.allocLong(mMax);
+        long[] allValid = ws.arena.allocValidAllTrue(mMax);
+        int[] mf0Ids = ws.arena.allocInt(mMax);
+        for (int i = 0; i < mMax; i++) { m3[i] = 1L; mf0Ids[i] = i; }
+
+        V11Vector vM0 = ws.arena.allocU64(m0, 0, allValid);
+        V11Vector vM1 = ws.arena.allocU64(m1, 0, allValid);
+        V11Vector vM2 = ws.arena.allocU64(m2, 0, allValid);
+        V11Vector vM3 = ws.arena.allocU64(m3, 0, allValid);
+
+        // Pre-allocate scratch for morsel interior V8..V15 (slots 11..15)
+        double[] scratchF64 = ws.arena.allocDouble(mMax);
+        long[] scratchValid = ws.arena.allocLong(mWords);
+        long[] scratchCmpValid = ws.arena.allocLong(mWords);
+        long[] scratchCmpData = ws.arena.allocLong(mWords);
+        int[] scratchFIds = ws.arena.allocInt(mMax);
+        V11Vector vGather = ws.arena.allocF64(scratchF64, 0, scratchValid);
+        V11Vector vCmp = ws.arena.allocBool3vl(0, scratchCmpValid, scratchCmpData);
+
+        int srcCard = fSrc.cardinality();
+        int[] srcIds = ws.arena.allocInt(srcCard);
+        int srcLen = fSrc.toSortedArrayInto(srcIds);
+        int[] roff = rel.rowOffsets;
+        long[] ctgt = rel.colTargets;
+
+        int srcIdx = 0;
+        int edgePos = (srcLen > 0) ? roff[srcIds[0]] : 0;
+
+        while (ws.status == IMPULSE_VM_OK) {
+            // Fill up to mMax edges directly from CSR (zero intermediate List<long[]>)
+            int len = 0;
+            while (len < mMax && srcIdx < srcLen) {
+                int u = srcIds[srcIdx];
+                int eEnd = roff[u + 1];
+                while (edgePos < eEnd && len < mMax) {
+                    m0[len] = u & 0xFFFFFFFFL;
+                    m1[len] = ctgt[edgePos];
+                    m2[len] = edgePos & 0xFFFFFFFFL;
+                    len++;
+                    edgePos++;
+                }
+                if (edgePos >= eEnd) {
+                    srcIdx++;
+                    if (srcIdx < srcLen) edgePos = roff[srcIds[srcIdx]];
+                }
+            }
+            if (len == 0) break;
+
+            if (stepsRef[0] >= maxSteps) {
+                ws.status = IMPULSE_VM_ERR_GAS_EXHAUSTED;
+                break;
+            }
+            stepsRef[0]++;
+
+            int curWords = Math.max(1, (len + 63) >>> 6);
+            vM0.length = len; vM1.length = len; vM2.length = len; vM3.length = len;
+            ws.vVectors[8] = vM0; ws.vVectors[9] = vM1; ws.vVectors[10] = vM2; ws.vVectors[11] = vM3;
+            ws.fRegs[8].initFromValidatedIds(0xFFFF, len, mf0Ids, len, V11Geometry.P0_DEFAULT, true);
+            ws.setFInitialized(8, true);
+
+            ws.pc = hdrPc + 1;
+            for (int pc = hdrPc + 1; pc < endPc && ws.status == IMPULSE_VM_OK; pc++) {
+                ws.pc = pc;
+                long w = program[pc];
+                int op = (int) (w & 0xFFL);
+                int subop = (int) ((w >>> 8) & 0xFL);
+                int flags = (int) ((w >>> 12) & 0xFL);
+                int s1 = (int) ((w >>> 16) & 0xFL);
+                int dst = (int) ((w >>> 20) & 0xFL);
+                int s3 = (int) ((w >>> 24) & 0xFL);
+                int s2 = (int) ((w >>> 28) & 0xFL);
+                int immLo = (int) ((w >>> 32) & 0xFFFFL);
+                int immHi = (int) ((w >>> 48) & 0xFFFFL);
+
+                switch (op) {
+                    case OP_GATHER_EDGE_ATTR -> {
+                        if (immLo >= view.relations.length || view.relations[immLo] == null) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; break; }
+                        V11Vector col = view.relations[immLo].edgeAttrs.get(immHi);
+                        V11Vector idxV = ws.vVectors[s1];
+                        if (col == null) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; break; }
+                        if (idxV == null || idxV.elemTag != V11Vector.TAG_U64) { ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; break; }
+                        Arrays.fill(scratchValid, 0, curWords, 0L);
+                        double[] colF64 = col.f64Data;
+                        long[] idxData = idxV.i64Data;
+                        int colLen = col.length;
+                        for (int i = 0; i < len; i++) {
+                            if (!idxV.isValidAt(i)) continue;
+                            long e64 = idxData[i];
+                            if (e64 < 0L || e64 >= colLen) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; break; }
+                            int e = (int) e64;
+                            if (col.isValidAt(e)) {
+                                scratchF64[i] = (col.elemTag == V11Vector.TAG_F64) ? colF64[e] : (double) col.i64Data[e];
+                                scratchValid[i >>> 6] |= (1L << (i & 63));
+                            }
+                        }
+                        if (ws.status != IMPULSE_VM_OK) break;
+                        vGather.length = len;
+                        ws.vVectors[dst] = vGather;
+                    }
+                    case OP_VEC_CMP -> {
+                        V11Vector lhs = ws.vVectors[s1];
+                        if (lhs == null || lhs.elemTag != V11Vector.TAG_F64) { ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; break; }
+                        boolean scalar = (flags & FLAG_SCALAR_RHS) != 0;
+                        Arrays.fill(scratchCmpValid, 0, curWords, 0L);
+                        Arrays.fill(scratchCmpData, 0, curWords, 0L);
+                        boolean rScOk = scalar && ws.isRValid(s2);
+                        double rSc = rScOk ? Double.longBitsToDouble(ws.rRegs[s2]) : Double.NaN;
+                        V11Vector rv = scalar ? null : ws.vVectors[s2];
+                        double[] lF64 = lhs.f64Data;
+                        for (int i = 0; i < len; i++) {
+                            if (!lhs.isValidAt(i)) continue;
+                            boolean hasY = scalar ? rScOk : (rv != null && rv.elemTag == V11Vector.TAG_F64 && i < rv.length && rv.isValidAt(i));
+                            if (!hasY) continue;
+                            double x = lF64[i];
+                            double y = scalar ? rSc : rv.f64Data[i];
+                            if (Double.isNaN(x) || Double.isNaN(y)) continue;
+                            boolean res = switch (subop) {
+                                case 0 -> x == y; case 1 -> x != y; case 2 -> x < y;
+                                case 3 -> x <= y; case 4 -> x > y; case 5 -> x >= y;
+                                default -> false;
+                            };
+                            long bit = 1L << (i & 63);
+                            scratchCmpValid[i >>> 6] |= bit;
+                            if (res) scratchCmpData[i >>> 6] |= bit;
+                        }
+                        vCmp.length = len;
+                        ws.vVectors[dst] = vCmp;
+                    }
+                    case OP_SET_CONVERT -> {
+                        V11Vector bv = ws.vVectors[s1];
+                        if (bv == null || bv.elemTag != V11Vector.TAG_BOOL_3VL) { ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; break; }
+                        int cnt = 0;
+                        long[] bValid = bv.validBits;
+                        long[] bData = bv.boolDataBits;
+                        for (int wi = 0; wi < curWords; wi++) {
+                            long m = bValid[wi] & bData[wi];
+                            int base = wi << 6;
+                            while (m != 0L) {
+                                int idx = base + Long.numberOfTrailingZeros(m);
+                                if (idx < len) scratchFIds[cnt++] = idx;
+                                m &= (m - 1L);
+                            }
+                        }
+                        ws.fRegs[dst].initFromValidatedIds(0xFFFF, len, scratchFIds, cnt, V11Geometry.P0_DEFAULT, true);
+                        ws.setFInitialized(dst, true);
+                    }
+                    case OP_MORSEL_COMMIT -> {
+                        V11Vector ids = ws.vVectors[s1];
+                        if (ids == null || ids.elemTag != V11Vector.TAG_U64) { ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; break; }
+                        long[] targetBits = switch (dst) {
+                            case 0 -> sinkBits0; case 1 -> sinkBits1; case 2 -> sinkBits2; case 3 -> sinkBits3;
+                            case 4 -> sinkBits4; case 5 -> sinkBits5; case 6 -> sinkBits6; case 7 -> sinkBits7;
+                            default -> null;
+                        };
+                        boolean masked = (flags & FLAG_MASKED_S3) != 0;
+                        V11Frontier fm = masked ? ws.fRegs[s3] : ws.fRegs[8];
+                        if (fm == null || fm.multiLane || !ws.isFInitialized(masked ? s3 : 8)) {
+                            ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; break;
+                        }
+                        int mc = fm.cardinality();
+                        int nM = fm.toSortedArrayInto(scratchFIds);
+                        long[] idData = ids.i64Data;
+                        if (targetBits != null) {
+                            for (int k = 0; k < nM; k++) {
+                                int i = scratchFIds[k];
+                                if (ids.isValidAt(i)) {
+                                    int v = (int) idData[i];
+                                    if (v >= 0 && (v >>> 6) < targetBits.length) {
+                                        targetBits[v >>> 6] |= (1L << (v & 63));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (ws.status == IMPULSE_VM_OK) ws.pc = pc + 1;
+            }
+        }
+
+        // Clean up morsel-private registers 8..15
+        for (int k = 8; k < 16; k++) {
+            ws.setFInitialized(k, false);
+            ws.vVectors[k] = null;
+        }
+        if (ws.status == IMPULSE_VM_OK) {
+            for (int d = 0; d < 8; d++) {
+                if ((commitMaskBits & (1 << d)) != 0 && sinkDom[d] >= view.domainCards.length) {
+                    ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                    return;
+                }
+            }
+            boolean anyNonEmpty = false;
+            for (int d = 0; d < 8; d++) {
+                if ((commitMaskBits & (1 << d)) != 0) {
+                    int dom = sinkDom[d];
+                    int dcard = (int) view.domainCards[dom];
+                    int dw = Math.max(1, (dcard + 63) >>> 6);
+                    long[] b = switch (d) {
+                        case 0 -> sinkBits0; case 1 -> sinkBits1; case 2 -> sinkBits2; case 3 -> sinkBits3;
+                        case 4 -> sinkBits4; case 5 -> sinkBits5; case 6 -> sinkBits6; case 7 -> sinkBits7;
+                        default -> null;
+                    };
+                    int card = 0;
+                    for (int wi = 0; wi < dw; wi++) card += Long.bitCount(b[wi]);
+                    if (card > 0) anyNonEmpty = true;
+                    ws.fRegs[d].initFromDenseBits(dom, dcard, b, dw, card, ws.geometry, false);
+                    ws.setFInitialized(d, true);
+                }
+            }
+            ws.zf = !anyNonEmpty;
+            ws.pc = endPc + 1;
+        }
     }
 
     private static void execFilterMorsel(
