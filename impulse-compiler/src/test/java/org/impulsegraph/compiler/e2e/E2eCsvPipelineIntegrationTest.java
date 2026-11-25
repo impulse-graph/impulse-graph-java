@@ -199,6 +199,8 @@ public class E2eCsvPipelineIntegrationTest {
 					cleanRel.getValiditySegments().add(valSeg);
 				}
 			}
+			cleanRel.setCatalogMetadata(lr.relationId(), origRel.getSrcDomainId(), origRel.getTgtDomainId(),
+					origRel.getEncodingId(), origRel.getSectionFeatures(), origRel.getComponentIds());
 			cleanRel.setAttributeNames(relAttrNames);
 			orderedMap.put(relName, cleanRel);
 		}

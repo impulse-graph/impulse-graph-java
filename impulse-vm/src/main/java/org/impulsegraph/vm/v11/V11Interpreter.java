@@ -129,6 +129,14 @@ public final class V11Interpreter {
         if (!V11Validator.validateInto(program, ws)) {
             return ws.status;
         }
+        return executePreValidated(program, bind, ws, maxSteps);
+    }
+
+    /**
+     * Execute an already-validated v0.11 program (Lifecycle 3/4: validated once at bind time,
+     * zero per-query re-validation overhead).
+     */
+    public static int executePreValidated(long[] program, SnapshotBinding bind, V11Workspace ws, long maxSteps) {
         ws.pc = 0;
         ws.status = V11IsaTables.IMPULSE_VM_OK;
         final int n = program.length;

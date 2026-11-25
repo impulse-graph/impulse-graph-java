@@ -36,6 +36,7 @@ class V11EmitterEndToEndTest {
         for (int i = 0; i < targets.length; i++) tgt.setAtIndex(ValueLayout.JAVA_INT, i, targets[i]);
 
         RelationSnapshot rel = new RelationSnapshot(arena, 5, 4, off, tgt);
+        rel.setCatalogMetadata(0, 0, 0, (byte) 0, 0L, new int[0]);
         return new GraphSnapshot(arena, Map.of("NEXT", rel));
     }
 
@@ -110,6 +111,7 @@ class V11EmitterEndToEndTest {
             for (int i = 0; i < targets.length; i++) tgt.setAtIndex(ValueLayout.JAVA_INT, i, targets[i]);
 
             RelationSnapshot rel = new RelationSnapshot(arena, 4, 3, off, tgt);
+            rel.setCatalogMetadata(0, 0, 0, (byte) 0, 0L, new int[0]);
             ImpulseGraphSnapshot snap = new GraphSnapshot(arena, Map.of("FOLLOWS", rel));
             V11SnapshotView view = V11SnapshotAdapter.from(snap);
 

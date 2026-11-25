@@ -258,8 +258,10 @@ public final class V11FixtureBatchMain {
                     rowOff = new int[nSrc + 1];
                     colTgt = new long[0];
                 }
-                relViews[rid] = new V11SnapshotView.RelView(
-                        rid, sd, td, rowOff, colTgt, edgeAttrsTbl.get(rid), fl[0], fl[1], fl[2], fl[3]);
+                int nTgt = (td < domCards.length) ? domCards[td] : 0;
+                relViews[rid] = V11OffHeapFixtureBuilder.buildRel(
+                        rid, sd, td, nTgt, rowOff, colTgt, edgeAttrsTbl.get(rid),
+                        fl[0], fl[1], fl[2], fl[3], true);
             }
             V11SnapshotView view = new V11SnapshotView(domCardsL, relViews, nodeAttrs, keyCatalogs, indexes);
             bind = new V11Interpreter.SnapshotBinding(domCards, view);

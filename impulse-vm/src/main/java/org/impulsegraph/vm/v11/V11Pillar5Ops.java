@@ -128,21 +128,6 @@ public final class V11Pillar5Ops {
         ws.setFInitialized(dst, true);
     }
 
-    @SuppressWarnings("unchecked")
-    private static List<int[]>[] buildRevAdj(V11SnapshotView view, V11SnapshotView.RelView rel) {
-        int nTgt = (int) view.domainCards[rel.tgtDom];
-        int nSrc = (int) view.domainCards[rel.srcDom];
-        List<int[]>[] rev = new List[nTgt];
-        for (int v = 0; v < nTgt; v++) rev[v] = new ArrayList<>();
-        for (int u = 0; u < nSrc; u++) {
-            for (int e = rel.csrRowOffset(u); e < rel.csrRowOffset(u + 1); e++) {
-                int v = rel.csrColTarget(e);
-                if (v >= 0 && v < nTgt) rev[v].add(new int[]{u, e});
-            }
-        }
-        return rev;
-    }
-
     private static double[] vecToF64Dense(V11Vector v) {
         if (v == null || (v.elemTag != V11Vector.TAG_F64 && v.elemTag != V11Vector.TAG_I64 && v.elemTag != V11Vector.TAG_U64)) {
             return null;
@@ -310,7 +295,7 @@ public final class V11Pillar5Ops {
     }
 
     private static TreeMap<Long, Long> laneWalkStepOnce(
-            int subop, V11SnapshotView.RelView rel, List<int[]>[] revAdj, V11Vector edgeMask,
+            int subop, V11SnapshotView.RelView rel, V11Vector edgeMask,
             TreeMap<Long, Long> cur, TreeMap<Long, Long> excl) {
         TreeMap<Long, Long> out = new TreeMap<>();
         boolean doFwd = (subop == 0 || subop == 3 || subop == 4 || subop == 7 || subop == 2 || subop == 8 || subop == 9);
@@ -320,8 +305,9 @@ public final class V11Pillar5Ops {
             for (Map.Entry<Long, Long> entry : cur.entrySet()) {
                 int u = entry.getKey().intValue();
                 long mask = entry.getValue();
-                for (int e = rel.csrRowOffset(u); e < rel.csrRowOffset(u + 1); e++) {
-                    long v = rel.csrColTarget(e);
+                int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+                for (int e = s; e < end; e++) {
+                    long v = rel.csrColTarget(e) & 0xFFFFFFFFL;
                     long ev = (edgeMask == null) ? -1L : (edgeMask.isValidAt(e) ? edgeMask.i64Data[e] : 0L);
                     long ex = excl.getOrDefault(v, 0L);
                     long pass = mask & ev & ~ex;
@@ -333,9 +319,10 @@ public final class V11Pillar5Ops {
             for (Map.Entry<Long, Long> entry : cur.entrySet()) {
                 int v = entry.getKey().intValue();
                 long mask = entry.getValue();
-                for (int[] pair : revAdj[v]) {
-                    long u = pair[0] & 0xFFFFFFFFL;
-                    int e = pair[1];
+                int s = rel.cscRowOffset(v), end = rel.cscRowOffset(v + 1);
+                for (int p = s; p < end; p++) {
+                    long u = rel.cscColSource(p) & 0xFFFFFFFFL;
+                    int e = rel.cscEdgeId(p);
                     long ev = (edgeMask == null) ? -1L : (edgeMask.isValidAt(e) ? edgeMask.i64Data[e] : 0L);
                     long ex = excl.getOrDefault(u, 0L);
                     long pass = mask & ev & ~ex;
@@ -433,8 +420,10 @@ public final class V11Pillar5Ops {
             mAccum = fmlToMap(fd);
         }
 
-        List<int[]>[] revAdj = (isRev || subop == 2 || subop == 8 || subop == 9)
-                ? buildRevAdj(bind.view, rel) : null;
+        boolean needsFwd = (subop == 0 || subop == 3 || subop == 4 || subop == 7 || subop == 2 || subop == 8 || subop == 9);
+        boolean needsRev = (isRev || subop == 2 || subop == 8 || subop == 9);
+        if (needsFwd && !rel.hasCsrSegments()) { ws.status = IMPULSE_VM_ERR_INVALID_OPERAND; return; }
+        if (needsRev && !rel.hasCscSegments()) { ws.status = IMPULSE_VM_ERR_INVALID_OPERAND; return; }
         TreeMap<Long, Long> mSrc = fmlToMap(fSrc);
         int aw = fSrc.allocWidth;
         int ac = fSrc.activeLaneCount;
@@ -442,13 +431,13 @@ public final class V11Pillar5Ops {
         TreeMap<Long, Long> outM;
         boolean stFlag = ws.st;
         switch (subop) {
-            case 0, 1, 2, 7 -> outM = laneWalkStepOnce(subop, rel, revAdj, edgeMask, mSrc, mExcl);
+            case 0, 1, 2, 7 -> outM = laneWalkStepOnce(subop, rel, edgeMask, mSrc, mExcl);
             case 3, 5 -> { // fixpoint_plus
                 TreeMap<Long, Long> visited = new TreeMap<>();
-                TreeMap<Long, Long> frontier = laneWalkStepOnce(subop, rel, revAdj, edgeMask, mSrc, mExcl);
+                TreeMap<Long, Long> frontier = laneWalkStepOnce(subop, rel, edgeMask, mSrc, mExcl);
                 while (!frontier.isEmpty()) {
                     visited = unionMl(visited, frontier);
-                    frontier = laneWalkStepOnce(subop, rel, revAdj, edgeMask, frontier, unionMl(mExcl, visited));
+                    frontier = laneWalkStepOnce(subop, rel, edgeMask, frontier, unionMl(mExcl, visited));
                 }
                 outM = visited;
                 stFlag = true;
@@ -457,7 +446,7 @@ public final class V11Pillar5Ops {
                 TreeMap<Long, Long> visited = diffMl(mSrc, mExcl);
                 TreeMap<Long, Long> frontier = visited;
                 while (!frontier.isEmpty()) {
-                    TreeMap<Long, Long> next = laneWalkStepOnce(subop, rel, revAdj, edgeMask, frontier, unionMl(mExcl, visited));
+                    TreeMap<Long, Long> next = laneWalkStepOnce(subop, rel, edgeMask, frontier, unionMl(mExcl, visited));
                     visited = unionMl(visited, next);
                     frontier = next;
                 }
@@ -950,12 +939,15 @@ public final class V11Pillar5Ops {
                 }
             }
         } else {
-            List<int[]>[] revAdj = buildRevAdj(bind.view, rel);
+            if (!rel.hasCscSegments()) { ws.status = IMPULSE_VM_ERR_INVALID_OPERAND; return; }
             for (int v = 0; v < ls.length; v++) {
                 int vBase = v * k;
-                for (int[] pair : revAdj[v]) {
-                    int u = pair[0];
-                    hits += relaxLaneEdgeFlat(v, vBase, u, u * k, pair[1], k, semi, mask, scalarW, scalarWValid, scalarWVal, weightCol,
+                int s = rel.cscRowOffset(v);
+                int eEnd = rel.cscRowOffset(v + 1);
+                for (int p = s; p < eEnd; p++) {
+                    int u = rel.cscColSource(p);
+                    int e = rel.cscEdgeId(p);
+                    hits += relaxLaneEdgeFlat(v, vBase, u, u * k, e, k, semi, mask, scalarW, scalarWValid, scalarWVal, weightCol,
                             snapIn, snapInValid, outVals, outValid, outWit, outWitValid);
                 }
             }

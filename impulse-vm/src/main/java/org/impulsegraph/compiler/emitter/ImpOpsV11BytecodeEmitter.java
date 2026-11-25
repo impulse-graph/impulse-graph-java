@@ -38,11 +38,12 @@ public final class ImpOpsV11BytecodeEmitter {
         /** Executes via {@link V11Interpreter} on a bound {@link V11SnapshotView}. */
         public int executeInterpreted(V11SnapshotView view, V11Workspace ws, long gasLimit) {
             container.loadIntoWorkspace(ws);
-            ws.gasRemaining = gasLimit;
             int[] domCards = new int[view.domainCards.length];
             for (int i = 0; i < domCards.length; i++) domCards[i] = (int) view.domainCards[i];
             V11Interpreter.SnapshotBinding binding = new V11Interpreter.SnapshotBinding(domCards, view);
-            V11Interpreter.execute(container.codeWords, binding, ws);
+            ws.reset();
+            ws.gasRemaining = gasLimit;
+            V11Interpreter.executePreValidated(container.codeWords, binding, ws, gasLimit);
             return ws.status;
         }
     }
@@ -115,8 +116,10 @@ public final class ImpOpsV11BytecodeEmitter {
                     b.emit(V11IsaTables.OP_MORSEL_COMMIT, V11IsaTables.SUBOP_MORSEL_COMMIT_YIELD_FRONTIER,
                             V11IsaTables.FLAG_ACCUM | V11IsaTables.FLAG_MASKED_S3,
                             dstF, 9 /*M1=tgt_id*/, 0, activeMaskF, 0);
-                    int endPc = b.emit(V11IsaTables.OP_MORSEL_END, V11IsaTables.SUBOP_MORSEL_END_END, 0, 0, 0, 0, 0, 0);
-                    b.patchImm16Hi(hdrPc, endPc - hdrPc);
+                    int endPc = b.emitU16(V11IsaTables.OP_MORSEL_END, V11IsaTables.SUBOP_MORSEL_END_END, 0, 0, 0, 0, 0, 0, 0);
+                    int span = endPc - hdrPc;
+                    b.patchImm16Hi(hdrPc, span);
+                    b.patchImm16Hi(endPc, span);
                 } else {
                     int wsub = (walk.direction() == ScmWalk.Direction.REVERSE_CSC)
                             ? V11IsaTables.SUBOP_WALK_REV : V11IsaTables.SUBOP_WALK_FWD;

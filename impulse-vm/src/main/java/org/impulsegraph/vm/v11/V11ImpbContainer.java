@@ -255,7 +255,7 @@ public final class V11ImpbContainer {
                 } else if (elemTag == V11Vector.TAG_BOOL_3VL) {
                     long[] d = new long[nWords];
                     for (int k = 0; k < nWords; k++) d[k] = buf.getLong();
-                    vec = V11Vector.ofBool3vl(elemCount, d, validBits);
+                    vec = V11Vector.ofBool3vl(elemCount, validBits, d);
                     off += nWords * 8;
                 } else if (elemTag == V11Vector.TAG_STR) {
                     String[] d = new String[elemCount];

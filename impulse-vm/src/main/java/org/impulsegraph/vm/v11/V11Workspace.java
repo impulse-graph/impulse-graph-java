@@ -242,7 +242,7 @@ public final class V11Workspace {
         gasRemaining = Long.MAX_VALUE;
         fValidMask = 0;
         callDepth = 0;
-        Arrays.fill(spillKind, 0, SPILL_PER_FRAME, SPILL_EMPTY);
+        Arrays.fill(spillKind, SPILL_EMPTY);
         for (int i = 0; i < 16; i++) {
             fRegs[i].tier = V11Frontier.TIER_EMPTY;
             fRegs[i].cachedCard = 0;
@@ -252,7 +252,10 @@ public final class V11Workspace {
             vVectors[i] = null;
             vLen[i] = 0;
         }
-        outputs.clear();
+        outputSlotMask = 0;
+        if (overflowOutputs != null && !overflowOutputs.isEmpty()) overflowOutputs.clear();
+        if (!strTable.isEmpty()) strTable.clear();
+        nextStrHandle = 1L;
         arena.reset();
     }
 
