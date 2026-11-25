@@ -110,21 +110,16 @@ public final class V11Pillar5Ops {
 
     private static void writeFml(V11Workspace ws, int dst, int domId, int domCard,
                                  int allocWidth, int activeLaneCount, TreeMap<Long, Long> map) {
-        V11Frontier f = ws.fRegs[dst];
-        f.resetEmpty(domId, domCard);
-        f.multiLane = true;
-        f.allocWidth = allocWidth;
-        f.activeLaneCount = activeLaneCount;
         int n = map.size();
-        f.mlCount = n;
-        f.mlNodes = new long[n];
-        f.mlMasks = new long[n];
+        long[] nodes = new long[n];
+        long[] masks = new long[n];
         int i = 0;
         for (Map.Entry<Long, Long> e : map.entrySet()) {
-            f.mlNodes[i] = e.getKey();
-            f.mlMasks[i] = e.getValue();
+            nodes[i] = e.getKey();
+            masks[i] = e.getValue();
             i++;
         }
+        ws.fRegs[dst].initMultiLane(domId, domCard, allocWidth, activeLaneCount, nodes, masks, ws.geometry);
         ws.setFInitialized(dst, true);
     }
 
@@ -577,7 +572,12 @@ public final class V11Pillar5Ops {
             valid = V11Vector.allocValidAllTrue(ac);
         }
         for (int i = 0; i < fa.mlCount; i++) {
-            int u = (int) fa.mlNodes[i];
+            long u64 = fa.mlNodes[i];
+            int u = (int) u64;
+            if (u64 < 0L || u < 0 || u >= attr.length) {
+                ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                return;
+            }
             if (!attr.isValidAt(u)) continue;
             double v = (attr.elemTag == V11Vector.TAG_F64) ? attr.f64Data[u] : (double) attr.i64Data[u];
             long lm = fa.mlMasks[i];
@@ -690,8 +690,13 @@ public final class V11Pillar5Ops {
             for (int i = 0; i < n; i++) {
                 if (mask != null && !mask.contains(i)) continue;
                 if (!ids.isValidAt(i)) continue;
-                int u = (int) ids.i64Data[i];
-                if (u >= 0 && u < col.length && col.isValidAt(u)) {
+                long u64 = ids.i64Data[i];
+                int u = (int) u64;
+                if (u64 < 0L || u < 0 || u >= col.length) {
+                    ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                    return;
+                }
+                if (col.isValidAt(u)) {
                     double sc = simMetric(metric, q, col.embData[u]);
                     if (!Double.isNaN(sc)) {
                         out[i] = sc;
@@ -720,9 +725,15 @@ public final class V11Pillar5Ops {
             for (int i = 0; i < n; i++) {
                 if (mask != null && !mask.contains(i)) continue;
                 if (!va.isValidAt(i) || !vb.isValidAt(i)) continue;
-                int u = (int) va.i64Data[i];
-                int v = (int) vb.i64Data[i];
-                if (u >= 0 && u < col.length && v >= 0 && v < col.length && col.isValidAt(u) && col.isValidAt(v)) {
+                long u64 = va.i64Data[i];
+                long v64 = vb.i64Data[i];
+                int u = (int) u64;
+                int v = (int) v64;
+                if (u64 < 0L || v64 < 0L || u < 0 || u >= col.length || v < 0 || v >= col.length) {
+                    ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                    return;
+                }
+                if (col.isValidAt(u) && col.isValidAt(v)) {
                     double sc = simMetric(metric, col.embData[u], col.embData[v]);
                     if (!Double.isNaN(sc)) {
                         out[i] = sc;

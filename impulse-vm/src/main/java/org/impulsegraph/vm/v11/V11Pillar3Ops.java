@@ -1445,7 +1445,12 @@ public final class V11Pillar3Ops {
                             boolean hasV = scalar ? (rOk && !Double.isNaN(rVal)) : (vals != null && vals.elemTag == V11Vector.TAG_F64 && vals.isValidAt(i));
                             if (!hasV) continue;
                             double v = scalar ? rVal : vals.f64Data[i];
-                            int ti = (int) ids.i64Data[i];
+                            long tgt64 = ids.i64Data[i];
+                            int ti = (int) tgt64;
+                            if (tgt64 < 0L || ti < 0 || ti >= accVF64[dst].length) {
+                                ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                                return;
+                            }
                             if (subop == 2) {
                                 double prev = accVF64Valid[dst][ti] ? accVF64[dst][ti] : 0.0;
                                 double sum = prev + v;
@@ -1477,7 +1482,12 @@ public final class V11Pillar3Ops {
                             boolean hasV = scalar ? ws.isRValid(s2) : (vals != null && (vals.elemTag == V11Vector.TAG_U64 || vals.elemTag == V11Vector.TAG_I64) && vals.isValidAt(i));
                             if (!hasV) continue;
                             long v = scalar ? ws.rRegs[s2] : vals.i64Data[i];
-                            int ti = (int) ids.i64Data[i];
+                            long tgt64 = ids.i64Data[i];
+                            int ti = (int) tgt64;
+                            if (tgt64 < 0L || ti < 0 || ti >= accVU64[dst].length) {
+                                ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                                return;
+                            }
                             if (!accVU64Valid[dst][ti]) {
                                 accVU64[dst][ti] = v;
                                 accVU64Valid[dst][ti] = true;

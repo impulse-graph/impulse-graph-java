@@ -264,10 +264,10 @@ public final class V11Pillar4MathOps {
                     case SUBOP_VEC_MATH_EXP_LOG_EXP2   -> Math.pow(2.0, a);
                     case SUBOP_VEC_MATH_EXP_LOG_EXP10  -> Math.pow(10.0, a);
                     case SUBOP_VEC_MATH_EXP_LOG_EXPM1  -> Math.expm1(a);
-                    case SUBOP_VEC_MATH_EXP_LOG_LOG    -> Math.log(a);
-                    case SUBOP_VEC_MATH_EXP_LOG_LOG2   -> Math.log(a) / LN_2;
-                    case SUBOP_VEC_MATH_EXP_LOG_LOG10  -> Math.log10(a);
-                    case SUBOP_VEC_MATH_EXP_LOG_LOG1P  -> Math.log1p(a);
+                    case SUBOP_VEC_MATH_EXP_LOG_LOG    -> (a <= 0.0) ? Double.NaN : Math.log(a);
+                    case SUBOP_VEC_MATH_EXP_LOG_LOG2   -> (a <= 0.0) ? Double.NaN : (Math.log(a) / LN_2);
+                    case SUBOP_VEC_MATH_EXP_LOG_LOG10  -> (a <= 0.0) ? Double.NaN : Math.log10(a);
+                    case SUBOP_VEC_MATH_EXP_LOG_LOG1P  -> (a <= -1.0) ? Double.NaN : Math.log1p(a);
                     case SUBOP_VEC_MATH_EXP_LOG_CBRT   -> Math.cbrt(a);
                     case SUBOP_VEC_MATH_EXP_LOG_ERF    -> erfApprox(a);
                     case SUBOP_VEC_MATH_EXP_LOG_ERFC   -> erfcApprox(a);
@@ -403,7 +403,7 @@ public final class V11Pillar4MathOps {
                     if (scalarRhs ? !sValid : !vb.isValidAt(i)) continue;
                     double alpha = scalarRhs ? sVal : vecToF64(vb, i);
                     if (Double.isNaN(alpha)) continue;
-                    res = (x >= 0.0) ? x : (alpha * x);
+                    res = (x > 0.0) ? x : (alpha * x);
                 }
                 case SUBOP_VEC_MATH_ACT_SIGMOID -> res = 1.0 / (1.0 + Math.exp(-x));
                 case SUBOP_VEC_MATH_ACT_GELU -> res = 0.5 * x * (1.0 + erfApprox(x / SQRT_2));
