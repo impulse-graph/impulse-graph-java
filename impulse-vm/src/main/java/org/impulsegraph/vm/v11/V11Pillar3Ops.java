@@ -1423,16 +1423,23 @@ public final class V11Pillar3Ops {
                     }
                     case 1 -> { // .yield_lane_or
                         V11Vector ids = ws.vVectors[s1];
-                        V11Vector lms = ws.vVectors[s2];
-                        if (ids == null || ids.elemTag != V11Vector.TAG_U64 || lms == null || lms.elemTag != V11Vector.TAG_U64) {
+                        V11Vector lms = scalar ? null : ws.vVectors[s2];
+                        if (ids == null || ids.elemTag != V11Vector.TAG_U64
+                                || (!scalar && (lms == null || (lms.elemTag != V11Vector.TAG_U64 && lms.elemTag != V11Vector.TAG_I64)))) {
                             ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
                             return;
                         }
+                        boolean rOk = scalar && ws.isRValid(s2);
+                        long rVal = rOk ? ws.rRegs[s2] : 0L;
                         for (int i : commitMask) {
-                            if (ids.isValidAt(i) && lms.isValidAt(i) && lms.i64Data[i] != 0L) {
+                            if (!ids.isValidAt(i)) continue;
+                            boolean hasLm = scalar ? rOk : lms.isValidAt(i);
+                            if (!hasLm) continue;
+                            long lm = scalar ? rVal : lms.i64Data[i];
+                            if (lm != 0L) {
                                 long tgt = ids.i64Data[i];
                                 long prev = accMl[dst].getOrDefault(tgt, 0L);
-                                accMl[dst].put(tgt, prev | lms.i64Data[i]);
+                                accMl[dst].put(tgt, prev | lm);
                             }
                         }
                         ws.pc++;
