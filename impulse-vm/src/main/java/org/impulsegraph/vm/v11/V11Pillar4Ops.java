@@ -314,6 +314,12 @@ public final class V11Pillar4Ops {
                     return;
                 }
                 int[] ids = f.toSortedArray();
+                for (int u : ids) {
+                    if (u < 0 || u >= col.length) {
+                        ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                        return;
+                    }
+                }
                 ws.vVectors[dst] = gatherFromVec(col, ids, null, null);
                 ws.pc++;
             }
