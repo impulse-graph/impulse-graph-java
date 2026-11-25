@@ -490,12 +490,14 @@ public final class V11Pillar4Ops {
                 if (col.elemTag == V11Vector.TAG_F64) {
                     double x = col.f64Data[u];
                     boolean loOk = scalarRhs ? V11Pillar4MathOps.isScalarF64BitsValid(ws, s2)
-                            : (vS2 != null && u < vS2.length && vS2.isValidAt(u));
+                            : (vS2 != null && (vS2.elemTag == V11Vector.TAG_F64 || vS2.elemTag == V11Vector.TAG_I64 || vS2.elemTag == V11Vector.TAG_U64)
+                               && u < vS2.length && vS2.isValidAt(u));
                     if (loOk) {
                         double lo = scalarRhs ? V11Pillar4MathOps.readScalarF64Bits(ws, s2) : vecElemAsF64(vS2, u);
                         if (subop == SUBOP_NODE_FILTER_BETWEEN) {
                             boolean hiOk = scalarRhs ? V11Pillar4MathOps.isScalarF64BitsValid(ws, s3)
-                                    : (vS3 != null && u < vS3.length && vS3.isValidAt(u));
+                                    : (vS3 != null && (vS3.elemTag == V11Vector.TAG_F64 || vS3.elemTag == V11Vector.TAG_I64 || vS3.elemTag == V11Vector.TAG_U64)
+                                       && u < vS3.length && vS3.isValidAt(u));
                             if (hiOk) {
                                 double hi = scalarRhs ? V11Pillar4MathOps.readScalarF64Bits(ws, s3) : vecElemAsF64(vS3, u);
                                 keep = (x >= lo && x <= hi);

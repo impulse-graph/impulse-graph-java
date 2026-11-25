@@ -482,10 +482,10 @@ public final class V11Pillar5Ops {
     private static void execLaneFilterQuorum(V11Workspace ws, int subop, int flags, int dst, int s1, int s2, int imm16Lo) {
         V11Frontier fa = getFml(ws, s1);
         if (fa == null) return;
-        int k;
+        long k;
         if ((flags & FLAG_SCALAR_RHS) != 0) {
             if (!ws.isRValid(s2)) { ws.status = IMPULSE_VM_ERR_INVALID_OPERAND; return; }
-            k = (int) ws.rRegs[s2];
+            k = ws.rRegs[s2];
         } else {
             k = imm16Lo;
         }
@@ -500,11 +500,11 @@ public final class V11Pillar5Ops {
             out.resetEmpty(domId, domCard);
         }
         for (int i = 0; i < fa.mlCount; i++) {
-            int p = Long.bitCount(fa.mlMasks[i]);
+            long p = Long.bitCount(fa.mlMasks[i]);
             boolean keep = switch (subop) {
                 case 0 -> p >= k;
                 case 1 -> p == k;
-                case 2 -> p > 0 && p <= k;
+                case 2 -> p > 0L && p <= k;
                 default -> false;
             };
             if (keep) out.add((int) fa.mlNodes[i]);
