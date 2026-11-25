@@ -1849,12 +1849,13 @@ public final class V11Pillar4Ops {
                 V11Vector out;
                 if (masked) {
                     int[] ids = mask.toSortedArray();
-                    int[] keep = new int[ids.length];
-                    int k = 0;
                     for (int idx : ids) {
-                        if (idx >= 0 && idx < v.length) keep[k++] = idx;
+                        if (idx < 0 || idx >= v.length) {
+                            ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                            return;
+                        }
                     }
-                    out = gatherFromVec(v, Arrays.copyOf(keep, k), null, null);
+                    out = gatherFromVec(v, ids, null, null);
                 } else {
                     out = v.shallowCopy();
                 }
