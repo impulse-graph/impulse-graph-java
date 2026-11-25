@@ -18,6 +18,13 @@ import org.impulsegraph.compiler.cypher.CypherCompiler;
 import org.impulsegraph.compiler.datalog.ImpLogCompiler;
 import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
 import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter.InstructionWord;
+import org.impulsegraph.compiler.emitter.ImpOpsV11BytecodeEmitter;
+import org.impulsegraph.vm.v11.V11Interpreter;
+import org.impulsegraph.vm.v11.V11IsaTables;
+import org.impulsegraph.vm.v11.V11SnapshotAdapter;
+import org.impulsegraph.vm.v11.V11SnapshotView;
+import org.impulsegraph.vm.v11.V11Vector;
+import org.impulsegraph.vm.v11.V11Workspace;
 import org.impulsegraph.compiler.impk.ImpKCompiler;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.passes.stage1.AlgebraicTypeInferencePass;
@@ -361,15 +368,30 @@ public class E2eCsvPipelineIntegrationTest {
 		assertEquals(22, rawEntries.size(), "query_manifest.json must contain all 22 canonical queries");
 
 		QueryCompilerEngine compilerEngine = new QueryCompilerEngine();
+		V11SnapshotView v11View = V11SnapshotAdapter.from(orderedSnapshot);
+		int[] v11DomCards = new int[v11View.domainCards.length];
+		int v11MaxCard = 64;
+		for (int i = 0; i < v11DomCards.length; i++) {
+			v11DomCards[i] = (int) v11View.domainCards[i];
+			if (v11DomCards[i] > v11MaxCard) v11MaxCard = v11DomCards[i];
+		}
+		V11Interpreter.SnapshotBinding v11Binding = new V11Interpreter.SnapshotBinding(v11DomCards, v11View);
+		V11Workspace v11Ws = new V11Workspace(v11MaxCard);
 		List<Executable> queryChecks = new ArrayList<>();
 
 		for (Object entryObj : rawEntries) {
 			Map<String, Object> entry = (Map<String, Object>) entryObj;
 			String id = (String) entry.get("id");
 			String language = (String) entry.get("language");
+			String status = (String) entry.get("status");
 			String queryFileRel = (String) entry.get("query_file");
 			String expectedScmFileRel = (String) entry.get("expected_scm_file");
+			int seedDomainId = ((Number) entry.get("seed_domain_id")).intValue();
 			int seedNodeDenseId = ((Number) entry.get("seed_node_dense_id")).intValue();
+			List<Long> seedNodesList = new ArrayList<>();
+			if (entry.get("seed_nodes") instanceof List<?> sn) {
+				for (Object o : sn) seedNodesList.add(((Number) o).longValue());
+			}
 
 			List<Integer> expectedDenseIds = new ArrayList<>();
 			for (Object n : (List<Object>) entry.get("expected_dense_ids")) {
@@ -430,7 +452,44 @@ public class E2eCsvPipelineIntegrationTest {
 						() -> assertQueryOutputMatches(id + " (Opt ON)", resOptOn, expectedDenseIds,
 								expectedCardinality, expectedScalarInt, isScalarCountQuery),
 						() -> assertQueryOutputMatches(id + " (Opt OFF)", resOptOff, expectedDenseIds,
-								expectedCardinality, expectedScalarInt, isScalarCountQuery));
+								expectedCardinality, expectedScalarInt, isScalarCountQuery),
+						() -> {
+							// Stage D: ImpulseVM v0.11.0 E2E Execution (all 21 active queries)
+							if ("pending_capability".equals(status)) return;
+							var v11On = ImpOpsV11BytecodeEmitter.emit(stage1OptOn.ast(), orderedSnapshot, seedDomainId);
+							var v11Off = ImpOpsV11BytecodeEmitter.emit(stage1OptOff.ast(), orderedSnapshot, seedDomainId);
+							for (var pair : List.of(Map.entry("v11 Opt ON", v11On), Map.entry("v11 Opt OFF", v11Off))) {
+								v11Ws.params.clear();
+								if (!seedNodesList.isEmpty()) {
+									long[] arr = seedNodesList.stream().mapToLong(Long::longValue).toArray();
+									v11Ws.params.put(0, new V11Workspace.ParamVec(V11Vector.ofU64(arr, null)));
+								} else {
+									v11Ws.params.put(0, new V11Workspace.ParamFrontier(
+											pair.getValue().startDomainId(), new long[]{seedNodeDenseId}));
+								}
+								pair.getValue().container().loadIntoWorkspace(v11Ws);
+								V11Interpreter.execute(pair.getValue().codeWords(), v11Binding, v11Ws);
+								assertEquals(V11IsaTables.IMPULSE_VM_OK, v11Ws.status,
+										pair.getKey() + " failed on " + id);
+								V11Vector ov = v11Ws.outputs.get(0);
+								assertNotNull(ov, pair.getKey() + " missing OP_COLLECT output on " + id);
+								if (isScalarCountQuery) {
+									assertEquals(expectedScalarInt, ov.i64Data[0],
+											pair.getKey() + " scalar mismatch on " + id);
+								} else {
+									List<Integer> actualV11Ids = new ArrayList<>();
+									if (ov.elemTag == V11Vector.TAG_BOOL_3VL && ov.boolDataBits != null) {
+										for (int u = 0; u < ov.length; u++) {
+											if (((ov.boolDataBits[u >>> 6] >>> (u & 63)) & 1L) != 0L) actualV11Ids.add(u);
+										}
+									} else if (ov.i64Data != null) {
+										for (int u = 0; u < ov.length; u++) actualV11Ids.add((int) ov.i64Data[u]);
+									}
+									assertEquals(expectedDenseIds, actualV11Ids,
+											pair.getKey() + " dense IDs mismatch on " + id);
+								}
+							}
+						});
 			});
 		}
 

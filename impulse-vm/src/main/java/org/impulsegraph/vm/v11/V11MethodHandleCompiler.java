@@ -121,6 +121,7 @@ public final class V11MethodHandleCompiler {
 
         /** Execute the compiled program to HALT or error with zero per-step allocation. */
         public int execute(V11Workspace ws, long maxSteps) {
+            ws.ensureLegacyJitBuffers();
             if (!validation.isOk()) {
                 ws.pc = validation.badPc();
                 ws.status = validation.status();
@@ -484,6 +485,7 @@ public final class V11MethodHandleCompiler {
     }
 
     private static void opVecInitF64(int dst, int len, double fill, V11Workspace ws) {
+        ws.ensureLegacyJitBuffers();
         Arrays.fill(ws.vF64[dst], 0, len, fill);
         ws.vLen[dst] = len;
     }

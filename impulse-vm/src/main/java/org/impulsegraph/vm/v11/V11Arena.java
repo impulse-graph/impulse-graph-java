@@ -48,16 +48,11 @@ public final class V11Arena {
     public int[] revEid = new int[64];
 
     public V11Arena(int preallocLen) {
-        int cap = Math.max(64, preallocLen);
-        int words = Math.max(1, (cap + 63) >>> 6);
         for (int i = 0; i < 16; i++) {
             vecPool[i] = new V11Vector();
         }
-        for (int i = 0; i < 8; i++) {
-            doublePool[i] = new double[cap];
-            longPool[i] = new long[Math.max(cap, words)];
-            intPool[i] = new int[cap];
-        }
+        // Buffers grow-once on first use and are reused forever via reset(),
+        // preserving 0 B/query steady-state without eager multi-MB startup bloat per thread.
     }
 
     /** O(1) zero-allocation rewind between queries. */

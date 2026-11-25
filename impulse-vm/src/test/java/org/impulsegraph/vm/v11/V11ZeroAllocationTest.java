@@ -123,6 +123,18 @@ public final class V11ZeroAllocationTest {
                 enc(0x52, 0, 0, 1, 2, 0, 0, 0),
                 enc(0x00, 0, 0, 0, 0, 0, 0, 0),
             },
+            // 7. 2-hop walk + OP_COLLECT (frontier bitset, frontier ids, scalar)
+            {
+                enc(0x05, 0, 0, 0, 0, 0, 0, 0),          // R0 = 0
+                enc(0x20, 0, 0, 0, 0, 0, 0, 0),          // F0 = seed(R0, dom=0)
+                enc(0x30, 0, 0, 1, 0, 0, 0, 0),          // F1 = walk.fwd(F0, rel=0)
+                enc(0x30, 0, 0, 2, 1, 0, 0, 0),          // F2 = walk.fwd(F1, rel=0)
+                enc(0x24, 0, 0, 1, 2, 0, 0, 0),          // R1 = card(F2)
+                enc(0x57, 0, 0, 0, 2, 0, 0, 0),          // COLLECT.bitset(F2 -> slot 0)
+                enc(0x57, 0, 1, 0, 2, 0, 0, 1),          // COLLECT.ids(F2 -> slot 1)
+                enc(0x57, 0, 3, 0, 1, 0, 0, 2),          // COLLECT.scalar(R1 -> slot 2)
+                enc(0x00, 0, 0, 0, 0, 0, 0, 0),
+            },
         };
 
         V11Workspace ws = new V11Workspace(N);

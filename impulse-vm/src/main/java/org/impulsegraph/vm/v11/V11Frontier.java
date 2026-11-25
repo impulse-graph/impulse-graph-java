@@ -44,7 +44,7 @@ public final class V11Frontier {
     private int pageEpoch = 1;
 
     public final int[] dirtyPageIds = new int[MAX_DIRTY_PGS];
-    public final long[] pageBits    = new long[MAX_DIRTY_PGS * PAGE_WORDS];
+    public long[] pageBits;
     public int dirtyPageCount;
 
     // Tier 2: dense bitset words (sized once to maxDomainCard)
@@ -320,6 +320,9 @@ public final class V11Frontier {
         dirPageId[idx] = pageId;
         dirSlot[idx] = slot;
         dirtyPageIds[slot] = pageId;
+        if (pageBits == null) {
+            pageBits = new long[MAX_DIRTY_PGS * PAGE_WORDS];
+        }
         int base = slot << 6;
         Arrays.fill(pageBits, base, base + PAGE_WORDS, 0L);
         return slot;

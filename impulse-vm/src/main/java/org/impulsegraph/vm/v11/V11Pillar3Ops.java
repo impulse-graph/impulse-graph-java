@@ -222,8 +222,8 @@ public final class V11Pillar3Ops {
         int fastOutCard = (int) view.domainCards[outDom];
         int outWords = Math.max(1, (fastOutCard + 63) >>> 6);
 
-        // Zero-alloc fast path for forward walks (subop 0=fwd, 3=fwd_fixpoint_plus, 4=fwd_fixpoint_star, 7=fwd_bounded)
-        if (subop == 0 || subop == 3 || subop == 4 || subop == 7) {
+        // Zero-alloc fast path for all walk subops (0=fwd, 1=rev, 2=both, 3=fwd_plus, 4=fwd_star, 5=rev_plus, 6=rev_star, 7=fwd_bounded)
+        if (subop >= 0 && subop <= 7) {
             V11Frontier fe = null;
             if ((flags & FLAG_MASKED_S3) != 0) {
                 fe = getF1Bit(ws, s3);
@@ -235,6 +235,10 @@ public final class V11Pillar3Ops {
                 fd = getF1Bit(ws, dst);
                 if (fd == null) return;
                 if (fd.domainId != outDom) { ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH; return; }
+            }
+            boolean needsRev = (subop == 1 || subop == 2 || subop == 5 || subop == 6);
+            if (needsRev) {
+                rel.ensureCsc((int) view.domainCards[rel.tgtDom]);
             }
             long[] exclBits = null;
             if (fe != null && !fe.isEmpty()) {
@@ -248,28 +252,108 @@ public final class V11Pillar3Ops {
                 }
             }
             long[] outBits = ws.arena.allocLongZeroed(outWords);
-            int[] roff = rel.rowOffsets;
-            long[] ctgt = rel.colTargets;
+            int csrRows = rel.csrRowCount();
+            int cscRows = needsRev ? rel.cscRowCount() : 0;
             int srcCard = fSrc.cardinality();
             int[] curQ = ws.arena.allocInt(Math.max(srcCard, fastOutCard));
             int curLen = fSrc.toSortedArrayInto(curQ);
             boolean stFlag = ws.st;
 
             if (subop == 0) {
+                if (rel.isOffHeap() && rel.edgeIdxWidth == 4 && rel.nodeIdWidth == 4) {
+                    var roSeg = rel.csrRowOffsetsSeg;
+                    var ctSeg = rel.csrColTargetsSeg;
+                    for (int i = 0; i < curLen; i++) {
+                        int u = curQ[i];
+                        if (u >= 0 && u < csrRows) {
+                            int eStart = roSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) u << 2);
+                            int eEnd = roSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) (u + 1) << 2);
+                            for (int e = eStart; e < eEnd; e++) {
+                                int v = ctSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2);
+                                if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
+                                    outBits[v >>> 6] |= (1L << v);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    for (int i = 0; i < curLen; i++) {
+                        int u = curQ[i];
+                        if (u >= 0 && u < csrRows) {
+                            int eStart = rel.csrRowOffset(u);
+                            int eEnd = rel.csrRowOffset(u + 1);
+                            for (int e = eStart; e < eEnd; e++) {
+                                int v = rel.csrColTarget(e);
+                                if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
+                                    outBits[v >>> 6] |= (1L << v);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (subop == 1) {
+                if (rel.hasOffHeapCsc() && rel.edgeIdxWidth == 4 && rel.nodeIdWidth == 4) {
+                    var cscRoSeg = rel.cscRowOffsetsSeg;
+                    var cscCtSeg = rel.cscColSourcesSeg;
+                    for (int i = 0; i < curLen; i++) {
+                        int u = curQ[i];
+                        if (u >= 0 && u < cscRows) {
+                            int eStart = cscRoSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) u << 2);
+                            int eEnd = cscRoSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) (u + 1) << 2);
+                            for (int e = eStart; e < eEnd; e++) {
+                                int v = cscCtSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2);
+                                if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
+                                    outBits[v >>> 6] |= (1L << v);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    for (int i = 0; i < curLen; i++) {
+                        int u = curQ[i];
+                        if (u >= 0 && u < cscRows) {
+                            int eStart = rel.cscRowOffset(u);
+                            int eEnd = rel.cscRowOffset(u + 1);
+                            for (int e = eStart; e < eEnd; e++) {
+                                int v = rel.cscColSource(e);
+                                if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
+                                    outBits[v >>> 6] |= (1L << v);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (subop == 2) {
                 for (int i = 0; i < curLen; i++) {
                     int u = curQ[i];
-                    for (int e = roff[u]; e < roff[u + 1]; e++) {
-                        int v = (int) ctgt[e];
-                        if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
-                            outBits[v >>> 6] |= (1L << v);
+                    if (u >= 0 && u < csrRows) {
+                        int eStart = rel.csrRowOffset(u);
+                        int eEnd = rel.csrRowOffset(u + 1);
+                        for (int e = eStart; e < eEnd; e++) {
+                            int v = rel.csrColTarget(e);
+                            if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
+                                outBits[v >>> 6] |= (1L << v);
+                            }
+                        }
+                    }
+                    if (u >= 0 && u < cscRows) {
+                        int eStart = rel.cscRowOffset(u);
+                        int eEnd = rel.cscRowOffset(u + 1);
+                        for (int e = eStart; e < eEnd; e++) {
+                            int v = rel.cscColSource(e);
+                            if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
+                                outBits[v >>> 6] |= (1L << v);
+                            }
                         }
                     }
                 }
             } else {
                 int[] nextQ = ws.arena.allocInt(Math.max(fastOutCard, 1));
                 int maxHops = (subop == 7) ? imm16Hi : Integer.MAX_VALUE;
+                boolean isRev = (subop == 5 || subop == 6);
+                boolean isStar = (subop == 4 || subop == 6);
                 boolean converged = false;
-                if (subop == 4) { // fixpoint_star: seed visited with src \ excl
+                if (isStar) { // fixpoint_star: seed visited with src \ excl
                     int w = 0;
                     for (int i = 0; i < curLen; i++) {
                         int u = curQ[i];
@@ -285,15 +369,38 @@ public final class V11Pillar3Ops {
                 }
                 for (int hop = 0; hop < maxHops; hop++) {
                     int nextLen = 0;
-                    for (int i = 0; i < curLen; i++) {
-                        int u = curQ[i];
-                        for (int e = roff[u]; e < roff[u + 1]; e++) {
-                            int v = (int) ctgt[e];
-                            long bit = 1L << v;
-                            int wi = v >>> 6;
-                            if ((outBits[wi] & bit) == 0L && (exclBits == null || (exclBits[wi] & bit) == 0L)) {
-                                outBits[wi] |= bit;
-                                nextQ[nextLen++] = v;
+                    if (!isRev) {
+                        for (int i = 0; i < curLen; i++) {
+                            int u = curQ[i];
+                            if (u >= 0 && u < csrRows) {
+                                int eStart = rel.csrRowOffset(u);
+                                int eEnd = rel.csrRowOffset(u + 1);
+                                for (int e = eStart; e < eEnd; e++) {
+                                    int v = rel.csrColTarget(e);
+                                    long bit = 1L << v;
+                                    int wi = v >>> 6;
+                                    if ((outBits[wi] & bit) == 0L && (exclBits == null || (exclBits[wi] & bit) == 0L)) {
+                                        outBits[wi] |= bit;
+                                        nextQ[nextLen++] = v;
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        for (int i = 0; i < curLen; i++) {
+                            int u = curQ[i];
+                            if (u >= 0 && u < cscRows) {
+                                int eStart = rel.cscRowOffset(u);
+                                int eEnd = rel.cscRowOffset(u + 1);
+                                for (int e = eStart; e < eEnd; e++) {
+                                    int v = rel.cscColSource(e);
+                                    long bit = 1L << v;
+                                    int wi = v >>> 6;
+                                    if ((outBits[wi] & bit) == 0L && (exclBits == null || (exclBits[wi] & bit) == 0L)) {
+                                        outBits[wi] |= bit;
+                                        nextQ[nextLen++] = v;
+                                    }
+                                }
                             }
                         }
                     }
@@ -2223,7 +2330,7 @@ public final class V11Pillar3Ops {
             case 1 -> val = (lo < view.relations.length && view.relations[lo].hasCsc) ? 1L : 0L;
             case 2 -> val = (lo < view.relations.length && view.relations[lo].hasCoo) ? 1L : 0L;
             case 3 -> val = (lo < view.relations.length && view.relations[lo].hasDense) ? 1L : 0L;
-            case 4 -> val = view.keyCatalogs.containsKey(lo) ? 1L : 0L;
+            case 4 -> val = view.hasKeyCatalog(lo) ? 1L : 0L;
             case 5 -> val = view.hasNodeAttr(lo, hi) ? 1L : 0L;
             case 6 -> val = (lo < view.relations.length && view.relations[lo].edgeAttrs.containsKey(hi)) ? 1L : 0L;
             case 7 -> val = view.hasIndex(lo, hi) ? 1L : 0L;
@@ -2233,7 +2340,7 @@ public final class V11Pillar3Ops {
             }
             case 9 -> {
                 if (lo >= view.relations.length) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
-                val = view.relations[lo].colTargets.length;
+                val = view.relations[lo].edgeCount();
             }
             default -> { ws.status = IMPULSE_VM_ERR_INVALID_OPCODE; return; }
         }

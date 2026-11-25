@@ -65,9 +65,11 @@ public final class ImpOpsV11BytecodeEmitter {
         int curV = 0;
         int curR = 0;
         int curDom = startDomainId;
+        int actualStartDom = startDomainId;
         boolean frontierInit = false;
         boolean activeIsVector = false;
         boolean activeIsScalar = false;
+        boolean activeIsMultiLane = false;
         int maxDomSeen = startDomainId;
 
         for (ImpScmNode step : prog.steps()) {
@@ -89,6 +91,7 @@ public final class ImpOpsV11BytecodeEmitter {
                     paramMap.put("$seed", 0);
                     frontierInit = true;
                     curDom = srcDom;
+                    actualStartDom = srcDom;
                     maxDomSeen = Math.max(maxDomSeen, srcDom);
                 }
                 maxDomSeen = Math.max(maxDomSeen, tgtDom);
@@ -156,6 +159,7 @@ public final class ImpOpsV11BytecodeEmitter {
                         paramMap.put("$seed", 0);
                         frontierInit = true;
                         curDom = srcDom;
+                        actualStartDom = srcDom;
                     }
                     int fsub = (walk.direction() == ScmWalk.Direction.REVERSE_CSC)
                             ? V11IsaTables.SUBOP_WALK_REV_FIXPOINT_STAR : V11IsaTables.SUBOP_WALK_FWD_FIXPOINT_STAR;
@@ -188,6 +192,41 @@ public final class ImpOpsV11BytecodeEmitter {
                 }
                 activeIsVector = false;
                 activeIsScalar = false;
+            } else if (step instanceof ScmSetOp sop) {
+                int ssub = switch (sop.kind()) {
+                    case INTERSECT -> V11IsaTables.SUBOP_SET_OP_INTERSECT;
+                    case DIFF -> V11IsaTables.SUBOP_SET_OP_DIFF;
+                    default -> V11IsaTables.SUBOP_SET_OP_UNION;
+                };
+                if (!frontierInit) {
+                    int initDom = curDom;
+                    if (sop.lhs() instanceof ScmWalk lw) {
+                        int rid = resolveRelId(snapshot, lw.relationName(), lw.relationId());
+                        initDom = (lw.direction() == ScmWalk.Direction.REVERSE_CSC)
+                                ? resolveRelTgtDom(snapshot, rid, curDom)
+                                : resolveRelSrcDom(snapshot, rid, curDom);
+                    }
+                    b.emitU16(V11IsaTables.OP_LOAD_PARAM, V11IsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0,
+                            curF, 0, 0, 0, 0, initDom);
+                    paramMap.put("$seed", 0);
+                    frontierInit = true;
+                    curDom = initDom;
+                    maxDomSeen = Math.max(maxDomSeen, initDom);
+                }
+                if (sop.lhs() != null) {
+                    int outDom = emitBranch(sop.lhs(), srcF, 2, b, snapshot, relIdMap, curDom);
+                    emitBranch(sop.rhs(), srcF, 3, b, snapshot, relIdMap, curDom);
+                    b.emit(V11IsaTables.OP_SET_OP, ssub, 0, dstF, 2, 3, 0, 0);
+                    curDom = outDom;
+                    maxDomSeen = Math.max(maxDomSeen, outDom);
+                } else {
+                    emitBranch(sop.rhs(), srcF, 2, b, snapshot, relIdMap, curDom);
+                    b.emit(V11IsaTables.OP_SET_OP, ssub, 0, dstF, srcF, 2, 0, 0);
+                }
+                curF = dstF;
+                activeIsVector = false;
+                activeIsScalar = false;
+                activeIsMultiLane = false;
             } else if (step instanceof ScmReduce red) {
                 if (!activeIsVector) {
                     if (!frontierInit) {
@@ -229,6 +268,7 @@ public final class ImpOpsV11BytecodeEmitter {
                 curF = dstF;
                 activeIsVector = false;
                 activeIsScalar = false;
+                activeIsMultiLane = true;
             } else if (step instanceof ScmLaneWalk lw) {
                 int relId = resolveRelId(snapshot, lw.relationName(), lw.relationId());
                 relIdMap.put(lw.relationName(), relId);
@@ -237,14 +277,17 @@ public final class ImpOpsV11BytecodeEmitter {
                         : (lw.fixedPoint() ? V11IsaTables.SUBOP_LANE_WALK_FWD_FIXPOINT_STAR : V11IsaTables.SUBOP_LANE_WALK_FWD);
                 b.emitU16(V11IsaTables.OP_LANE_WALK, lwsub, 0, dstF, srcF, 0, 0, relId, 0);
                 curF = dstF;
+                activeIsMultiLane = true;
             } else if (step instanceof ScmLaneFilterQuorum q) {
                 b.emitU16(V11IsaTables.OP_LANE_FILTER_QUORUM, V11IsaTables.SUBOP_LANE_FILTER_QUORUM_AT_LEAST, 0,
                         dstF, srcF, 0, 0, q.minQuorum(), 0);
                 curF = dstF;
+                activeIsMultiLane = false;
             } else if (step instanceof ScmLaneReduceAnd) {
                 b.emit(V11IsaTables.OP_LANE_REDUCE_AND, V11IsaTables.SUBOP_LANE_REDUCE_AND_REDUCE_AND, 0,
                         dstF, srcF, 0, 0, 0);
                 curF = dstF;
+                activeIsMultiLane = false;
             } else if (step instanceof ScmLaneReduceAttr ra) {
                 int rsub = ra.reduceOp() & 0x03;
                 b.emitU16(V11IsaTables.OP_LOAD_COLUMN, V11IsaTables.SUBOP_LOAD_COLUMN_NODE_ATTR, 0,
@@ -252,7 +295,14 @@ public final class ImpOpsV11BytecodeEmitter {
                 b.emit(V11IsaTables.OP_LANE_REDUCE_ATTR, rsub, 0, curV, srcF, 1, 0, 0);
                 activeIsVector = true;
                 activeIsScalar = false;
+                activeIsMultiLane = false;
             } else if (step instanceof ScmCollect collect) {
+                if (activeIsMultiLane) {
+                    b.emitU16(V11IsaTables.OP_LANE_FILTER_QUORUM, V11IsaTables.SUBOP_LANE_FILTER_QUORUM_AT_LEAST, 0,
+                            dstF, curF, 0, 0, 1, 0);
+                    curF = dstF;
+                    activeIsMultiLane = false;
+                }
                 if (activeIsScalar) {
                     b.emitU16(V11IsaTables.OP_COLLECT, V11IsaTables.SUBOP_COLLECT_SCALAR, 0, 0, curR, 0, 0, 0, 0);
                 } else if (activeIsVector) {
@@ -264,7 +314,11 @@ public final class ImpOpsV11BytecodeEmitter {
                         paramMap.put("$seed", 0);
                         frontierInit = true;
                     }
-                    if (collect.format() == ScmCollect.Format.VECTOR || collect.format() == ScmCollect.Format.LIST) {
+                    if (collect.format() == ScmCollect.Format.COUNT || collect.format() == ScmCollect.Format.SCALAR) {
+                        b.emit(V11IsaTables.OP_SET_CARDINALITY, V11IsaTables.SUBOP_SET_CARDINALITY_CARD_1BIT, 0,
+                                curR, curF, 0, 0, 0);
+                        b.emitU16(V11IsaTables.OP_COLLECT, V11IsaTables.SUBOP_COLLECT_SCALAR, 0, 0, curR, 0, 0, 0, 0);
+                    } else if (collect.format() == ScmCollect.Format.VECTOR || collect.format() == ScmCollect.Format.LIST) {
                         b.emitU16(V11IsaTables.OP_COLLECT, V11IsaTables.SUBOP_COLLECT_FRONTIER_IDS, 0, 0, curF, 0, 0, 0, 0);
                     } else if (collect.format() == ScmCollect.Format.KEYS) {
                         b.emitU16(V11IsaTables.OP_MAP_DENSE_TO_KEYS, V11IsaTables.SUBOP_MAP_DENSE_TO_KEYS_FRONTIER_SORTED,
@@ -329,7 +383,7 @@ public final class ImpOpsV11BytecodeEmitter {
                     + vr.badPc() + " status=" + vr.status());
         }
 
-        return new V11CompiledProgram(container, relIdMap, paramMap, startDomainId, curDom, reqDoms);
+        return new V11CompiledProgram(container, relIdMap, paramMap, actualStartDom, curDom, reqDoms);
     }
 
     private static int emitMorselExpr(ImpScmNode expr, V11ProgramBuilder b, int[] regs,
@@ -397,11 +451,61 @@ public final class ImpOpsV11BytecodeEmitter {
         return isNodeMorsel ? 8 : 9;
     }
 
+    private static int emitBranch(ImpScmNode branch, int inF, int outF, V11ProgramBuilder b,
+                                  ImpulseGraphSnapshot snap, Map<String, Integer> relIdMap, int curDom) {
+        if (branch instanceof ScmWalk w) {
+            int rid = resolveRelId(snap, w.relationName(), w.relationId());
+            relIdMap.put(w.relationName(), rid);
+            int tdom = (w.direction() == ScmWalk.Direction.REVERSE_CSC)
+                    ? resolveRelSrcDom(snap, rid, curDom)
+                    : resolveRelTgtDom(snap, rid, curDom);
+            int wsub = (w.direction() == ScmWalk.Direction.REVERSE_CSC)
+                    ? V11IsaTables.SUBOP_WALK_REV : V11IsaTables.SUBOP_WALK_FWD;
+            b.emitU16(V11IsaTables.OP_WALK, wsub, 0, outF, inF, 0, 0, rid, 0);
+            return tdom;
+        }
+        if (branch instanceof ScmProgram sp) {
+            int curB = inF;
+            int bdom = curDom;
+            for (ImpScmNode sub : sp.steps()) {
+                if (sub instanceof ScmWalk w) {
+                    int rid = resolveRelId(snap, w.relationName(), w.relationId());
+                    relIdMap.put(w.relationName(), rid);
+                    bdom = (w.direction() == ScmWalk.Direction.REVERSE_CSC)
+                            ? resolveRelSrcDom(snap, rid, bdom)
+                            : resolveRelTgtDom(snap, rid, bdom);
+                    int wsub = (w.direction() == ScmWalk.Direction.REVERSE_CSC)
+                            ? V11IsaTables.SUBOP_WALK_REV : V11IsaTables.SUBOP_WALK_FWD;
+                    int nxt = (curB == outF) ? (outF + 4) : outF;
+                    b.emitU16(V11IsaTables.OP_WALK, wsub, 0, nxt, curB, 0, 0, rid, 0);
+                    curB = nxt;
+                }
+            }
+            if (curB != outF) {
+                b.emit(V11IsaTables.OP_MOV, V11IsaTables.SUBOP_MOV_F, 0, outF, curB, 0, 0, 0);
+            }
+            return bdom;
+        }
+        return curDom;
+    }
+
     private static int resolveRelId(ImpulseGraphSnapshot snap, String name, int fallback) {
         if (fallback >= 0) return fallback;
         if (snap == null || name == null || name.isEmpty()) return 0;
         RelationSnapshot rs = snap.getRelationSnapshot(name);
-        return (rs != null && rs.getRelationId() >= 0) ? rs.getRelationId() : 0;
+        if (rs != null && rs.getRelationId() >= 0) return rs.getRelationId();
+        Map<String, RelationSnapshot> all = snap.getAllRelationSnapshots();
+        if (all != null) {
+            int idx = 0;
+            for (Map.Entry<String, RelationSnapshot> e : all.entrySet()) {
+                if (e.getKey().equalsIgnoreCase(name)) {
+                    int id = e.getValue() != null ? e.getValue().getRelationId() : -1;
+                    return id >= 0 ? id : idx;
+                }
+                idx++;
+            }
+        }
+        return 0;
     }
 
     private static int resolveRelSrcDom(ImpulseGraphSnapshot snap, int relId, int fallback) {

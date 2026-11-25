@@ -135,8 +135,8 @@ public final class V11Pillar5Ops {
         List<int[]>[] rev = new List[nTgt];
         for (int v = 0; v < nTgt; v++) rev[v] = new ArrayList<>();
         for (int u = 0; u < nSrc; u++) {
-            for (int e = rel.rowOffsets[u]; e < rel.rowOffsets[u + 1]; e++) {
-                int v = (int) rel.colTargets[e];
+            for (int e = rel.csrRowOffset(u); e < rel.csrRowOffset(u + 1); e++) {
+                int v = rel.csrColTarget(e);
                 if (v >= 0 && v < nTgt) rev[v].add(new int[]{u, e});
             }
         }
@@ -320,8 +320,8 @@ public final class V11Pillar5Ops {
             for (Map.Entry<Long, Long> entry : cur.entrySet()) {
                 int u = entry.getKey().intValue();
                 long mask = entry.getValue();
-                for (int e = rel.rowOffsets[u]; e < rel.rowOffsets[u + 1]; e++) {
-                    long v = rel.colTargets[e];
+                for (int e = rel.csrRowOffset(u); e < rel.csrRowOffset(u + 1); e++) {
+                    long v = rel.csrColTarget(e);
                     long ev = (edgeMask == null) ? -1L : (edgeMask.isValidAt(e) ? edgeMask.i64Data[e] : 0L);
                     long ex = excl.getOrDefault(v, 0L);
                     long pass = mask & ev & ~ex;
@@ -368,7 +368,7 @@ public final class V11Pillar5Ops {
                 ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
                 return;
             }
-            if (edgeMask.length < rel.colTargets.length) {
+            if (edgeMask.length < rel.edgeCount()) {
                 ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
                 return;
             }
@@ -378,8 +378,6 @@ public final class V11Pillar5Ops {
             int outCard = (int) bind.view.domainCards[outDom];
             if (outCard >= 0 && outCard <= 1_000_000) {
                 long[] dense = ws.arena.allocLongZeroed(outCard);
-                int[] roff = rel.rowOffsets;
-                long[] ctgt = rel.colTargets;
                 int srcCnt = fSrc.mlCount;
                 long[] srcNodes = fSrc.mlNodes;
                 long[] srcMasks = fSrc.mlMasks;
@@ -387,10 +385,10 @@ public final class V11Pillar5Ops {
                     long m = srcMasks[i];
                     if (m == 0L) continue;
                     int u = (int) srcNodes[i];
-                    int s = roff[u];
-                    int eEnd = roff[u + 1];
+                    int s = rel.csrRowOffset(u);
+                    int eEnd = rel.csrRowOffset(u + 1);
                     for (int e = s; e < eEnd; e++) {
-                        int v = (int) ctgt[e];
+                        int v = rel.csrColTarget(e);
                         dense[v] |= m;
                     }
                 }
@@ -941,12 +939,12 @@ public final class V11Pillar5Ops {
         byte[] snapInValid = ls.lsValidFlat;
         int hits = 0;
         if (!isRev) {
-            int[] roff = rel.rowOffsets;
-            long[] ctgt = rel.colTargets;
             for (int u = 0; u < ls.length; u++) {
                 int uBase = u * k;
-                for (int e = roff[u]; e < roff[u + 1]; e++) {
-                    int v = (int) ctgt[e];
+                int s = rel.csrRowOffset(u);
+                int eEnd = rel.csrRowOffset(u + 1);
+                for (int e = s; e < eEnd; e++) {
+                    int v = rel.csrColTarget(e);
                     hits += relaxLaneEdgeFlat(u, uBase, v, v * k, e, k, semi, mask, scalarW, scalarWValid, scalarWVal, weightCol,
                             snapIn, snapInValid, outVals, outValid, outWit, outWitValid);
                 }
