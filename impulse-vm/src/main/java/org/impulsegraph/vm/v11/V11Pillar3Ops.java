@@ -1017,6 +1017,12 @@ public final class V11Pillar3Ops {
         }
 
         if (ws.status == IMPULSE_VM_OK) {
+            for (int d = 0; d < 8; d++) {
+                if (committedFDom[d] >= view.domainCards.length || committedMlDom[d] >= view.domainCards.length) {
+                    ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                    return;
+                }
+            }
             boolean anyNonEmpty = false;
             for (int d = 0; d < 8; d++) {
                 if (committedFDom[d] >= 0) {
