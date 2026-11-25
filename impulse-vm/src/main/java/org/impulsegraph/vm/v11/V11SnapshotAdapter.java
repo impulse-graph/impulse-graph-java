@@ -31,10 +31,11 @@ public final class V11SnapshotAdapter {
                     Map.of(), Map.of(), Map.of());
         }
 
-        // 1. Domains, node attributes, and Section 2 key catalogs
-        Map<Long, V11Vector> nodeAttrs = new HashMap<>();
-        Map<Integer, String[]> keyCatalogs = new HashMap<>();
+        // 1. Domains (metadata only — node attributes and key catalogs load lazily on demand)
+        Map<Long, V11Vector> nodeAttrs = new java.util.concurrent.ConcurrentHashMap<>();
+        Map<Integer, String[]> keyCatalogs = new java.util.concurrent.ConcurrentHashMap<>();
         Map<Long, String> indexes = new HashMap<>();
+        Map<Integer, BinarySnapshotLoader.LoadedDomain> domainsById = new HashMap<>();
 
         int maxDomId = -1;
         Map<Integer, Long> domCardMap = new HashMap<>();
@@ -46,38 +47,11 @@ public final class V11SnapshotAdapter {
                 int did = ld.domainId();
                 maxDomId = Math.max(maxDomId, did);
                 domCardMap.put(did, ld.nodeCount());
-
-                // Decode node attributes for this domain
-                List<BinarySnapshotLoader.LoadedAttribute> attrs = ld.attributes();
-                for (int a = 0; a < attrs.size(); a++) {
-                    BinarySnapshotLoader.LoadedAttribute attr = attrs.get(a);
-                    MemorySegment dataSeg = ld.getAttributeSegment(a);
-                    MemorySegment validSeg = (a < ld.validitySegments().size()) ? ld.validitySegments().get(a) : MemorySegment.NULL;
-                    MemorySegment offSeg = (a < ld.offsetsSegments().size()) ? ld.offsetsSegments().get(a) : MemorySegment.NULL;
-                    V11Vector vec = decodeAttribute(attr.typeCode(), ld.nodeCount(), dataSeg, validSeg, offSeg, attr.isNullable());
-                    if (vec != null) {
-                        nodeAttrs.put(V11SnapshotView.domAttrKey(did, a), vec);
-                    }
-                }
-
-                // Decode key catalog if present
-                if (ld.keyAttrIndex() != 0xFFFF && ld.nodeCount() > 0 && ld.nodeCount() <= Integer.MAX_VALUE) {
-                    int n = (int) ld.nodeCount();
-                    String[] keys = new String[n];
-                    boolean anyKey = false;
-                    for (int i = 0; i < n; i++) {
-                        String k = ld.resolveKey(i);
-                        keys[i] = k;
-                        if (k != null) anyKey = true;
-                    }
-                    if (anyKey) {
-                        keyCatalogs.put(did, keys);
-                    }
-                }
+                domainsById.put(did, ld);
             }
         }
 
-        // 2. Relations (CSR topology & edge attributes)
+        // 2. Relations (zero-copy off-heap MemorySegment CSR/CSC views — zero heap topology copies!)
         Map<String, RelationSnapshot> allRels = snapshot.getAllRelationSnapshots();
         int maxRelId = -1;
         Map<Integer, RelationSnapshot> relById = new HashMap<>();
@@ -90,11 +64,11 @@ public final class V11SnapshotAdapter {
                 maxRelId = Math.max(maxRelId, rid);
                 relById.put(rid, rel);
                 maxDomId = Math.max(maxDomId, Math.max(rel.getSrcDomainId(), rel.getTgtDomainId()));
-                domCardMap.putIfAbsent(rel.getSrcDomainId(), (long) rel.getNodeCount());
+                domCardMap.merge(rel.getSrcDomainId(), (long) rel.getNodeCount(), Math::max);
                 if (rel.hasCsc()) {
-                    domCardMap.putIfAbsent(rel.getTgtDomainId(), (long) Math.max(rel.getCscNodeCount(), rel.getNodeCount()));
+                    domCardMap.merge(rel.getTgtDomainId(), (long) Math.max(rel.getCscNodeCount(), rel.getNodeCount()), Math::max);
                 } else {
-                    domCardMap.putIfAbsent(rel.getTgtDomainId(), (long) rel.getNodeCount());
+                    domCardMap.merge(rel.getTgtDomainId(), (long) rel.getNodeCount(), Math::max);
                 }
             }
         }
@@ -110,56 +84,51 @@ public final class V11SnapshotAdapter {
         for (Map.Entry<Integer, RelationSnapshot> entry : relById.entrySet()) {
             int rid = entry.getKey();
             RelationSnapshot rel = entry.getValue();
-            int nRows = rel.getNodeCount() + 1;
             int nEdges = (int) rel.getEdgeCount();
 
-            int[] rowOffsets = new int[nRows];
-            long[] colTargets = new long[nEdges];
             MemorySegment roSeg = rel.getRowOffsetsSegment();
             MemorySegment ctSeg = rel.getColumnTargetsSegment();
-
-            if (rel.hasCsr() && roSeg != null && !roSeg.equals(MemorySegment.NULL) && roSeg.byteSize() > 0) {
-                for (int i = 0; i < nRows; i++) {
-                    rowOffsets[i] = (int) rel.readEdgeIndex(roSeg, i);
-                }
-                if (ctSeg != null && !ctSeg.equals(MemorySegment.NULL) && nEdges > 0) {
-                    for (int e = 0; e < nEdges; e++) {
-                        colTargets[e] = Integer.toUnsignedLong(rel.readNodeId(ctSeg, e));
-                    }
-                }
-            }
-
-            Map<Integer, V11Vector> edgeAttrs = new HashMap<>();
-            List<MemorySegment> attrSegs = rel.getAttributeSegments();
-            if (attrSegs != null) {
-                for (int a = 0; a < attrSegs.size(); a++) {
-                    MemorySegment seg = attrSegs.get(a);
-                    if (seg == null || seg.equals(MemorySegment.NULL) || seg.byteSize() == 0) continue;
-                    // Default heuristic when raw edge attribute segment is exposed without explicit type tag:
-                    // match element width against edge count (f32=4B, f64=8B)
-                    if (nEdges > 0 && seg.byteSize() == (long) nEdges * 4L) {
-                        double[] vals = new double[nEdges];
-                        for (int e = 0; e < nEdges; e++) {
-                            vals[e] = seg.get(ValueLayout.JAVA_FLOAT_UNALIGNED, (long) e * 4L);
-                        }
-                        edgeAttrs.put(a, V11Vector.ofF64(vals, null));
-                    } else if (nEdges > 0 && seg.byteSize() == (long) nEdges * 8L) {
-                        double[] vals = new double[nEdges];
-                        for (int e = 0; e < nEdges; e++) {
-                            vals[e] = seg.get(ValueLayout.JAVA_DOUBLE_UNALIGNED, (long) e * 8L);
-                        }
-                        edgeAttrs.put(a, V11Vector.ofF64(vals, null));
-                    }
-                }
-            }
+            MemorySegment cscRoSeg = rel.hasCsc() ? rel.getCscRowOffsetsSegment() : null;
+            MemorySegment cscCtSeg = rel.hasCsc() ? rel.getCscColumnTargetsSegment() : null;
+            if (roSeg != null && (roSeg.equals(MemorySegment.NULL) || roSeg.byteSize() == 0)) roSeg = null;
+            if (ctSeg != null && (ctSeg.equals(MemorySegment.NULL) || (nEdges > 0 && ctSeg.byteSize() == 0))) ctSeg = null;
+            if (cscRoSeg != null && (cscRoSeg.equals(MemorySegment.NULL) || cscRoSeg.byteSize() == 0)) cscRoSeg = null;
+            if (cscCtSeg != null && (cscCtSeg.equals(MemorySegment.NULL) || (nEdges > 0 && cscCtSeg.byteSize() == 0))) cscCtSeg = null;
 
             relViews[rid] = new V11SnapshotView.RelView(
                     rid, rel.getSrcDomainId(), rel.getTgtDomainId(),
-                    rowOffsets, colTargets, edgeAttrs,
-                    rel.hasCsr(), rel.hasCsc(), false, false);
+                    roSeg, ctSeg, cscRoSeg, cscCtSeg,
+                    rel.getNodeIdWidth(), rel.getEdgeIndexWidth(),
+                    rel.getNodeCount(), rel.hasCsc() ? rel.getCscNodeCount() : 0, nEdges,
+                    null, rel.hasCsr(), rel.hasCsc());
         }
 
-        return new V11SnapshotView(domainCards, relViews, nodeAttrs, keyCatalogs, indexes);
+        return new V11SnapshotView(
+                domainCards, relViews, nodeAttrs, keyCatalogs, indexes,
+                (did, attrIdx) -> {
+                    BinarySnapshotLoader.LoadedDomain ld = domainsById.get(did);
+                    if (ld == null || attrIdx < 0 || attrIdx >= ld.attributes().size()) return null;
+                    BinarySnapshotLoader.LoadedAttribute attr = ld.attributes().get(attrIdx);
+                    MemorySegment dataSeg = ld.getAttributeSegment(attrIdx);
+                    MemorySegment validSeg = (attrIdx < ld.validitySegments().size()) ? ld.validitySegments().get(attrIdx) : MemorySegment.NULL;
+                    MemorySegment offSeg = (attrIdx < ld.offsetsSegments().size()) ? ld.offsetsSegments().get(attrIdx) : MemorySegment.NULL;
+                    return decodeAttribute(attr.typeCode(), ld.nodeCount(), dataSeg, validSeg, offSeg, attr.isNullable());
+                },
+                did -> {
+                    BinarySnapshotLoader.LoadedDomain ld = domainsById.get(did);
+                    if (ld == null || ld.keyAttrIndex() == 0xFFFF || ld.nodeCount() <= 0 || ld.nodeCount() > Integer.MAX_VALUE) {
+                        return null;
+                    }
+                    int n = (int) ld.nodeCount();
+                    String[] keys = new String[n];
+                    boolean anyKey = false;
+                    for (int i = 0; i < n; i++) {
+                        String k = ld.resolveKey(i);
+                        keys[i] = k;
+                        if (k != null) anyKey = true;
+                    }
+                    return anyKey ? keys : null;
+                });
     }
 
     private static V11Vector decodeAttribute(byte attrType, long nodeCount,

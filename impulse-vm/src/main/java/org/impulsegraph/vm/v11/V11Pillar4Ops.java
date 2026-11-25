@@ -1657,7 +1657,7 @@ public final class V11Pillar4Ops {
             ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
             return;
         }
-        String[] catalog = view.keyCatalogs.get(domId);
+        String[] catalog = view.getKeyCatalog(domId);
         if (catalog == null) {
             ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
             return;
@@ -1741,7 +1741,7 @@ public final class V11Pillar4Ops {
                     ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; return;
                 }
                 V11Frontier fSrc = ws.fRegs[s1];
-                String[] srcCatalog = view.keyCatalogs.get(fSrc.domainId);
+                String[] srcCatalog = view.getKeyCatalog(fSrc.domainId);
                 if (srcCatalog == null) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
                 if (accum) {
                     if (!ws.isFInitialized(dst) || ws.fRegs[dst].multiLane) { ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; return; }
@@ -1775,7 +1775,7 @@ public final class V11Pillar4Ops {
             ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
             return;
         }
-        String[] catalog = view.keyCatalogs.get(domId);
+        String[] catalog = view.getKeyCatalog(domId);
         if (catalog == null) {
             ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
             return;
@@ -1850,23 +1850,39 @@ public final class V11Pillar4Ops {
                 V11Frontier fa = ws.fRegs[s1];
                 int n = fa.domainCard;
                 int words = Math.max(1, (n + 63) >>> 6);
-                long[] valid = V11Vector.allocValidAllTrue(n);
-                long[] data = new long[words];
-                int[] ids = fa.toSortedArray();
-                for (int u : ids) data[u >>> 6] |= (1L << (u & 63));
-                ws.outputs.put(slot, V11Vector.ofBool3vl(n, valid, data));
-                ws.zf = (ids.length == 0);
+                long[] valid = ws.arena.allocValidAllTrue(n);
+                long[] data = ws.arena.allocLongZeroed(words);
+                int card = fa.cardinality();
+                if (card > 0) {
+                    if (fa.tier == V11Frontier.TIER2_DENSE && fa.denseWords != null) {
+                        System.arraycopy(fa.denseWords, 0, data, 0, Math.min(words, fa.denseWordCount));
+                    } else {
+                        int[] ids = ws.arena.allocInt(card);
+                        int cnt = fa.toSortedArrayInto(ids);
+                        for (int i = 0; i < cnt; i++) {
+                            int u = ids[i];
+                            data[u >>> 6] |= (1L << (u & 63));
+                        }
+                    }
+                }
+                ws.putOutput(slot, ws.arena.allocBool3vl(n, valid, data));
+                ws.zf = (card == 0);
                 ws.pc++;
             }
             case SUBOP_COLLECT_FRONTIER_IDS -> {
                 if (!ws.isFInitialized(s1) || ws.fRegs[s1].multiLane) {
                     ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; return;
                 }
-                int[] ids = ws.fRegs[s1].toSortedArray();
-                long[] vals = new long[ids.length];
-                for (int i = 0; i < ids.length; i++) vals[i] = ids[i] & 0xFFFFFFFFL;
-                ws.outputs.put(slot, V11Vector.ofU64(vals, V11Vector.allocValidAllTrue(ids.length)));
-                ws.zf = (ids.length == 0);
+                V11Frontier fa = ws.fRegs[s1];
+                int card = fa.cardinality();
+                long[] vals = ws.arena.allocLong(Math.max(1, card));
+                if (card > 0) {
+                    int[] ids = ws.arena.allocInt(card);
+                    int cnt = fa.toSortedArrayInto(ids);
+                    for (int i = 0; i < cnt; i++) vals[i] = ids[i] & 0xFFFFFFFFL;
+                }
+                ws.putOutput(slot, ws.arena.allocU64(vals, card, ws.arena.allocValidAllTrue(card)));
+                ws.zf = (card == 0);
                 ws.pc++;
             }
             case SUBOP_COLLECT_VEC, SUBOP_COLLECT_TABLE_COL -> {
@@ -1889,9 +1905,9 @@ public final class V11Pillar4Ops {
                     }
                     out = gatherFromVec(v, ids, null, null);
                 } else {
-                    out = v.shallowCopy();
+                    out = ws.arena.shallowCopyVec(v);
                 }
-                ws.outputs.put(slot, out);
+                ws.putOutput(slot, out);
                 ws.zf = (out.length == 0);
                 ws.pc++;
             }
@@ -1902,29 +1918,44 @@ public final class V11Pillar4Ops {
                 V11Vector out;
                 boolean isZero;
                 if (!valid) {
-                    out = V11Vector.ofI64(new long[1], new long[1]);
+                    long[] d = ws.arena.allocLongZeroed(1);
+                    long[] vb = ws.arena.allocLongZeroed(1);
+                    out = ws.arena.allocI64(d, 1, vb);
                     isZero = true;
                 } else if (ty == SCALAR_F64) {
                     double f = Double.longBitsToDouble(val);
+                    double[] d = ws.arena.allocDouble(1);
+                    long[] vb = ws.arena.allocLong(1);
                     if (Double.isNaN(f)) {
-                        out = V11Vector.ofF64(new double[1], new long[1]);
+                        d[0] = 0.0;
+                        vb[0] = 0L;
                         isZero = true;
                     } else {
-                        out = V11Vector.ofF64(new double[]{f}, new long[]{1L});
+                        d[0] = f;
+                        vb[0] = 1L;
                         isZero = (f == 0.0);
                     }
+                    out = ws.arena.allocF64(d, 1, vb);
                 } else if (ty == SCALAR_STR_HANDLE) {
                     String s = ws.resolveScalarStr(val);
                     out = V11Vector.ofStr(new String[]{s});
                     isZero = (s == null || s.isEmpty());
                 } else if (ty == SCALAR_U64) {
-                    out = V11Vector.ofU64(new long[]{val}, new long[]{1L});
+                    long[] d = ws.arena.allocLong(1);
+                    long[] vb = ws.arena.allocLong(1);
+                    d[0] = val;
+                    vb[0] = 1L;
+                    out = ws.arena.allocU64(d, 1, vb);
                     isZero = (val == 0L);
                 } else {
-                    out = V11Vector.ofI64(new long[]{val}, new long[]{1L});
+                    long[] d = ws.arena.allocLong(1);
+                    long[] vb = ws.arena.allocLong(1);
+                    d[0] = val;
+                    vb[0] = 1L;
+                    out = ws.arena.allocI64(d, 1, vb);
                     isZero = (val == 0L);
                 }
-                ws.outputs.put(slot, out);
+                ws.putOutput(slot, out);
                 ws.zf = isZero;
                 ws.pc++;
             }

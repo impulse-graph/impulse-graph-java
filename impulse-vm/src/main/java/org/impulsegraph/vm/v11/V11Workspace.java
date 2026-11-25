@@ -86,7 +86,76 @@ public final class V11Workspace {
     public final Map<Integer, ParamEntry> params = new HashMap<>();
     public final Map<Long, String> strTable = new HashMap<>();
     public long nextStrHandle = 1L;
-    public final Map<Integer, V11Vector> outputs = new HashMap<>();
+    public final V11Vector[] outputSlots = new V11Vector[16];
+    public int outputSlotMask;
+    private Map<Integer, V11Vector> overflowOutputs;
+    public final Map<Integer, V11Vector> outputs = new java.util.AbstractMap<>() {
+        @Override
+        public V11Vector get(Object key) {
+            if (!(key instanceof Integer k)) return null;
+            int slot = k;
+            if (slot >= 0 && slot < 16) {
+                return ((outputSlotMask & (1 << slot)) != 0) ? outputSlots[slot] : null;
+            }
+            return overflowOutputs != null ? overflowOutputs.get(k) : null;
+        }
+
+        @Override
+        public V11Vector put(Integer key, V11Vector value) {
+            int slot = key;
+            if (slot >= 0 && slot < 16) {
+                V11Vector prev = ((outputSlotMask & (1 << slot)) != 0) ? outputSlots[slot] : null;
+                outputSlots[slot] = value;
+                outputSlotMask |= (1 << slot);
+                return prev;
+            }
+            if (overflowOutputs == null) overflowOutputs = new HashMap<>();
+            return overflowOutputs.put(key, value);
+        }
+
+        @Override
+        public int size() {
+            return Integer.bitCount(outputSlotMask) + (overflowOutputs != null ? overflowOutputs.size() : 0);
+        }
+
+        @Override
+        public void clear() {
+            outputSlotMask = 0;
+            if (overflowOutputs != null && !overflowOutputs.isEmpty()) overflowOutputs.clear();
+        }
+
+        @Override
+        public java.util.Set<Entry<Integer, V11Vector>> entrySet() {
+            java.util.LinkedHashMap<Integer, V11Vector> copy = new java.util.LinkedHashMap<>();
+            int m = outputSlotMask;
+            while (m != 0) {
+                int s = Integer.numberOfTrailingZeros(m);
+                copy.put(s, outputSlots[s]);
+                m &= (m - 1);
+            }
+            if (overflowOutputs != null) copy.putAll(overflowOutputs);
+            return copy.entrySet();
+        }
+    };
+
+    /** Zero-allocation output slot write (avoids Integer boxing and HashMap$Node allocation). */
+    public void putOutput(int slot, V11Vector vec) {
+        if (slot >= 0 && slot < 16) {
+            outputSlots[slot] = vec;
+            outputSlotMask |= (1 << slot);
+        } else {
+            if (overflowOutputs == null) overflowOutputs = new HashMap<>();
+            overflowOutputs.put(slot, vec);
+        }
+    }
+
+    /** Zero-allocation output slot read. */
+    public V11Vector getOutput(int slot) {
+        if (slot >= 0 && slot < 16) {
+            return ((outputSlotMask & (1 << slot)) != 0) ? outputSlots[slot] : null;
+        }
+        return overflowOutputs != null ? overflowOutputs.get(slot) : null;
+    }
 
     public final int maxDomainCard;
     public final V11Arena arena;
@@ -131,15 +200,24 @@ public final class V11Workspace {
         }
         for (int i = 0; i < 8; i++) {
             fRegs[i] = new V11Frontier(this.maxDomainCard);
+        }
+        for (int i = 8; i < 16; i++) {
+            fRegs[i] = new V11Frontier(MORSEL_MAX);
+        }
+    }
+
+    /** Lazily allocates legacy gut-check JIT primitive vector slices on demand. */
+    public void ensureLegacyJitBuffers() {
+        if (vF64[0] != null) return;
+        int words = (this.maxDomainCard + 63) >>> 6;
+        for (int i = 0; i < 8; i++) {
             vF64[i] = new double[this.maxDomainCard];
             vU32[i] = new int[this.maxDomainCard];
-            int words = (this.maxDomainCard + 63) >>> 6;
             vValid[i] = new long[words];
             vBool[i] = new long[words];
         }
         int morselWords = (MORSEL_MAX + 63) >>> 6;
         for (int i = 8; i < 16; i++) {
-            fRegs[i] = new V11Frontier(MORSEL_MAX);
             vF64[i] = new double[MORSEL_MAX];
             vU32[i] = new int[MORSEL_MAX];
             vValid[i] = new long[morselWords];
