@@ -58,7 +58,8 @@ public final class V11ZeroAllocationTest {
         V11Vector nvec = V11Vector.ofF64(nattrs, V11Vector.allocValidAllTrue(N));
         Map<Integer, V11Vector> eattrs = new HashMap<>();
         eattrs.put(0, evec);
-        V11SnapshotView.RelView rel = new V11SnapshotView.RelView(0, 0, 0, roff, ctgt, eattrs, true, true, false, false);
+        V11SnapshotView.RelView rel = V11OffHeapFixtureBuilder.buildRel(
+                0, 0, 0, N, roff, ctgt, eattrs, true, true, false, false, true);
         Map<Long, V11Vector> naMap = new HashMap<>();
         naMap.put(V11SnapshotView.domAttrKey(0, 0), nvec);
         V11SnapshotView view = new V11SnapshotView(

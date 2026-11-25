@@ -42,6 +42,10 @@ public final class V11Arena {
     public boolean[] valVisited  = new boolean[256];
     public int[]     valStack    = new int[256];
 
+    // Reusable morsel per-register scratch tables (zero-alloc across morsel invocations)
+    public final V11Vector[] morselGatherVecs = new V11Vector[16];
+    public final V11Vector[] morselCmpVecs    = new V11Vector[16];
+
     // Pre-allocated flat reverse-adjacency scratch for CSC builds
     public int[] revOff = new int[64];
     public int[] revSrc = new int[64];

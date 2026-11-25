@@ -64,11 +64,11 @@ class V11JitAndAllocationTest {
 
     @Test
     void compiledJitMatchesInterpreterOnGraphWalkAndMultiLane() {
-        V11SnapshotView.RelView rel = new V11SnapshotView.RelView(
-                0, 0, 0,
+        V11SnapshotView.RelView rel = V11OffHeapFixtureBuilder.buildRel(
+                0, 0, 0, 4,
                 new int[]{0, 2, 3, 4, 4},
                 new long[]{1, 2, 3, 3},
-                new HashMap<>(), true, false, false, false);
+                new HashMap<>(), true, false, false, false, false);
         V11SnapshotView view = new V11SnapshotView(
                 new long[]{4}, new V11SnapshotView.RelView[]{rel}, Map.of(), Map.of(), Map.of());
         V11Interpreter.SnapshotBinding bind = new V11Interpreter.SnapshotBinding(new int[]{4}, view);

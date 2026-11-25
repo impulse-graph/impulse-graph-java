@@ -97,7 +97,7 @@ public final class V11Pillar3Ops {
     private static V11SnapshotView.RelView getRel(V11Interpreter.SnapshotBinding bind, V11Workspace ws, int rid) {
         V11SnapshotView view = getView(bind, ws);
         if (view == null) return null;
-        if (rid < 0 || rid >= view.relations.length) {
+        if (rid < 0 || rid >= view.relations.length || view.relations[rid] == null) {
             ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
             return null;
         }
@@ -150,49 +150,6 @@ public final class V11Pillar3Ops {
         return s;
     }
 
-    private static List<int[]>[] buildRevAdj(V11SnapshotView view, V11SnapshotView.RelView rel) {
-        int nTgt = (int) view.domainCards[rel.tgtDom];
-        @SuppressWarnings("unchecked")
-        List<int[]>[] rev = new List[nTgt];
-        for (int i = 0; i < nTgt; i++) rev[i] = new ArrayList<>();
-        int nSrc = rel.rowOffsets.length - 1;
-        for (int u = 0; u < nSrc; u++) {
-            for (int e = rel.rowOffsets[u]; e < rel.rowOffsets[u + 1]; e++) {
-                int v = (int) rel.colTargets[e];
-                if (v >= 0 && v < nTgt) {
-                    rev[v].add(new int[]{u, e});
-                }
-            }
-        }
-        return rev;
-    }
-
-    private static Set<Integer> fwdStep(V11SnapshotView.RelView rel, Set<Integer> src, Set<Integer> excl) {
-        Set<Integer> out = new TreeSet<>();
-        for (int u : src) {
-            if (u >= 0 && u + 1 < rel.rowOffsets.length) {
-                for (int e = rel.rowOffsets[u]; e < rel.rowOffsets[u + 1]; e++) {
-                    int v = (int) rel.colTargets[e];
-                    if (!excl.contains(v)) out.add(v);
-                }
-            }
-        }
-        return out;
-    }
-
-    private static Set<Integer> revStep(List<int[]>[] revAdj, Set<Integer> tgt, Set<Integer> excl) {
-        Set<Integer> out = new TreeSet<>();
-        for (int v : tgt) {
-            if (v >= 0 && v < revAdj.length) {
-                for (int[] pair : revAdj[v]) {
-                    int u = pair[0];
-                    if (!excl.contains(u)) out.add(u);
-                }
-            }
-        }
-        return out;
-    }
-
     // --- 0x30 OP_WALK ---
     private static void execWalk(
             V11Workspace ws, V11Interpreter.SnapshotBinding bind, int subop, int flags,
@@ -237,8 +194,14 @@ public final class V11Pillar3Ops {
                 if (fd.domainId != outDom) { ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH; return; }
             }
             boolean needsRev = (subop == 1 || subop == 2 || subop == 5 || subop == 6);
-            if (needsRev) {
-                rel.ensureCsc((int) view.domainCards[rel.tgtDom]);
+            boolean needsFwd = (subop == 0 || subop == 2 || subop == 3 || subop == 4 || subop == 7);
+            if (needsFwd && !rel.hasCsrSegments()) {
+                ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                return;
+            }
+            if (needsRev && !rel.hasCscSegments()) {
+                ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                return;
             }
             long[] exclBits = null;
             if (fe != null && !fe.isEmpty()) {
@@ -260,7 +223,7 @@ public final class V11Pillar3Ops {
             boolean stFlag = ws.st;
 
             if (subop == 0) {
-                if (rel.isOffHeap() && rel.edgeIdxWidth == 4 && rel.nodeIdWidth == 4) {
+                if (rel.edgeIdxWidth == 4 && rel.nodeIdWidth == 4) {
                     var roSeg = rel.csrRowOffsetsSeg;
                     var ctSeg = rel.csrColTargetsSeg;
                     for (int i = 0; i < curLen; i++) {
@@ -292,7 +255,7 @@ public final class V11Pillar3Ops {
                     }
                 }
             } else if (subop == 1) {
-                if (rel.hasOffHeapCsc() && rel.edgeIdxWidth == 4 && rel.nodeIdWidth == 4) {
+                if (rel.edgeIdxWidth == 4 && rel.nodeIdWidth == 4) {
                     var cscRoSeg = rel.cscRowOffsetsSeg;
                     var cscCtSeg = rel.cscColSourcesSeg;
                     for (int i = 0; i < curLen; i++) {
@@ -431,99 +394,7 @@ public final class V11Pillar3Ops {
             ws.pc++;
             return;
         }
-
-        Set<Integer> sExcl = Set.of();
-        if ((flags & FLAG_MASKED_S3) != 0) {
-            V11Frontier fe = getF1Bit(ws, s3);
-            if (fe == null) return;
-            if (fe.domainId != outDom) {
-                ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
-                return;
-            }
-            sExcl = toIntSet(fe);
-        }
-        Set<Integer> sAccum = Set.of();
-        if ((flags & FLAG_ACCUM) != 0) {
-            V11Frontier fd = getF1Bit(ws, dst);
-            if (fd == null) return;
-            if (fd.domainId != outDom) {
-                ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
-                return;
-            }
-            sAccum = toIntSet(fd);
-        }
-
-        Set<Integer> sSrc = toIntSet(fSrc);
-        List<int[]>[] revAdj = (subop == 1 || subop == 2 || subop == 5 || subop == 6) ? buildRevAdj(view, rel) : null;
-
-        Set<Integer> outS;
-        boolean stFlag = ws.st;
-        switch (subop) {
-            case 0 -> outS = fwdStep(rel, sSrc, sExcl);
-            case 1 -> outS = revStep(revAdj, sSrc, sExcl);
-            case 2 -> {
-                outS = fwdStep(rel, sSrc, sExcl);
-                outS.addAll(revStep(revAdj, sSrc, sExcl));
-            }
-            case 3, 5 -> { // fixpoint_plus
-                Set<Integer> visited = new TreeSet<>();
-                Set<Integer> frontier = (subop == 3) ? fwdStep(rel, sSrc, sExcl) : revStep(revAdj, sSrc, sExcl);
-                while (!frontier.isEmpty()) {
-                    visited.addAll(frontier);
-                    Set<Integer> excl = new HashSet<>(sExcl);
-                    excl.addAll(visited);
-                    frontier = (subop == 3) ? fwdStep(rel, frontier, excl) : revStep(revAdj, frontier, excl);
-                }
-                outS = visited;
-                stFlag = true;
-            }
-            case 4, 6 -> { // fixpoint_star
-                Set<Integer> visited = new TreeSet<>(sSrc);
-                visited.removeAll(sExcl);
-                Set<Integer> frontier = new TreeSet<>(visited);
-                while (!frontier.isEmpty()) {
-                    Set<Integer> excl = new HashSet<>(sExcl);
-                    excl.addAll(visited);
-                    Set<Integer> next = (subop == 4) ? fwdStep(rel, frontier, excl) : revStep(revAdj, frontier, excl);
-                    visited.addAll(next);
-                    frontier = next;
-                }
-                outS = visited;
-                stFlag = true;
-            }
-            case 7 -> { // fwd_bounded k
-                int k = imm16Hi;
-                Set<Integer> visited = new TreeSet<>();
-                Set<Integer> frontier = sSrc;
-                boolean converged = false;
-                for (int hop = 0; hop < k && !converged; hop++) {
-                    Set<Integer> excl = new HashSet<>(sExcl);
-                    excl.addAll(visited);
-                    Set<Integer> next = fwdStep(rel, frontier, excl);
-                    if (next.isEmpty()) {
-                        converged = true;
-                    } else {
-                        visited.addAll(next);
-                        frontier = next;
-                    }
-                }
-                outS = visited;
-                stFlag = converged;
-            }
-            default -> {
-                ws.status = IMPULSE_VM_ERR_INVALID_OPCODE;
-                return;
-            }
-        }
-
-        Set<Integer> finalS = new TreeSet<>(sAccum);
-        finalS.addAll(outS);
-        int outCard = (int) view.domainCards[outDom];
-        ws.fRegs[dst].initFromValidatedIds(outDom, outCard, toSortedInts(finalS), ws.geometry, false);
-        ws.setFInitialized(dst, true);
-        ws.zf = finalS.isEmpty();
-        ws.st = stFlag;
-        ws.pc++;
+        ws.status = IMPULSE_VM_ERR_INVALID_OPCODE;
     }
 
     // --- 0x31 OP_WALK_FILTERED ---
@@ -634,22 +505,37 @@ public final class V11Pillar3Ops {
         if (!(cmpOp <= 5 && !rhsValid)) {
             int[] srcIds = fSrc.toSortedArray();
             if (!isRev) {
+                if (!rel.hasCsrSegments()) {
+                    ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                    return;
+                }
+                int csrRows = rel.csrRowCount();
                 for (int u : srcIds) {
-                    for (int e = rel.rowOffsets[u]; e < rel.rowOffsets[u + 1]; e++) {
-                        int v = (int) rel.colTargets[e];
-                        if (!sExcl.contains(v) && evalEdgePred(col, e, cmpOp, rhsValid, rhsBits, rhsTy)) {
-                            out.add(v);
+                    if (u >= 0 && u < csrRows) {
+                        int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+                        for (int e = s; e < end; e++) {
+                            int v = rel.csrColTarget(e);
+                            if (!sExcl.contains(v) && evalEdgePred(col, e, cmpOp, rhsValid, rhsBits, rhsTy)) {
+                                out.add(v);
+                            }
                         }
                     }
                 }
             } else {
-                List<int[]>[] revAdj = buildRevAdj(view, rel);
+                if (!rel.hasCscSegments()) {
+                    ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                    return;
+                }
+                int cscRows = rel.cscRowCount();
                 for (int v : srcIds) {
-                    for (int[] pair : revAdj[v]) {
-                        int u = pair[0];
-                        int e = pair[1];
-                        if (!sExcl.contains(u) && evalEdgePred(col, e, cmpOp, rhsValid, rhsBits, rhsTy)) {
-                            out.add(u);
+                    if (v >= 0 && v < cscRows) {
+                        int s = rel.cscRowOffset(v), end = rel.cscRowOffset(v + 1);
+                        for (int p = s; p < end; p++) {
+                            int u = rel.cscColSource(p);
+                            int e = rel.cscEdgeId(p);
+                            if (!sExcl.contains(u) && evalEdgePred(col, e, cmpOp, rhsValid, rhsBits, rhsTy)) {
+                                out.add(u);
+                            }
                         }
                     }
                 }
@@ -666,16 +552,6 @@ public final class V11Pillar3Ops {
     }
 
     // --- 0x33 OP_DEGREE ---
-    private static int[] computeInDegs(V11SnapshotView view, V11SnapshotView.RelView rel) {
-        int nTgt = (int) view.domainCards[rel.tgtDom];
-        int[] d = new int[nTgt];
-        for (long v64 : rel.colTargets) {
-            int v = (int) v64;
-            if (v >= 0 && v < nTgt) d[v]++;
-        }
-        return d;
-    }
-
     private static void execDegree(
             V11Workspace ws, V11Interpreter.SnapshotBinding bind, int subop, int flags,
             int dst, int s1, int s3, int relId) {
@@ -691,8 +567,18 @@ public final class V11Pillar3Ops {
                     ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
                     return;
                 }
+                if (!rel.hasCsrSegments()) {
+                    ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                    return;
+                }
+                int cnt = fSrc.cardinality();
+                int[] ids = ws.arena.allocInt(Math.max(1, cnt));
+                int nIds = fSrc.toSortedArrayInto(ids);
                 long sum = 0L;
-                for (int u : fSrc.toSortedArray()) sum += (rel.rowOffsets[u + 1] - rel.rowOffsets[u]);
+                for (int i = 0; i < nIds; i++) {
+                    int u = ids[i];
+                    sum += (rel.csrRowOffset(u + 1) - rel.csrRowOffset(u));
+                }
                 ws.writeR(dst, SCALAR_U64, sum);
                 setScalarFlags(ws, true, sum);
                 ws.pc++;
@@ -704,58 +590,74 @@ public final class V11Pillar3Ops {
                     ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
                     return;
                 }
-                int[] inD = computeInDegs(view, rel);
+                if (!rel.hasCscSegments()) {
+                    ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                    return;
+                }
+                int cnt = fTgt.cardinality();
+                int[] ids = ws.arena.allocInt(Math.max(1, cnt));
+                int nIds = fTgt.toSortedArrayInto(ids);
                 long sum = 0L;
-                for (int v : fTgt.toSortedArray()) sum += inD[v];
+                for (int i = 0; i < nIds; i++) {
+                    int v = ids[i];
+                    sum += (rel.cscRowOffset(v + 1) - rel.cscRowOffset(v));
+                }
                 ws.writeR(dst, SCALAR_U64, sum);
                 setScalarFlags(ws, true, sum);
                 ws.pc++;
             }
             case 2 -> { // .vec_fwd_v
-                Set<Integer> maskSet = null;
+                V11Frontier fm = null;
                 if ((flags & FLAG_MASKED_S3) != 0) {
-                    V11Frontier fm = getF1Bit(ws, s3);
+                    fm = getF1Bit(ws, s3);
                     if (fm == null) return;
                     if (fm.domainId != rel.srcDom) {
                         ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
                         return;
                     }
-                    maskSet = toIntSet(fm);
+                }
+                if (!rel.hasCsrSegments()) {
+                    ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                    return;
                 }
                 int n = (int) view.domainCards[rel.srcDom];
-                long[] vals = new long[n];
-                long[] valid = new long[Math.max(1, (n + 63) >>> 6)];
+                int words = Math.max(1, (n + 63) >>> 6);
+                long[] vals = ws.arena.allocLongZeroed(Math.max(1, n));
+                long[] valid = ws.arena.allocLongZeroed(words);
                 for (int u = 0; u < n; u++) {
-                    if (maskSet == null || maskSet.contains(u)) {
-                        vals[u] = rel.rowOffsets[u + 1] - rel.rowOffsets[u];
+                    if (fm == null || fm.contains(u)) {
+                        vals[u] = rel.csrRowOffset(u + 1) - rel.csrRowOffset(u);
                         valid[u >>> 6] |= (1L << (u & 63));
                     }
                 }
-                ws.vVectors[dst] = V11Vector.ofU64(vals, valid);
+                ws.vVectors[dst] = ws.arena.allocU64(vals, n, valid);
                 ws.pc++;
             }
             case 3 -> { // .vec_rev_v
-                Set<Integer> maskSet = null;
+                V11Frontier fm = null;
                 if ((flags & FLAG_MASKED_S3) != 0) {
-                    V11Frontier fm = getF1Bit(ws, s3);
+                    fm = getF1Bit(ws, s3);
                     if (fm == null) return;
                     if (fm.domainId != rel.tgtDom) {
                         ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
                         return;
                     }
-                    maskSet = toIntSet(fm);
                 }
-                int[] inD = computeInDegs(view, rel);
-                int n = inD.length;
-                long[] vals = new long[n];
-                long[] valid = new long[Math.max(1, (n + 63) >>> 6)];
+                if (!rel.hasCscSegments()) {
+                    ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                    return;
+                }
+                int n = (int) view.domainCards[rel.tgtDom];
+                int words = Math.max(1, (n + 63) >>> 6);
+                long[] vals = ws.arena.allocLongZeroed(Math.max(1, n));
+                long[] valid = ws.arena.allocLongZeroed(words);
                 for (int v = 0; v < n; v++) {
-                    if (maskSet == null || maskSet.contains(v)) {
-                        vals[v] = inD[v];
+                    if (fm == null || fm.contains(v)) {
+                        vals[v] = rel.cscRowOffset(v + 1) - rel.cscRowOffset(v);
                         valid[v >>> 6] |= (1L << (v & 63));
                     }
                 }
-                ws.vVectors[dst] = V11Vector.ofU64(vals, valid);
+                ws.vVectors[dst] = ws.arena.allocU64(vals, n, valid);
                 ws.pc++;
             }
             case 4 -> { // .node_fwd_r
@@ -771,8 +673,12 @@ public final class V11Pillar3Ops {
                     ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
                     return;
                 }
+                if (!rel.hasCsrSegments()) {
+                    ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                    return;
+                }
                 int u = (int) u64;
-                long deg = rel.rowOffsets[u + 1] - rel.rowOffsets[u];
+                long deg = rel.csrRowOffset(u + 1) - rel.csrRowOffset(u);
                 ws.writeR(dst, SCALAR_U64, deg);
                 setScalarFlags(ws, true, deg);
                 ws.pc++;
@@ -790,8 +696,12 @@ public final class V11Pillar3Ops {
                     ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
                     return;
                 }
-                int[] inD = computeInDegs(view, rel);
-                long deg = inD[(int) v64];
+                if (!rel.hasCscSegments()) {
+                    ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                    return;
+                }
+                int v = (int) v64;
+                long deg = rel.cscRowOffset(v + 1) - rel.cscRowOffset(v);
                 ws.writeR(dst, SCALAR_U64, deg);
                 setScalarFlags(ws, true, deg);
                 ws.pc++;
@@ -845,11 +755,13 @@ public final class V11Pillar3Ops {
 
         // Zero-alloc fast path for forward SpMV (subop 0=plus_times, 2=min_plus, 4=max_plus, 5=max_times, 6=min_max, 7=first_src, 8=argmin_plus)
         if (!isRev && (flags & FLAG_MASKED_S3) == 0) {
+            if (!rel.hasCsrSegments()) {
+                ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                return;
+            }
             int srcCard = fSrc.cardinality();
             int[] srcIds = ws.arena.allocInt(srcCard);
             int srcLen = fSrc.toSortedArrayInto(srcIds);
-            int[] roff = rel.rowOffsets;
-            long[] ctgt = rel.colTargets;
             int outWords = Math.max(1, (nOut + 63) >>> 6);
 
             if (subop == 7) { // .fwd_first_src
@@ -859,8 +771,9 @@ public final class V11Pillar3Ops {
                 for (int si = 0; si < srcLen; si++) {
                     int u = srcIds[si];
                     long u64 = u & 0xFFFFFFFFL;
-                    for (int e = roff[u]; e < roff[u + 1]; e++) {
-                        int v = (int) ctgt[e];
+                    int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+                    for (int e = s; e < end; e++) {
+                        int v = rel.csrColTarget(e);
                         boolean has = ((valid[v >>> 6] >>> (v & 63)) & 1L) != 0L;
                         if (!has) {
                             out[v] = u64;
@@ -911,8 +824,9 @@ public final class V11Pillar3Ops {
                     if (scalarRhs ? !scalarValid : !rhsSnapValid[u]) continue;
                     double du = scalarRhs ? scalarVal : rhsSnap[u];
                     long u64 = u & 0xFFFFFFFFL;
-                    for (int e = roff[u]; e < roff[u + 1]; e++) {
-                        int v = (int) ctgt[e];
+                    int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+                    for (int e = s; e < end; e++) {
+                        int v = rel.csrColTarget(e);
                         if (weightCol != null && !weightCol.isValidAt(e)) continue;
                         double w = (weightCol == null) ? 1.0
                                 : (weightCol.elemTag == V11Vector.TAG_F64 ? weightCol.f64Data[e] : (double) weightCol.i64Data[e]);
@@ -952,8 +866,9 @@ public final class V11Pillar3Ops {
                 int u = srcIds[si];
                 if (scalarRhs ? !scalarValid : !rhsSnapValid[u]) continue;
                 double ru = scalarRhs ? scalarVal : rhsSnap[u];
-                for (int e = roff[u]; e < roff[u + 1]; e++) {
-                    int v = (int) ctgt[e];
+                int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+                for (int e = s; e < end; e++) {
+                    int v = rel.csrColTarget(e);
                     if (weightCol != null && !weightCol.isValidAt(e)) continue;
                     double w = (weightCol == null) ? 1.0
                             : (weightCol.elemTag == V11Vector.TAG_F64 ? weightCol.f64Data[e] : (double) weightCol.i64Data[e]);
@@ -994,20 +909,29 @@ public final class V11Pillar3Ops {
         List<int[]> edges = new ArrayList<>();
         int[] srcIds = fSrc.toSortedArray();
         if (!isRev) {
+            if (!rel.hasCsrSegments()) {
+                ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                return;
+            }
             for (int u : srcIds) {
-                for (int e = rel.rowOffsets[u]; e < rel.rowOffsets[u + 1]; e++) {
-                    int v = (int) rel.colTargets[e];
+                int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+                for (int e = s; e < end; e++) {
+                    int v = rel.csrColTarget(e);
                     if (tgtMask == null || tgtMask.contains(v)) {
                         edges.add(new int[]{u, v, e});
                     }
                 }
             }
         } else {
-            List<int[]>[] revAdj = buildRevAdj(view, rel);
+            if (!rel.hasCscSegments()) {
+                ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                return;
+            }
             for (int v : srcIds) {
-                for (int[] pair : revAdj[v]) {
-                    int u = pair[0];
-                    int e = pair[1];
+                int s = rel.cscRowOffset(v), end = rel.cscRowOffset(v + 1);
+                for (int p = s; p < end; p++) {
+                    int u = rel.cscColSource(p);
+                    int e = rel.cscEdgeId(p);
                     if (tgtMask == null || tgtMask.contains(u)) {
                         edges.add(new int[]{v, u, e});
                     }
@@ -1203,20 +1127,29 @@ public final class V11Pillar3Ops {
         List<long[]> items = new ArrayList<>();
         int[] srcIds = fSrc.toSortedArray();
         if (!isRev) {
+            if (!rel.hasCsrSegments()) {
+                ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                return;
+            }
             for (int u : srcIds) {
-                for (int e = rel.rowOffsets[u]; e < rel.rowOffsets[u + 1]; e++) {
-                    int v = (int) rel.colTargets[e];
+                int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+                for (int e = s; e < end; e++) {
+                    int v = rel.csrColTarget(e);
                     if (!sExcl.contains(v)) {
                         items.add(new long[]{u & 0xFFFFFFFFL, v & 0xFFFFFFFFL, e & 0xFFFFFFFFL, 1L});
                     }
                 }
             }
         } else {
-            List<int[]>[] revAdj = buildRevAdj(view, rel);
+            if (!rel.hasCscSegments()) {
+                ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                return;
+            }
             for (int v : srcIds) {
-                for (int[] pair : revAdj[v]) {
-                    int u = pair[0];
-                    int e = pair[1];
+                int s = rel.cscRowOffset(v), end = rel.cscRowOffset(v + 1);
+                for (int p = s; p < end; p++) {
+                    int u = rel.cscColSource(p);
+                    int e = rel.cscEdgeId(p);
                     if (!sExcl.contains(u)) {
                         items.add(new long[]{u & 0xFFFFFFFFL, v & 0xFFFFFFFFL, e & 0xFFFFFFFFL, 1L});
                     }
@@ -1301,40 +1234,51 @@ public final class V11Pillar3Ops {
         V11Vector vM2 = ws.arena.allocU64(m2, 0, allValid);
         V11Vector vM3 = ws.arena.allocU64(m3, 0, allValid);
 
-        // Pre-allocate scratch for morsel interior V8..V15 (slots 11..15)
-        double[] scratchF64 = ws.arena.allocDouble(mMax);
-        long[] scratchValid = ws.arena.allocLong(mWords);
-        long[] scratchCmpValid = ws.arena.allocLong(mWords);
-        long[] scratchCmpData = ws.arena.allocLong(mWords);
+        // Pre-allocate per-register scratch for morsel interior V8..V15 (eliminates register aliasing, 0-alloc)
         int[] scratchFIds = ws.arena.allocInt(mMax);
-        V11Vector vGather = ws.arena.allocF64(scratchF64, 0, scratchValid);
-        V11Vector vCmp = ws.arena.allocBool3vl(0, scratchCmpValid, scratchCmpData);
+        V11Vector[] gatherVecs = ws.arena.morselGatherVecs;
+        V11Vector[] cmpVecs = ws.arena.morselCmpVecs;
+        Arrays.fill(gatherVecs, null);
+        Arrays.fill(cmpVecs, null);
+        for (int p = hdrPc + 1; p < endPc; p++) {
+            long pw = program[p];
+            int pop = (int) (pw & 0xFFL);
+            int pdst = (int) ((pw >>> 20) & 0xFL);
+            if (pop == OP_GATHER_EDGE_ATTR && gatherVecs[pdst] == null) {
+                gatherVecs[pdst] = ws.arena.allocF64(ws.arena.allocDouble(mMax), 0, ws.arena.allocLong(mWords));
+                gatherVecs[pdst].i64Data = ws.arena.allocLong(mMax);
+            } else if (pop == OP_VEC_CMP && cmpVecs[pdst] == null) {
+                cmpVecs[pdst] = ws.arena.allocBool3vl(0, ws.arena.allocLong(mWords), ws.arena.allocLong(mWords));
+            }
+        }
 
+        if (!rel.hasCsrSegments()) {
+            ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+            return;
+        }
         int srcCard = fSrc.cardinality();
         int[] srcIds = ws.arena.allocInt(srcCard);
         int srcLen = fSrc.toSortedArrayInto(srcIds);
-        int[] roff = rel.rowOffsets;
-        long[] ctgt = rel.colTargets;
 
         int srcIdx = 0;
-        int edgePos = (srcLen > 0) ? roff[srcIds[0]] : 0;
+        int edgePos = (srcLen > 0) ? rel.csrRowOffset(srcIds[0]) : 0;
 
         while (ws.status == IMPULSE_VM_OK) {
-            // Fill up to mMax edges directly from CSR (zero intermediate List<long[]>)
+            // Fill up to mMax edges directly from off-heap CSR (zero intermediate List<long[]>)
             int len = 0;
             while (len < mMax && srcIdx < srcLen) {
                 int u = srcIds[srcIdx];
-                int eEnd = roff[u + 1];
+                int eEnd = rel.csrRowOffset(u + 1);
                 while (edgePos < eEnd && len < mMax) {
                     m0[len] = u & 0xFFFFFFFFL;
-                    m1[len] = ctgt[edgePos];
+                    m1[len] = rel.csrColTarget(edgePos) & 0xFFFFFFFFL;
                     m2[len] = edgePos & 0xFFFFFFFFL;
                     len++;
                     edgePos++;
                 }
                 if (edgePos >= eEnd) {
                     srcIdx++;
-                    if (srcIdx < srcLen) edgePos = roff[srcIds[srcIdx]];
+                    if (srcIdx < srcLen) edgePos = rel.csrRowOffset(srcIds[srcIdx]);
                 }
             }
             if (len == 0) break;
@@ -1376,23 +1320,49 @@ public final class V11Pillar3Ops {
                 switch (op) {
                     case OP_GATHER_EDGE_ATTR -> {
                         if (immLo >= view.relations.length || view.relations[immLo] == null) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; break; }
-                        V11Vector col = view.relations[immLo].edgeAttrs.get(immHi);
+                        V11SnapshotView.RelView gr = view.relations[immLo];
+                        V11Vector col = gr.edgeAttrs.get(immHi);
+                        V11SnapshotView.OffHeapAttrColumn offCol = (col == null) ? gr.offHeapEdgeAttrs.get(immHi) : null;
                         V11Vector idxV = ws.vVectors[s1];
-                        if (col == null) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; break; }
+                        if (col == null && offCol == null) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; break; }
                         if (idxV == null || idxV.elemTag != V11Vector.TAG_U64) { ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; break; }
+                        V11Vector vGather = gatherVecs[dst];
+                        long[] scratchValid = vGather.validBits;
                         Arrays.fill(scratchValid, 0, curWords, 0L);
-                        double[] colF64 = col.f64Data;
                         long[] idxData = idxV.i64Data;
-                        int colLen = col.length;
-                        for (int i = 0; i < len; i++) {
-                            if (!idxV.isValidAt(i)) continue;
-                            long e64 = idxData[i];
-                            if (e64 < 0L || e64 >= colLen) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; break; }
-                            int e = (int) e64;
-                            if (col.isValidAt(e)) {
-                                scratchF64[i] = (col.elemTag == V11Vector.TAG_F64) ? colF64[e] : (double) col.i64Data[e];
-                                scratchValid[i >>> 6] |= (1L << (i & 63));
+                        int colLen = (col != null) ? col.length : offCol.count();
+                        int tag = (col != null) ? col.elemTag : offCol.elemTag();
+                        if (tag == V11Vector.TAG_F64) {
+                            double[] scratchF64 = vGather.f64Data;
+                            for (int i = 0; i < len; i++) {
+                                if (!idxV.isValidAt(i)) continue;
+                                long e64 = idxData[i];
+                                if (e64 < 0L || e64 >= colLen) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; break; }
+                                int e = (int) e64;
+                                boolean ok = (col != null) ? col.isValidAt(e) : offCol.isValidAt(e);
+                                if (ok) {
+                                    scratchF64[i] = (col != null) ? col.f64Data[e] : offCol.readF64(e);
+                                    scratchValid[i >>> 6] |= (1L << (i & 63));
+                                }
                             }
+                            vGather.elemTag = V11Vector.TAG_F64;
+                        } else if (tag == V11Vector.TAG_I64 || tag == V11Vector.TAG_U64) {
+                            long[] scratchI64 = vGather.i64Data;
+                            for (int i = 0; i < len; i++) {
+                                if (!idxV.isValidAt(i)) continue;
+                                long e64 = idxData[i];
+                                if (e64 < 0L || e64 >= colLen) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; break; }
+                                int e = (int) e64;
+                                boolean ok = (col != null) ? col.isValidAt(e) : offCol.isValidAt(e);
+                                if (ok) {
+                                    scratchI64[i] = (col != null) ? col.i64Data[e] : offCol.readI64(e);
+                                    scratchValid[i >>> 6] |= (1L << (i & 63));
+                                }
+                            }
+                            vGather.elemTag = tag;
+                        } else {
+                            ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+                            break;
                         }
                         if (ws.status != IMPULSE_VM_OK) break;
                         vGather.length = len;
@@ -1402,6 +1372,9 @@ public final class V11Pillar3Ops {
                         V11Vector lhs = ws.vVectors[s1];
                         if (lhs == null || lhs.elemTag != V11Vector.TAG_F64) { ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; break; }
                         boolean scalar = (flags & FLAG_SCALAR_RHS) != 0;
+                        V11Vector vCmp = cmpVecs[dst];
+                        long[] scratchCmpValid = vCmp.validBits;
+                        long[] scratchCmpData = vCmp.boolDataBits;
                         Arrays.fill(scratchCmpValid, 0, curWords, 0L);
                         Arrays.fill(scratchCmpData, 0, curWords, 0L);
                         boolean rScOk = scalar && ws.isRValid(s2);
@@ -1992,8 +1965,9 @@ public final class V11Pillar3Ops {
                             case 1 -> x - y;
                             case 2 -> x * y;
                             case 3 -> (y == 0.0) ? Double.NaN : (x / y);
-                            case 6 -> ieeeMinF64(x, y);
-                            case 7 -> ieeeMaxF64(x, y);
+                            case 5 -> ieeeMinF64(x, y);
+                            case 6 -> ieeeMaxF64(x, y);
+                            case 7 -> Math.copySign(x, y);
                             default -> Double.NaN;
                         };
                     }
@@ -2212,12 +2186,16 @@ public final class V11Pillar3Ops {
                     ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
                     return;
                 }
+                if (!rel.hasCsrSegments()) {
+                    ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+                    return;
+                }
                 Set<Integer> out = new TreeSet<>();
                 for (int u : fSrc.toSortedArray()) {
-                    int lo = rel.rowOffsets[u], hi = rel.rowOffsets[u + 1];
+                    int lo = rel.csrRowOffset(u), hi = rel.csrRowOffset(u + 1);
                     int deg = hi - lo;
                     if (deg <= k) {
-                        for (int e = lo; e < hi; e++) out.add((int) rel.colTargets[e]);
+                        for (int e = lo; e < hi; e++) out.add(rel.csrColTarget(e));
                     } else {
                         Set<Integer> chosen = new HashSet<>(k * 2);
                         for (int t = deg - k; t < deg; t++) {
@@ -2225,7 +2203,7 @@ public final class V11Pillar3Ops {
                             int p = (int) Long.remainderUnsigned(r, t + 1L);
                             int pick = chosen.contains(p) ? t : p;
                             chosen.add(pick);
-                            out.add((int) rel.colTargets[lo + pick]);
+                            out.add(rel.csrColTarget(lo + pick));
                         }
                     }
                 }
@@ -2258,14 +2236,14 @@ public final class V11Pillar3Ops {
                         return;
                     }
                     int u = (int) u64;
-                    int lo = rel.rowOffsets[u], hi = rel.rowOffsets[u + 1];
+                    int lo = rel.csrRowOffset(u), hi = rel.csrRowOffset(u + 1);
                     int deg = hi - lo;
                     if (deg > 0) {
                         for (int j = 0; j < k; j++) {
                             long r = splitMixSample(seed, u64, j);
                             int idx = (int) Long.remainderUnsigned(r, deg);
                             int pos = i * k + j;
-                            out[pos] = rel.colTargets[lo + idx];
+                            out[pos] = rel.csrColTarget(lo + idx) & 0xFFFFFFFFL;
                             valid[pos >>> 6] |= (1L << (pos & 63));
                             anyValid = true;
                         }
@@ -2295,7 +2273,7 @@ public final class V11Pillar3Ops {
                         return;
                     }
                     int u = (int) u64;
-                    int lo = rel.rowOffsets[u], hi = rel.rowOffsets[u + 1];
+                    int lo = rel.csrRowOffset(u), hi = rel.csrRowOffset(u + 1);
                     int deg = hi - lo;
                     if (deg == 0) {
                         if (stay) {
@@ -2306,7 +2284,7 @@ public final class V11Pillar3Ops {
                     } else {
                         long r = splitMixSample(seed, u64, i);
                         int idx = (int) Long.remainderUnsigned(r, deg);
-                        out[i] = rel.colTargets[lo + idx];
+                        out[i] = rel.csrColTarget(lo + idx) & 0xFFFFFFFFL;
                         valid[i >>> 6] |= (1L << (i & 63));
                         anyValid = true;
                     }
@@ -2326,20 +2304,21 @@ public final class V11Pillar3Ops {
         if (view == null) return;
         long val;
         switch (subop) {
-            case 0 -> val = (lo < view.relations.length && view.relations[lo].hasCsr) ? 1L : 0L;
-            case 1 -> val = (lo < view.relations.length && view.relations[lo].hasCsc) ? 1L : 0L;
-            case 2 -> val = (lo < view.relations.length && view.relations[lo].hasCoo) ? 1L : 0L;
-            case 3 -> val = (lo < view.relations.length && view.relations[lo].hasDense) ? 1L : 0L;
+            case 0 -> val = (lo < view.relations.length && view.relations[lo] != null && view.relations[lo].hasCsr) ? 1L : 0L;
+            case 1 -> val = (lo < view.relations.length && view.relations[lo] != null && view.relations[lo].hasCsc) ? 1L : 0L;
+            case 2 -> val = (lo < view.relations.length && view.relations[lo] != null && view.relations[lo].hasCoo) ? 1L : 0L;
+            case 3 -> val = (lo < view.relations.length && view.relations[lo] != null && view.relations[lo].hasDense) ? 1L : 0L;
             case 4 -> val = view.hasKeyCatalog(lo) ? 1L : 0L;
             case 5 -> val = view.hasNodeAttr(lo, hi) ? 1L : 0L;
-            case 6 -> val = (lo < view.relations.length && view.relations[lo].edgeAttrs.containsKey(hi)) ? 1L : 0L;
+            case 6 -> val = (lo < view.relations.length && view.relations[lo] != null
+                    && (view.relations[lo].edgeAttrs.containsKey(hi) || view.relations[lo].offHeapEdgeAttrs.containsKey(hi))) ? 1L : 0L;
             case 7 -> val = view.hasIndex(lo, hi) ? 1L : 0L;
             case 8 -> {
                 if (lo >= view.domainCards.length) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
                 val = view.domainCards[lo];
             }
             case 9 -> {
-                if (lo >= view.relations.length) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
+                if (lo >= view.relations.length || view.relations[lo] == null) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
                 val = view.relations[lo].edgeCount();
             }
             default -> { ws.status = IMPULSE_VM_ERR_INVALID_OPCODE; return; }
@@ -2383,12 +2362,17 @@ public final class V11Pillar3Ops {
             maskSet = toIntSet(fm);
         }
 
+        if (!rel.hasCsrSegments()) {
+            ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+            return;
+        }
         Set<Integer>[] adj = new Set[n];
         for (int u = 0; u < n; u++) adj[u] = new TreeSet<>();
         for (int u = 0; u < n; u++) {
             if (maskSet != null && !maskSet.contains(u)) continue;
-            for (int e = rel.rowOffsets[u]; e < rel.rowOffsets[u + 1]; e++) {
-                int v = (int) rel.colTargets[e];
+            int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+            for (int e = s; e < end; e++) {
+                int v = rel.csrColTarget(e);
                 if (v != u && v >= 0 && v < n && (maskSet == null || maskSet.contains(v))) {
                     adj[u].add(v);
                     adj[v].add(u);
