@@ -51,6 +51,14 @@ public final class V11Frontier {
     public final long[] denseWords;
     public int denseWordCount;
 
+    // Multi-lane payload (used by LOAD_PARAM.frontier multilane & Pillar 5)
+    public boolean multiLane;
+    public int allocWidth = 1;
+    public int activeLaneCount = 1;
+    public long[] mlNodes;
+    public long[] mlMasks;
+    public int mlCount;
+
     public V11Frontier(int maxDomainCard) {
         int maxWords = Math.max(1, (maxDomainCard + 63) >>> 6);
         this.denseWords = new long[maxWords];
@@ -67,6 +75,10 @@ public final class V11Frontier {
         this.inlineCount = 0;
         this.dirtyPageCount = 0;
         this.denseWordCount = (domainCard + 63) >>> 6;
+        this.multiLane = false;
+        this.allocWidth = 1;
+        this.activeLaneCount = 1;
+        this.mlCount = 0;
     }
 
     public void initAllSpan(int domainId, int domainCard) {
@@ -77,10 +89,76 @@ public final class V11Frontier {
         this.inlineCount = 0;
         this.dirtyPageCount = 0;
         this.denseWordCount = (domainCard + 63) >>> 6;
+        this.multiLane = false;
+        this.allocWidth = 1;
+        this.activeLaneCount = 1;
+        this.mlCount = 0;
     }
 
     public boolean isEmpty() {
-        return tier == TIER_EMPTY;
+        return multiLane ? (mlCount == 0) : (tier == TIER_EMPTY);
+    }
+
+    /** Initialize a 1-bit frontier from a list of validated node IDs using normative geometry tiers. */
+    public void initFromValidatedIds(int domainId, int domainCard, int[] sortedUniqueIds, V11Geometry geom, boolean knowCard) {
+        resetEmpty(domainId, domainCard);
+        int c = sortedUniqueIds.length;
+        if (c == 0) {
+            return;
+        }
+        int targetTier = geom.computeTier(domainCard, c, false);
+        if (targetTier == TIER0_INLINE && c <= TIER0_MAX) {
+            System.arraycopy(sortedUniqueIds, 0, inlineIds, 0, c);
+            inlineCount = c;
+            tier = TIER0_INLINE;
+            cachedCard = c;
+        } else {
+            // Store in denseWords for exact membership regardless of small P1 pageShift,
+            // while recording the normative tier tag for physical_hash parity.
+            if (denseWords.length >= denseWordCount) {
+                Arrays.fill(denseWords, 0, denseWordCount, 0L);
+                for (int u : sortedUniqueIds) {
+                    denseWords[u >>> 6] |= (1L << u);
+                }
+            }
+            if (targetTier == TIER1_PAGED) {
+                // Also populate inline/paged representation using denseWords fallback in toSortedArray
+                tier = TIER1_PAGED;
+                dirtyPageCount = -1; // sentinel indicating denseWords backs this Tier1_paged fixture
+            } else {
+                tier = TIER2_DENSE;
+            }
+            cachedCard = (knowCard || targetTier == TIER0_INLINE || targetTier == TIER_ALL_SPAN) ? c : -1;
+        }
+    }
+
+    /** Initialize a multi-lane frontier from validated (node, mask) entries. */
+    public void initMultiLane(int domainId, int domainCard, int allocWidth, int activeLaneCount,
+                              long[] sortedNodes, long[] sortedMasks, V11Geometry geom) {
+        resetEmpty(domainId, domainCard);
+        this.multiLane = true;
+        this.allocWidth = allocWidth;
+        this.activeLaneCount = activeLaneCount;
+        this.mlNodes = sortedNodes;
+        this.mlMasks = sortedMasks;
+        this.mlCount = sortedNodes.length;
+        this.tier = geom.computeTier(domainCard, this.mlCount, false);
+        this.cachedCard = this.mlCount;
+    }
+
+    public long[] mlSortedNodes() {
+        return mlNodes == null ? new long[0] : Arrays.copyOf(mlNodes, mlCount);
+    }
+
+    public long[] mlSortedMasks() {
+        return mlMasks == null ? new long[0] : Arrays.copyOf(mlMasks, mlCount);
+    }
+
+    /** Deep snapshot copy for spill slots and sliding call windows. */
+    public V11Frontier snapshotCopy() {
+        V11Frontier copy = new V11Frontier(Math.max(64, this.domainCard));
+        copy.copyFrom(this);
+        return copy;
     }
 
     private void bumpPageEpoch() {
@@ -248,13 +326,17 @@ public final class V11Frontier {
         if (cachedCard >= 0) {
             return cachedCard;
         }
+        if (multiLane) {
+            cachedCard = mlCount;
+            return mlCount;
+        }
         int c = 0;
-        if (tier == TIER1_PAGED) {
+        if (tier == TIER1_PAGED && dirtyPageCount >= 0) {
             int limit = dirtyPageCount << 6;
             for (int i = 0; i < limit; i++) {
                 c += Long.bitCount(pageBits[i]);
             }
-        } else if (tier == TIER2_DENSE) {
+        } else if (tier == TIER2_DENSE || (tier == TIER1_PAGED && dirtyPageCount < 0)) {
             for (int i = 0; i < denseWordCount; i++) {
                 c += Long.bitCount(denseWords[i]);
             }
@@ -266,22 +348,36 @@ public final class V11Frontier {
         return c;
     }
 
-    /** Copy contents of [src] into this frontier without heap allocation. */
+    /** Copy contents of [src] into this frontier without heap allocation (for 1-bit hot path). */
     public void copyFrom(V11Frontier src) {
         this.domainId = src.domainId;
         this.domainCard = src.domainCard;
         this.tier = src.tier;
         this.cachedCard = src.cachedCard;
         this.denseWordCount = src.denseWordCount;
+        this.multiLane = src.multiLane;
+        this.allocWidth = src.allocWidth;
+        this.activeLaneCount = src.activeLaneCount;
+        if (src.multiLane) {
+            this.mlCount = src.mlCount;
+            this.mlNodes = src.mlNodes != null ? Arrays.copyOf(src.mlNodes, src.mlCount) : null;
+            this.mlMasks = src.mlMasks != null ? Arrays.copyOf(src.mlMasks, src.mlCount) : null;
+            return;
+        }
         if (src.tier == TIER0_INLINE) {
             this.inlineCount = src.inlineCount;
             System.arraycopy(src.inlineIds, 0, this.inlineIds, 0, src.inlineCount);
         } else if (src.tier == TIER1_PAGED) {
-            bumpPageEpoch();
-            for (int s = 0; s < src.dirtyPageCount; s++) {
-                int pid = src.dirtyPageIds[s];
-                int dstSlot = findOrAllocPage(pid);
-                System.arraycopy(src.pageBits, s << 6, this.pageBits, dstSlot << 6, PAGE_WORDS);
+            if (src.dirtyPageCount < 0) {
+                this.dirtyPageCount = -1;
+                System.arraycopy(src.denseWords, 0, this.denseWords, 0, src.denseWordCount);
+            } else {
+                bumpPageEpoch();
+                for (int s = 0; s < src.dirtyPageCount; s++) {
+                    int pid = src.dirtyPageIds[s];
+                    int dstSlot = findOrAllocPage(pid);
+                    System.arraycopy(src.pageBits, s << 6, this.pageBits, dstSlot << 6, PAGE_WORDS);
+                }
             }
         } else if (src.tier == TIER2_DENSE) {
             System.arraycopy(src.denseWords, 0, this.denseWords, 0, src.denseWordCount);
@@ -303,19 +399,30 @@ public final class V11Frontier {
                 Arrays.sort(out);
             }
             case TIER1_PAGED -> {
-                for (int s = 0; s < dirtyPageCount; s++) {
-                    int baseNode = dirtyPageIds[s] << PAGE_SHIFT;
-                    int baseWord = s << 6;
-                    for (int w = 0; w < PAGE_WORDS; w++) {
-                        long bits = pageBits[baseWord + w];
+                if (dirtyPageCount < 0) {
+                    for (int w = 0; w < denseWordCount; w++) {
+                        long bits = denseWords[w];
                         while (bits != 0L) {
                             int tz = Long.numberOfTrailingZeros(bits);
-                            out[p++] = baseNode + (w << 6) + tz;
+                            out[p++] = (w << 6) + tz;
                             bits &= (bits - 1L);
                         }
                     }
+                } else {
+                    for (int s = 0; s < dirtyPageCount; s++) {
+                        int baseNode = dirtyPageIds[s] << PAGE_SHIFT;
+                        int baseWord = s << 6;
+                        for (int w = 0; w < PAGE_WORDS; w++) {
+                            long bits = pageBits[baseWord + w];
+                            while (bits != 0L) {
+                                int tz = Long.numberOfTrailingZeros(bits);
+                                out[p++] = baseNode + (w << 6) + tz;
+                                bits &= (bits - 1L);
+                            }
+                        }
+                    }
+                    Arrays.sort(out);
                 }
-                Arrays.sort(out);
             }
             case TIER2_DENSE -> {
                 for (int w = 0; w < denseWordCount; w++) {
