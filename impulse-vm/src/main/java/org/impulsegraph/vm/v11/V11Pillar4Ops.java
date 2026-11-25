@@ -1002,7 +1002,6 @@ public final class V11Pillar4Ops {
         if (!scalarRhs) {
             vb = ws.vVectors[s2];
             if (vb == null) { ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; return; }
-            if (vb.length != n) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
         }
         int words = Math.max(1, (n + 63) >>> 6);
         switch (va.elemTag) {
@@ -1010,6 +1009,7 @@ public final class V11Pillar4Ops {
                 if (!scalarRhs && vb.elemTag != V11Vector.TAG_I64 && vb.elemTag != V11Vector.TAG_U64) {
                     ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; return;
                 }
+                if (!scalarRhs && vb.length != n) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
                 long[] out = new long[n];
                 long[] outValid = new long[words];
                 boolean sv = scalarRhs && ws.isRValid(s2);
@@ -1031,6 +1031,7 @@ public final class V11Pillar4Ops {
                 if (!scalarRhs && vb.elemTag != V11Vector.TAG_F64 && vb.elemTag != V11Vector.TAG_I64 && vb.elemTag != V11Vector.TAG_U64) {
                     ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; return;
                 }
+                if (!scalarRhs && vb.length != n) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
                 double[] out = new double[n];
                 long[] outValid = new long[words];
                 boolean sv = scalarRhs && V11Pillar4MathOps.isScalarF64BitsValid(ws, s2);
@@ -1051,6 +1052,7 @@ public final class V11Pillar4Ops {
                 if (!scalarRhs && vb.elemTag != V11Vector.TAG_BOOL_3VL) {
                     ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; return;
                 }
+                if (!scalarRhs && vb.length != n) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
                 long[] outValid = new long[words];
                 long[] outData = new long[words];
                 boolean sv = scalarRhs && ws.isRValid(s2);
@@ -1076,6 +1078,7 @@ public final class V11Pillar4Ops {
                 if (!scalarRhs && vb.elemTag != V11Vector.TAG_STR) {
                     ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH; return;
                 }
+                if (!scalarRhs && vb.length != n) { ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS; return; }
                 String[] out = new String[n];
                 String sr = (scalarRhs && ws.isRValid(s2)) ? ws.resolveScalarStr(ws.rRegs[s2]) : null;
                 for (int i = 0; i < n; i++) {
