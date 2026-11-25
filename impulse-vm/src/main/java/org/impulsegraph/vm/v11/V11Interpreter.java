@@ -146,6 +146,16 @@ public final class V11Interpreter {
             }
             stepsRef[0]++;
             long w = program[ws.pc];
+            int profOp = 0;
+            long profT0 = 0L;
+            if (V11Workspace.OPCODE_PROFILE) {
+                profOp = (int) (w & 0xFFL);
+                if (profOp >= 0x20 && profOp < 128) {
+                    profT0 = System.nanoTime();
+                } else if (profOp < 128) {
+                    ws.opCalls[profOp]++;
+                }
+            }
             int p1 = V11Pillar1Ops.step(ws, bind, program, w);
             if (p1 == V11Pillar1Ops.RESULT_HALTED) {
                 return ws.status;
@@ -155,18 +165,30 @@ public final class V11Interpreter {
             }
             int p2 = V11Pillar2Ops.step(ws, bind, w);
             if (p2 == V11Pillar2Ops.RESULT_STEPPED) {
+                if (V11Workspace.OPCODE_PROFILE && profOp >= 0x20 && profOp < 128) {
+                    ws.recordOpcode(profOp, System.nanoTime() - profT0);
+                }
                 continue;
             }
             int p3 = V11Pillar3Ops.step(ws, bind, program, w, stepsRef, maxSteps);
             if (p3 == V11Pillar3Ops.RESULT_STEPPED) {
+                if (V11Workspace.OPCODE_PROFILE && profOp >= 0x20 && profOp < 128) {
+                    ws.recordOpcode(profOp, System.nanoTime() - profT0);
+                }
                 continue;
             }
             int p4 = V11Pillar4Ops.step(ws, bind, w);
             if (p4 == V11Pillar4Ops.RESULT_STEPPED) {
+                if (V11Workspace.OPCODE_PROFILE && profOp >= 0x20 && profOp < 128) {
+                    ws.recordOpcode(profOp, System.nanoTime() - profT0);
+                }
                 continue;
             }
             int p5 = V11Pillar5Ops.step(ws, bind, w);
             if (p5 == V11Pillar5Ops.RESULT_STEPPED) {
+                if (V11Workspace.OPCODE_PROFILE && profOp >= 0x20 && profOp < 128) {
+                    ws.recordOpcode(profOp, System.nanoTime() - profT0);
+                }
                 continue;
             }
             ws.status = V11IsaTables.IMPULSE_VM_ERR_INVALID_OPCODE;
