@@ -339,12 +339,23 @@ public final class V11Pillar4MathOps {
                     case SUBOP_VEC_MATH_TRIG_HYP_TANH  -> Math.tanh(a);
                     case SUBOP_VEC_MATH_TRIG_HYP_ASINH -> {
                         double ax = Math.abs(a);
-                        double r = Math.log(ax + Math.sqrt(ax * ax + 1.0));
-                        yield a < 0.0 ? -r : r;
+                        double r;
+                        if (ax < 1e-8) {
+                            r = ax;
+                        } else if (ax > 1e8) {
+                            r = Math.log(ax) + LN_2;
+                        } else {
+                            r = Math.log1p(ax + (ax * ax) / (1.0 + Math.sqrt(ax * ax + 1.0)));
+                        }
+                        yield Math.copySign(r, a);
                     }
                     case SUBOP_VEC_MATH_TRIG_HYP_ACOSH -> a < 1.0 ? Double.NaN : Math.log(a + Math.sqrt(a * a - 1.0));
                     case SUBOP_VEC_MATH_TRIG_HYP_ATANH -> {
-                        if (a > -1.0 && a < 1.0) yield 0.5 * Math.log((1.0 + a) / (1.0 - a));
+                        double ax = Math.abs(a);
+                        if (ax < 1.0) {
+                            double r = (ax < 1e-8) ? ax : 0.5 * Math.log1p((2.0 * ax) / (1.0 - ax));
+                            yield Math.copySign(r, a);
+                        }
                         if (a == 1.0) yield Double.POSITIVE_INFINITY;
                         if (a == -1.0) yield Double.NEGATIVE_INFINITY;
                         yield Double.NaN;
