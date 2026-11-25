@@ -354,6 +354,10 @@ public final class V11Pillar5Ops {
                 ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
                 return;
             }
+            if (edgeMask.length < rel.colTargets.length) {
+                ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+                return;
+            }
         }
 
         TreeMap<Long, Long> mExcl = new TreeMap<>();
