@@ -689,13 +689,17 @@ public final class V11Pillar2Ops {
                 ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
                 return;
             }
+            V11Vector v1 = ws.vVectors[s1];
+            V11Vector v2 = ws.vVectors[s2];
+            if (v1 == null || v2 == null) {
+                ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+                return;
+            }
             double eps = Double.longBitsToDouble(ws.rRegs[s3]);
             if (Double.isNaN(eps)) {
                 ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
                 return;
             }
-            V11Vector v1 = ws.vVectors[s1];
-            V11Vector v2 = ws.vVectors[s2];
             if (!isNumericVec(v1) || !isNumericVec(v2)) {
                 ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
                 return;
