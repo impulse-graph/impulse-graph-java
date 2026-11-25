@@ -196,7 +196,7 @@ public final class V11Pillar4Ops {
                 } else {
                     long h = ws.internScalarStr(s);
                     ws.writeR(dst, SCALAR_STR_HANDLE, h);
-                    ws.zf = (h == 0L);
+                    ws.zf = s.isEmpty();
                     ws.nf = false;
                 }
             }
@@ -438,12 +438,12 @@ public final class V11Pillar4Ops {
             return;
         }
         V11Frontier fSrc = ws.fRegs[s1];
-        if (domId >= view.domainCards.length) {
-            ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-            return;
-        }
         if (fSrc.domainId != domId) {
             ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
+            return;
+        }
+        if (domId >= view.domainCards.length) {
+            ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
             return;
         }
         V11Vector col = view.getNodeAttr(domId, attrId);
@@ -454,13 +454,19 @@ public final class V11Pillar4Ops {
         int domCard = (int) view.domainCards[domId];
         boolean accum = (flags & FLAG_ACCUM) != 0;
         boolean scalarRhs = (flags & FLAG_SCALAR_RHS) != 0;
-        if (accum && ws.isFInitialized(dst) && ws.fRegs[dst].domainId != domId) {
-            ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
-            return;
+        if (accum) {
+            if (!ws.isFInitialized(dst) || ws.fRegs[dst].multiLane) {
+                ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+                return;
+            }
+            if (ws.fRegs[dst].domainId != domId) {
+                ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
+                return;
+            }
         }
         int[] srcIds = fSrc.toSortedArray();
         V11Frontier out = new V11Frontier(Math.max(domCard, 64));
-        if (accum && ws.isFInitialized(dst)) {
+        if (accum) {
             out.copyFrom(ws.fRegs[dst]);
         } else {
             out.resetEmpty(domId, domCard);
