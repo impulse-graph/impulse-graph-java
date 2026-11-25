@@ -626,7 +626,11 @@ public final class V11FixtureBatchMain {
             try {
                 return Long.parseLong(tok);
             } catch (NumberFormatException e) {
-                return Double.parseDouble(tok);
+                try {
+                    return Long.parseUnsignedLong(tok);
+                } catch (NumberFormatException e2) {
+                    return Double.parseDouble(tok);
+                }
             }
         }
     }

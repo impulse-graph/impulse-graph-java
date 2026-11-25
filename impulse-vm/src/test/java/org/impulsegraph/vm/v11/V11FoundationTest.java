@@ -88,8 +88,8 @@ class V11FoundationTest {
 
     @Test
     void sweSweepFrontierSelfCopyPreservesTier1Paged() {
-        V11Frontier f = new V11Frontier(100_000);
-        f.resetEmpty(0, 100_000);
+        V11Frontier f = new V11Frontier(300_000);
+        f.resetEmpty(0, 300_000);
         // Add 65 nodes to promote from TIER0_INLINE (max 64) to TIER1_PAGED (dirtyPageCount >= 0)
         for (int i = 0; i < 65; i++) {
             f.add(i * 10);
