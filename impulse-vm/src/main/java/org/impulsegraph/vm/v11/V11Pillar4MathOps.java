@@ -349,7 +349,11 @@ public final class V11Pillar4MathOps {
                         }
                         yield Math.copySign(r, a);
                     }
-                    case SUBOP_VEC_MATH_TRIG_HYP_ACOSH -> a < 1.0 ? Double.NaN : Math.log(a + Math.sqrt(a * a - 1.0));
+                    case SUBOP_VEC_MATH_TRIG_HYP_ACOSH -> {
+                        if (a < 1.0) yield Double.NaN;
+                        if (a > 1e8) yield Math.log(a) + LN_2;
+                        yield Math.log(a + Math.sqrt(a * a - 1.0));
+                    }
                     case SUBOP_VEC_MATH_TRIG_HYP_ATANH -> {
                         double ax = Math.abs(a);
                         if (ax < 1.0) {

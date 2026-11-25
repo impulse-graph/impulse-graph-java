@@ -150,6 +150,14 @@ public final class V11Pillar4Ops {
     }
 
     private static void writeVecElemToScalar(V11Workspace ws, int dst, V11Vector col, int idx) {
+        if (col.elemTag != V11Vector.TAG_I64
+                && col.elemTag != V11Vector.TAG_U64
+                && col.elemTag != V11Vector.TAG_F64
+                && col.elemTag != V11Vector.TAG_BOOL_3VL
+                && col.elemTag != V11Vector.TAG_STR) {
+            ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+            return;
+        }
         if (!col.isValidAt(idx)) {
             ws.writeRNull(dst);
             ws.zf = true;
@@ -1353,8 +1361,10 @@ public final class V11Pillar4Ops {
         switch (subop) {
             case SUBOP_VEC_REDUCE_COUNT_VALID -> {
                 long cnt = 0L;
-                for (int i = 0; i < n; i++) {
-                    if (V11Pillar4MathOps.laneActive(mask, i) && v.isValidAt(i)) cnt++;
+                if (v.elemTag != V11Vector.TAG_LANE_STATE) {
+                    for (int i = 0; i < n; i++) {
+                        if (V11Pillar4MathOps.laneActive(mask, i) && v.isValidAt(i)) cnt++;
+                    }
                 }
                 ws.writeR(dst, SCALAR_U64, cnt);
                 ws.zf = (cnt == 0L);

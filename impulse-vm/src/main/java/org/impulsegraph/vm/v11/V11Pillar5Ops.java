@@ -360,6 +360,51 @@ public final class V11Pillar5Ops {
             }
         }
 
+        if (subop == 0 && (flags & (FLAG_MASKED_S3 | FLAG_ACCUM)) == 0) {
+            int outCard = (int) bind.view.domainCards[outDom];
+            if (outCard >= 0 && outCard <= 1_000_000) {
+                long[] dense = new long[outCard];
+                int[] roff = rel.rowOffsets;
+                long[] ctgt = rel.colTargets;
+                int srcCnt = fSrc.mlCount;
+                long[] srcNodes = fSrc.mlNodes;
+                long[] srcMasks = fSrc.mlMasks;
+                for (int i = 0; i < srcCnt; i++) {
+                    long m = srcMasks[i];
+                    if (m == 0L) continue;
+                    int u = (int) srcNodes[i];
+                    int s = roff[u];
+                    int eEnd = roff[u + 1];
+                    for (int e = s; e < eEnd; e++) {
+                        int v = (int) ctgt[e];
+                        dense[v] |= m;
+                    }
+                }
+                int cnt = 0;
+                for (int v = 0; v < outCard; v++) {
+                    if (dense[v] != 0L) cnt++;
+                }
+                long[] outNodes = new long[cnt];
+                long[] outMasks = new long[cnt];
+                int k = 0;
+                for (int v = 0; v < outCard; v++) {
+                    long m = dense[v];
+                    if (m != 0L) {
+                        outNodes[k] = v;
+                        outMasks[k] = m;
+                        k++;
+                    }
+                }
+                int aw = fSrc.allocWidth;
+                int ac = fSrc.activeLaneCount;
+                ws.fRegs[dst].initMultiLane(outDom, outCard, aw, ac, outNodes, outMasks, ws.geometry);
+                ws.setFInitialized(dst, true);
+                ws.zf = (cnt == 0);
+                ws.pc++;
+                return;
+            }
+        }
+
         TreeMap<Long, Long> mExcl = new TreeMap<>();
         if ((flags & FLAG_MASKED_S3) != 0) {
             V11Frontier fe = getFml(ws, s3);
@@ -1042,7 +1087,7 @@ public final class V11Pillar5Ops {
                     }
                     if (m != 0L) map.put(u & 0xFFFFFFFFL, m);
                 }
-                writeFml(ws, dst, dom, n, chooseWidth(k), k, map);
+                writeFml(ws, dst, dom, n, chooseWidth(lim), lim, map);
                 ws.zf = map.isEmpty();
                 ws.pc++;
             }
