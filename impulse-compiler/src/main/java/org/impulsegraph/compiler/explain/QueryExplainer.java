@@ -2,8 +2,7 @@ package org.impulsegraph.compiler.explain;
 
 import org.impulsegraph.compiler.ast.ImpScmNode;
 import org.impulsegraph.compiler.emitter.ImpAsmDisassembler;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter.EmittedProgram;
+import org.impulsegraph.compiler.emitter.ImpOpsV11BytecodeEmitter;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.passes.stage1.*;
 import org.impulsegraph.compiler.passes.stage2.*;
@@ -57,12 +56,10 @@ public final class QueryExplainer {
 			ast = ctx2.executePass(PhysicalBindingPass.INSTANCE, ast);
 			ast = ctx2.executePass(RegisterAllocationPass.INSTANCE, ast);
 
-			try (Arena arena = Arena.ofConfined()) {
-				EmittedProgram program = ImpOpsBytecodeEmitter.emit(ast, snapshot, arena);
-				sb.append(tracer.generateTraceReport());
-				sb.append("\n");
-				sb.append(ImpAsmDisassembler.disassemble(program));
-			}
+			ImpOpsV11BytecodeEmitter.V11CompiledProgram program = ImpOpsV11BytecodeEmitter.emit(ast, snapshot);
+			sb.append(tracer.generateTraceReport());
+			sb.append("\n");
+			sb.append(ImpAsmDisassembler.disassemble(program));
 		} else {
 			sb.append(tracer.generateTraceReport());
 			sb.append("\n(Snapshot not bound — Stage 2 physical binding skipped)\n");

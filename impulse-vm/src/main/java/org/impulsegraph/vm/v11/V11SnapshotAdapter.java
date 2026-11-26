@@ -37,6 +37,7 @@ public final class V11SnapshotAdapter {
 			return new V11SnapshotView(new long[0], new V11SnapshotView.RelView[0], Map.of(), Map.of(), Map.of());
 		}
 
+		Map<Long, V11Vector> nodeEmbAttrs = new HashMap<>();
 		Map<Long, V11SnapshotView.OffHeapAttrColumn> offHeapNodeAttrs = new HashMap<>();
 		Map<Integer, V11SnapshotView.KeyResolver> offHeapKeyResolvers = new HashMap<>();
 		Map<Long, String> indexes = new HashMap<>();
@@ -69,6 +70,22 @@ public final class V11SnapshotAdapter {
 					MemorySegment validSeg = (a < ld.validitySegments().size()) ? ld.validitySegments().get(a) : null;
 					MemorySegment offSeg = (a < ld.offsetsSegments().size()) ? ld.offsetsSegments().get(a) : null;
 					if (dataSeg != null && !dataSeg.equals(MemorySegment.NULL)) {
+						int baseType = attr.typeCode() & 0x7F;
+						if (nodeCount > 0 && (baseType == 12 || ("emb".equalsIgnoreCase(attr.name()) && baseType == 9
+								&& dataSeg.byteSize() >= nodeCount * 4L
+								&& (dataSeg.byteSize() % (nodeCount * 4L)) == 0))) {
+							int dim = (int) (dataSeg.byteSize() / (nodeCount * 4L));
+							if (dim > 0) {
+								double[][] rows = new double[(int) nodeCount][dim];
+								for (int u = 0; u < (int) nodeCount; u++) {
+									for (int d = 0; d < dim; d++) {
+										rows[u][d] = dataSeg.get(java.lang.foreign.ValueLayout.JAVA_FLOAT_UNALIGNED,
+												((long) u * dim + d) * 4L);
+									}
+								}
+								nodeEmbAttrs.put(V11SnapshotView.domAttrKey(did, a), V11Vector.ofEmb(dim, rows));
+							}
+						}
 						validateAttrBounds(attr.typeCode(), (int) nodeCount, dataSeg, offSeg,
 								domName + "." + attr.name());
 						offHeapNodeAttrs.put(V11SnapshotView.domAttrKey(did, a), new V11SnapshotView.OffHeapAttrColumn(
@@ -120,13 +137,18 @@ public final class V11SnapshotAdapter {
 			}
 		}
 
-		if (domCardMap.isEmpty() && !relById.isEmpty()) {
+		if (!relById.isEmpty()) {
 			for (RelationSnapshot rel : relById.values()) {
-				domCardMap.merge(rel.getSrcDomainId(), (long) rel.getNodeCount(), Math::max);
-				if (rel.hasCsc()) {
-					domCardMap.merge(rel.getTgtDomainId(), (long) rel.getCscNodeCount(), Math::max);
-				} else if (rel.getSrcDomainId() == rel.getTgtDomainId()) {
-					domCardMap.merge(rel.getTgtDomainId(), (long) rel.getNodeCount(), Math::max);
+				int sDom = rel.getSrcDomainId();
+				int tDom = rel.getTgtDomainId();
+				maxDomId = Math.max(maxDomId, Math.max(sDom, tDom));
+				if (rel.getNodeCount() > 0) {
+					domCardMap.merge(sDom, (long) rel.getNodeCount(), Math::max);
+				}
+				if (rel.hasCsc() && rel.getCscNodeCount() > 0) {
+					domCardMap.merge(tDom, (long) rel.getCscNodeCount(), Math::max);
+				} else if (rel.getNodeCount() > 0 && domCardMap.getOrDefault(tDom, 0L) == 0L) {
+					domCardMap.merge(tDom, (long) rel.getNodeCount(), Math::max);
 				}
 			}
 		}
@@ -186,6 +208,23 @@ public final class V11SnapshotAdapter {
 					MemorySegment seg = attrSegs.get(a);
 					if (seg == null || seg.equals(MemorySegment.NULL) || seg.byteSize() == 0)
 						continue;
+					String aname = (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot crs)
+							? crs.getAttributeName(a)
+							: null;
+					int nDom = rel.getNodeCount();
+					if ("emb".equalsIgnoreCase(aname) && nDom > 0 && seg.byteSize() >= (long) nDom * 4L
+							&& (seg.byteSize() % ((long) nDom * 4L)) == 0) {
+						int dim = (int) (seg.byteSize() / ((long) nDom * 4L));
+						double[][] rows = new double[nDom][dim];
+						for (int u = 0; u < nDom; u++) {
+							for (int d = 0; d < dim; d++) {
+								rows[u][d] = seg.get(java.lang.foreign.ValueLayout.JAVA_FLOAT_UNALIGNED,
+										((long) u * dim + d) * 4L);
+							}
+						}
+						nodeEmbAttrs.putIfAbsent(V11SnapshotView.domAttrKey(rel.getSrcDomainId(), 0),
+								V11Vector.ofEmb(dim, rows));
+					}
 					byte inferredType = (nEdges > 0 && seg.byteSize() == (long) nEdges * 8L) ? (byte) 10 : (byte) 9;
 					offHeapEdgeAttrs.put(a,
 							new V11SnapshotView.OffHeapAttrColumn(inferredType, nEdges, false, seg, null, null));
@@ -200,7 +239,7 @@ public final class V11SnapshotAdapter {
 					rel.hasCsr(), rel.hasCsc(), hasCoo, false);
 		}
 
-		return new V11SnapshotView(domainCards, relViews, Map.of(), offHeapNodeAttrs, Map.of(), offHeapKeyResolvers,
+		return new V11SnapshotView(domainCards, relViews, nodeEmbAttrs, offHeapNodeAttrs, Map.of(), offHeapKeyResolvers,
 				indexes);
 	}
 

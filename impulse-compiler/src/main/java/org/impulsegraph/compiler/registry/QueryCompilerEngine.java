@@ -1,7 +1,6 @@
 package org.impulsegraph.compiler.registry;
 
 import org.impulsegraph.compiler.ast.ImpScmNode;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
 import org.impulsegraph.compiler.emitter.ImpOpsV11BytecodeEmitter;
 import org.impulsegraph.compiler.metrics.CompilerMetricsRecorder;
 import org.impulsegraph.compiler.metrics.PlanCacheMetricsRecorder;
@@ -101,7 +100,7 @@ public final class QueryCompilerEngine {
 			ast = ctx.executePass(RegisterAllocationPass.INSTANCE, ast);
 
 			long jitStart = System.nanoTime();
-			CompiledQuery compiled = ImpOpsBytecodeEmitter.compileToExecutable(ast, snapshot, arena);
+			CompiledQuery compiled = CompiledQuery.fromV11(ast, snapshot);
 			long jitDur = System.nanoTime() - jitStart;
 			compilerMetrics.recordJit(jitDur);
 
@@ -121,7 +120,8 @@ public final class QueryCompilerEngine {
 	}
 
 	/**
-	 * Executes Stage 2 (Snapshot-Bound) compilation targeting ImpulseVM v0.11.0 ({@code .impb} v11).
+	 * Executes Stage 2 (Snapshot-Bound) compilation targeting ImpulseVM v0.11.0
+	 * ({@code .impb} v11).
 	 */
 	public ImpOpsV11BytecodeEmitter.V11CompiledProgram compileStage2V11(QueryObject queryObject,
 			ImpulseGraphSnapshot snapshot, CompilerOptions options) {

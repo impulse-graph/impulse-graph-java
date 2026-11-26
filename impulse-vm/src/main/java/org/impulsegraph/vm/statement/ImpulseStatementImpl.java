@@ -9,7 +9,6 @@ import org.impulsegraph.api.ImpulseQueryBuilder;
 import org.impulsegraph.api.ImpulseGraphQuery;
 import org.impulsegraph.compiler.ast.ImpScmNode;
 import org.impulsegraph.compiler.ast.parser.ImpScmParser;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.passes.stage2.PhysicalBindingPass;
 import org.impulsegraph.compiler.trace.CompilerOptions;

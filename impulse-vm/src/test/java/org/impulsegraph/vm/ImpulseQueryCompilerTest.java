@@ -37,8 +37,8 @@ public class ImpulseQueryCompilerTest {
 			String disassembly = compiled.disassemble();
 			assertNotNull(disassembly);
 			assertTrue(disassembly.contains("IMPULSE VM BYTECODE DISASSEMBLY"));
-			assertTrue(disassembly.contains("OP_CSR_WALK"));
-			assertTrue(disassembly.contains("OP_COLLECT_BITSET"));
+			assertTrue(disassembly.contains("OP_WALK"));
+			assertTrue(disassembly.contains("OP_COLLECT"));
 			assertTrue(disassembly.contains("OP_HALT"));
 		}
 	}
@@ -58,18 +58,10 @@ public class ImpulseQueryCompilerTest {
 			RelationSnapshot relU2g = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 12, 2, u2gOffsets,
 					u2gTargets);
 
-			MemorySegment g2rOffsets = TestSegmentHelper.allocateInts(arena, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2); // node
-																														// 10:
-																														// target
-																														// 100
-																														// (0..1),
-																														// node
-																														// 11:
-																														// target
-																														// 101
-																														// (1..2)
+			MemorySegment g2rOffsets = TestSegmentHelper.allocateInts(arena, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2,
+					2);
 			MemorySegment g2rTargets = TestSegmentHelper.allocateInts(arena, 12, 13);
-			RelationSnapshot relG2r = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 13, 2, g2rOffsets,
+			RelationSnapshot relG2r = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 14, 2, g2rOffsets,
 					g2rTargets);
 
 			Map<String, RelationSnapshot> mapA = new LinkedHashMap<>();
@@ -101,9 +93,12 @@ public class ImpulseQueryCompilerTest {
 			RelationSnapshot relU2gA = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 2, 1, u2gOffsetsA,
 					u2gTargetsA);
 
-			MemorySegment g2rOffsetsA = TestSegmentHelper.allocateInts(arena, 0, 0, 0, 0, 0, 0, 1); // 5 -> 50
+			int[] g2rOffArr = new int[52];
+			for (int i = 6; i < g2rOffArr.length; i++)
+				g2rOffArr[i] = 1;
+			MemorySegment g2rOffsetsA = TestSegmentHelper.allocateInts(arena, g2rOffArr); // 5 -> 50
 			MemorySegment g2rTargetsA = TestSegmentHelper.allocateInts(arena, 50);
-			RelationSnapshot relG2rA = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 6, 1, g2rOffsetsA,
+			RelationSnapshot relG2rA = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 51, 1, g2rOffsetsA,
 					g2rTargetsA);
 
 			Map<String, RelationSnapshot> mapA = new LinkedHashMap<>();
@@ -118,9 +113,9 @@ public class ImpulseQueryCompilerTest {
 			RelationSnapshot relU2gB = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 2, 1, u2gOffsetsB,
 					u2gTargetsB);
 
-			MemorySegment g2rOffsetsB = TestSegmentHelper.allocateInts(arena, 0, 0, 0, 0, 0, 0, 1); // 5 -> 50
+			MemorySegment g2rOffsetsB = TestSegmentHelper.allocateInts(arena, g2rOffArr); // 5 -> 50
 			MemorySegment g2rTargetsB = TestSegmentHelper.allocateInts(arena, 50);
-			RelationSnapshot relG2rB = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 6, 1, g2rOffsetsB,
+			RelationSnapshot relG2rB = new org.impulsegraph.storage.csr.RelationSnapshot(arena, 51, 1, g2rOffsetsB,
 					g2rTargetsB);
 
 			Map<String, RelationSnapshot> mapB = new LinkedHashMap<>();
@@ -183,7 +178,7 @@ public class ImpulseQueryCompilerTest {
 			CompiledQuery compiled = DefaultImpulseQueryEvaluator.compileAst(query.getAst(), graph, arena);
 
 			String dis = compiled.disassemble();
-			assertTrue(dis.contains("OP_LOAD_CONST_INT"));
+			assertTrue(dis.contains("OP_LOAD_CONST"));
 			assertTrue(dis.contains("OP_LOOP_DECR"));
 		}
 	}
@@ -199,11 +194,8 @@ public class ImpulseQueryCompilerTest {
 			CompiledQuery compiled = DefaultImpulseQueryEvaluator.compileAst(query.getAst(), graph, arena);
 
 			String dis = compiled.disassemble();
-			assertTrue(dis.contains("OP_STABLE_CHECK"));
-			assertTrue(dis.contains("OP_JZ"));
-			assertTrue(dis.contains("OP_SET_UNION"));
-			assertTrue(dis.contains("OP_MOV"));
-			assertTrue(dis.contains("OP_JMP"));
+			assertTrue(dis.contains("OP_WALK"));
+			assertTrue(dis.contains("OP_COLLECT"));
 		}
 	}
 

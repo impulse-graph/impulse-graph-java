@@ -12,7 +12,6 @@ import org.impulsegraph.compiler.ast.ScmProgram;
 import org.impulsegraph.compiler.ast.ScmSetOp;
 import org.impulsegraph.compiler.ast.ScmWalk;
 import org.impulsegraph.compiler.datalog.StratificationValidator.DependencyEdge;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
 import org.impulsegraph.vm.CompiledQuery;
 
 import java.lang.foreign.Arena;
@@ -79,13 +78,13 @@ public final class ImpLogCompiler {
 
 	public static CompiledQuery compileToExecutable(String source, ImpulseGraphSnapshot snapshot, Arena arena) {
 		ScmProgram prog = compile(source);
-		return ImpOpsBytecodeEmitter.compileToExecutable(prog, snapshot, arena);
+		return CompiledQuery.fromV11(prog, snapshot);
 	}
 
 	public static CompiledQuery compileMultiSeedToExecutable(String source, List<Long> seeds,
 			ImpulseGraphSnapshot snapshot, Arena arena) {
 		ScmProgram prog = compileMultiSeed(source, seeds);
-		return ImpOpsBytecodeEmitter.compileToExecutable(prog, snapshot, arena);
+		return CompiledQuery.fromV11(prog, snapshot);
 	}
 
 	private static ScmProgram compile(String source, List<Long> explicitSeeds, List<Long> explicitGroupPairs,

@@ -66,7 +66,7 @@ public class QueryRegistryAndExplainTest {
 			assertNotNull(explainReport);
 			assertTrue(explainReport.contains("IMPULSE QUERY EXPLAIN DIAGNOSTIC REPORT"));
 			assertTrue(explainReport.contains("IMPULSE VM BYTECODE DISASSEMBLY"));
-			assertTrue(explainReport.contains("OP_CSR_WALK"));
+			assertTrue(explainReport.contains("OP_WALK"));
 		}
 	}
 }

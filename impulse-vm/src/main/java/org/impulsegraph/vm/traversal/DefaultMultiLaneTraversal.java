@@ -23,7 +23,6 @@ import org.impulsegraph.compiler.ast.ScmLiteral;
 import org.impulsegraph.compiler.ast.ScmProgram;
 import org.impulsegraph.compiler.ast.ScmSymbol;
 import org.impulsegraph.compiler.ast.ScmWalk;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
 import org.impulsegraph.vm.CompiledQuery;
 import org.impulsegraph.vm.DefaultImpulseQueryEvaluator;
 import org.impulsegraph.vm.VmLaneFrontier;
@@ -322,7 +321,7 @@ public final class DefaultMultiLaneTraversal implements MultiLaneTraversal {
 			scSteps.add(ScmLaneSetCover.greedy(Math.max(1, maxNodes), 0L));
 			ScmProgram prog = new ScmProgram(scSteps);
 			try (Arena arena = Arena.ofConfined()) {
-				CompiledQuery cq = ImpOpsBytecodeEmitter.compileToExecutable(prog, snapshot, arena);
+				CompiledQuery cq = DefaultImpulseQueryEvaluator.compileAst(prog, snapshot, arena);
 				Object raw = cq.execute(snapshot, 0L, arena);
 				if (raw instanceof int[] arr) {
 					List<Long> res = new ArrayList<>(arr.length);

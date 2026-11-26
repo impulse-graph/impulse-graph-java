@@ -8,7 +8,6 @@ import org.impulsegraph.api.traversal.MultiLaneResult;
 import org.impulsegraph.api.traversal.NodePair;
 import org.impulsegraph.api.traversal.ScoredKey;
 import org.impulsegraph.api.traversal.ScoredNode;
-import org.impulsegraph.vm.VmRegType;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -61,12 +60,16 @@ public final class DefaultMultiLaneResult implements MultiLaneResult {
 		return domainName;
 	}
 
+	private static long makeActiveMaskU64(int k) {
+		return k <= 0 ? 0L : (k >= 64 ? -1L : (1L << k) - 1L);
+	}
+
 	@Override
 	public long laneMaskFor(long nodeId) {
 		if (nodeId < 0 || nodeId >= laneMasks.length) {
 			return 0L;
 		}
-		return laneMasks[(int) nodeId] & VmRegType.makeActiveMaskU64(laneCount);
+		return laneMasks[(int) nodeId] & makeActiveMaskU64(laneCount);
 	}
 
 	@Override
@@ -136,7 +139,7 @@ public final class DefaultMultiLaneResult implements MultiLaneResult {
 
 	@Override
 	public List<NodePair> findSetCoverPairs(long targetMask) {
-		long req = targetMask & VmRegType.makeActiveMaskU64(laneCount);
+		long req = targetMask & makeActiveMaskU64(laneCount);
 		if (req == 0L) {
 			return List.of();
 		}
@@ -158,7 +161,7 @@ public final class DefaultMultiLaneResult implements MultiLaneResult {
 
 	@Override
 	public List<Long> findGreedySetCover(long targetMask, int maxNodes) {
-		long uncovered = targetMask & VmRegType.makeActiveMaskU64(laneCount);
+		long uncovered = targetMask & makeActiveMaskU64(laneCount);
 		int limit = Math.max(0, maxNodes);
 		List<Long> selected = new ArrayList<>();
 		while (uncovered != 0L && selected.size() < limit) {

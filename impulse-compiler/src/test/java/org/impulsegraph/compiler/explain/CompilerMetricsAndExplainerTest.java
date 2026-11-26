@@ -3,9 +3,7 @@ package org.impulsegraph.compiler.explain;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.emitter.ImpAsmDisassembler;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter.InstructionWord;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter.EmittedProgram;
+import org.impulsegraph.compiler.emitter.V11ProgramBuilder;
 import org.impulsegraph.compiler.harness.CrossCompilerParityHarness;
 import org.impulsegraph.compiler.metrics.CompilerMetricsRecorder;
 import org.impulsegraph.compiler.metrics.PlanCacheMetricsRecorder;
@@ -15,7 +13,7 @@ import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.storage.csr.GraphSnapshot;
 import org.impulsegraph.storage.csr.RelationSnapshot;
 import org.impulsegraph.vm.CompiledQuery;
-import org.impulsegraph.vm.RelationInstructionPatch;
+import org.impulsegraph.vm.v11.V11IsaTables;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -33,7 +31,6 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.impulsegraph.vm.VmRegisterType.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -163,56 +160,31 @@ public class CompilerMetricsAndExplainerTest {
 	class ImpAsmDisassemblerTests {
 
 		@Test
-		@DisplayName("Disassembly: Produces valid .impas text with header, opcode names, and comments")
+		@DisplayName("Disassembly: Produces valid .impas text with header and v0.11 opcode names")
 		void testDisassemblyFormatting() {
-			try (Arena arena = Arena.ofConfined()) {
-				List<InstructionWord> instructions = new ArrayList<>();
-				instructions.add(new InstructionWord(OP_INIT_INPUT_NODE, (byte) 0, (short) 0, 0));
-				instructions.add(new InstructionWord(OP_CSR_WALK, (byte) 0x02, (short) 1, 0x00010000));
-				instructions.add(new InstructionWord(OP_CSR_WALK_2HOP, (byte) 0x01, (short) 2, 0x00020001));
-				instructions.add(new InstructionWord(OP_NODE_FILTER, (byte) 0, (short) 1, 0x00010001));
-				instructions.add(new InstructionWord(OP_COLLECT_BITSET, (byte) 0, (short) 2, 0));
-				instructions.add(new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
+			V11ProgramBuilder b = new V11ProgramBuilder();
+			b.emitU16(V11IsaTables.OP_LOAD_PARAM, V11IsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
+			b.emitU16(V11IsaTables.OP_WALK, V11IsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 0, 0);
+			b.emitU16(V11IsaTables.OP_COLLECT, V11IsaTables.SUBOP_COLLECT_FRONTIER_BITSET, 0, 0, 1, 0, 0, 0, 0);
+			b.emit(V11IsaTables.OP_HALT, V11IsaTables.SUBOP_HALT_OK, 0, 0, 0, 0, 0, 0);
 
-				List<RelationInstructionPatch> patches = List
-						.of(new RelationInstructionPatch(1L, "userToGroup", (short) 0, (short) 1));
-
-				MemorySegment seg = arena.allocate(instructions.size() * 8);
-				EmittedProgram program = new EmittedProgram(seg, instructions.size(), patches, Map.of("userToGroup", 1),
-						instructions, List.of());
-
-				String asm = ImpAsmDisassembler.disassemble(program);
-				assertNotNull(asm);
-				assertThat(asm).contains("IMPULSE VM BYTECODE DISASSEMBLY (.impas)");
-				assertThat(asm).contains(".version 0.9.0");
-				assertThat(asm).contains(".instructions 6");
-				assertThat(asm).contains("OP_INIT_INPUT_NODE");
-				assertThat(asm).contains("Load input node ID into R0");
-				assertThat(asm).contains("OP_CSR_WALK");
-				assertThat(asm).contains("[seed-inlined]");
-				assertThat(asm).contains("userToGroup");
-				assertThat(asm).contains("OP_CSR_WALK_2HOP");
-				assertThat(asm).contains("[early-exit]");
-				assertThat(asm).contains("OP_NODE_FILTER");
-				assertThat(asm).contains("OP_COLLECT_BITSET");
-				assertThat(asm).contains("OP_HALT");
-				assertThat(asm).contains("Execution complete");
-			}
+			String asm = ImpAsmDisassembler.disassemble(b.toWordArray());
+			assertNotNull(asm);
+			assertThat(asm).contains("IMPULSE VM BYTECODE DISASSEMBLY (.impas)");
+			assertThat(asm).contains(".version 0.11.0");
+			assertThat(asm).contains(".instructions 4");
+			assertThat(asm).contains("OP_LOAD_PARAM");
+			assertThat(asm).contains("OP_WALK");
+			assertThat(asm).contains("OP_COLLECT");
+			assertThat(asm).contains("OP_HALT");
 		}
 
 		@Test
-		@DisplayName("Fallback: Unrecognized opcode falls back to OP_UNKNOWN_0x hex string")
+		@DisplayName("Fallback: Unrecognized opcode falls back to OP_0x hex string")
 		void testUnknownOpcodeFallback() {
-			try (Arena arena = Arena.ofConfined()) {
-				byte unknownOp = (byte) 0xFE;
-				List<InstructionWord> instructions = List.of(new InstructionWord(unknownOp, (byte) 0, (short) 0, 0));
-
-				MemorySegment seg = arena.allocate(8);
-				EmittedProgram program = new EmittedProgram(seg, 1, List.of(), Map.of(), instructions, List.of());
-
-				String asm = ImpAsmDisassembler.disassemble(program);
-				assertThat(asm).contains("OP_UNKNOWN_0xFE");
-			}
+			long unknownWord = V11ProgramBuilder.encodeWord(0xFE, 0, 0, 0, 0, 0, 0, 0);
+			String asm = ImpAsmDisassembler.disassemble(new long[]{unknownWord});
+			assertThat(asm).contains("OP_0xFE");
 		}
 	}
 
@@ -258,7 +230,7 @@ public class CompilerMetricsAndExplainerTest {
 				assertThat(report).contains("PhysicalBindingPass");
 				assertThat(report).contains("RegisterAllocationPass");
 				assertThat(report).contains("IMPULSE VM BYTECODE DISASSEMBLY");
-				assertThat(report).contains("OP_CSR_WALK");
+				assertThat(report).contains("OP_WALK");
 			}
 		}
 

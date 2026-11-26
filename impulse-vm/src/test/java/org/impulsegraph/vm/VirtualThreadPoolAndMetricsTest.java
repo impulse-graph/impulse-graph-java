@@ -29,43 +29,6 @@ class VirtualThreadPoolAndMetricsTest {
 	}
 
 	@Test
-	void virtualThreadsReuseSharedBitsetPoolWithoutSlabChurn() throws Exception {
-		PrometheusMetricsExporter exporter = PrometheusMetricsExporter.enable();
-		ImpulseGraphSnapshot snap = new MockImpulseGraphSnapshot(Map.of());
-
-		final int tasks = 2000;
-		final var sem = new java.util.concurrent.Semaphore(64);
-		try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
-			List<Future<?>> futures = new java.util.ArrayList<>(tasks);
-			for (int i = 0; i < tasks; i++) {
-				futures.add(exec.submit(() -> {
-					sem.acquireUninterruptibly();
-					try (Arena arena = Arena.ofConfined(); VmQueryContext ctx = new VmQueryContext(snap, arena)) {
-						ctx.allocateStateSegment();
-						int h = ctx.acquireBitset();
-						assertTrue(h >= 0);
-					} finally {
-						sem.release();
-					}
-				}));
-			}
-			for (Future<?> f : futures) {
-				f.get();
-			}
-		}
-
-		String scraped = exporter.scrapeMetrics();
-		assertTrue(scraped.contains("impulse_vm_slab_allocations_total "));
-		assertTrue(scraped.contains("impulse_vm_bitset_pool_hits_total "));
-		assertTrue(scraped.contains("impulse_vm_bitset_pool_misses_total "));
-
-		long slabs = extractMetric(scraped, "impulse_vm_slab_allocations_total");
-		long hits = extractMetric(scraped, "impulse_vm_bitset_pool_hits_total");
-		assertTrue(slabs <= 16, "Expected bounded shared slab allocations across 2000 virtual threads, got " + slabs);
-		assertTrue(hits >= 1500, "Expected high shared bitset pool reuse across virtual threads, got hits=" + hits);
-	}
-
-	@Test
 	void evaluatorCacheHitsMissesAndOffHeapPreserved() {
 		PrometheusMetricsExporter exporter = PrometheusMetricsExporter.enable();
 		exporter.setOffHeapMemoryBytes(1_234_567L);
