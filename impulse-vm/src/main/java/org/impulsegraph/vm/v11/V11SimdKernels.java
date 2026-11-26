@@ -142,6 +142,242 @@ final class V11SimdKernels {
 		}
 	}
 
+	/**
+	 * Fused single-pass f64 vector-vector arithmetic + validity bitmask packing.
+	 */
+	static void f64ArithVecValid(int subop, double[] a, double[] b, long[] aValid, long[] bValid, double[] out,
+			long[] outValid, int n) {
+		int vwords = (n + 63) >>> 6;
+		DoubleVector vZero = DoubleVector.zero(F64);
+		DoubleVector vNan = DoubleVector.broadcast(F64, Double.NaN);
+		for (int w = 0; w < vwords; w++) {
+			long inM = ((aValid != null) ? aValid[w] : -1L) & ((bValid != null) ? bValid[w] : -1L);
+			int base = w << 6;
+			int cnt = Math.min(64, n - base);
+			if (cnt < 64)
+				inM &= (1L << cnt) - 1L;
+			if (inM == 0L) {
+				outValid[w] = 0L;
+				continue;
+			}
+			long nonNan = 0L;
+			int j = 0;
+			int vEnd = cnt & ~(LANES - 1);
+			switch (subop) {
+				case 0 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector r = DoubleVector.fromArray(F64, a, base + j)
+								.add(DoubleVector.fromArray(F64, b, base + j));
+						r.intoArray(out, base + j);
+						nonNan |= (r.eq(r).toLong() << j);
+					}
+					for (; j < cnt; j++) {
+						double r = a[base + j] + b[base + j];
+						out[base + j] = r;
+						if (r == r)
+							nonNan |= (1L << j);
+					}
+				}
+				case 1 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector r = DoubleVector.fromArray(F64, a, base + j)
+								.sub(DoubleVector.fromArray(F64, b, base + j));
+						r.intoArray(out, base + j);
+						nonNan |= (r.eq(r).toLong() << j);
+					}
+					for (; j < cnt; j++) {
+						double r = a[base + j] - b[base + j];
+						out[base + j] = r;
+						if (r == r)
+							nonNan |= (1L << j);
+					}
+				}
+				case 2 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector r = DoubleVector.fromArray(F64, a, base + j)
+								.mul(DoubleVector.fromArray(F64, b, base + j));
+						r.intoArray(out, base + j);
+						nonNan |= (r.eq(r).toLong() << j);
+					}
+					for (; j < cnt; j++) {
+						double r = a[base + j] * b[base + j];
+						out[base + j] = r;
+						if (r == r)
+							nonNan |= (1L << j);
+					}
+				}
+				case 3 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						DoubleVector vb = DoubleVector.fromArray(F64, b, base + j);
+						DoubleVector r = va.div(vb).blend(vNan, vb.eq(vZero));
+						r.intoArray(out, base + j);
+						nonNan |= (r.eq(r).toLong() << j);
+					}
+					for (; j < cnt; j++) {
+						double y = b[base + j];
+						double r = (y == 0.0) ? Double.NaN : (a[base + j] / y);
+						out[base + j] = r;
+						if (r == r)
+							nonNan |= (1L << j);
+					}
+				}
+				default -> {
+				}
+			}
+			outValid[w] = inM & nonNan;
+		}
+	}
+
+	/**
+	 * Fused single-pass f64 vector-scalar arithmetic + validity bitmask packing.
+	 */
+	static void f64ArithScalarValid(int subop, double[] a, double bSc, long[] aValid, double[] out, long[] outValid,
+			int n) {
+		int vwords = (n + 63) >>> 6;
+		if (subop == 3 && bSc == 0.0) {
+			for (int w = 0; w < vwords; w++)
+				outValid[w] = 0L;
+			return;
+		}
+		DoubleVector vb = DoubleVector.broadcast(F64, bSc);
+		for (int w = 0; w < vwords; w++) {
+			long inM = (aValid != null) ? aValid[w] : -1L;
+			int base = w << 6;
+			int cnt = Math.min(64, n - base);
+			if (cnt < 64)
+				inM &= (1L << cnt) - 1L;
+			if (inM == 0L) {
+				outValid[w] = 0L;
+				continue;
+			}
+			long nonNan = 0L;
+			int j = 0;
+			int vEnd = cnt & ~(LANES - 1);
+			switch (subop) {
+				case 0 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector r = DoubleVector.fromArray(F64, a, base + j).add(vb);
+						r.intoArray(out, base + j);
+						nonNan |= (r.eq(r).toLong() << j);
+					}
+					for (; j < cnt; j++) {
+						double r = a[base + j] + bSc;
+						out[base + j] = r;
+						if (r == r)
+							nonNan |= (1L << j);
+					}
+				}
+				case 1 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector r = DoubleVector.fromArray(F64, a, base + j).sub(vb);
+						r.intoArray(out, base + j);
+						nonNan |= (r.eq(r).toLong() << j);
+					}
+					for (; j < cnt; j++) {
+						double r = a[base + j] - bSc;
+						out[base + j] = r;
+						if (r == r)
+							nonNan |= (1L << j);
+					}
+				}
+				case 2 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector r = DoubleVector.fromArray(F64, a, base + j).mul(vb);
+						r.intoArray(out, base + j);
+						nonNan |= (r.eq(r).toLong() << j);
+					}
+					for (; j < cnt; j++) {
+						double r = a[base + j] * bSc;
+						out[base + j] = r;
+						if (r == r)
+							nonNan |= (1L << j);
+					}
+				}
+				case 3 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector r = DoubleVector.fromArray(F64, a, base + j).div(vb);
+						r.intoArray(out, base + j);
+						nonNan |= (r.eq(r).toLong() << j);
+					}
+					for (; j < cnt; j++) {
+						double r = a[base + j] / bSc;
+						out[base + j] = r;
+						if (r == r)
+							nonNan |= (1L << j);
+					}
+				}
+				default -> {
+				}
+			}
+			outValid[w] = inM & nonNan;
+		}
+	}
+
+	/** Fused single-pass f64 unary arithmetic + validity bitmask packing. */
+	static void f64ArithUnaryValid(int subop, double[] a, long[] aValid, double[] out, long[] outValid, int n) {
+		int vwords = (n + 63) >>> 6;
+		for (int w = 0; w < vwords; w++) {
+			long inM = (aValid != null) ? aValid[w] : -1L;
+			int base = w << 6;
+			int cnt = Math.min(64, n - base);
+			if (cnt < 64)
+				inM &= (1L << cnt) - 1L;
+			if (inM == 0L) {
+				outValid[w] = 0L;
+				continue;
+			}
+			long nonNan = 0L;
+			int j = 0;
+			int vEnd = cnt & ~(LANES - 1);
+			switch (subop) {
+				case 8 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector r = DoubleVector.fromArray(F64, a, base + j).neg();
+						r.intoArray(out, base + j);
+						nonNan |= (r.eq(r).toLong() << j);
+					}
+					for (; j < cnt; j++) {
+						double r = -a[base + j];
+						out[base + j] = r;
+						if (r == r)
+							nonNan |= (1L << j);
+					}
+				}
+				case 9 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector r = DoubleVector.fromArray(F64, a, base + j).abs();
+						r.intoArray(out, base + j);
+						nonNan |= (r.eq(r).toLong() << j);
+					}
+					for (; j < cnt; j++) {
+						double r = Math.abs(a[base + j]);
+						out[base + j] = r;
+						if (r == r)
+							nonNan |= (1L << j);
+					}
+				}
+				case 10 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector r = DoubleVector.fromArray(F64, a, base + j).sqrt();
+						r.intoArray(out, base + j);
+						nonNan |= (r.eq(r).toLong() << j);
+					}
+					for (; j < cnt; j++) {
+						double x = a[base + j];
+						double r = (x < 0.0) ? Double.NaN : Math.sqrt(x);
+						out[base + j] = r;
+						if (r == r)
+							nonNan |= (1L << j);
+					}
+				}
+				default -> {
+				}
+			}
+			outValid[w] = inM & nonNan;
+		}
+	}
+
 	/** Pack non-NaN validity bitmap word-by-word using VectorMask.toLong(). */
 	static void f64PackValidWords(double[] out, long[] aValid, long[] bValid, boolean hasB, boolean bScalarOk,
 			long[] outValid, int n) {
