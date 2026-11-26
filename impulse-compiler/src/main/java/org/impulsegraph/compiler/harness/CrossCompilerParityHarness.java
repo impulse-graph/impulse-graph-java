@@ -6,7 +6,7 @@ import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 import org.impulsegraph.storage.csr.GraphSnapshot;
 import org.impulsegraph.storage.csr.RelationSnapshot;
 import org.impulsegraph.vm.CompiledQuery;
-import org.impulsegraph.vm.v11.*;
+import org.impulsegraph.vm.*;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -67,22 +67,22 @@ public class CrossCompilerParityHarness {
 				System.out.println("{\"status\": \"compile_error\", \"error\": \"" + msg + "\"}");
 				return;
 			}
-			V11SnapshotView view = V11SnapshotAdapter.from(snap);
+			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
 			int[] domCards = new int[view.domainCards.length];
 			for (int i = 0; i < domCards.length; i++)
 				domCards[i] = (int) view.domainCards[i];
-			V11Interpreter.SnapshotBinding binding = new V11Interpreter.SnapshotBinding(domCards, view);
-			V11Workspace ws = new V11Workspace(16);
+			ImpulseInterpreter.SnapshotBinding binding = new ImpulseInterpreter.SnapshotBinding(domCards, view);
+			ImpulseWorkspace ws = new ImpulseWorkspace(16);
 			for (int p = 4; p < args.length; p++) {
 				ws.params.put(p - 4,
-						new V11Workspace.ParamScalar(V11IsaTables.SCALAR_U64, true, Long.parseLong(args[p])));
+						new ImpulseWorkspace.ParamScalar(ImpulseIsaTables.SCALAR_U64, true, Long.parseLong(args[p])));
 			}
-			V11Interpreter.execute(cr.codeWords(), binding, ws);
+			ImpulseInterpreter.execute(cr.codeWords(), binding, ws);
 			StringBuilder outJson = new StringBuilder("[");
 			for (int s = 0; s < cr.outputNames().size(); s++) {
 				if (s > 0)
 					outJson.append(",");
-				V11Vector v = ws.outputs.get(s);
+				ImpulseVector v = ws.outputs.get(s);
 				outJson.append("[");
 				if (v != null && v.i64Data != null) {
 					for (int k = 0; k < v.length; k++) {

@@ -3,7 +3,7 @@ package org.impulsegraph.compiler.impscm.v11;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 import org.impulsegraph.storage.csr.GraphSnapshot;
 import org.impulsegraph.storage.csr.RelationSnapshot;
-import org.impulsegraph.vm.v11.*;
+import org.impulsegraph.vm.*;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
@@ -80,26 +80,27 @@ class ImpScmV11CompilerTest {
 		String src = Files.readString(specFixtureDir().resolve("01_rebac_reachability.impscm"));
 		try (Arena arena = Arena.ofConfined()) {
 			GraphSnapshot snap = buildRebacSnapshot(arena);
-			V11SnapshotView view = V11SnapshotAdapter.from(snap);
+			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
 
 			var resOn = ImpScmV11Compiler.compile(src, snap, true);
 			var resOff = ImpScmV11Compiler.compile(src, snap, false);
 
 			int[] domCards = {2, 3, 2};
-			V11Interpreter.SnapshotBinding binding = new V11Interpreter.SnapshotBinding(domCards, view);
+			ImpulseInterpreter.SnapshotBinding binding = new ImpulseInterpreter.SnapshotBinding(domCards, view);
 
-			V11Workspace wsOn = new V11Workspace(16);
-			wsOn.params.put(0, new V11Workspace.ParamScalar(V11IsaTables.SCALAR_U64, true, 0L)); // $user = 0
-			wsOn.params.put(1, new V11Workspace.ParamScalar(V11IsaTables.SCALAR_U64, true, 1L)); // $resource = 1
-			V11Interpreter.execute(resOn.codeWords(), binding, wsOn);
-			assertEquals(V11IsaTables.IMPULSE_VM_OK, wsOn.status);
+			ImpulseWorkspace wsOn = new ImpulseWorkspace(16);
+			wsOn.params.put(0, new ImpulseWorkspace.ParamScalar(ImpulseIsaTables.SCALAR_U64, true, 0L)); // $user = 0
+			wsOn.params.put(1, new ImpulseWorkspace.ParamScalar(ImpulseIsaTables.SCALAR_U64, true, 1L)); // $resource =
+																											// 1
+			ImpulseInterpreter.execute(resOn.codeWords(), binding, wsOn);
+			assertEquals(ImpulseIsaTables.IMPULSE_VM_OK, wsOn.status);
 			assertEquals(1L, wsOn.outputs.get(0).i64Data[0]); // allowed = true
 
-			V11Workspace wsOff = new V11Workspace(16);
-			wsOff.params.put(0, new V11Workspace.ParamScalar(V11IsaTables.SCALAR_U64, true, 0L));
-			wsOff.params.put(1, new V11Workspace.ParamScalar(V11IsaTables.SCALAR_U64, true, 1L));
-			V11Interpreter.execute(resOff.codeWords(), binding, wsOff);
-			assertEquals(V11IsaTables.IMPULSE_VM_OK, wsOff.status);
+			ImpulseWorkspace wsOff = new ImpulseWorkspace(16);
+			wsOff.params.put(0, new ImpulseWorkspace.ParamScalar(ImpulseIsaTables.SCALAR_U64, true, 0L));
+			wsOff.params.put(1, new ImpulseWorkspace.ParamScalar(ImpulseIsaTables.SCALAR_U64, true, 1L));
+			ImpulseInterpreter.execute(resOff.codeWords(), binding, wsOff);
+			assertEquals(ImpulseIsaTables.IMPULSE_VM_OK, wsOff.status);
 			assertEquals(wsOn.outputs.get(0).i64Data[0], wsOff.outputs.get(0).i64Data[0]);
 		}
 	}
@@ -110,23 +111,23 @@ class ImpScmV11CompilerTest {
 		String src3 = Files.readString(specFixtureDir().resolve("03_fixpoint_reach_count.impscm"));
 		try (Arena arena = Arena.ofConfined()) {
 			GraphSnapshot snap = buildChainSnapshot(arena);
-			V11SnapshotView view = V11SnapshotAdapter.from(snap);
-			V11Interpreter.SnapshotBinding binding = new V11Interpreter.SnapshotBinding(new int[]{5}, view);
+			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
+			ImpulseInterpreter.SnapshotBinding binding = new ImpulseInterpreter.SnapshotBinding(new int[]{5}, view);
 
 			var r2 = ImpScmV11Compiler.compile(src2, snap, true);
-			V11Workspace ws2 = new V11Workspace(16);
-			ws2.params.put(0, new V11Workspace.ParamScalar(V11IsaTables.SCALAR_U64, true, 0L));
-			V11Interpreter.execute(r2.codeWords(), binding, ws2);
-			assertEquals(V11IsaTables.IMPULSE_VM_OK, ws2.status);
+			ImpulseWorkspace ws2 = new ImpulseWorkspace(16);
+			ws2.params.put(0, new ImpulseWorkspace.ParamScalar(ImpulseIsaTables.SCALAR_U64, true, 0L));
+			ImpulseInterpreter.execute(r2.codeWords(), binding, ws2);
+			assertEquals(ImpulseIsaTables.IMPULSE_VM_OK, ws2.status);
 			assertEquals(1, ws2.outputs.get(0).length);
 			assertEquals(2L, ws2.outputs.get(0).i64Data[0]);
 			assertEquals(1L, ws2.outputs.get(1).i64Data[0]);
 
 			var r3 = ImpScmV11Compiler.compile(src3, snap, true);
-			V11Workspace ws3 = new V11Workspace(16);
-			ws3.params.put(0, new V11Workspace.ParamScalar(V11IsaTables.SCALAR_U64, true, 1L));
-			V11Interpreter.execute(r3.codeWords(), binding, ws3);
-			assertEquals(V11IsaTables.IMPULSE_VM_OK, ws3.status);
+			ImpulseWorkspace ws3 = new ImpulseWorkspace(16);
+			ws3.params.put(0, new ImpulseWorkspace.ParamScalar(ImpulseIsaTables.SCALAR_U64, true, 1L));
+			ImpulseInterpreter.execute(r3.codeWords(), binding, ws3);
+			assertEquals(ImpulseIsaTables.IMPULSE_VM_OK, ws3.status);
 			assertEquals(4L, ws3.outputs.get(0).i64Data[0]);
 		}
 	}

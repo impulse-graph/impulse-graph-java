@@ -7,7 +7,7 @@ import org.impulsegraph.compiler.registry.QueryObject;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.storage.csr.GraphSnapshot;
 import org.impulsegraph.storage.csr.RelationSnapshot;
-import org.impulsegraph.vm.v11.*;
+import org.impulsegraph.vm.*;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
@@ -19,8 +19,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * End-to-end tests for M4.1 + M4.2: {@link V11SnapshotAdapter},
- * {@link V11ImpbContainer}, and {@link ImpOpsV11BytecodeEmitter} via
+ * End-to-end tests for M4.1 + M4.2: {@link ImpulseSnapshotAdapter},
+ * {@link ImpulseImpbContainer}, and {@link ImpOpsBytecodeEmitter} via
  * {@link QueryCompilerEngine#compileStage2V11}.
  */
 class V11EmitterEndToEndTest {
@@ -50,7 +50,7 @@ class V11EmitterEndToEndTest {
 	void testTwoHopAndFixpointAndReduceEndToEndOnV11() {
 		try (Arena arena = Arena.ofConfined()) {
 			ImpulseGraphSnapshot snap = buildChainSnapshot(arena);
-			V11SnapshotView view = V11SnapshotAdapter.from(snap);
+			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
 			assertEquals(1, view.domainCards.length);
 			assertEquals(5L, view.domainCards[0]);
 
@@ -64,22 +64,22 @@ class V11EmitterEndToEndTest {
 					CompilerOptions.builder().withDisabledPassesMask(CompilerOptions.OPT_ALL_DISABLED).build());
 
 			// Verify .impb roundtrip
-			V11ImpbContainer decoded = V11ImpbContainer.decode(progOn.impbBytes());
+			ImpulseImpbContainer decoded = ImpulseImpbContainer.decode(progOn.impbBytes());
 			assertArrayEquals(progOn.codeWords(), decoded.codeWords);
 
-			V11Workspace wsOn = new V11Workspace(16);
-			wsOn.params.put(0, new V11Workspace.ParamFrontier(0, new long[]{0L}));
-			assertEquals(V11IsaTables.IMPULSE_VM_OK, progOn.executeInterpreted(view, wsOn, 100_000L));
-			V11Vector outOn = wsOn.outputs.get(0);
+			ImpulseWorkspace wsOn = new ImpulseWorkspace(16);
+			wsOn.params.put(0, new ImpulseWorkspace.ParamFrontier(0, new long[]{0L}));
+			assertEquals(ImpulseIsaTables.IMPULSE_VM_OK, progOn.executeInterpreted(view, wsOn, 100_000L));
+			ImpulseVector outOn = wsOn.outputs.get(0);
 			assertNotNull(outOn);
 			assertEquals(1, outOn.length);
 			assertEquals(2L, outOn.i64Data[0]);
 
 			// Verify opt-ON == opt-OFF
-			V11Workspace wsOff = new V11Workspace(16);
-			wsOff.params.put(0, new V11Workspace.ParamFrontier(0, new long[]{0L}));
-			assertEquals(V11IsaTables.IMPULSE_VM_OK, progOff.executeInterpreted(view, wsOff, 100_000L));
-			V11Vector outOff = wsOff.outputs.get(0);
+			ImpulseWorkspace wsOff = new ImpulseWorkspace(16);
+			wsOff.params.put(0, new ImpulseWorkspace.ParamFrontier(0, new long[]{0L}));
+			assertEquals(ImpulseIsaTables.IMPULSE_VM_OK, progOff.executeInterpreted(view, wsOff, 100_000L));
+			ImpulseVector outOff = wsOff.outputs.get(0);
 			assertNotNull(outOff);
 			assertEquals(outOn.length, outOff.length);
 			assertEquals(outOn.i64Data[0], outOff.i64Data[0]);
@@ -88,11 +88,11 @@ class V11EmitterEndToEndTest {
 			// 4
 			ScmProgram fixCount = ScmProgram.of(new ScmFixpoint(ScmProgram.of(ScmWalk.forward("NEXT"))),
 					new ScmReduce(ScmReduce.Op.COUNT), ScmCollect.bitset());
-			var progFix = ImpOpsV11BytecodeEmitter.emit(fixCount, snap);
-			V11Workspace wsFix = new V11Workspace(16);
-			wsFix.params.put(0, new V11Workspace.ParamFrontier(0, new long[]{1L}));
-			assertEquals(V11IsaTables.IMPULSE_VM_OK, progFix.executeInterpreted(view, wsFix, 100_000L));
-			V11Vector outFix = wsFix.outputs.get(0);
+			var progFix = ImpOpsBytecodeEmitter.emit(fixCount, snap);
+			ImpulseWorkspace wsFix = new ImpulseWorkspace(16);
+			wsFix.params.put(0, new ImpulseWorkspace.ParamFrontier(0, new long[]{1L}));
+			assertEquals(ImpulseIsaTables.IMPULSE_VM_OK, progFix.executeInterpreted(view, wsFix, 100_000L));
+			ImpulseVector outFix = wsFix.outputs.get(0);
 			assertNotNull(outFix);
 			assertEquals(1, outFix.length);
 			assertEquals(4L, outFix.i64Data[0]);
@@ -115,17 +115,17 @@ class V11EmitterEndToEndTest {
 			RelationSnapshot rel = new RelationSnapshot(arena, 4, 3, off, tgt);
 			rel.setCatalogMetadata(0, 0, 0, (byte) 0, 0L, new int[0]);
 			ImpulseGraphSnapshot snap = new GraphSnapshot(arena, Map.of("FOLLOWS", rel));
-			V11SnapshotView view = V11SnapshotAdapter.from(snap);
+			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
 
 			ScmProgram quorumProg = ScmProgram.of(new ScmLaneInitSeeds(List.of(0L, 1L), 0),
 					new ScmLaneWalk("FOLLOWS", -1, ScmWalk.Direction.FORWARD_CSR, false),
 					new ScmLaneFilterQuorum(2, false), ScmCollect.list());
-			var compiled = ImpOpsV11BytecodeEmitter.emit(quorumProg, snap);
+			var compiled = ImpOpsBytecodeEmitter.emit(quorumProg, snap);
 			assertFalse(compiled.container().constPool.isEmpty(), "inline seeds should be stored in .impb const_pool");
 
-			V11Workspace ws = new V11Workspace(16);
-			assertEquals(V11IsaTables.IMPULSE_VM_OK, compiled.executeInterpreted(view, ws, 100_000L));
-			V11Vector out = ws.outputs.get(0);
+			ImpulseWorkspace ws = new ImpulseWorkspace(16);
+			assertEquals(ImpulseIsaTables.IMPULSE_VM_OK, compiled.executeInterpreted(view, ws, 100_000L));
+			ImpulseVector out = ws.outputs.get(0);
 			assertNotNull(out);
 			assertEquals(1, out.length);
 			assertEquals(2L, out.i64Data[0]);

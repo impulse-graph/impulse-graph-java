@@ -1,6 +1,6 @@
 package org.impulsegraph.compiler.emitter;
 
-import org.impulsegraph.vm.v11.V11IsaTables;
+import org.impulsegraph.vm.ImpulseIsaTables;
 
 /**
  * Human-readable disassembler generating canonical ImpAsm (.impas) text
@@ -11,7 +11,7 @@ public final class ImpAsmDisassembler {
 	private ImpAsmDisassembler() {
 	}
 
-	public static String disassemble(ImpOpsV11BytecodeEmitter.V11CompiledProgram program) {
+	public static String disassemble(ImpOpsBytecodeEmitter.CompiledProgram program) {
 		return disassemble(program.codeWords());
 	}
 
@@ -32,9 +32,10 @@ public final class ImpAsmDisassembler {
 			int s3 = (int) ((w >>> 24) & 0xFL);
 			int s2 = (int) ((w >>> 28) & 0xFL);
 			int imm = (int) (w >>> 32);
-			String opName = (op >= 0 && op < V11IsaTables.OPCODE_NAME.length && V11IsaTables.OPCODE_NAME[op] != null)
-					? V11IsaTables.OPCODE_NAME[op]
-					: String.format("OP_0x%02X", op);
+			String opName = (op >= 0 && op < ImpulseIsaTables.OPCODE_NAME.length
+					&& ImpulseIsaTables.OPCODE_NAME[op] != null)
+							? ImpulseIsaTables.OPCODE_NAME[op]
+							: String.format("OP_0x%02X", op);
 			sb.append(String.format("  0x%04X:  %-24s sub=%d fl=0x%X dst=%d s1=%d s2=%d s3=%d imm=0x%08X\n", pc, opName,
 					sub, fl, dst, s1, s2, s3, imm));
 		}

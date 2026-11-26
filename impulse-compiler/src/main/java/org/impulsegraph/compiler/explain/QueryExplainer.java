@@ -2,7 +2,7 @@ package org.impulsegraph.compiler.explain;
 
 import org.impulsegraph.compiler.ast.ImpScmNode;
 import org.impulsegraph.compiler.emitter.ImpAsmDisassembler;
-import org.impulsegraph.compiler.emitter.ImpOpsV11BytecodeEmitter;
+import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.passes.stage1.*;
 import org.impulsegraph.compiler.passes.stage2.*;
@@ -56,7 +56,7 @@ public final class QueryExplainer {
 			ast = ctx2.executePass(PhysicalBindingPass.INSTANCE, ast);
 			ast = ctx2.executePass(RegisterAllocationPass.INSTANCE, ast);
 
-			ImpOpsV11BytecodeEmitter.V11CompiledProgram program = ImpOpsV11BytecodeEmitter.emit(ast, snapshot);
+			ImpOpsBytecodeEmitter.CompiledProgram program = ImpOpsBytecodeEmitter.emit(ast, snapshot);
 			sb.append(tracer.generateTraceReport());
 			sb.append("\n");
 			sb.append(ImpAsmDisassembler.disassemble(program));
