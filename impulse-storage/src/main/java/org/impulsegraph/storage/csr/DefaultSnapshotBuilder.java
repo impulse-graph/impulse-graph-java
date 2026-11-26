@@ -11,7 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 import static org.impulsegraph.spec.v0_9.ImpulseLayoutsV0_9.SPEC_MAGIC;
-import static org.impulsegraph.spec.v0_10.ImpulseLayoutsV0_10.SPEC_VERSION_PACKED;
+import static org.impulsegraph.spec.v0_11.ImpulseLayoutsV0_11.SPEC_VERSION_PACKED;
 
 public final class DefaultSnapshotBuilder {
 
@@ -70,19 +70,26 @@ public final class DefaultSnapshotBuilder {
 		private final int domainId;
 		private final String name;
 		private final byte keyType;
+		private final byte denseIdWidth;
 		private final long nodeCount;
 		private final int keyAttrIndex;
 		private final List<DomainAttributeEntry> attributes;
 
 		public DomainEntry(int domainId, String name, byte keyType, long nodeCount) {
-			this(domainId, name, keyType, nodeCount, 0xFFFF, new ArrayList<>());
+			this(domainId, name, keyType, (byte) 0, nodeCount, 0xFFFF, new ArrayList<>());
 		}
 
 		public DomainEntry(int domainId, String name, byte keyType, long nodeCount, int keyAttrIndex,
 				List<DomainAttributeEntry> attributes) {
+			this(domainId, name, keyType, (byte) 0, nodeCount, keyAttrIndex, attributes);
+		}
+
+		public DomainEntry(int domainId, String name, byte keyType, byte denseIdWidth, long nodeCount, int keyAttrIndex,
+				List<DomainAttributeEntry> attributes) {
 			this.domainId = domainId;
 			this.name = name;
 			this.keyType = keyType;
+			this.denseIdWidth = denseIdWidth;
 			this.nodeCount = nodeCount;
 			this.keyAttrIndex = keyAttrIndex;
 			this.attributes = attributes != null ? new ArrayList<>(attributes) : new ArrayList<>();
@@ -96,6 +103,9 @@ public final class DefaultSnapshotBuilder {
 		}
 		public byte keyType() {
 			return keyType;
+		}
+		public byte denseIdWidth() {
+			return denseIdWidth;
 		}
 		public long nodeCount() {
 			return nodeCount;
@@ -129,6 +139,19 @@ public final class DefaultSnapshotBuilder {
 			List<DomainAttributeEntry> attributes) {
 		customDomains.add(new DomainEntry(domainId, name, keyType, nodeCount, keyAttrIndex, attributes));
 		withMetadata("domain." + name + ".nodeCount", String.valueOf(nodeCount));
+		return this;
+	}
+
+	public DefaultSnapshotBuilder withDomainDenseIdWidth(int domainId, byte denseIdWidth) {
+		if (denseIdWidth != 0 && denseIdWidth != 2 && denseIdWidth != 4 && denseIdWidth != 8) {
+			throw new IllegalArgumentException("Unsupported denseIdWidth: " + denseIdWidth);
+		}
+		DomainEntry dom = findDomain(domainId);
+		if (dom == null) {
+			throw new IllegalArgumentException("Domain ID not found: " + domainId);
+		}
+		customDomains.set(customDomains.indexOf(dom), new DomainEntry(dom.domainId(), dom.name(), dom.keyType(),
+				denseIdWidth, dom.nodeCount(), dom.keyAttrIndex(), dom.attributes()));
 		return this;
 	}
 
@@ -414,7 +437,8 @@ public final class DefaultSnapshotBuilder {
 				totalRelAttrDescBytes += relSnap.getAttributeSegments().size() * 44;
 			}
 		}
-		int rawRelTableBytes = relationCount * 128 + totalRelAttrDescBytes;
+		int relEntryBytes = (targetVersion >= 11) ? 192 : 128;
+		int rawRelTableBytes = relationCount * relEntryBytes + totalRelAttrDescBytes;
 		int alignedRelTableBytes = (rawRelTableBytes + 127) & ~127;
 
 		int totalDirLen = alignedStrTableBytes + alignedDomTableBytes + alignedRelTableBytes;
@@ -579,6 +603,69 @@ public final class DefaultSnapshotBuilder {
 					}
 				}
 
+				// COO Segments evaluation (Spec v0.11.0)
+				long cooSrcOffset = 0L;
+				long cooSrcBytes = 0L;
+				long cooTgtOffset = 0L;
+				long cooTgtBytes = 0L;
+				long cooEdgeIdOffset = 0L;
+				long cooEdgeIdBytes = 0L;
+				byte cooOrder = 0;
+				boolean sourceHasCoo = relSnap != null && relSnap.hasCoo();
+				boolean includeCoo = (targetVersion >= 11)
+						&& ((includeCooOverride != null) ? includeCooOverride : sourceHasCoo);
+				if (includeCoo && relSnap != null) {
+					byte[] cooSrcArr = new byte[0];
+					byte[] cooTgtArr = new byte[0];
+					byte[] cooEidArr = new byte[0];
+					if (sourceHasCoo) {
+						MemorySegment cs = relSnap.getCooSrcSegment();
+						MemorySegment ct = relSnap.getCooTgtSegment();
+						MemorySegment ce = relSnap.getCooEdgeIdsSegment();
+						if (cs != null && cs != MemorySegment.NULL && cs.byteSize() > 0)
+							cooSrcArr = cs.toArray(ValueLayout.JAVA_BYTE);
+						if (ct != null && ct != MemorySegment.NULL && ct.byteSize() > 0)
+							cooTgtArr = ct.toArray(ValueLayout.JAVA_BYTE);
+						if (ce != null && ce != MemorySegment.NULL && ce.byteSize() > 0)
+							cooEidArr = ce.toArray(ValueLayout.JAVA_BYTE);
+						cooOrder = relSnap.getCooOrder();
+					} else if (relSnap.hasCsr() && relSnap.getEdgeCount() > 0) {
+						int nSrc = relSnap.getNodeCount();
+						int nE = (int) relSnap.getEdgeCount();
+						ByteBuffer sBuf = ByteBuffer.allocate(nE * 4).order(ByteOrder.LITTLE_ENDIAN);
+						ByteBuffer tBuf = ByteBuffer.allocate(nE * 4).order(ByteOrder.LITTLE_ENDIAN);
+						for (int u = 0; u < nSrc; u++) {
+							int start = rowSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u);
+							int end = rowSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, u + 1);
+							for (int e = start; e < end; e++) {
+								sBuf.putInt(u);
+								tBuf.putInt(colSeg.getAtIndex(ValueLayout.JAVA_INT_UNALIGNED, e));
+							}
+						}
+						cooSrcArr = sBuf.array();
+						cooTgtArr = tBuf.array();
+						cooOrder = 2; // SRC_TGT
+					}
+					if (cooSrcArr.length > 0 && cooTgtArr.length > 0) {
+						align128Out(payloadOut);
+						cooSrcOffset = payloadBaseOffset + payloadOut.size();
+						payloadOut.write(cooSrcArr);
+						cooSrcBytes = cooSrcArr.length;
+
+						align128Out(payloadOut);
+						cooTgtOffset = payloadBaseOffset + payloadOut.size();
+						payloadOut.write(cooTgtArr);
+						cooTgtBytes = cooTgtArr.length;
+
+						if (cooEidArr.length > 0) {
+							align128Out(payloadOut);
+							cooEdgeIdOffset = payloadBaseOffset + payloadOut.size();
+							payloadOut.write(cooEidArr);
+							cooEdgeIdBytes = cooEidArr.length;
+						}
+					}
+				}
+
 				byte encodingId = 0x00; // RAW
 				long nodeCount = relSnap != null ? relSnap.getNodeCount() : 0;
 				long edgeCount = relSnap != null ? (int) relSnap.getEdgeCount() : 0;
@@ -634,24 +721,35 @@ public final class DefaultSnapshotBuilder {
 					attrDescsBuf.putLong(0L); // offsets_bytes
 				}
 
-				// Relation Entry (Fixed 128 Bytes) + Attribute Descriptors (44 Bytes each)
+				// Relation Entry (128B in v0.9/v0.10, 192B in v0.11) + Attribute Descriptors
+				// (44 Bytes each)
 				int rNameOff = relNameOffsets.get(relIdx);
 				int[] doms = customRelationDomains.getOrDefault(rName, new int[]{0, 0});
-				ByteBuffer relBuf = ByteBuffer.allocate(128 + attrCount * 44).order(ByteOrder.LITTLE_ENDIAN);
+				byte relNodeW = (relSnap != null && relSnap.getNodeIdWidth() > 0) ? relSnap.getNodeIdWidth() : (byte) 4;
+				byte relEdgeW = (relSnap != null && relSnap.getEdgeIndexWidth() > 0)
+						? relSnap.getEdgeIndexWidth()
+						: (byte) 4;
+				ByteBuffer relBuf = ByteBuffer.allocate(relEntryBytes + attrCount * 44).order(ByteOrder.LITTLE_ENDIAN);
 				relBuf.putShort((short) relIdx); // relation_id
 				relBuf.putShort((short) doms[0]); // src_domain_id
 				relBuf.putShort((short) doms[1]); // tgt_domain_id
-				relBuf.put(encodingId); // encoding_id = RAW (0) or TPU_BCOO (6)
-				relBuf.put((byte) 4); // node_id_width = 4
-				relBuf.put((byte) 4); // edge_index_width = 4
+				relBuf.put(encodingId); // encoding_id = RAW (0)
+				relBuf.put(relNodeW); // node_id_width
+				relBuf.put(relEdgeW); // edge_index_width
 				relBuf.put(new byte[3]); // reserved1
 				relBuf.putInt(rNameOff); // name_offset
 
 				long sectionFeatures = (cscRowOffBytes > 0) ? 1L : 0L;
+				if (includeCoo) {
+					sectionFeatures |= 0x100L; // IMPULSE_SECTION_FEAT_HAS_COO
+					if (cooEdgeIdBytes > 0) {
+						sectionFeatures |= 0x200L; // IMPULSE_SECTION_FEAT_COO_EXPLICIT_EDGE_IDS
+					}
+				}
 
 				relBuf.putLong(nodeCount);
 				relBuf.putLong(edgeCount);
-				relBuf.putLong(sectionFeatures); // section_features (bit 0 = CSC)
+				relBuf.putLong(sectionFeatures);
 				relBuf.putLong(csrRowOffOffset);
 				relBuf.putLong(csrRowOffBytes);
 				relBuf.putLong(csrColIdxOffset);
@@ -662,6 +760,16 @@ public final class DefaultSnapshotBuilder {
 				relBuf.putLong(cscColIdxBytes);
 				relBuf.putShort((short) attrCount); // attr_count
 				relBuf.put(new byte[22]); // reserved2
+				if (targetVersion >= 11) {
+					relBuf.putLong(cooSrcOffset);
+					relBuf.putLong(cooSrcBytes);
+					relBuf.putLong(cooTgtOffset);
+					relBuf.putLong(cooTgtBytes);
+					relBuf.putLong(cooEdgeIdOffset);
+					relBuf.putLong(cooEdgeIdBytes);
+					relBuf.put(cooOrder);
+					relBuf.put(new byte[15]); // reserved3
+				}
 				if (attrCount > 0) {
 					relBuf.put(attrDescsBuf.array());
 				}
@@ -691,7 +799,7 @@ public final class DefaultSnapshotBuilder {
 					ByteBuffer domBuf = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
 					domBuf.putShort((short) dom.domainId());
 					domBuf.put(dom.keyType());
-					domBuf.put((byte) 0); // reserved1
+					domBuf.put(targetVersion >= 11 ? dom.denseIdWidth() : (byte) 0); // dense_id_width (v0.11)
 					domBuf.putInt(domNameOff);
 					domBuf.putLong(dom.nodeCount());
 					domBuf.putShort((short) descs.size()); // attr_count
