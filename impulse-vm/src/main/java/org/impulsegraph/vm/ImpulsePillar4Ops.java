@@ -319,7 +319,13 @@ public final class ImpulsePillar4Ops {
 			}
 			col = view.getNodeAttr(imm16Lo, imm16Hi);
 			if (col == null) {
-				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+				ImpulseSnapshotView.OffHeapAttrColumn off = view.getOffHeapNodeAttr(imm16Lo, imm16Hi);
+				if (off == null) {
+					ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+					return;
+				}
+				ws.vVectors[dst] = materializeOffHeapColumn(ws, off);
+				ws.pc++;
 				return;
 			}
 		} else if (subop == SUBOP_LOAD_COLUMN_EDGE_ATTR) {
@@ -329,7 +335,13 @@ public final class ImpulsePillar4Ops {
 			}
 			col = view.relations[imm16Lo].edgeAttrs.get(imm16Hi);
 			if (col == null) {
-				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+				ImpulseSnapshotView.OffHeapAttrColumn off = view.relations[imm16Lo].offHeapEdgeAttrs.get(imm16Hi);
+				if (off == null) {
+					ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+					return;
+				}
+				ws.vVectors[dst] = materializeOffHeapColumn(ws, off);
+				ws.pc++;
 				return;
 			}
 		} else {
@@ -338,6 +350,121 @@ public final class ImpulsePillar4Ops {
 		}
 		ws.vVectors[dst] = ws.arena.shallowCopyVec(col);
 		ws.pc++;
+	}
+
+	private static ImpulseVector materializeOffHeapColumn(ImpulseWorkspace ws,
+			ImpulseSnapshotView.OffHeapAttrColumn off) {
+		int n = off.count();
+		int vwords = Math.max(1, (n + 63) >>> 6);
+		int base = off.typeCode() & 0x7F;
+		java.lang.foreign.MemorySegment dataSeg = off.dataSeg();
+		java.lang.foreign.MemorySegment validSeg = off.validSeg();
+		boolean hasValidSeg = off.nullable() && validSeg != null
+				&& !validSeg.equals(java.lang.foreign.MemorySegment.NULL);
+		int tag = off.elemTag();
+
+		if (tag == ImpulseVector.TAG_F64) {
+			double[] out = ws.arena.allocDouble(n);
+			long[] valid = ws.arena.allocLong(vwords);
+			if (!hasValidSeg) {
+				Arrays.fill(valid, -1L);
+				if ((n & 63) != 0)
+					valid[vwords - 1] = (1L << (n & 63)) - 1L;
+				if (base == 6) {
+					for (int i = 0; i < n; i++) {
+						float f = dataSeg.get(java.lang.foreign.ValueLayout.JAVA_FLOAT_UNALIGNED, (long) i << 2);
+						if (Float.isNaN(f)) {
+							out[i] = 0.0;
+							valid[i >>> 6] &= ~(1L << (i & 63));
+						} else {
+							out[i] = f;
+						}
+					}
+				} else {
+					for (int i = 0; i < n; i++) {
+						double d = dataSeg.get(java.lang.foreign.ValueLayout.JAVA_DOUBLE_UNALIGNED, (long) i << 3);
+						if (Double.isNaN(d)) {
+							out[i] = 0.0;
+							valid[i >>> 6] &= ~(1L << (i & 63));
+						} else {
+							out[i] = d;
+						}
+					}
+				}
+			} else {
+				Arrays.fill(valid, 0L);
+				long vSize = validSeg.byteSize();
+				if (base == 6) {
+					for (int i = 0; i < n; i++) {
+						long bIdx = i >>> 3;
+						if (bIdx < vSize && (validSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE, bIdx) & (1 << (i & 7))) != 0) {
+							float f = dataSeg.get(java.lang.foreign.ValueLayout.JAVA_FLOAT_UNALIGNED, (long) i << 2);
+							if (!Float.isNaN(f)) {
+								out[i] = f;
+								valid[i >>> 6] |= (1L << (i & 63));
+							}
+						}
+					}
+				} else {
+					for (int i = 0; i < n; i++) {
+						long bIdx = i >>> 3;
+						if (bIdx < vSize && (validSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE, bIdx) & (1 << (i & 7))) != 0) {
+							double d = dataSeg.get(java.lang.foreign.ValueLayout.JAVA_DOUBLE_UNALIGNED, (long) i << 3);
+							if (!Double.isNaN(d)) {
+								out[i] = d;
+								valid[i >>> 6] |= (1L << (i & 63));
+							}
+						}
+					}
+				}
+			}
+			return ws.arena.allocF64(out, n, valid);
+		} else if (tag == ImpulseVector.TAG_I64 || tag == ImpulseVector.TAG_U64) {
+			long[] out = ws.arena.allocLong(n);
+			long[] valid = ws.arena.allocLong(vwords);
+			if (!hasValidSeg) {
+				Arrays.fill(valid, -1L);
+				if ((n & 63) != 0)
+					valid[vwords - 1] = (1L << (n & 63)) - 1L;
+				switch (base) {
+					case 1 -> {
+						for (int i = 0; i < n; i++)
+							out[i] = dataSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE, i);
+					}
+					case 2 -> {
+						for (int i = 0; i < n; i++)
+							out[i] = dataSeg.get(java.lang.foreign.ValueLayout.JAVA_SHORT_UNALIGNED, (long) i << 1);
+					}
+					case 3 -> {
+						for (int i = 0; i < n; i++)
+							out[i] = dataSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) i << 2);
+					}
+					default -> {
+						for (int i = 0; i < n; i++)
+							out[i] = dataSeg.get(java.lang.foreign.ValueLayout.JAVA_LONG_UNALIGNED, (long) i << 3);
+					}
+				}
+			} else {
+				Arrays.fill(valid, 0L);
+				long vSize = validSeg.byteSize();
+				for (int i = 0; i < n; i++) {
+					long bIdx = i >>> 3;
+					if (bIdx < vSize && (validSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE, bIdx) & (1 << (i & 7))) != 0) {
+						out[i] = off.readI64(i);
+						valid[i >>> 6] |= (1L << (i & 63));
+					}
+				}
+			}
+			return (tag == ImpulseVector.TAG_U64) ? ws.arena.allocU64(out, n, valid) : ws.arena.allocI64(out, n, valid);
+		} else {
+			String[] out = new String[n];
+			for (int i = 0; i < n; i++) {
+				if (off.isValidAt(i)) {
+					out[i] = off.readString(i);
+				}
+			}
+			return ImpulseVector.ofStr(out);
+		}
 	}
 
 	// --- 0x41 OP_GATHER_NODE_ATTR ---

@@ -246,7 +246,8 @@ public final class ImpulsePillar3Ops {
 			int csrRows = rel.csrRowCount();
 			int cscRows = needsRev ? rel.cscRowCount() : 0;
 			int srcCard = fSrc.cardinality();
-			int[] curQ = ws.arena.allocInt(Math.max(srcCard, fastOutCard));
+			boolean isMultiHop = (subop >= 3 && subop <= 7);
+			int[] curQ = ws.arena.allocInt(isMultiHop ? Math.max(srcCard, fastOutCard) : srcCard);
 			int curLen = fSrc.toSortedArrayInto(curQ);
 			boolean stFlag = ws.st;
 
@@ -1699,74 +1700,7 @@ public final class ImpulsePillar3Ops {
 				}
 				switch (op) {
 					case OP_GATHER_EDGE_ATTR -> {
-						if (immLo >= view.relations.length || view.relations[immLo] == null) {
-							ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-							break;
-						}
-						ImpulseSnapshotView.RelView gr = view.relations[immLo];
-						ImpulseVector col = gr.edgeAttrs.get(immHi);
-						ImpulseSnapshotView.OffHeapAttrColumn offCol = (col == null)
-								? gr.offHeapEdgeAttrs.get(immHi)
-								: null;
-						ImpulseVector idxV = ws.vVectors[s1];
-						if (col == null && offCol == null) {
-							ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-							break;
-						}
-						if (idxV == null || idxV.elemTag != ImpulseVector.TAG_U64) {
-							ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
-							break;
-						}
-						ImpulseVector vGather = gatherVecs[dst];
-						long[] scratchValid = vGather.validBits;
-						Arrays.fill(scratchValid, 0, curWords, 0L);
-						long[] idxData = idxV.i64Data;
-						int colLen = (col != null) ? col.length : offCol.count();
-						int tag = (col != null) ? col.elemTag : offCol.elemTag();
-						if (tag == ImpulseVector.TAG_F64) {
-							double[] scratchF64 = vGather.f64Data;
-							for (int i = 0; i < len; i++) {
-								if (!idxV.isValidAt(i))
-									continue;
-								long e64 = idxData[i];
-								if (e64 < 0L || e64 >= colLen) {
-									ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-									break;
-								}
-								int e = (int) e64;
-								boolean ok = (col != null) ? col.isValidAt(e) : offCol.isValidAt(e);
-								if (ok) {
-									scratchF64[i] = (col != null) ? col.f64Data[e] : offCol.readF64(e);
-									scratchValid[i >>> 6] |= (1L << (i & 63));
-								}
-							}
-							vGather.elemTag = ImpulseVector.TAG_F64;
-						} else if (tag == ImpulseVector.TAG_I64 || tag == ImpulseVector.TAG_U64) {
-							long[] scratchI64 = vGather.i64Data;
-							for (int i = 0; i < len; i++) {
-								if (!idxV.isValidAt(i))
-									continue;
-								long e64 = idxData[i];
-								if (e64 < 0L || e64 >= colLen) {
-									ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-									break;
-								}
-								int e = (int) e64;
-								boolean ok = (col != null) ? col.isValidAt(e) : offCol.isValidAt(e);
-								if (ok) {
-									scratchI64[i] = (col != null) ? col.i64Data[e] : offCol.readI64(e);
-									scratchValid[i >>> 6] |= (1L << (i & 63));
-								}
-							}
-							vGather.elemTag = tag;
-						} else {
-							ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
-							break;
-						}
-						if (ws.status != IMPULSE_VM_OK)
-							break;
-						vGather.length = len;
-						ws.vVectors[dst] = vGather;
+						execZeroAllocGatherEdgeAttr(ws, view, immLo, immHi, s1, dst, gatherVecs[dst], len, curWords);
 					}
 					case OP_VEC_CMP -> {
 						ImpulseVector lhs = ws.vVectors[s1];
@@ -2032,6 +1966,7 @@ public final class ImpulsePillar3Ops {
 
 		final Set<Integer>[] accF;
 		final TreeMap<Long, Long>[] accMl;
+		final long[][] accMlDense;
 		final double[][] accVF64;
 		final boolean[][] accVF64Valid;
 		final long[][] accVU64;
@@ -2078,6 +2013,7 @@ public final class ImpulsePillar3Ops {
 
 			this.accF = new Set[8];
 			this.accMl = new TreeMap[8];
+			this.accMlDense = new long[8][];
 			this.accVF64 = new double[8][];
 			this.accVF64Valid = new boolean[8][];
 			this.accVU64 = new long[8][];
@@ -2145,12 +2081,24 @@ public final class ImpulsePillar3Ops {
 							: new TreeSet<>();
 				}
 				if (committedMlDom[d] >= 0) {
+					int mdom = committedMlDom[d];
+					int mdcard = (mdom >= 0 && mdom < view.domainCards.length) ? (int) view.domainCards[mdom] : 0;
+					if (mdcard > 0 && mdcard <= (1 << 22)) {
+						accMlDense[d] = ws.arena.allocLongZeroed(mdcard);
+					}
 					accMl[d] = new TreeMap<>();
 					if (accumMl[d] && ws.isFInitialized(d) && ws.fRegs[d].multiLane) {
 						long[] ns = ws.fRegs[d].mlSortedNodes();
 						long[] ms = ws.fRegs[d].mlSortedMasks();
-						for (int k = 0; k < ns.length; k++)
-							accMl[d].put(ns[k], ms[k]);
+						long[] dense = accMlDense[d];
+						for (int k = 0; k < ns.length; k++) {
+							long u = ns[k];
+							if (dense != null && u >= 0L && u < dense.length) {
+								dense[(int) u] |= ms[k];
+							} else {
+								accMl[d].put(u, ms[k]);
+							}
+						}
 					}
 				}
 				ImpulseVector vd = ws.vVectors[d];
@@ -2301,18 +2249,50 @@ public final class ImpulsePillar3Ops {
 					if (committedMlDom[d] >= 0) {
 						int dom = committedMlDom[d];
 						int dcard = (int) view.domainCards[dom];
-						if (!accMl[d].isEmpty())
-							anyNonEmpty = true;
-						long[] ns = new long[accMl[d].size()];
-						long[] ms = new long[accMl[d].size()];
-						int idx = 0;
-						for (var e : accMl[d].entrySet()) {
-							ns[idx] = e.getKey();
-							ms[idx] = e.getValue();
-							idx++;
+						long[] dense = accMlDense[d];
+						if (dense != null && accMl[d].isEmpty()) {
+							int cnt = 0;
+							for (int i = 0; i < dcard; i++) {
+								if (dense[i] != 0L)
+									cnt++;
+							}
+							if (cnt > 0)
+								anyNonEmpty = true;
+							long[] ns = ws.arena.allocLong(cnt);
+							long[] ms = ws.arena.allocLong(cnt);
+							int idx = 0;
+							for (int i = 0; i < dcard; i++) {
+								long m = dense[i];
+								if (m != 0L) {
+									ns[idx] = i;
+									ms[idx] = m;
+									idx++;
+								}
+							}
+							ws.fRegs[d].initMultiLane(dom, dcard, 64, 64, ns, ms, cnt, ws.geometry);
+							ws.setFInitialized(d, true);
+						} else {
+							if (dense != null) {
+								for (int i = 0; i < dcard; i++) {
+									if (dense[i] != 0L) {
+										long prev = accMl[d].getOrDefault((long) i, 0L);
+										accMl[d].put((long) i, prev | dense[i]);
+									}
+								}
+							}
+							if (!accMl[d].isEmpty())
+								anyNonEmpty = true;
+							long[] ns = new long[accMl[d].size()];
+							long[] ms = new long[accMl[d].size()];
+							int idx = 0;
+							for (var e : accMl[d].entrySet()) {
+								ns[idx] = e.getKey();
+								ms[idx] = e.getValue();
+								idx++;
+							}
+							ws.fRegs[d].initMultiLane(dom, dcard, 64, 64, ns, ms, ws.geometry);
+							ws.setFInitialized(d, true);
 						}
-						ws.fRegs[d].initMultiLane(dom, dcard, 64, 64, ns, ms, ws.geometry);
-						ws.setFInitialized(d, true);
 					}
 					if (committedVF64[d] && accVF64[d] != null) {
 						int n = accVF64[d].length;
@@ -2632,283 +2612,8 @@ public final class ImpulsePillar3Ops {
 				ws.pc++;
 			}
 			case OP_GATHER_NODE_ATTR, OP_GATHER_EDGE_ATTR -> {
-				ImpulseVector idxVec = ws.vVectors[s1];
-				if (idxVec == null || idxVec.elemTag != ImpulseVector.TAG_U64) {
-					ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
-					return;
-				}
-				if (idxVec.length < morselLen) {
-					ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-					return;
-				}
-				ImpulseVector col;
-				ImpulseSnapshotView.OffHeapAttrColumn offCol = null;
-				if (op == OP_GATHER_NODE_ATTR) {
-					col = view.getNodeAttr(imm16Lo, imm16Hi);
-					if (col == null)
-						offCol = view.getOffHeapNodeAttr(imm16Lo, imm16Hi);
-				} else {
-					if (imm16Lo >= view.relations.length) {
-						ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-						return;
-					}
-					col = view.relations[imm16Lo].edgeAttrs.get(imm16Hi);
-					if (col == null)
-						offCol = view.relations[imm16Lo].offHeapEdgeAttrs.get(imm16Hi);
-				}
-				if (col == null && offCol == null) {
-					ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-					return;
-				}
-				int colLen = (col != null) ? col.length : offCol.count();
-				int words = Math.max(1, (morselLen + 63) >>> 6);
-				boolean reuseDst = (dst >= 8 && dst < 16);
-				// Fast single-pass non-nullable off-heap F64 gather (unmasked M0/M1/M2 ->
-				// double)
-				if (!useMask && offCol != null && !offCol.nullable() && (offCol.typeCode() & 0x7F) == 10
-						&& idxVec.validBits == sess.allValid) {
-					double[] out = reuseDst ? sess.scratchF64[dst - 8] : new double[morselLen];
-					long[] idxs = idxVec.i64Data;
-					MemorySegment seg = offCol.dataSeg();
-					for (int i = 0; i < morselLen; i++) {
-						long id = idxs[i];
-						if (id < 0 || id >= colLen) {
-							ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-							return;
-						}
-						out[i] = seg.get(ValueLayout.JAVA_DOUBLE_UNALIGNED, id << 3);
-					}
-					long[] vBits = reuseDst ? sess.scratchVBits[dst - 8] : new long[words];
-					Arrays.fill(vBits, 0, words, -1L);
-					if ((morselLen & 63) != 0) {
-						vBits[words - 1] = (1L << (morselLen & 63)) - 1L;
-					}
-					if (reuseDst) {
-						ImpulseVector sv = sess.scratchVecF64[dst - 8];
-						sv.length = morselLen;
-						ws.vVectors[dst] = sv;
-					} else {
-						ws.vVectors[dst] = ImpulseVector.ofF64(out, vBits);
-					}
-					ws.pc++;
-					break;
-				}
-				if (useMask) {
-					for (int k = 0; k < maskCnt; k++) {
-						int i = maskScratch[k];
-						if (i < morselLen && idxVec.isValidAt(i)) {
-							long id = idxVec.i64Data[i];
-							if (id < 0 || id >= colLen) {
-								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-								return;
-							}
-						}
-					}
-				} else {
-					for (int i = 0; i < morselLen; i++) {
-						if (idxVec.isValidAt(i)) {
-							long id = idxVec.i64Data[i];
-							if (id < 0 || id >= colLen) {
-								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-								return;
-							}
-						}
-					}
-				}
-				long[] vBits = reuseDst ? sess.scratchVBits[dst - 8] : new long[words];
-				if (reuseDst)
-					Arrays.fill(vBits, 0, words, 0L);
-				if (offCol != null) {
-					int base = offCol.typeCode() & 0x7F;
-					if (base == 9 || base == 10) {
-						double[] out = reuseDst ? sess.scratchF64[dst - 8] : new double[morselLen];
-						if (useMask) {
-							for (int k = 0; k < maskCnt; k++) {
-								int i = maskScratch[k];
-								if (i < morselLen && idxVec.isValidAt(i)) {
-									int id = (int) idxVec.i64Data[i];
-									if (offCol.isValidAt(id)) {
-										out[i] = offCol.readF64(id);
-										vBits[i >>> 6] |= (1L << (i & 63));
-									}
-								}
-							}
-						} else {
-							for (int i = 0; i < morselLen; i++) {
-								if (idxVec.isValidAt(i)) {
-									int id = (int) idxVec.i64Data[i];
-									if (offCol.isValidAt(id)) {
-										out[i] = offCol.readF64(id);
-										vBits[i >>> 6] |= (1L << (i & 63));
-									}
-								}
-							}
-						}
-						if (reuseDst) {
-							ImpulseVector sv = sess.scratchVecF64[dst - 8];
-							sv.length = morselLen;
-							ws.vVectors[dst] = sv;
-						} else {
-							ws.vVectors[dst] = ImpulseVector.ofF64(out, vBits);
-						}
-					} else if (base >= 1 && base <= 8) {
-						long[] out = reuseDst ? sess.scratchI64[dst - 8] : new long[morselLen];
-						if (useMask) {
-							for (int k = 0; k < maskCnt; k++) {
-								int i = maskScratch[k];
-								if (i < morselLen && idxVec.isValidAt(i)) {
-									int id = (int) idxVec.i64Data[i];
-									if (offCol.isValidAt(id)) {
-										out[i] = offCol.readI64(id);
-										vBits[i >>> 6] |= (1L << (i & 63));
-									}
-								}
-							}
-						} else {
-							for (int i = 0; i < morselLen; i++) {
-								if (idxVec.isValidAt(i)) {
-									int id = (int) idxVec.i64Data[i];
-									if (offCol.isValidAt(id)) {
-										out[i] = offCol.readI64(id);
-										vBits[i >>> 6] |= (1L << (i & 63));
-									}
-								}
-							}
-						}
-						if (reuseDst) {
-							ImpulseVector sv = (base <= 4) ? sess.scratchVecI64[dst - 8] : sess.scratchVecU64[dst - 8];
-							sv.length = morselLen;
-							ws.vVectors[dst] = sv;
-						} else {
-							ws.vVectors[dst] = (base <= 4)
-									? ImpulseVector.ofI64(out, vBits)
-									: ImpulseVector.ofU64(out, vBits);
-						}
-					} else if (base == 11) {
-						String[] out = new String[morselLen];
-						if (useMask) {
-							for (int k = 0; k < maskCnt; k++) {
-								int i = maskScratch[k];
-								if (i < morselLen && idxVec.isValidAt(i)) {
-									int id = (int) idxVec.i64Data[i];
-									if (offCol.isValidAt(id)) {
-										out[i] = offCol.readString(id);
-										vBits[i >>> 6] |= (1L << (i & 63));
-									}
-								}
-							}
-						} else {
-							for (int i = 0; i < morselLen; i++) {
-								if (idxVec.isValidAt(i)) {
-									int id = (int) idxVec.i64Data[i];
-									if (offCol.isValidAt(id)) {
-										out[i] = offCol.readString(id);
-										vBits[i >>> 6] |= (1L << (i & 63));
-									}
-								}
-							}
-						}
-						ws.vVectors[dst] = ImpulseVector.ofStr(out);
-					} else {
-						ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-						return;
-					}
-				} else if (col.elemTag == ImpulseVector.TAG_F64) {
-					double[] out = reuseDst ? sess.scratchF64[dst - 8] : new double[morselLen];
-					if (useMask) {
-						for (int k = 0; k < maskCnt; k++) {
-							int i = maskScratch[k];
-							if (i < morselLen && idxVec.isValidAt(i)) {
-								int id = (int) idxVec.i64Data[i];
-								if (col.isValidAt(id)) {
-									out[i] = col.f64Data[id];
-									vBits[i >>> 6] |= (1L << (i & 63));
-								}
-							}
-						}
-					} else {
-						for (int i = 0; i < morselLen; i++) {
-							if (idxVec.isValidAt(i)) {
-								int id = (int) idxVec.i64Data[i];
-								if (col.isValidAt(id)) {
-									out[i] = col.f64Data[id];
-									vBits[i >>> 6] |= (1L << (i & 63));
-								}
-							}
-						}
-					}
-					if (reuseDst) {
-						ImpulseVector sv = sess.scratchVecF64[dst - 8];
-						sv.length = morselLen;
-						ws.vVectors[dst] = sv;
-					} else {
-						ws.vVectors[dst] = ImpulseVector.ofF64(out, vBits);
-					}
-				} else if (col.elemTag == ImpulseVector.TAG_I64 || col.elemTag == ImpulseVector.TAG_U64) {
-					long[] out = reuseDst ? sess.scratchI64[dst - 8] : new long[morselLen];
-					if (useMask) {
-						for (int k = 0; k < maskCnt; k++) {
-							int i = maskScratch[k];
-							if (i < morselLen && idxVec.isValidAt(i)) {
-								int id = (int) idxVec.i64Data[i];
-								if (col.isValidAt(id)) {
-									out[i] = col.i64Data[id];
-									vBits[i >>> 6] |= (1L << (i & 63));
-								}
-							}
-						}
-					} else {
-						for (int i = 0; i < morselLen; i++) {
-							if (idxVec.isValidAt(i)) {
-								int id = (int) idxVec.i64Data[i];
-								if (col.isValidAt(id)) {
-									out[i] = col.i64Data[id];
-									vBits[i >>> 6] |= (1L << (i & 63));
-								}
-							}
-						}
-					}
-					if (reuseDst) {
-						ImpulseVector sv = (col.elemTag == ImpulseVector.TAG_I64)
-								? sess.scratchVecI64[dst - 8]
-								: sess.scratchVecU64[dst - 8];
-						sv.length = morselLen;
-						ws.vVectors[dst] = sv;
-					} else {
-						ws.vVectors[dst] = (col.elemTag == ImpulseVector.TAG_I64)
-								? ImpulseVector.ofI64(out, vBits)
-								: ImpulseVector.ofU64(out, vBits);
-					}
-				} else if (col.elemTag == ImpulseVector.TAG_STR) {
-					String[] out = new String[morselLen];
-					if (useMask) {
-						for (int k = 0; k < maskCnt; k++) {
-							int i = maskScratch[k];
-							if (i < morselLen && idxVec.isValidAt(i)) {
-								int id = (int) idxVec.i64Data[i];
-								if (col.isValidAt(id)) {
-									out[i] = col.strData[id];
-									vBits[i >>> 6] |= (1L << (i & 63));
-								}
-							}
-						}
-					} else {
-						for (int i = 0; i < morselLen; i++) {
-							if (idxVec.isValidAt(i)) {
-								int id = (int) idxVec.i64Data[i];
-								if (col.isValidAt(id)) {
-									out[i] = col.strData[id];
-									vBits[i >>> 6] |= (1L << (i & 63));
-								}
-							}
-						}
-					}
-					ws.vVectors[dst] = ImpulseVector.ofStr(out);
-				} else {
-					ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-					return;
-				}
-				ws.pc++;
+				execMorselGatherAttr(ws, view, sess, op, dst, s1, imm16Lo, imm16Hi, morselLen, useMask, maskScratch,
+						maskCnt);
 			}
 			case OP_COALESCE -> {
 				ImpulseVector lhs = ws.vVectors[s1];
@@ -3174,18 +2879,45 @@ public final class ImpulsePillar3Ops {
 						}
 						boolean rOk = scalar && ws.isRValid(s2);
 						long rVal = rOk ? ws.rRegs[s2] : 0L;
-						for (int k = 0; k < commitCnt; k++) {
-							int i = commitIds[k];
-							if (!ids.isValidAt(i))
-								continue;
-							boolean hasLm = scalar ? rOk : lms.isValidAt(i);
-							if (!hasLm)
-								continue;
-							long lm = scalar ? rVal : lms.i64Data[i];
-							if (lm != 0L) {
-								long tgt = ids.i64Data[i];
-								long prev = accMl[dst].getOrDefault(tgt, 0L);
-								accMl[dst].put(tgt, prev | lm);
+						long[] dense = sess.accMlDense[dst];
+						int mdom = sess.committedMlDom[dst];
+						int dlen = (dense != null && mdom >= 0 && mdom < view.domainCards.length)
+								? (int) view.domainCards[mdom]
+								: 0;
+						if (dense != null && !scalar && commitIds == null && ids.validBits == null
+								&& lms.validBits == null && ids.length >= commitCnt && lms.length >= commitCnt) {
+							long[] idArr = ids.i64Data;
+							long[] lmArr = lms.i64Data;
+							for (int i = 0; i < commitCnt; i++) {
+								long lm = lmArr[i];
+								if (lm != 0L) {
+									long tgt = idArr[i];
+									if (tgt >= 0L && tgt < dlen) {
+										dense[(int) tgt] |= lm;
+									} else {
+										long prev = accMl[dst].getOrDefault(tgt, 0L);
+										accMl[dst].put(tgt, prev | lm);
+									}
+								}
+							}
+						} else {
+							for (int k = 0; k < commitCnt; k++) {
+								int i = (commitIds != null) ? commitIds[k] : k;
+								if (!ids.isValidAt(i))
+									continue;
+								boolean hasLm = scalar ? rOk : lms.isValidAt(i);
+								if (!hasLm)
+									continue;
+								long lm = scalar ? rVal : lms.i64Data[i];
+								if (lm != 0L) {
+									long tgt = ids.i64Data[i];
+									if (dense != null && tgt >= 0L && tgt < dlen) {
+										dense[(int) tgt] |= lm;
+									} else {
+										long prev = accMl[dst].getOrDefault(tgt, 0L);
+										accMl[dst].put(tgt, prev | lm);
+									}
+								}
 							}
 						}
 						ws.pc++;
@@ -3248,6 +2980,528 @@ public final class ImpulsePillar3Ops {
 	}
 
 	// --- 0x39 OP_SAMPLE_NEIGHBORS ---
+	private static void execZeroAllocGatherEdgeAttr(ImpulseWorkspace ws, ImpulseSnapshotView view, int relId,
+			int attrIdx, int s1, int dst, ImpulseVector vGather, int len, int curWords) {
+		if (relId >= view.relations.length || view.relations[relId] == null) {
+			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+			return;
+		}
+		ImpulseSnapshotView.RelView gr = view.relations[relId];
+		ImpulseVector col = gr.edgeAttrs.get(attrIdx);
+		ImpulseSnapshotView.OffHeapAttrColumn offCol = (col == null) ? gr.offHeapEdgeAttrs.get(attrIdx) : null;
+		ImpulseVector idxV = ws.vVectors[s1];
+		if (col == null && offCol == null) {
+			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+			return;
+		}
+		if (idxV == null || idxV.elemTag != ImpulseVector.TAG_U64) {
+			ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+			return;
+		}
+		long[] scratchValid = vGather.validBits;
+		long[] idxData = idxV.i64Data;
+		int colLen = (col != null) ? col.length : offCol.count();
+		if (offCol != null && !offCol.nullable() && idxV.validBits == null) {
+			int base = offCol.typeCode() & 0x7F;
+			MemorySegment seg = offCol.dataSeg();
+			Arrays.fill(scratchValid, 0, curWords, -1L);
+			if ((len & 63) != 0)
+				scratchValid[curWords - 1] = (1L << (len & 63)) - 1L;
+			if (base == 6 || base == 7 || base == 10) {
+				double[] scratchF64 = vGather.f64Data;
+				if (base == 7 || base == 10) {
+					for (int i = 0; i < len; i++) {
+						long e64 = idxData[i];
+						if (e64 < 0L || e64 >= colLen) {
+							ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+							return;
+						}
+						double d = seg.get(ValueLayout.JAVA_DOUBLE_UNALIGNED, e64 << 3);
+						if (Double.isNaN(d)) {
+							scratchF64[i] = 0.0;
+							scratchValid[i >>> 6] &= ~(1L << (i & 63));
+						} else {
+							scratchF64[i] = d;
+						}
+					}
+				} else {
+					for (int i = 0; i < len; i++) {
+						long e64 = idxData[i];
+						if (e64 < 0L || e64 >= colLen) {
+							ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+							return;
+						}
+						float f = seg.get(ValueLayout.JAVA_FLOAT_UNALIGNED, e64 << 2);
+						if (Float.isNaN(f)) {
+							scratchF64[i] = 0.0;
+							scratchValid[i >>> 6] &= ~(1L << (i & 63));
+						} else {
+							scratchF64[i] = f;
+						}
+					}
+				}
+				vGather.elemTag = ImpulseVector.TAG_F64;
+				vGather.length = len;
+				ws.vVectors[dst] = vGather;
+				return;
+			} else if ((base >= 1 && base <= 4) || base == 8 || base == 9) {
+				long[] scratchI64 = vGather.i64Data;
+				switch (base) {
+					case 1 -> {
+						for (int i = 0; i < len; i++) {
+							long e64 = idxData[i];
+							if (e64 < 0L || e64 >= colLen) {
+								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+								return;
+							}
+							scratchI64[i] = seg.get(ValueLayout.JAVA_BYTE, e64);
+						}
+					}
+					case 2 -> {
+						for (int i = 0; i < len; i++) {
+							long e64 = idxData[i];
+							if (e64 < 0L || e64 >= colLen) {
+								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+								return;
+							}
+							scratchI64[i] = seg.get(ValueLayout.JAVA_SHORT_UNALIGNED, e64 << 1);
+						}
+					}
+					case 3 -> {
+						for (int i = 0; i < len; i++) {
+							long e64 = idxData[i];
+							if (e64 < 0L || e64 >= colLen) {
+								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+								return;
+							}
+							scratchI64[i] = seg.get(ValueLayout.JAVA_INT_UNALIGNED, e64 << 2);
+						}
+					}
+					default -> {
+						for (int i = 0; i < len; i++) {
+							long e64 = idxData[i];
+							if (e64 < 0L || e64 >= colLen) {
+								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+								return;
+							}
+							scratchI64[i] = seg.get(ValueLayout.JAVA_LONG_UNALIGNED, e64 << 3);
+						}
+					}
+				}
+				vGather.elemTag = (base <= 4) ? ImpulseVector.TAG_I64 : ImpulseVector.TAG_U64;
+				vGather.length = len;
+				ws.vVectors[dst] = vGather;
+				return;
+			}
+		}
+		Arrays.fill(scratchValid, 0, curWords, 0L);
+		int tag = (col != null) ? col.elemTag : offCol.elemTag();
+		if (tag == ImpulseVector.TAG_F64) {
+			double[] scratchF64 = vGather.f64Data;
+			for (int i = 0; i < len; i++) {
+				if (!idxV.isValidAt(i))
+					continue;
+				long e64 = idxData[i];
+				if (e64 < 0L || e64 >= colLen) {
+					ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+					return;
+				}
+				int e = (int) e64;
+				boolean ok = (col != null) ? col.isValidAt(e) : offCol.isValidAt(e);
+				if (ok) {
+					scratchF64[i] = (col != null) ? col.f64Data[e] : offCol.readF64(e);
+					scratchValid[i >>> 6] |= (1L << (i & 63));
+				}
+			}
+			vGather.elemTag = ImpulseVector.TAG_F64;
+		} else if (tag == ImpulseVector.TAG_I64 || tag == ImpulseVector.TAG_U64) {
+			long[] scratchI64 = vGather.i64Data;
+			for (int i = 0; i < len; i++) {
+				if (!idxV.isValidAt(i))
+					continue;
+				long e64 = idxData[i];
+				if (e64 < 0L || e64 >= colLen) {
+					ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+					return;
+				}
+				int e = (int) e64;
+				boolean ok = (col != null) ? col.isValidAt(e) : offCol.isValidAt(e);
+				if (ok) {
+					scratchI64[i] = (col != null) ? col.i64Data[e] : offCol.readI64(e);
+					scratchValid[i >>> 6] |= (1L << (i & 63));
+				}
+			}
+			vGather.elemTag = tag;
+		} else {
+			ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+			return;
+		}
+		vGather.length = len;
+		ws.vVectors[dst] = vGather;
+	}
+
+	private static void execMorselGatherAttr(ImpulseWorkspace ws, ImpulseSnapshotView view, MorselStreamSession sess,
+			int op, int dst, int s1, int imm16Lo, int imm16Hi, int morselLen, boolean useMask, int[] maskScratch,
+			int maskCnt) {
+		ImpulseVector idxVec = ws.vVectors[s1];
+		if (idxVec == null || idxVec.elemTag != ImpulseVector.TAG_U64) {
+			ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+			return;
+		}
+		if (idxVec.length < morselLen) {
+			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+			return;
+		}
+		ImpulseVector col;
+		ImpulseSnapshotView.OffHeapAttrColumn offCol = null;
+		if (op == OP_GATHER_NODE_ATTR) {
+			col = view.getNodeAttr(imm16Lo, imm16Hi);
+			if (col == null)
+				offCol = view.getOffHeapNodeAttr(imm16Lo, imm16Hi);
+		} else {
+			if (imm16Lo >= view.relations.length) {
+				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+				return;
+			}
+			col = view.relations[imm16Lo].edgeAttrs.get(imm16Hi);
+			if (col == null)
+				offCol = view.relations[imm16Lo].offHeapEdgeAttrs.get(imm16Hi);
+		}
+		if (col == null && offCol == null) {
+			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+			return;
+		}
+		int colLen = (col != null) ? col.length : offCol.count();
+		int words = Math.max(1, (morselLen + 63) >>> 6);
+		boolean reuseDst = (dst >= 8 && dst < 16);
+
+		// Fast single-pass non-nullable unmasked off-heap gather (F32/F64 & I8..U64)
+		if (!useMask && offCol != null && !offCol.nullable() && idxVec.validBits == sess.allValid) {
+			int base = offCol.typeCode() & 0x7F;
+			long[] idxs = idxVec.i64Data;
+			MemorySegment seg = offCol.dataSeg();
+			if (base == 6 || base == 7 || base == 10) {
+				double[] out = reuseDst ? sess.scratchF64[dst - 8] : new double[morselLen];
+				long[] vBits = reuseDst ? sess.scratchVBits[dst - 8] : new long[words];
+				Arrays.fill(vBits, 0, words, -1L);
+				if ((morselLen & 63) != 0)
+					vBits[words - 1] = (1L << (morselLen & 63)) - 1L;
+				if (base == 7 || base == 10) {
+					for (int i = 0; i < morselLen; i++) {
+						long id = idxs[i];
+						if (id < 0 || id >= colLen) {
+							ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+							return;
+						}
+						double d = seg.get(ValueLayout.JAVA_DOUBLE_UNALIGNED, id << 3);
+						if (Double.isNaN(d)) {
+							out[i] = 0.0;
+							vBits[i >>> 6] &= ~(1L << (i & 63));
+						} else {
+							out[i] = d;
+						}
+					}
+				} else {
+					for (int i = 0; i < morselLen; i++) {
+						long id = idxs[i];
+						if (id < 0 || id >= colLen) {
+							ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+							return;
+						}
+						float f = seg.get(ValueLayout.JAVA_FLOAT_UNALIGNED, id << 2);
+						if (Float.isNaN(f)) {
+							out[i] = 0.0;
+							vBits[i >>> 6] &= ~(1L << (i & 63));
+						} else {
+							out[i] = f;
+						}
+					}
+				}
+				if (reuseDst) {
+					ImpulseVector sv = sess.scratchVecF64[dst - 8];
+					sv.length = morselLen;
+					ws.vVectors[dst] = sv;
+				} else {
+					ws.vVectors[dst] = ImpulseVector.ofF64(out, vBits);
+				}
+				ws.pc++;
+				return;
+			} else if ((base >= 1 && base <= 4) || base == 8 || base == 9) {
+				long[] out = reuseDst ? sess.scratchI64[dst - 8] : new long[morselLen];
+				long[] vBits = reuseDst ? sess.scratchVBits[dst - 8] : new long[words];
+				Arrays.fill(vBits, 0, words, -1L);
+				if ((morselLen & 63) != 0)
+					vBits[words - 1] = (1L << (morselLen & 63)) - 1L;
+				switch (base) {
+					case 1 -> {
+						for (int i = 0; i < morselLen; i++) {
+							long id = idxs[i];
+							if (id < 0 || id >= colLen) {
+								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+								return;
+							}
+							out[i] = seg.get(ValueLayout.JAVA_BYTE, id);
+						}
+					}
+					case 2 -> {
+						for (int i = 0; i < morselLen; i++) {
+							long id = idxs[i];
+							if (id < 0 || id >= colLen) {
+								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+								return;
+							}
+							out[i] = seg.get(ValueLayout.JAVA_SHORT_UNALIGNED, id << 1);
+						}
+					}
+					case 3 -> {
+						for (int i = 0; i < morselLen; i++) {
+							long id = idxs[i];
+							if (id < 0 || id >= colLen) {
+								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+								return;
+							}
+							out[i] = seg.get(ValueLayout.JAVA_INT_UNALIGNED, id << 2);
+						}
+					}
+					default -> {
+						for (int i = 0; i < morselLen; i++) {
+							long id = idxs[i];
+							if (id < 0 || id >= colLen) {
+								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+								return;
+							}
+							out[i] = seg.get(ValueLayout.JAVA_LONG_UNALIGNED, id << 3);
+						}
+					}
+				}
+				if (reuseDst) {
+					ImpulseVector sv = (base <= 4) ? sess.scratchVecI64[dst - 8] : sess.scratchVecU64[dst - 8];
+					sv.length = morselLen;
+					ws.vVectors[dst] = sv;
+				} else {
+					ws.vVectors[dst] = (base <= 4) ? ImpulseVector.ofI64(out, vBits) : ImpulseVector.ofU64(out, vBits);
+				}
+				ws.pc++;
+				return;
+			}
+		}
+
+		if (useMask) {
+			for (int k = 0; k < maskCnt; k++) {
+				int i = maskScratch[k];
+				if (i < morselLen && idxVec.isValidAt(i)) {
+					long id = idxVec.i64Data[i];
+					if (id < 0 || id >= colLen) {
+						ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+						return;
+					}
+				}
+			}
+		} else {
+			for (int i = 0; i < morselLen; i++) {
+				if (idxVec.isValidAt(i)) {
+					long id = idxVec.i64Data[i];
+					if (id < 0 || id >= colLen) {
+						ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+						return;
+					}
+				}
+			}
+		}
+		long[] vBits = reuseDst ? sess.scratchVBits[dst - 8] : new long[words];
+		if (reuseDst)
+			Arrays.fill(vBits, 0, words, 0L);
+		if (offCol != null) {
+			int base = offCol.typeCode() & 0x7F;
+			if (base == 6 || base == 7 || base == 10) {
+				double[] out = reuseDst ? sess.scratchF64[dst - 8] : new double[morselLen];
+				if (useMask) {
+					for (int k = 0; k < maskCnt; k++) {
+						int i = maskScratch[k];
+						if (i < morselLen && idxVec.isValidAt(i)) {
+							int id = (int) idxVec.i64Data[i];
+							if (offCol.isValidAt(id)) {
+								out[i] = offCol.readF64(id);
+								vBits[i >>> 6] |= (1L << (i & 63));
+							}
+						}
+					}
+				} else {
+					for (int i = 0; i < morselLen; i++) {
+						if (idxVec.isValidAt(i)) {
+							int id = (int) idxVec.i64Data[i];
+							if (offCol.isValidAt(id)) {
+								out[i] = offCol.readF64(id);
+								vBits[i >>> 6] |= (1L << (i & 63));
+							}
+						}
+					}
+				}
+				if (reuseDst) {
+					ImpulseVector sv = sess.scratchVecF64[dst - 8];
+					sv.length = morselLen;
+					ws.vVectors[dst] = sv;
+				} else {
+					ws.vVectors[dst] = ImpulseVector.ofF64(out, vBits);
+				}
+			} else if ((base >= 1 && base <= 4) || base == 8 || base == 9) {
+				long[] out = reuseDst ? sess.scratchI64[dst - 8] : new long[morselLen];
+				if (useMask) {
+					for (int k = 0; k < maskCnt; k++) {
+						int i = maskScratch[k];
+						if (i < morselLen && idxVec.isValidAt(i)) {
+							int id = (int) idxVec.i64Data[i];
+							if (offCol.isValidAt(id)) {
+								out[i] = offCol.readI64(id);
+								vBits[i >>> 6] |= (1L << (i & 63));
+							}
+						}
+					}
+				} else {
+					for (int i = 0; i < morselLen; i++) {
+						if (idxVec.isValidAt(i)) {
+							int id = (int) idxVec.i64Data[i];
+							if (offCol.isValidAt(id)) {
+								out[i] = offCol.readI64(id);
+								vBits[i >>> 6] |= (1L << (i & 63));
+							}
+						}
+					}
+				}
+				if (reuseDst) {
+					ImpulseVector sv = (base <= 4) ? sess.scratchVecI64[dst - 8] : sess.scratchVecU64[dst - 8];
+					sv.length = morselLen;
+					ws.vVectors[dst] = sv;
+				} else {
+					ws.vVectors[dst] = (base <= 4) ? ImpulseVector.ofI64(out, vBits) : ImpulseVector.ofU64(out, vBits);
+				}
+			} else if (base == 11) {
+				String[] out = new String[morselLen];
+				if (useMask) {
+					for (int k = 0; k < maskCnt; k++) {
+						int i = maskScratch[k];
+						if (i < morselLen && idxVec.isValidAt(i)) {
+							int id = (int) idxVec.i64Data[i];
+							if (offCol.isValidAt(id)) {
+								out[i] = offCol.readString(id);
+								vBits[i >>> 6] |= (1L << (i & 63));
+							}
+						}
+					}
+				} else {
+					for (int i = 0; i < morselLen; i++) {
+						if (idxVec.isValidAt(i)) {
+							int id = (int) idxVec.i64Data[i];
+							if (offCol.isValidAt(id)) {
+								out[i] = offCol.readString(id);
+								vBits[i >>> 6] |= (1L << (i & 63));
+							}
+						}
+					}
+				}
+				ws.vVectors[dst] = ImpulseVector.ofStr(out);
+			} else {
+				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+				return;
+			}
+		} else if (col.elemTag == ImpulseVector.TAG_F64) {
+			double[] out = reuseDst ? sess.scratchF64[dst - 8] : new double[morselLen];
+			if (useMask) {
+				for (int k = 0; k < maskCnt; k++) {
+					int i = maskScratch[k];
+					if (i < morselLen && idxVec.isValidAt(i)) {
+						int id = (int) idxVec.i64Data[i];
+						if (col.isValidAt(id)) {
+							out[i] = col.f64Data[id];
+							vBits[i >>> 6] |= (1L << (i & 63));
+						}
+					}
+				}
+			} else {
+				for (int i = 0; i < morselLen; i++) {
+					if (idxVec.isValidAt(i)) {
+						int id = (int) idxVec.i64Data[i];
+						if (col.isValidAt(id)) {
+							out[i] = col.f64Data[id];
+							vBits[i >>> 6] |= (1L << (i & 63));
+						}
+					}
+				}
+			}
+			if (reuseDst) {
+				ImpulseVector sv = sess.scratchVecF64[dst - 8];
+				sv.length = morselLen;
+				ws.vVectors[dst] = sv;
+			} else {
+				ws.vVectors[dst] = ImpulseVector.ofF64(out, vBits);
+			}
+		} else if (col.elemTag == ImpulseVector.TAG_I64 || col.elemTag == ImpulseVector.TAG_U64) {
+			long[] out = reuseDst ? sess.scratchI64[dst - 8] : new long[morselLen];
+			if (useMask) {
+				for (int k = 0; k < maskCnt; k++) {
+					int i = maskScratch[k];
+					if (i < morselLen && idxVec.isValidAt(i)) {
+						int id = (int) idxVec.i64Data[i];
+						if (col.isValidAt(id)) {
+							out[i] = col.i64Data[id];
+							vBits[i >>> 6] |= (1L << (i & 63));
+						}
+					}
+				}
+			} else {
+				for (int i = 0; i < morselLen; i++) {
+					if (idxVec.isValidAt(i)) {
+						int id = (int) idxVec.i64Data[i];
+						if (col.isValidAt(id)) {
+							out[i] = col.i64Data[id];
+							vBits[i >>> 6] |= (1L << (i & 63));
+						}
+					}
+				}
+			}
+			if (reuseDst) {
+				ImpulseVector sv = (col.elemTag == ImpulseVector.TAG_I64)
+						? sess.scratchVecI64[dst - 8]
+						: sess.scratchVecU64[dst - 8];
+				sv.length = morselLen;
+				ws.vVectors[dst] = sv;
+			} else {
+				ws.vVectors[dst] = (col.elemTag == ImpulseVector.TAG_I64)
+						? ImpulseVector.ofI64(out, vBits)
+						: ImpulseVector.ofU64(out, vBits);
+			}
+		} else if (col.elemTag == ImpulseVector.TAG_STR) {
+			String[] out = new String[morselLen];
+			if (useMask) {
+				for (int k = 0; k < maskCnt; k++) {
+					int i = maskScratch[k];
+					if (i < morselLen && idxVec.isValidAt(i)) {
+						int id = (int) idxVec.i64Data[i];
+						if (col.isValidAt(id)) {
+							out[i] = col.strData[id];
+							vBits[i >>> 6] |= (1L << (i & 63));
+						}
+					}
+				}
+			} else {
+				for (int i = 0; i < morselLen; i++) {
+					if (idxVec.isValidAt(i)) {
+						int id = (int) idxVec.i64Data[i];
+						if (col.isValidAt(id)) {
+							out[i] = col.strData[id];
+							vBits[i >>> 6] |= (1L << (i & 63));
+						}
+					}
+				}
+			}
+			ws.vVectors[dst] = ImpulseVector.ofStr(out);
+		} else {
+			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+			return;
+		}
+		ws.pc++;
+	}
+
 	private static long splitMixSample(long seed, long u, long j) {
 		long z = seed ^ (u * 0x9E3779B97F4A7C15L) ^ (j * 0xBF58476D1CE4E5B9L);
 		z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9L;
