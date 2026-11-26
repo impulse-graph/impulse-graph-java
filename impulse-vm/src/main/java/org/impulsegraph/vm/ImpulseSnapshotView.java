@@ -169,7 +169,7 @@ public final class ImpulseSnapshotView {
 				throw new IllegalArgumentException("Negative topology counts for relId=" + relId);
 			}
 			if (hasCsr) {
-				long needRo = (long) (csrNodeCount + 1) * edgeIdxWidth;
+				long needRo = ((long) csrNodeCount + 1L) * edgeIdxWidth;
 				if (csrRowOffsetsSeg == null || csrRowOffsetsSeg.byteSize() < needRo) {
 					throw new IllegalArgumentException("Truncated CSR rowOffsets for relId=" + relId);
 				}
@@ -179,7 +179,7 @@ public final class ImpulseSnapshotView {
 				}
 			}
 			if (cscRowOffsetsSeg != null) {
-				long needCscRo = (long) (cscNodeCount + 1) * edgeIdxWidth;
+				long needCscRo = ((long) cscNodeCount + 1L) * edgeIdxWidth;
 				if (cscRowOffsetsSeg.byteSize() < needCscRo) {
 					throw new IllegalArgumentException("Truncated CSC rowOffsets for relId=" + relId);
 				}
@@ -188,8 +188,8 @@ public final class ImpulseSnapshotView {
 					throw new IllegalArgumentException("Truncated CSC colSources for relId=" + relId);
 				}
 			}
-			if (cooSrcSeg != null && cooEdgeCount > 0) {
-				if (cooSrcSeg.byteSize() < (long) cooEdgeCount * cooSrcWidth || cooTgtSeg == null
+			if (hasCoo && cooEdgeCount > 0) {
+				if (cooSrcSeg == null || cooSrcSeg.byteSize() < (long) cooEdgeCount * cooSrcWidth || cooTgtSeg == null
 						|| cooTgtSeg.byteSize() < (long) cooEdgeCount * cooTgtWidth) {
 					throw new IllegalArgumentException("Truncated COO segments for relId=" + relId);
 				}

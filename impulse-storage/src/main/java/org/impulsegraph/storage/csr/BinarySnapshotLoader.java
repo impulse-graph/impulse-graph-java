@@ -1389,6 +1389,10 @@ public final class BinarySnapshotLoader {
 						long tgtBound = isGlobalUnifiedCoo
 								? totalDomainNodes
 								: ((tgtDom != null && tgtDom.nodeCount() > 0) ? tgtDom.nodeCount() : nodeCount);
+						if (srcBound == 0 || tgtBound == 0) {
+							throw new IllegalArgumentException(
+									"COO relation " + relId + " has edgeCount=" + edgeCount + " with empty domain");
+						}
 						if (ImpulseAssert.isAuditEnabled() || edgeCount <= 100_000) {
 							for (long e = 0; e < edgeCount; e++) {
 								long s = readUnsignedAt(cooSrcSeg, e, srcNodeIdWidth);

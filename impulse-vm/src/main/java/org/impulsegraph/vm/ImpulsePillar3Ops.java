@@ -258,9 +258,10 @@ public final class ImpulsePillar3Ops {
 				if (subop == 8) {
 					for (int i = 0; i < m; i++) {
 						int u = rel.cooSrc(i);
-						if ((srcBits[u >>> 6] & (1L << u)) != 0L) {
+						if (u >= 0 && u < inCard && (srcBits[u >>> 6] & (1L << u)) != 0L) {
 							int v = rel.cooTgt(i);
-							if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
+							if (v >= 0 && v < fastOutCard
+									&& (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L)) {
 								outBits[v >>> 6] |= (1L << v);
 							}
 						}
@@ -268,9 +269,10 @@ public final class ImpulsePillar3Ops {
 				} else {
 					for (int i = 0; i < m; i++) {
 						int v = rel.cooTgt(i);
-						if ((srcBits[v >>> 6] & (1L << v)) != 0L) {
+						if (v >= 0 && v < inCard && (srcBits[v >>> 6] & (1L << v)) != 0L) {
 							int u = rel.cooSrc(i);
-							if (exclBits == null || (exclBits[u >>> 6] & (1L << u)) == 0L) {
+							if (u >= 0 && u < fastOutCard
+									&& (exclBits == null || (exclBits[u >>> 6] & (1L << u)) == 0L)) {
 								outBits[u >>> 6] |= (1L << u);
 							}
 						}
