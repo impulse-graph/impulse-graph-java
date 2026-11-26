@@ -173,6 +173,10 @@ public final class ImpulsePillar3Ops {
 		boolean endo = (rel.srcDom == rel.tgtDom);
 		int inDom = (subop == 1 || subop == 9) ? rel.tgtDom : rel.srcDom;
 		int outDom = (subop == 1 || subop == 9) ? rel.srcDom : rel.tgtDom;
+		if ((subop == 8 || subop == 9) && !rel.hasCooSegments()) {
+			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+			return;
+		}
 		if (subop >= 2 && subop <= 7 && !endo) {
 			ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
 			return;
@@ -192,6 +196,21 @@ public final class ImpulsePillar3Ops {
 		// Zero-alloc fast path for all walk subops (0=fwd, 1=rev, 2=both, 3=fwd_plus,
 		// 4=fwd_star, 5=rev_plus, 6=rev_star, 7=fwd_bounded, 8=coo_fwd, 9=coo_rev)
 		if (subop >= 0 && subop <= 9) {
+			boolean isCoo = (subop == 8 || subop == 9);
+			boolean needsRev = (subop == 1 || subop == 2 || subop == 5 || subop == 6);
+			boolean needsFwd = (subop == 0 || subop == 2 || subop == 3 || subop == 4 || subop == 7);
+			if (isCoo && !rel.hasCooSegments()) {
+				ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+				return;
+			}
+			if (needsFwd && !rel.hasCsrSegments()) {
+				ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+				return;
+			}
+			if (needsRev && !rel.hasCscSegments()) {
+				ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+				return;
+			}
 			ImpulseFrontier fe = null;
 			if ((flags & FLAG_MASKED_S3) != 0) {
 				fe = getF1Bit(ws, s3);
@@ -211,21 +230,6 @@ public final class ImpulsePillar3Ops {
 					ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
 					return;
 				}
-			}
-			boolean isCoo = (subop == 8 || subop == 9);
-			boolean needsRev = (subop == 1 || subop == 2 || subop == 5 || subop == 6);
-			boolean needsFwd = (subop == 0 || subop == 2 || subop == 3 || subop == 4 || subop == 7);
-			if (isCoo && !rel.hasCooSegments()) {
-				ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
-				return;
-			}
-			if (needsFwd && !rel.hasCsrSegments()) {
-				ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
-				return;
-			}
-			if (needsRev && !rel.hasCscSegments()) {
-				ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
-				return;
 			}
 			long[] exclBits = null;
 			if (fe != null && !fe.isEmpty()) {
@@ -1221,6 +1225,10 @@ public final class ImpulsePillar3Ops {
 
 		boolean isCoo = (subop == 2 || subop == 3);
 		boolean isRev = (subop == 1 || subop == 3);
+		if (isCoo && !rel.hasCooSegments()) {
+			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+			return;
+		}
 		int inDom = isRev ? rel.tgtDom : rel.srcDom;
 		int outDom = isRev ? rel.srcDom : rel.tgtDom;
 		if (fSrc.domainId != inDom) {
@@ -1621,7 +1629,8 @@ public final class ImpulsePillar3Ops {
 					}
 					case OP_VEC_CMP -> {
 						ImpulseVector lhs = ws.vVectors[s1];
-						if (lhs == null || lhs.elemTag != ImpulseVector.TAG_F64) {
+						if (lhs == null || (lhs.elemTag != ImpulseVector.TAG_F64 && lhs.elemTag != ImpulseVector.TAG_I64
+								&& lhs.elemTag != ImpulseVector.TAG_U64)) {
 							ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
 							break;
 						}
@@ -1631,36 +1640,68 @@ public final class ImpulsePillar3Ops {
 						long[] scratchCmpData = vCmp.boolDataBits;
 						Arrays.fill(scratchCmpValid, 0, curWords, 0L);
 						Arrays.fill(scratchCmpData, 0, curWords, 0L);
-						boolean rScOk = scalar && ws.isRValid(s2);
-						double rSc = rScOk ? Double.longBitsToDouble(ws.rRegs[s2]) : Double.NaN;
 						ImpulseVector rv = scalar ? null : ws.vVectors[s2];
-						double[] lF64 = lhs.f64Data;
-						for (int i = 0; i < len; i++) {
-							if (!lhs.isValidAt(i))
-								continue;
-							boolean hasY = scalar
-									? rScOk
-									: (rv != null && rv.elemTag == ImpulseVector.TAG_F64 && i < rv.length
-											&& rv.isValidAt(i));
-							if (!hasY)
-								continue;
-							double x = lF64[i];
-							double y = scalar ? rSc : rv.f64Data[i];
-							if (Double.isNaN(x) || Double.isNaN(y))
-								continue;
-							boolean res = switch (subop) {
-								case 0 -> x == y;
-								case 1 -> x != y;
-								case 2 -> x < y;
-								case 3 -> x <= y;
-								case 4 -> x > y;
-								case 5 -> x >= y;
-								default -> false;
-							};
-							long bit = 1L << (i & 63);
-							scratchCmpValid[i >>> 6] |= bit;
-							if (res)
-								scratchCmpData[i >>> 6] |= bit;
+						if (lhs.elemTag == ImpulseVector.TAG_F64) {
+							boolean rScOk = scalar && ws.isRValid(s2);
+							double rSc = rScOk ? Double.longBitsToDouble(ws.rRegs[s2]) : Double.NaN;
+							double[] lF64 = lhs.f64Data;
+							for (int i = 0; i < len && i < lhs.length; i++) {
+								if (!lhs.isValidAt(i))
+									continue;
+								boolean hasY = scalar
+										? rScOk
+										: (rv != null && rv.elemTag == ImpulseVector.TAG_F64 && i < rv.length
+												&& rv.isValidAt(i));
+								if (!hasY)
+									continue;
+								double x = lF64[i];
+								double y = scalar ? rSc : rv.f64Data[i];
+								if (Double.isNaN(x) || Double.isNaN(y))
+									continue;
+								boolean res = switch (subop) {
+									case 0 -> x == y;
+									case 1 -> x != y;
+									case 2 -> x < y;
+									case 3 -> x <= y;
+									case 4 -> x > y;
+									case 5 -> x >= y;
+									default -> false;
+								};
+								long bit = 1L << (i & 63);
+								scratchCmpValid[i >>> 6] |= bit;
+								if (res)
+									scratchCmpData[i >>> 6] |= bit;
+							}
+						} else {
+							boolean isU64 = (lhs.elemTag == ImpulseVector.TAG_U64);
+							boolean rScOk = scalar && ws.isRValid(s2);
+							long rSc = rScOk ? ws.rRegs[s2] : 0L;
+							long[] lI64 = lhs.i64Data;
+							for (int i = 0; i < len && i < lhs.length; i++) {
+								if (!lhs.isValidAt(i))
+									continue;
+								boolean hasY = scalar
+										? rScOk
+										: (rv != null && rv.elemTag == lhs.elemTag && i < rv.length && rv.isValidAt(i));
+								if (!hasY)
+									continue;
+								long x = lI64[i];
+								long y = scalar ? rSc : rv.i64Data[i];
+								int cmp = isU64 ? Long.compareUnsigned(x, y) : Long.compare(x, y);
+								boolean res = switch (subop) {
+									case 0 -> cmp == 0;
+									case 1 -> cmp != 0;
+									case 2 -> cmp < 0;
+									case 3 -> cmp <= 0;
+									case 4 -> cmp > 0;
+									case 5 -> cmp >= 0;
+									default -> false;
+								};
+								long bit = 1L << (i & 63);
+								scratchCmpValid[i >>> 6] |= bit;
+								if (res)
+									scratchCmpData[i >>> 6] |= bit;
+							}
 						}
 						vCmp.length = len;
 						ws.vVectors[dst] = vCmp;
@@ -2788,7 +2829,7 @@ public final class ImpulsePillar3Ops {
 					int iterCnt = useMask ? maskCnt : morselLen;
 					for (int k = 0; k < iterCnt; k++) {
 						int i = useMask ? maskScratch[k] : k;
-						if (i >= morselLen || !lhs.isValidAt(i))
+						if (i >= morselLen || i >= lhs.length || !lhs.isValidAt(i))
 							continue;
 						double x = lhs.f64Data[i];
 						double r;
@@ -2813,9 +2854,8 @@ public final class ImpulsePillar3Ops {
 								case 1 -> x - y;
 								case 2 -> x * y;
 								case 3 -> (y == 0.0) ? Double.NaN : (x / y);
-								case 5 -> ieeeMinF64(x, y);
-								case 6 -> ieeeMaxF64(x, y);
-								case 7 -> Math.copySign(x, y);
+								case 6 -> ieeeMinF64(x, y);
+								case 7 -> ieeeMaxF64(x, y);
 								default -> Double.NaN;
 							};
 						}
