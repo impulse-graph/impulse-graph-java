@@ -59,7 +59,7 @@ public final class ImpulseCompiledQuery {
 
 	private record BindingState(ImpulseGraphSnapshot snapshot, ImpulseSnapshotView view,
 			ImpOpsBytecodeEmitter.CompiledProgram compiled, int[] domainCards, int maxDomCard,
-			ImpulseMemoryPlanner.MemoryPlan memoryPlan) {
+			ImpulseMemoryPlanner.MemoryPlan memoryPlan, ImpulseInterpreter.SnapshotBinding interpreterBinding) {
 	}
 
 	private final ImpScmNode ast;
@@ -101,21 +101,28 @@ public final class ImpulseCompiledQuery {
 			}
 		}
 		ImpulseMemoryPlanner.MemoryPlan plan = ImpulseMemoryPlanner.plan(compiled.codeWords(), view);
-		return new BindingState(snapshot, view, compiled, domCards, maxCard, plan);
+		ImpulseInterpreter.SnapshotBinding interpreterBinding = new ImpulseInterpreter.SnapshotBinding(domCards, view);
+		return new BindingState(snapshot, view, compiled, domCards, maxCard, plan, interpreterBinding);
 	}
 
 	public synchronized void rebind(ImpulseGraphSnapshot newSnapshot) {
+		rebindAndGet(newSnapshot);
+	}
+
+	private synchronized BindingState rebindAndGet(ImpulseGraphSnapshot newSnapshot) {
 		Objects.requireNonNull(newSnapshot, "newSnapshot must not be null");
 		BindingState cur = bindingState.get();
 		if (cur.snapshot() == newSnapshot) {
-			return;
+			return cur;
 		}
 		for (String relName : cur.compiled().relationIdMap().keySet()) {
 			if (relName != null && !relName.isEmpty() && newSnapshot.getRelationSnapshot(relName) == null) {
 				throw new IllegalStateException("Required relation '" + relName + "' is missing in target snapshot");
 			}
 		}
-		bindingState.set(bindToSnapshot(newSnapshot));
+		BindingState next = bindToSnapshot(newSnapshot);
+		bindingState.set(next);
+		return next;
 	}
 
 	public ImpulseGraphSnapshot currentSnapshot() {
@@ -137,8 +144,7 @@ public final class ImpulseCompiledQuery {
 	public Object execute(ImpulseGraphSnapshot snapshot, Object input, Arena executionArena) {
 		BindingState state = bindingState.get();
 		if (snapshot != null && snapshot != state.snapshot()) {
-			rebind(snapshot);
-			state = bindingState.get();
+			state = rebindAndGet(snapshot);
 		}
 
 		ImpulseGraphSnapshot targetSnapshot = state.snapshot();
@@ -158,10 +164,8 @@ public final class ImpulseCompiledQuery {
 			long[] seedIds = extractSeedIds(input);
 			ws.params.put(0, new ImpulseWorkspace.ParamFrontier(seedDom, seedIds));
 
-			ImpulseInterpreter.SnapshotBinding binding = new ImpulseInterpreter.SnapshotBinding(state.domainCards(),
-					state.view());
-			int status = ImpulseInterpreter.executePreValidated(state.compiled().codeWords(), binding, ws,
-					Long.MAX_VALUE);
+			int status = ImpulseInterpreter.executePreValidated(state.compiled().codeWords(),
+					state.interpreterBinding(), ws, Long.MAX_VALUE);
 			if (status != ImpulseIsaTables.IMPULSE_VM_OK) {
 				throw new IllegalStateException(
 						"ImpulseVM v0.11 execution failed: status=" + status + " at pc=" + ws.pc);

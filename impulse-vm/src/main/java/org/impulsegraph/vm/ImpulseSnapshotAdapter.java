@@ -228,7 +228,12 @@ public final class ImpulseSnapshotAdapter {
 						nodeEmbAttrs.putIfAbsent(ImpulseSnapshotView.domAttrKey(rel.getSrcDomainId(), 0),
 								ImpulseVector.ofEmb(dim, rows));
 					}
-					byte inferredType = (nEdges > 0 && seg.byteSize() == (long) nEdges * 8L) ? (byte) 10 : (byte) 9;
+					byte actualType = (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot crs)
+							? crs.getAttributeTypeCode(a)
+							: (byte) 0;
+					byte inferredType = (actualType != 0)
+							? actualType
+							: ((nEdges > 0 && seg.byteSize() == (long) nEdges * 8L) ? (byte) 10 : (byte) 9);
 					offHeapEdgeAttrs.put(a,
 							new ImpulseSnapshotView.OffHeapAttrColumn(inferredType, nEdges, false, seg, null, null));
 				}
@@ -263,7 +268,7 @@ public final class ImpulseSnapshotAdapter {
 					+ ((long) count * elemBytes) + "B, got " + dataSeg.byteSize() + "B");
 		}
 		if (baseType == 11 && (offSeg == null || offSeg.equals(MemorySegment.NULL)
-				|| offSeg.byteSize() < (long) (count + 1) * 4L)) {
+				|| offSeg.byteSize() < ((long) count + 1L) * 4L)) {
 			throw new IllegalArgumentException("Truncated UTF-8 offsets segment for " + label);
 		}
 	}
