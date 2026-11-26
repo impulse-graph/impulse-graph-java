@@ -31,6 +31,7 @@ public final class BinarySnapshotLoader {
 		private final int domainId;
 		private final String name;
 		private final byte keyType;
+		private final byte denseIdWidth;
 		private final long nodeCount;
 		private final int attrCount;
 		private final int keyAttrIndex;
@@ -41,24 +42,33 @@ public final class BinarySnapshotLoader {
 		private volatile Map<String, Long> reverseKeyIndex;
 
 		public LoadedDomain(int domainId, String name, byte keyType) {
-			this(domainId, name, keyType, 0L, 0xFFFF, List.of(), List.of(), List.of(), List.of());
+			this(domainId, name, keyType, (byte) 0, 0L, 0xFFFF, List.of(), List.of(), List.of(), List.of());
 		}
 
 		public LoadedDomain(int domainId, String name, byte keyType, long nodeCount) {
-			this(domainId, name, keyType, nodeCount, 0xFFFF, List.of(), List.of(), List.of(), List.of());
+			this(domainId, name, keyType, (byte) 0, nodeCount, 0xFFFF, List.of(), List.of(), List.of(), List.of());
 		}
 
 		public LoadedDomain(int domainId, String name, byte keyType, long nodeCount, int keyAttrIndex,
 				List<LoadedAttribute> attributes) {
-			this(domainId, name, keyType, nodeCount, keyAttrIndex, attributes, List.of(), List.of(), List.of());
+			this(domainId, name, keyType, (byte) 0, nodeCount, keyAttrIndex, attributes, List.of(), List.of(),
+					List.of());
 		}
 
 		public LoadedDomain(int domainId, String name, byte keyType, long nodeCount, int keyAttrIndex,
 				List<LoadedAttribute> attributes, List<MemorySegment> attributeSegments,
 				List<MemorySegment> validitySegments, List<MemorySegment> offsetsSegments) {
+			this(domainId, name, keyType, (byte) 0, nodeCount, keyAttrIndex, attributes, attributeSegments,
+					validitySegments, offsetsSegments);
+		}
+
+		public LoadedDomain(int domainId, String name, byte keyType, byte denseIdWidth, long nodeCount,
+				int keyAttrIndex, List<LoadedAttribute> attributes, List<MemorySegment> attributeSegments,
+				List<MemorySegment> validitySegments, List<MemorySegment> offsetsSegments) {
 			this.domainId = domainId;
 			this.name = name;
 			this.keyType = keyType;
+			this.denseIdWidth = denseIdWidth;
 			this.nodeCount = nodeCount;
 			this.attrCount = attributes != null ? attributes.size() : 0;
 			this.keyAttrIndex = keyAttrIndex;
@@ -76,6 +86,9 @@ public final class BinarySnapshotLoader {
 		}
 		public byte keyType() {
 			return keyType;
+		}
+		public byte denseIdWidth() {
+			return denseIdWidth;
 		}
 		public long nodeCount() {
 			return nodeCount;
@@ -747,7 +760,8 @@ public final class BinarySnapshotLoader {
 
 		short version = buf.getShort(4);
 		int ver = Short.toUnsignedInt(version);
-		if (ver != 10 && ver != 0x000A && ver != 9 && ver != 0x0009 && ver != 2 && ver != 0x0204) {
+		if (ver != 11 && ver != 0x000B && ver != 10 && ver != 0x000A && ver != 9 && ver != 0x0009 && ver != 2
+				&& ver != 0x0204) {
 			ImpulseAssert.checkWellFormed(false, () -> "Unsupported protocol version number: " + ver);
 			throw new IllegalArgumentException("Unsupported protocol version number: " + ver);
 		}
@@ -759,12 +773,14 @@ public final class BinarySnapshotLoader {
 		ImpulseAssert.testcase(domainCount == 0);
 		ImpulseAssert.testcase(relationCount == 0);
 
+		boolean isV011 = (ver == 11 || ver == 0x000B);
 		boolean isV010 = (ver == 10 || ver == 0x000A);
+		boolean isV010Plus = isV010 || isV011;
 		boolean isV09 = (ver == 9 || ver == 0x0009);
-		boolean isModern = isV010 || isV09;
+		boolean isModern = isV010Plus || isV09;
 
 		if (isModern) {
-			int minHeaderBytes = isV010 ? 66 : 64;
+			int minHeaderBytes = isV010Plus ? 66 : 64;
 			ImpulseAssert.testcase(segSize == minHeaderBytes);
 			if (segSize < minHeaderBytes) {
 				ImpulseAssert.checkWellFormed(false,
@@ -801,14 +817,14 @@ public final class BinarySnapshotLoader {
 			}
 		}
 
-		int indexCount = isV010 ? Short.toUnsignedInt(buf.getShort(0x40)) : 0;
+		int indexCount = isV010Plus ? Short.toUnsignedInt(buf.getShort(0x40)) : 0;
 		ImpulseAssert.testcase(indexCount > 0);
 
 		// Determine Catalog Directory offset and window size
 		long dirOffset = dataOffset;
 		long maxDirBytes = segSize - dirOffset;
 		if (isModern) {
-			int minHeaderBytes = isV010 ? 66 : 64;
+			int minHeaderBytes = isV010Plus ? 66 : 64;
 			long footerDirectoryOffset = buf.getLong(30);
 			long footerDirectoryBytes = buf.getLong(38);
 			if (footerDirectoryOffset < 0 || footerDirectoryOffset >= segSize
@@ -891,16 +907,22 @@ public final class BinarySnapshotLoader {
 			// Read Domain Catalog Entries
 			for (int i = 0; i < domainCount; i++) {
 				final int domEntryIdx = i;
-				if (isV010) {
+				if (isV010Plus) {
 					if (dirBuf.remaining() < 32) {
 						ImpulseAssert.checkWellFormed(false,
-								() -> "Truncated v0.10 domain catalog entry at index " + domEntryIdx);
+								() -> "Truncated v0.10/v0.11 domain catalog entry at index " + domEntryIdx);
 						throw new IllegalArgumentException(
-								"Truncated v0.10 domain catalog entry at index " + domEntryIdx);
+								"Truncated v0.10/v0.11 domain catalog entry at index " + domEntryIdx);
 					}
 					int domId = Short.toUnsignedInt(dirBuf.getShort());
 					byte keyType = dirBuf.get();
-					dirBuf.get(); // reserved1
+					byte denseIdWidth = dirBuf.get(); // v0.11 dense_id_width (0 = legacy fallback)
+					if (isV011 && denseIdWidth != 0 && denseIdWidth != 2 && denseIdWidth != 4 && denseIdWidth != 8) {
+						ImpulseAssert.checkWellFormed(false,
+								() -> "Unsupported domain denseIdWidth=" + denseIdWidth + " on domain " + domId);
+						throw new IllegalArgumentException(
+								"Unsupported domain denseIdWidth=" + denseIdWidth + " on domain " + domId);
+					}
 					int nameOff = dirBuf.getInt();
 					long nodeCount = dirBuf.getLong();
 					int attrCount = Short.toUnsignedInt(dirBuf.getShort());
@@ -1019,8 +1041,8 @@ public final class BinarySnapshotLoader {
 						throw new IllegalArgumentException("Domain nodeCount exceeds Integer.MAX_VALUE: " + nodeCount);
 					}
 
-					LoadedDomain domain = new LoadedDomain(domId, domName, keyType, nodeCount, keyAttrIndex,
-							domAttributes, domAttrSegs, domValSegs, domOffsSegs);
+					LoadedDomain domain = new LoadedDomain(domId, domName, keyType, isV011 ? denseIdWidth : (byte) 0,
+							nodeCount, keyAttrIndex, domAttributes, domAttrSegs, domValSegs, domOffsSegs);
 					domainsById.put(domId, domain);
 					domainsByName.put(domName, domain);
 
@@ -1062,15 +1084,16 @@ public final class BinarySnapshotLoader {
 				totalDomainNodes = (next < 0) ? Long.MAX_VALUE : next;
 			}
 
-			// Read Relation Directory Entries (Fixed 128 Bytes)
+			// Read Relation Directory Entries (128B in v0.9/v0.10, 192B in v0.11)
 			Map<Integer, LoadedRelation> relationsById = new LinkedHashMap<>();
 			Map<String, RelationSnapshot> relationSnapshots = new LinkedHashMap<>();
 			Map<String, RelationSnapshot> relationAliases = new LinkedHashMap<>();
 			Map<Integer, RelationSnapshot> relIdToSnapshot = new LinkedHashMap<>();
+			int relEntryBytes = isV011 ? 192 : 128;
 
 			for (int j = 0; j < relationCount; j++) {
 				final int relEntryIdx = j;
-				if (dirBuf.remaining() < 128) {
+				if (dirBuf.remaining() < relEntryBytes) {
 					ImpulseAssert.checkWellFormed(false,
 							() -> "Truncated relation directory entry at index " + relEntryIdx);
 					throw new IllegalArgumentException("Truncated relation directory entry at index " + relEntryIdx);
@@ -1098,6 +1121,24 @@ public final class BinarySnapshotLoader {
 				int attrCount = Short.toUnsignedInt(dirBuf.getShort());
 				int res2Pos = dirBuf.position();
 				dirBuf.position(res2Pos + 22); // reserved2
+
+				long cooSrcOffset = 0L;
+				long cooSrcBytes = 0L;
+				long cooTgtOffset = 0L;
+				long cooTgtBytes = 0L;
+				long cooEdgeIdOffset = 0L;
+				long cooEdgeIdBytes = 0L;
+				byte cooOrder = 0;
+				if (isV011) {
+					cooSrcOffset = dirBuf.getLong();
+					cooSrcBytes = dirBuf.getLong();
+					cooTgtOffset = dirBuf.getLong();
+					cooTgtBytes = dirBuf.getLong();
+					cooEdgeIdOffset = dirBuf.getLong();
+					cooEdgeIdBytes = dirBuf.getLong();
+					cooOrder = dirBuf.get();
+					dirBuf.position(dirBuf.position() + 15); // reserved3
+				}
 
 				if (relationsById.containsKey(relId)) {
 					ImpulseAssert.checkWellFormed(false, () -> "Duplicate relation ID in catalog: " + relId);
@@ -1146,9 +1187,20 @@ public final class BinarySnapshotLoader {
 				validateSectionBounds("CSR col_idx", csrColIdxOffset, csrColIdxBytes, segSize);
 				validateSectionBounds("CSC row_offsets", cscRowOffOffset, cscRowOffBytes, segSize);
 				validateSectionBounds("CSC col_idx", cscColIdxOffset, cscColIdxBytes, segSize);
+				if (isV011) {
+					validateSectionBounds("COO src", cooSrcOffset, cooSrcBytes, segSize);
+					validateSectionBounds("COO tgt", cooTgtOffset, cooTgtBytes, segSize);
+					validateSectionBounds("COO edge_ids", cooEdgeIdOffset, cooEdgeIdBytes, segSize);
+				}
 
 				LoadedDomain srcDom = domainsById.get(srcDomId);
 				LoadedDomain tgtDom = domainsById.get(tgtDomId);
+				byte srcNodeIdWidth = (isV011 && srcDom != null && srcDom.denseIdWidth() != 0)
+						? srcDom.denseIdWidth()
+						: nodeIdWidth;
+				byte tgtNodeIdWidth = (isV011 && tgtDom != null && tgtDom.denseIdWidth() != 0)
+						? tgtDom.denseIdWidth()
+						: nodeIdWidth;
 				if ((srcDom != null && srcDom.nodeCount() > Integer.MAX_VALUE)
 						|| (tgtDom != null && tgtDom.nodeCount() > Integer.MAX_VALUE)) {
 					if (nodeIdWidth != 8 || edgeIndexWidth != 8 || edgeCount > 0 || csrRowOffOffset > 0
@@ -1225,7 +1277,7 @@ public final class BinarySnapshotLoader {
 					long validityOff = 0;
 					long validityBytes = 0;
 
-					long expectedRows = isV010
+					long expectedRows = isV010Plus
 							? edgeCount
 							: ((dataOff == 0 && dataBytes == 0 && edgeCount == 0)
 									? 0L
@@ -1262,7 +1314,7 @@ public final class BinarySnapshotLoader {
 
 					MemorySegment offsSeg = (offsOff > 0) ? segment.asSlice(offsOff, offsBytes) : MemorySegment.NULL;
 					validateAttributePayload("Relation " + relId + " attribute " + attrEntryIdx, typeCode, dimension,
-							expectedRows, dataOff, dataBytes, offsOff, offsBytes, offsSeg, isV010);
+							expectedRows, dataOff, dataBytes, offsOff, offsBytes, offsSeg, isV010Plus);
 
 					String attrName = getString.apply(attrNameOff, "");
 					attributes.add(new LoadedAttribute(attrName, typeCode, dimension, validityOff, validityBytes,
@@ -1272,6 +1324,9 @@ public final class BinarySnapshotLoader {
 				String relName = getString.apply(relNameOff, "rel_" + srcDomId + "_" + tgtDomId);
 				if (relName.isEmpty()) {
 					relName = "rel_" + srcDomId + "_" + tgtDomId;
+				}
+				if (relationSnapshots.containsKey(relName)) {
+					relName = relName + "#" + relId;
 				}
 
 				MemorySegment offsetsSeg = (csrRowOffOffset > 0 && csrRowOffBytes > 0)
@@ -1288,11 +1343,73 @@ public final class BinarySnapshotLoader {
 						? segment.asSlice(cscColIdxOffset, cscColIdxBytes)
 						: MemorySegment.NULL;
 
+				boolean hasCoo = isV011 && (((secFeatures & 0x100L) != 0L) || cooSrcOffset > 0 || cooSrcBytes > 0
+						|| cooTgtOffset > 0 || cooTgtBytes > 0 || cooEdgeIdOffset > 0 || cooEdgeIdBytes > 0);
+				if (isV011 && !isVirtualRel && edgeCount > 0 && MemorySegment.NULL.equals(offsetsSeg)
+						&& MemorySegment.NULL.equals(targetsSeg) && MemorySegment.NULL.equals(cscOffsetsSeg)
+						&& MemorySegment.NULL.equals(cscTargetsSeg) && !hasCoo) {
+					ImpulseAssert.checkWellFormed(false,
+							() -> "v0.11 relation " + relId + " with edgeCount > 0 has neither CSR, CSC, nor COO");
+					throw new IllegalArgumentException(
+							"v0.11 relation " + relId + " with edgeCount > 0 has neither CSR, CSC, nor COO");
+				}
+				MemorySegment cooSrcSeg = MemorySegment.NULL;
+				MemorySegment cooTgtSeg = MemorySegment.NULL;
+				MemorySegment cooEdgeIdsSeg = MemorySegment.NULL;
+				if (hasCoo) {
+					int cooOrdUnsigned = Byte.toUnsignedInt(cooOrder);
+					if (cooOrdUnsigned > 4) {
+						throw new IllegalArgumentException(
+								"Unsupported COO order " + cooOrdUnsigned + " for relation " + relId);
+					}
+					long reqCooSrcBytes = checkedMultiply(edgeCount, srcNodeIdWidth, "COO srcBytes");
+					long reqCooTgtBytes = checkedMultiply(edgeCount, tgtNodeIdWidth, "COO tgtBytes");
+					if (cooSrcBytes < reqCooSrcBytes || cooTgtBytes < reqCooTgtBytes) {
+						throw new IllegalArgumentException("COO buffer undersized for relation " + relId);
+					}
+					if (edgeCount > 0 && (cooSrcOffset == 0 || cooTgtOffset == 0)) {
+						throw new IllegalArgumentException("COO relation " + relId + " missing src/tgt offset");
+					}
+					if (cooEdgeIdOffset > 0 || cooEdgeIdBytes > 0) {
+						long reqCooEidBytes = checkedMultiply(edgeCount, edgeIndexWidth, "COO edgeIdBytes");
+						if (cooEdgeIdBytes < reqCooEidBytes) {
+							throw new IllegalArgumentException("COO edgeId buffer undersized for relation " + relId);
+						}
+						if (edgeCount > 0) {
+							cooEdgeIdsSeg = segment.asSlice(cooEdgeIdOffset, cooEdgeIdBytes);
+						}
+					}
+					if (edgeCount > 0) {
+						cooSrcSeg = segment.asSlice(cooSrcOffset, cooSrcBytes);
+						cooTgtSeg = segment.asSlice(cooTgtOffset, cooTgtBytes);
+						boolean isGlobalUnifiedCoo = (totalDomainNodes > 0 && nodeCount == totalDomainNodes);
+						long srcBound = isGlobalUnifiedCoo
+								? totalDomainNodes
+								: ((srcDom != null && srcDom.nodeCount() > 0) ? srcDom.nodeCount() : nodeCount);
+						long tgtBound = isGlobalUnifiedCoo
+								? totalDomainNodes
+								: ((tgtDom != null && tgtDom.nodeCount() > 0) ? tgtDom.nodeCount() : nodeCount);
+						if (ImpulseAssert.isAuditEnabled() || edgeCount <= 100_000) {
+							for (long e = 0; e < edgeCount; e++) {
+								long s = readUnsignedAt(cooSrcSeg, e, srcNodeIdWidth);
+								long t = readUnsignedAt(cooTgtSeg, e, tgtNodeIdWidth);
+								if (srcBound > 0 && s >= srcBound) {
+									throw new IllegalArgumentException("COO src ID out of bounds: " + s);
+								}
+								if (tgtBound > 0 && t >= tgtBound) {
+									throw new IllegalArgumentException("COO tgt ID out of bounds: " + t);
+								}
+							}
+						}
+					}
+				}
+
 				long tgtDomainNodeCount = (tgtDom != null) ? tgtDom.nodeCount() : 0L;
 				boolean isGlobalUnified = (totalDomainNodes > 0 && nodeCount == totalDomainNodes);
 				long effectiveTgtBound = isGlobalUnified ? totalDomainNodes : tgtDomainNodeCount;
 				auditRelationIntegrity(relId, encodingId, secFeatures, nodeCount, edgeCount, effectiveTgtBound,
-						nodeIdWidth, edgeIndexWidth, offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg);
+						srcNodeIdWidth, tgtNodeIdWidth, edgeIndexWidth, offsetsSeg, targetsSeg, cscOffsetsSeg,
+						cscTargetsSeg);
 
 				List<MemorySegment> attrSegments = new ArrayList<>(attributes.size());
 				List<MemorySegment> validitySegments = new ArrayList<>(attributes.size());
@@ -1317,8 +1434,11 @@ public final class BinarySnapshotLoader {
 
 				RelationSnapshot relSnap = new RelationSnapshot(arena, Math.toIntExact(nodeCount),
 						Math.toIntExact(edgeCount), offsetsSeg, targetsSeg, cscOffsetsSeg, cscTargetsSeg, attrSegments,
-						validitySegments, nodeIdWidth, edgeIndexWidth);
+						validitySegments, srcNodeIdWidth, tgtNodeIdWidth, edgeIndexWidth);
 				relSnap.setCatalogMetadata(relId, srcDomId, tgtDomId, encodingId, secFeatures, virtualComponentIds);
+				if (hasCoo) {
+					relSnap.setCooSegments(cooSrcSeg, cooTgtSeg, cooEdgeIdsSeg, cooOrder);
+				}
 				relSnap.setLoadedAttributes(attributes, attrOffsetsSegments);
 				long effectiveTgtNodeCount = (tgtDomainNodeCount > 0) ? tgtDomainNodeCount : nodeCount;
 				if (effectiveTgtNodeCount > 0) {
@@ -1576,7 +1696,7 @@ public final class BinarySnapshotLoader {
 
 				long tgtDomainNodeCount = (tgtDom != null) ? tgtDom.nodeCount() : 0L;
 				auditRelationIntegrity(relId, encodingId, reqFeat | compatFeat, nodeCount, edgeCount,
-						tgtDomainNodeCount, (byte) 4, (byte) 4, offsetsSeg, targetsSeg, MemorySegment.NULL,
+						tgtDomainNodeCount, (byte) 4, (byte) 4, (byte) 4, offsetsSeg, targetsSeg, MemorySegment.NULL,
 						MemorySegment.NULL);
 
 				RelationSnapshot relSnap = new RelationSnapshot(arena, Math.toIntExact(nodeCount),
@@ -1950,14 +2070,17 @@ public final class BinarySnapshotLoader {
 	}
 
 	private static void auditRelationIntegrity(int relId, byte encodingId, long secFeatures, long nodeCount,
-			long edgeCount, long tgtDomainNodeCount, byte nodeIdWidth, byte edgeIndexWidth, MemorySegment offsetsSeg,
-			MemorySegment targetsSeg, MemorySegment cscOffsetsSeg, MemorySegment cscTargetsSeg) {
+			long edgeCount, long tgtDomainNodeCount, byte srcNodeIdWidth, byte tgtNodeIdWidth, byte edgeIndexWidth,
+			MemorySegment offsetsSeg, MemorySegment targetsSeg, MemorySegment cscOffsetsSeg,
+			MemorySegment cscTargetsSeg) {
 		if ((secFeatures & 0x04L) != 0L) {
 			return;
 		}
 		int offWidth = (edgeIndexWidth == 8) ? 8 : (edgeIndexWidth == 2 ? 2 : 4);
-		int tgtWidth = (nodeIdWidth == 8) ? 8 : (nodeIdWidth == 2 ? 2 : 4);
+		int srcWidth = (srcNodeIdWidth == 8) ? 8 : (srcNodeIdWidth == 2 ? 2 : 4);
+		int tgtWidth = (tgtNodeIdWidth == 8) ? 8 : (tgtNodeIdWidth == 2 ? 2 : 4);
 		long sentinel = (tgtWidth == 2) ? 0xFFFFL : (tgtWidth == 8 ? -1L : 0xFFFFFFFFL);
+		long srcSentinel = (srcWidth == 2) ? 0xFFFFL : (srcWidth == 8 ? -1L : 0xFFFFFFFFL);
 		boolean flatForward = MemorySegment.NULL.equals(offsetsSeg) && !MemorySegment.NULL.equals(targetsSeg);
 		boolean flatReverse = MemorySegment.NULL.equals(cscOffsetsSeg) && !MemorySegment.NULL.equals(cscTargetsSeg);
 
@@ -2082,7 +2205,7 @@ public final class BinarySnapshotLoader {
 		}
 
 		long flatRevSlots = flatReverse ? tgtDomainNodeCount : edgeCount;
-		long reqCscTargetsBytes = checkedMultiply(flatRevSlots, tgtWidth, "CSC reqCscTargetsBytes");
+		long reqCscTargetsBytes = checkedMultiply(flatRevSlots, srcWidth, "CSC reqCscTargetsBytes");
 		if (!MemorySegment.NULL.equals(cscTargetsSeg)) {
 			if (cscTargetsSeg.byteSize() < reqCscTargetsBytes) {
 				ImpulseAssert.checkWellFormed(false, () -> "CSC targets segment undersized for relation " + relId
@@ -2092,8 +2215,8 @@ public final class BinarySnapshotLoader {
 			}
 			if (ImpulseAssert.isAuditEnabled() || flatRevSlots <= 100_000) {
 				for (long e = 0; e < flatRevSlots; e++) {
-					long src = readUnsignedAt(cscTargetsSeg, e, tgtWidth);
-					if (flatReverse && src == sentinel) {
+					long src = readUnsignedAt(cscTargetsSeg, e, srcWidth);
+					if (flatReverse && src == srcSentinel) {
 						continue;
 					}
 					if (src < 0 || (nodeCount > 0 && src >= nodeCount)) {

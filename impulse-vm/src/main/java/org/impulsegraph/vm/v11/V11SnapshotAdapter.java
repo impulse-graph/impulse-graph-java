@@ -148,6 +148,9 @@ public final class V11SnapshotAdapter {
 			MemorySegment ctSeg = rel.hasCsr() ? rel.getColumnTargetsSegment() : null;
 			MemorySegment cscRoSeg = rel.hasCsc() ? rel.getCscRowOffsetsSegment() : null;
 			MemorySegment cscCtSeg = rel.hasCsc() ? rel.getCscColumnTargetsSegment() : null;
+			MemorySegment cooSrcSeg = rel.hasCoo() ? rel.getCooSrcSegment() : null;
+			MemorySegment cooTgtSeg = rel.hasCoo() ? rel.getCooTgtSegment() : null;
+			MemorySegment cooEdgeIdsSeg = rel.hasCoo() ? rel.getCooEdgeIdsSegment() : null;
 			if (roSeg != null && roSeg.equals(MemorySegment.NULL))
 				roSeg = null;
 			if (ctSeg != null && ctSeg.equals(MemorySegment.NULL))
@@ -156,11 +159,20 @@ public final class V11SnapshotAdapter {
 				cscRoSeg = null;
 			if (cscCtSeg != null && cscCtSeg.equals(MemorySegment.NULL))
 				cscCtSeg = null;
+			if (cooSrcSeg != null && cooSrcSeg.equals(MemorySegment.NULL))
+				cooSrcSeg = null;
+			if (cooTgtSeg != null && cooTgtSeg.equals(MemorySegment.NULL))
+				cooTgtSeg = null;
+			if (cooEdgeIdsSeg != null && cooEdgeIdsSeg.equals(MemorySegment.NULL))
+				cooEdgeIdsSeg = null;
 
 			byte nodeIdWidth = rel.getNodeIdWidth();
+			byte srcNodeIdWidth = rel.getSrcNodeIdWidth();
 			byte edgeIdxWidth = rel.getEdgeIndexWidth();
 			if (nodeIdWidth == 0)
 				nodeIdWidth = 4;
+			if (srcNodeIdWidth == 0)
+				srcNodeIdWidth = nodeIdWidth;
 			if (edgeIdxWidth == 0)
 				edgeIdxWidth = 4;
 
@@ -177,9 +189,12 @@ public final class V11SnapshotAdapter {
 				}
 			}
 
+			boolean hasCoo = rel.hasCoo();
 			relViews[rid] = new V11SnapshotView.RelView(rid, rel.getSrcDomainId(), rel.getTgtDomainId(), roSeg, ctSeg,
-					cscRoSeg, cscCtSeg, nodeIdWidth, edgeIdxWidth, rel.getNodeCount(),
-					rel.hasCsc() ? rel.getCscNodeCount() : 0, nEdges, offHeapEdgeAttrs, rel.hasCsr(), rel.hasCsc());
+					cscRoSeg, cscCtSeg, null, cooSrcSeg, cooTgtSeg, cooEdgeIdsSeg, nodeIdWidth, edgeIdxWidth,
+					srcNodeIdWidth, nodeIdWidth, rel.getCooOrder(), rel.getNodeCount(),
+					rel.hasCsc() ? rel.getCscNodeCount() : 0, nEdges, hasCoo ? nEdges : 0, null, offHeapEdgeAttrs,
+					rel.hasCsr(), rel.hasCsc(), hasCoo, false);
 		}
 
 		return new V11SnapshotView(domainCards, relViews, Map.of(), offHeapNodeAttrs, Map.of(), offHeapKeyResolvers,

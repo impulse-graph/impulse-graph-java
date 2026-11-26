@@ -23,6 +23,21 @@ public interface RelationSnapshot {
 	MemorySegment getCscRowOffsetsSegment();
 	boolean hasCsc();
 	boolean hasCsr();
+	default boolean hasCoo() {
+		return false;
+	}
+	default MemorySegment getCooSrcSegment() {
+		return MemorySegment.NULL;
+	}
+	default MemorySegment getCooTgtSegment() {
+		return MemorySegment.NULL;
+	}
+	default MemorySegment getCooEdgeIdsSegment() {
+		return MemorySegment.NULL;
+	}
+	default byte getCooOrder() {
+		return 0;
+	}
 	int getNodeCount();
 	default int getCscNodeCount() {
 		MemorySegment cscOff = getCscRowOffsetsSegment();

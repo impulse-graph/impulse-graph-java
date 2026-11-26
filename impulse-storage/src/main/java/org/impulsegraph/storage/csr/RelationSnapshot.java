@@ -63,6 +63,11 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 	private RelationSnapshot[] componentRelations = new RelationSnapshot[0];
 	private volatile int[] cscToCsrEdgeMap;
 	private volatile int[] flatForwardEdgeMap;
+	private MemorySegment cooSrcSegment = MemorySegment.NULL;
+	private MemorySegment cooTgtSegment = MemorySegment.NULL;
+	private MemorySegment cooEdgeIdsSegment = MemorySegment.NULL;
+	private byte cooOrder = 0;
+	private boolean hasCooFlag = false;
 
 	public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment,
 			MemorySegment columnTargetsSegment, java.util.List<MemorySegment> attributeSegments) {
@@ -115,6 +120,41 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 		this.encodingId = encodingId;
 		this.sectionFeatures = sectionFeatures;
 		this.componentIds = componentIds != null ? componentIds.clone() : new int[0];
+	}
+
+	public void setCooSegments(MemorySegment cooSrcSegment, MemorySegment cooTgtSegment,
+			MemorySegment cooEdgeIdsSegment, byte cooOrder) {
+		this.cooSrcSegment = cooSrcSegment != null ? cooSrcSegment : MemorySegment.NULL;
+		this.cooTgtSegment = cooTgtSegment != null ? cooTgtSegment : MemorySegment.NULL;
+		this.cooEdgeIdsSegment = cooEdgeIdsSegment != null ? cooEdgeIdsSegment : MemorySegment.NULL;
+		this.cooOrder = cooOrder;
+		this.hasCooFlag = true;
+	}
+
+	@Override
+	public boolean hasCoo() {
+		return hasCooFlag || (!MemorySegment.NULL.equals(cooSrcSegment) && cooSrcSegment.byteSize() > 0
+				&& !MemorySegment.NULL.equals(cooTgtSegment) && cooTgtSegment.byteSize() > 0);
+	}
+
+	@Override
+	public MemorySegment getCooSrcSegment() {
+		return cooSrcSegment;
+	}
+
+	@Override
+	public MemorySegment getCooTgtSegment() {
+		return cooTgtSegment;
+	}
+
+	@Override
+	public MemorySegment getCooEdgeIdsSegment() {
+		return cooEdgeIdsSegment;
+	}
+
+	@Override
+	public byte getCooOrder() {
+		return cooOrder;
 	}
 
 	public void setLoadedAttributes(java.util.List<BinarySnapshotLoader.LoadedAttribute> attrs,

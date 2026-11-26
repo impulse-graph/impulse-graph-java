@@ -52,7 +52,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 
 	@Override
 	public SnapshotBuilder withVersion(short version) {
-		if (version != 9 && version != 10) {
+		if (version != 9 && version != 10 && version != 11) {
 			throw new IllegalArgumentException("Unsupported snapshot version: " + version);
 		}
 		this.specVersion = version;
@@ -321,7 +321,8 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			}
 			int alignedDomTableBytes = (rawDomTableBytes + 127) & ~127;
 
-			int rawRelTableBytes = stagedRelations.size() * 128;
+			int relEntryBytes = (specVersion >= 11) ? 192 : 128;
+			int rawRelTableBytes = stagedRelations.size() * relEntryBytes;
 			int alignedRelTableBytes = (rawRelTableBytes + 127) & ~127;
 
 			int totalDirLen = alignedStrTableBytes + alignedDomTableBytes + alignedRelTableBytes;
@@ -403,7 +404,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				String rName = relationNames.get(sr.relId);
 				int rNameOff = getOrAddString.apply(rName);
 
-				ByteBuffer relBuf = ByteBuffer.allocate(128).order(ByteOrder.LITTLE_ENDIAN);
+				ByteBuffer relBuf = ByteBuffer.allocate(relEntryBytes).order(ByteOrder.LITTLE_ENDIAN);
 				relBuf.putShort((short) sr.relId);
 				relBuf.putShort((short) sr.srcDomId);
 				relBuf.putShort((short) sr.tgtDomId);
@@ -425,6 +426,9 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 				relBuf.putLong(cscColIdxBytes);
 				relBuf.putShort((short) 0); // attr_count
 				relBuf.put(new byte[22]); // reserved2
+				if (specVersion >= 11) {
+					relBuf.put(new byte[64]); // v0.11 COO block (absent)
+				}
 				relEntries.add(relBuf);
 			}
 
@@ -463,7 +467,7 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 					ByteBuffer domBuf = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
 					domBuf.putShort((short) dId);
 					domBuf.put(keyType);
-					domBuf.put((byte) 0); // reserved1
+					domBuf.put(specVersion >= 11 ? (byte) dom.getIdWidth().byteSize() : (byte) 0); // dense_id_width
 					domBuf.putInt(dNameOff);
 					domBuf.putLong(dom.getCardinality());
 					domBuf.putShort((short) attrs.size());

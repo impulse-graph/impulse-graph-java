@@ -31,8 +31,8 @@ class DefaultSnapshotBuilderTest {
 			assertTrue(
 					reloaded.version() == 2 || (reloaded.version() >> 8) == 2 || reloaded.version() == 0x0204
 							|| reloaded.version() == 9 || reloaded.version() == 0x0009 || reloaded.version() == 10
-							|| reloaded.version() == 0x000A,
-					"Version MUST be major version 2 (packed 0x0204), version 9, or version 10");
+							|| reloaded.version() == 0x000A || reloaded.version() == 11 || reloaded.version() == 0x000B,
+					"Version MUST be major version 2 (packed 0x0204), version 9, version 10, or version 11");
 			assertEquals(1, reloaded.relationCount());
 		}
 	}

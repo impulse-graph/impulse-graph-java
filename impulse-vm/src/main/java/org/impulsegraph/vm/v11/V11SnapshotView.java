@@ -183,7 +183,7 @@ public final class V11SnapshotView {
 				if (cscRowOffsetsSeg.byteSize() < needCscRo) {
 					throw new IllegalArgumentException("Truncated CSC rowOffsets for relId=" + relId);
 				}
-				long needCscCt = (long) edgeCount * nodeIdWidth;
+				long needCscCt = (long) edgeCount * cooSrcWidth;
 				if (edgeCount > 0 && (cscColSourcesSeg == null || cscColSourcesSeg.byteSize() < needCscCt)) {
 					throw new IllegalArgumentException("Truncated CSC colSources for relId=" + relId);
 				}
