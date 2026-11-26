@@ -274,7 +274,7 @@ public class DefaultTraversal<T> implements Traversal<T> {
 				ScmLiteral.ofStr(currentDomain), ScmLiteral.ofStr(attrOrExpr))));
 		ScmProgram prog = new ScmProgram(redSteps);
 		try (Arena arena = Arena.ofConfined()) {
-			CompiledQuery cq = ImpOpsBytecodeEmitter.compileToExecutable(prog, snapshot, arena);
+			CompiledQuery cq = DefaultImpulseQueryEvaluator.compileAst(prog, snapshot, arena);
 			return cq.execute(snapshot, seedInput, arena);
 		}
 	}

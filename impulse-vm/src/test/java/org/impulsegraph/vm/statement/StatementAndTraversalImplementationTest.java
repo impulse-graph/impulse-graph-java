@@ -46,7 +46,33 @@ public class StatementAndTraversalImplementationTest {
 			int[] targets = edgeList[1];
 			int nodeCount = offsets.length - 1;
 			int edgeCount = targets.length;
-			RelationSnapshot rel = new RelationSnapshot(arena, nodeCount, edgeCount, offsets, targets);
+			int[] inDeg = new int[nodeCount];
+			for (int t : targets) {
+				if (t >= 0 && t < nodeCount) {
+					inDeg[t]++;
+				}
+			}
+			int[] cscOff = new int[nodeCount + 1];
+			for (int i = 0; i < nodeCount; i++) {
+				cscOff[i + 1] = cscOff[i] + inDeg[i];
+			}
+			int[] cscSrc = new int[edgeCount];
+			int[] cur = cscOff.clone();
+			for (int u = 0; u < nodeCount; u++) {
+				for (int e = offsets[u]; e < offsets[u + 1]; e++) {
+					int t = targets[e];
+					if (t >= 0 && t < nodeCount) {
+						cscSrc[cur[t]++] = u;
+					}
+				}
+			}
+			java.lang.foreign.MemorySegment roSeg = arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_INT, offsets);
+			java.lang.foreign.MemorySegment ctSeg = arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_INT, targets);
+			java.lang.foreign.MemorySegment cscRoSeg = arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_INT,
+					cscOff);
+			java.lang.foreign.MemorySegment cscCtSeg = arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_INT,
+					cscSrc);
+			RelationSnapshot rel = new RelationSnapshot(arena, nodeCount, edgeCount, roSeg, ctSeg, cscRoSeg, cscCtSeg);
 			relMap.put(entry.getKey(), rel);
 		}
 		return new GraphSnapshot(arena, relMap, metadata != null ? metadata : Map.of());

@@ -53,6 +53,21 @@ public final class CompiledQuery {
 	private final AtomicReference<QueryBindingState> bindingState;
 	private final List<String> stringPool;
 	private final MemorySegment inlineDataSegment;
+	private final org.impulsegraph.vm.v11.V11CompiledQuery v11Delegate;
+
+	public static CompiledQuery fromV11(org.impulsegraph.compiler.ast.ImpScmNode ast,
+			ImpulseGraphSnapshot initialSnapshot) {
+		return new CompiledQuery(new org.impulsegraph.vm.v11.V11CompiledQuery(ast, initialSnapshot));
+	}
+
+	private CompiledQuery(org.impulsegraph.vm.v11.V11CompiledQuery v11Delegate) {
+		this.v11Delegate = Objects.requireNonNull(v11Delegate, "v11Delegate must not be null");
+		this.patches = List.of();
+		this.arena = null;
+		this.bindingState = null;
+		this.stringPool = List.of();
+		this.inlineDataSegment = null;
+	}
 
 	public CompiledQuery(MemorySegment programSeg, long instructionCount, List<RelationInstructionPatch> patches,
 			Map<String, Integer> relationIdMap, ImpulseGraphSnapshot initialSnapshot, Arena arena,
@@ -63,6 +78,7 @@ public final class CompiledQuery {
 	public CompiledQuery(MemorySegment programSeg, long instructionCount, List<RelationInstructionPatch> patches,
 			Map<String, Integer> relationIdMap, ImpulseGraphSnapshot initialSnapshot, Arena arena,
 			List<String> stringPool, MemorySegment inlineDataSegment) {
+		this.v11Delegate = null;
 		this.stringPool = stringPool != null ? List.copyOf(stringPool) : List.of();
 		this.inlineDataSegment = inlineDataSegment;
 		Objects.requireNonNull(programSeg, "programSeg must not be null");
@@ -95,14 +111,20 @@ public final class CompiledQuery {
 	}
 
 	public long instructionCount() {
+		if (v11Delegate != null) {
+			return v11Delegate.instructionCount();
+		}
 		return bindingState.get().instructionCount();
 	}
 
 	public MethodHandle methodHandle() {
-		return bindingState.get().methodHandle();
+		return bindingState != null ? bindingState.get().methodHandle() : null;
 	}
 
 	public ImpulseGraphSnapshot currentSnapshot() {
+		if (v11Delegate != null) {
+			return v11Delegate.currentSnapshot();
+		}
 		return bindingState.get().snapshot();
 	}
 
@@ -120,6 +142,10 @@ public final class CompiledQuery {
 	 */
 	public synchronized void rebind(ImpulseGraphSnapshot newSnapshot) {
 		Objects.requireNonNull(newSnapshot, "newSnapshot must not be null");
+		if (v11Delegate != null) {
+			v11Delegate.rebind(newSnapshot);
+			return;
+		}
 		QueryBindingState currentState = bindingState.get();
 		if (currentState.snapshot() == newSnapshot) {
 			return; // Already bound
@@ -174,6 +200,9 @@ public final class CompiledQuery {
 	 * state reads and active query reference counting.
 	 */
 	public Object execute(ImpulseGraphSnapshot snapshot, Object input, Arena executionArena) {
+		if (v11Delegate != null) {
+			return v11Delegate.execute(snapshot, input, executionArena);
+		}
 		QueryBindingState state = bindingState.get();
 		if (snapshot != null && snapshot != state.snapshot()) {
 			rebind(snapshot);
@@ -216,6 +245,9 @@ public final class CompiledQuery {
 	 * code.
 	 */
 	public String disassemble() {
+		if (v11Delegate != null) {
+			return v11Delegate.disassemble();
+		}
 		QueryBindingState state = bindingState.get();
 		long instrCount = state.instructionCount();
 		MemorySegment programSeg = state.programSeg();
