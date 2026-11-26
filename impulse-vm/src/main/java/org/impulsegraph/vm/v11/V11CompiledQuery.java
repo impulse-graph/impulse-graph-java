@@ -111,6 +111,11 @@ public final class V11CompiledQuery {
 		if (cur.snapshot() == newSnapshot) {
 			return;
 		}
+		for (String relName : cur.compiled().relationIdMap().keySet()) {
+			if (relName != null && !relName.isEmpty() && newSnapshot.getRelationSnapshot(relName) == null) {
+				throw new IllegalStateException("Required relation '" + relName + "' is missing in target snapshot");
+			}
+		}
 		bindingState.set(bindToSnapshot(newSnapshot));
 	}
 
@@ -120,6 +125,10 @@ public final class V11CompiledQuery {
 
 	public long instructionCount() {
 		return bindingState.get().compiled().codeWords().length;
+	}
+
+	public byte[] impbBytes() {
+		return bindingState.get().compiled().impbBytes();
 	}
 
 	public V11MemoryPlanner.MemoryPlan memoryPlan() {

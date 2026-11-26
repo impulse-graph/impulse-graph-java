@@ -1,100 +1,44 @@
 package org.impulsegraph.compiler.emitter;
 
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter.EmittedProgram;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter.InstructionWord;
-import org.impulsegraph.vm.VmHandlers;
-
-import java.lang.foreign.MemorySegment;
-import java.util.Map;
-
-import static org.impulsegraph.vm.VmRegisterType.*;
+import org.impulsegraph.vm.v11.V11IsaTables;
 
 /**
  * Human-readable disassembler generating canonical ImpAsm (.impas) text
- * assembly.
+ * assembly for ImpulseVM v0.11.0 64-bit nibble bytecode.
  */
 public final class ImpAsmDisassembler {
 
 	private ImpAsmDisassembler() {
 	}
 
-	public static String disassemble(EmittedProgram program) {
+	public static String disassemble(ImpOpsV11BytecodeEmitter.V11CompiledProgram program) {
+		return disassemble(program.codeWords());
+	}
+
+	public static String disassemble(long[] words) {
 		StringBuilder sb = new StringBuilder();
 		sb.append("; =========================================================================\n");
 		sb.append(";                  IMPULSE VM BYTECODE DISASSEMBLY (.impas)               \n");
 		sb.append("; =========================================================================\n");
-		sb.append(".version 0.9.0\n");
-		sb.append(String.format(".instructions %d\n\n", program.instructionCount()));
-
-		Map<Long, String> patchMap = new java.util.HashMap<>();
-		for (var patch : program.patches()) {
-			patchMap.put(patch.pc(), patch.logicalRelationName());
+		sb.append(".version 0.11.0\n");
+		sb.append(String.format(".instructions %d\n\n", words.length));
+		for (int pc = 0; pc < words.length; pc++) {
+			long w = words[pc];
+			int op = (int) (w & 0xFFL);
+			int sub = (int) ((w >>> 8) & 0xFL);
+			int fl = (int) ((w >>> 12) & 0xFL);
+			int s1 = (int) ((w >>> 16) & 0xFL);
+			int dst = (int) ((w >>> 20) & 0xFL);
+			int s3 = (int) ((w >>> 24) & 0xFL);
+			int s2 = (int) ((w >>> 28) & 0xFL);
+			int imm = (int) (w >>> 32);
+			String opName = (op >= 0 && op < V11IsaTables.OPCODE_NAME.length && V11IsaTables.OPCODE_NAME[op] != null)
+					? V11IsaTables.OPCODE_NAME[op]
+					: String.format("OP_0x%02X", op);
+			sb.append(String.format("  0x%04X:  %-24s sub=%d fl=0x%X dst=%d s1=%d s2=%d s3=%d imm=0x%08X\n", pc, opName,
+					sub, fl, dst, s1, s2, s3, imm));
 		}
-
-		for (int pc = 0; pc < program.instructionList().size(); pc++) {
-			InstructionWord w = program.instructionList().get(pc);
-			String opName = getOpcodeName(w.opcode());
-			sb.append(String.format("  0x%04X:  %-24s flags=0x%02X, dst=R%-2d, payload=0x%08X", pc, opName, w.flags(),
-					w.dstReg(), w.payload()));
-
-			if (w.opcode() == OP_CSR_WALK || w.opcode() == OP_CSC_WALK || w.opcode() == OP_CSR_WALK_FILTERED) {
-				int srcReg = w.payload() & 0xFFFF;
-				int relId = (w.payload() >> 16) & 0xFFFF;
-				String relName = patchMap.getOrDefault((long) pc, "rel_" + relId);
-				String flagDesc = "";
-				if ((w.flags() & 0x02) != 0)
-					flagDesc += " [seed-inlined]";
-				if ((w.flags() & 0x01) != 0)
-					flagDesc += " [early-exit]";
-				sb.append(String.format(" ; Walk src=R%d -> dst=R%d via rel[%d] (\"%s\")%s", srcReg, w.dstReg(), relId,
-						relName, flagDesc));
-			} else if (w.opcode() == OP_CSR_WALK_2HOP) {
-				int rel1 = w.payload() & 0xFFFF;
-				int rel2 = (w.payload() >> 16) & 0xFFFF;
-				String flagDesc = "";
-				if ((w.flags() & 0x02) != 0)
-					flagDesc += " [seed-inlined]";
-				if ((w.flags() & 0x01) != 0)
-					flagDesc += " [early-exit]";
-				sb.append(String.format(" ; Fused 2-Hop CSR Walk dst=R%d via rel[%d] o rel[%d]%s", w.dstReg(), rel1,
-						rel2, flagDesc));
-			} else if (w.opcode() == OP_NODE_FILTER) {
-				int srcReg = (w.payload() >> 16) & 0xFFFF;
-				sb.append(String.format(" ; Vector node filter src=R%d -> dst=R%d", srcReg, w.dstReg()));
-			} else if (w.opcode() == OP_INIT_INPUT_NODE) {
-				sb.append(" ; Load input node ID into R0");
-			} else if (w.opcode() == OP_COLLECT_BITSET) {
-				sb.append(String.format(" ; Collect active result bitset from R%d", w.dstReg()));
-			} else if (w.opcode() == OP_HALT) {
-				sb.append(" ; Execution complete");
-			}
-			sb.append("\n");
-		}
-
 		sb.append("; =========================================================================\n");
 		return sb.toString();
-	}
-
-	private static final java.util.Map<Byte, String> OPCODE_NAMES = new java.util.HashMap<>();
-	static {
-		try {
-			for (java.lang.reflect.Field field : org.impulsegraph.vm.VmRegisterType.class.getDeclaredFields()) {
-				if (field.getName().startsWith("OP_") && !field.getName().startsWith("OP_FLAG_")
-						&& field.getType() == byte.class) {
-					byte val = field.getByte(null);
-					// If multiple constants have the same value (like OP_ADAPTIVE_WALK and
-					// OP_DENSE_WALK_LEGACY),
-					// the first one processed wins. This is fine.
-					OPCODE_NAMES.putIfAbsent(val, field.getName());
-				}
-			}
-		} catch (IllegalAccessException | SecurityException e) {
-			System.getLogger(ImpAsmDisassembler.class.getName()).log(System.Logger.Level.DEBUG,
-					"Failed to inspect VmRegisterType opcode constants; falling back to hex", e);
-		}
-	}
-
-	private static String getOpcodeName(byte opcode) {
-		return OPCODE_NAMES.getOrDefault(opcode, "OP_UNKNOWN_0x" + Integer.toHexString(opcode & 0xFF).toUpperCase());
 	}
 }

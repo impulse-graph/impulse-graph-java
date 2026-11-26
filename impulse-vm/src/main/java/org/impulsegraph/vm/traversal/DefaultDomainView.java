@@ -9,8 +9,8 @@ import org.impulsegraph.api.traversal.Traversal;
 import org.impulsegraph.compiler.ast.ScmCollect;
 import org.impulsegraph.compiler.ast.ScmProgram;
 import org.impulsegraph.compiler.ast.ScmVectorAnnSearch;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
 import org.impulsegraph.vm.CompiledQuery;
+import org.impulsegraph.vm.DefaultImpulseQueryEvaluator;
 
 import java.lang.foreign.Arena;
 import java.util.ArrayList;
@@ -300,7 +300,7 @@ public class DefaultDomainView implements DomainView {
 		ScmProgram prog = new ScmProgram(
 				List.of(ScmVectorAnnSearch.fromInlineVector(qList, topK, 0, false), ScmCollect.vector()));
 		try (Arena arena = Arena.ofConfined()) {
-			CompiledQuery cq = ImpOpsBytecodeEmitter.compileToExecutable(prog, snapshot, arena);
+			CompiledQuery cq = DefaultImpulseQueryEvaluator.compileAst(prog, snapshot, arena);
 			Object res = cq.execute(snapshot, 0L, arena);
 			if (res instanceof int[] arr) {
 				long[] seeds = new long[arr.length];

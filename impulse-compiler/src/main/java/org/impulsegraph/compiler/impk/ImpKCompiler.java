@@ -17,7 +17,6 @@ import org.impulsegraph.compiler.ast.ScmReduce;
 import org.impulsegraph.compiler.ast.ScmVectorAnnSearch;
 import org.impulsegraph.compiler.ast.ScmVectorRerankDot;
 import org.impulsegraph.compiler.ast.ScmWalk;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
 import org.impulsegraph.vm.CompiledQuery;
 
 import java.lang.foreign.Arena;
@@ -386,7 +385,7 @@ public final class ImpKCompiler {
 
 	public static CompiledQuery compileToExecutable(String script, ImpulseGraphSnapshot snapshot, Arena arena) {
 		ScmProgram prog = compile(script);
-		return ImpOpsBytecodeEmitter.compileToExecutable(prog, snapshot, arena);
+		return CompiledQuery.fromV11(prog, snapshot);
 	}
 
 	public static ScmProgram lowerToProgram(List<ImpKStatement> stmts) {

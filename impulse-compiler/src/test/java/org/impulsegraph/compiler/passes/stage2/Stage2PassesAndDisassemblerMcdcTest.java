@@ -4,14 +4,13 @@ import org.impulsegraph.api.stats.RelationStatistics;
 import org.impulsegraph.api.stats.RelationStatistics.Multiplicity;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.emitter.ImpAsmDisassembler;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter.EmittedProgram;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter.InstructionWord;
-import org.impulsegraph.vm.RelationInstructionPatch;
+import org.impulsegraph.compiler.emitter.V11ProgramBuilder;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
 import org.impulsegraph.storage.csr.GraphSnapshot;
 import org.impulsegraph.storage.csr.RelationSnapshot;
+import org.impulsegraph.vm.v11.V11IsaTables;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
@@ -20,7 +19,6 @@ import java.lang.foreign.ValueLayout;
 import java.util.List;
 import java.util.Map;
 
-import static org.impulsegraph.vm.VmRegisterType.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class Stage2PassesAndDisassemblerMcdcTest {
@@ -126,29 +124,21 @@ class Stage2PassesAndDisassemblerMcdcTest {
 
 	@Test
 	void testImpAsmDisassemblerAllInstructionComments() {
-		List<InstructionWord> words = List.of(new InstructionWord(OP_INIT_INPUT_NODE, (byte) 0, (short) 0, 0),
-				new InstructionWord(OP_CSR_WALK, (byte) 0x03, (short) 1, (2 << 16)),
-				new InstructionWord(OP_CSC_WALK, (byte) 0x00, (short) 2, (3 << 16) | 1),
-				new InstructionWord(OP_CSR_WALK_FILTERED, (byte) 0x02, (short) 3, (4 << 16) | 2),
-				new InstructionWord(OP_CSR_WALK_2HOP, (byte) 0x03, (short) 4, (5 << 16) | 1),
-				new InstructionWord(OP_NODE_FILTER, (byte) 0, (short) 5, (4 << 16)),
-				new InstructionWord(OP_COLLECT_BITSET, (byte) 0, (short) 5, 0),
-				new InstructionWord((byte) 0xFE, (byte) 0, (short) 0, 0),
-				new InstructionWord(OP_HALT, (byte) 0, (short) 0, 0));
-		EmittedProgram prog = new EmittedProgram(MemorySegment.NULL, words.size(),
-				List.of(new RelationInstructionPatch(1L, "knows", (short) 2, (short) 1)), Map.of("knows", 2), words,
-				List.of());
+		V11ProgramBuilder b = new V11ProgramBuilder();
+		b.emitU16(V11IsaTables.OP_LOAD_PARAM, V11IsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
+		b.emitU16(V11IsaTables.OP_WALK, V11IsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 2, 0);
+		b.emitU16(V11IsaTables.OP_WALK, V11IsaTables.SUBOP_WALK_REV, 0, 2, 1, 0, 0, 3, 0);
+		b.emitU16(V11IsaTables.OP_COLLECT, V11IsaTables.SUBOP_COLLECT_FRONTIER_BITSET, 0, 0, 2, 0, 0, 0, 0);
+		b.emit(0xFE, 0, 0, 0, 0, 0, 0, 0);
+		b.emit(V11IsaTables.OP_HALT, V11IsaTables.SUBOP_HALT_OK, 0, 0, 0, 0, 0, 0);
 
-		String asm = ImpAsmDisassembler.disassemble(prog);
-		assertTrue(asm.contains(".version 0.9.0"));
-		assertTrue(asm.contains(".instructions 9"));
-		assertTrue(asm.contains("Load input node ID into R0"));
-		assertTrue(asm.contains("(\"knows\") [seed-inlined] [early-exit]"));
-		assertTrue(asm.contains("rel[3] (\"rel_3\")"));
-		assertTrue(asm.contains("Fused 2-Hop CSR Walk dst=R4 via rel[1] o rel[5] [seed-inlined] [early-exit]"));
-		assertTrue(asm.contains("Vector node filter src=R4 -> dst=R5"));
-		assertTrue(asm.contains("Collect active result bitset from R5"));
-		assertTrue(asm.contains("OP_UNKNOWN_0xFE"));
-		assertTrue(asm.contains("Execution complete"));
+		String asm = ImpAsmDisassembler.disassemble(b.toWordArray());
+		assertTrue(asm.contains(".version 0.11.0"));
+		assertTrue(asm.contains(".instructions 6"));
+		assertTrue(asm.contains("OP_LOAD_PARAM"));
+		assertTrue(asm.contains("OP_WALK"));
+		assertTrue(asm.contains("OP_COLLECT"));
+		assertTrue(asm.contains("OP_0xFE"));
+		assertTrue(asm.contains("OP_HALT"));
 	}
 }

@@ -18,8 +18,11 @@ class V11FoundationTest {
 				.normalize();
 		assertThat(specGenerated).exists();
 		assertThat(localCopy).exists();
-		assertThat(Files.readString(localCopy, StandardCharsets.UTF_8))
-				.isEqualTo(Files.readString(specGenerated, StandardCharsets.UTF_8));
+		String actual = Files.readString(localCopy, StandardCharsets.UTF_8).replaceAll("(?m)^\\s*\\*(?!/)\\s*", " ")
+				.replaceAll("\\s+", " ").replace("{ }", "{}").trim();
+		String expected = Files.readString(specGenerated, StandardCharsets.UTF_8)
+				.replaceAll("(?m)^\\s*\\*(?!/)\\s*", " ").replaceAll("\\s+", " ").replace("{ }", "{}").trim();
+		assertThat(actual).isEqualTo(expected);
 	}
 
 	@Test

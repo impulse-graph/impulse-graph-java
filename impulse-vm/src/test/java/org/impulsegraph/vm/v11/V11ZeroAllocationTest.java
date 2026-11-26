@@ -111,8 +111,8 @@ public final class V11ZeroAllocationTest {
 
 		for (int w = 0; w < progs.length; w++) {
 			boolean needSeed = (w == 4);
-			// Warmup workspace arena + JIT
-			for (int i = 0; i < 50; i++) {
+			// Warmup workspace arena + C2 Tier-4 Vector API intrinsification
+			for (int i = 0; i < 2500; i++) {
 				ws.reset();
 				if (needSeed)
 					ws.vVectors[0] = seedVec;

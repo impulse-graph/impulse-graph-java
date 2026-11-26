@@ -32,6 +32,9 @@ public class MockImpulseGraphSnapshot implements ImpulseGraphSnapshot {
 					maxNodes = Math.max(maxNodes, relationMaxNodes(rel));
 				}
 				if (i < arr.length) {
+					if (rel instanceof MockRelationSnapshot mrs) {
+						mrs.setRelationId(i);
+					}
 					arr[i++] = rel;
 				}
 			}

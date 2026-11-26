@@ -17,7 +17,6 @@ import org.impulsegraph.compiler.ast.ScmProgram;
 import org.impulsegraph.compiler.ast.ScmSymbol;
 import org.impulsegraph.compiler.ast.ScmVectorRerankDot;
 import org.impulsegraph.compiler.ast.ScmWalk;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
 import org.impulsegraph.vm.CompiledQuery;
 import org.impulsegraph.vm.DefaultImpulseQueryEvaluator;
 
@@ -336,7 +335,7 @@ public class DefaultTraversal<T> implements Traversal<T> {
 					lastRerankMetric));
 			ScmProgram prog = new ScmProgram(rerankSteps);
 			try (Arena arena = Arena.ofConfined()) {
-				CompiledQuery cq = ImpOpsBytecodeEmitter.compileToExecutable(prog, snapshot, arena);
+				CompiledQuery cq = DefaultImpulseQueryEvaluator.compileAst(prog, snapshot, arena);
 				Object raw = cq.execute(snapshot, seedInput, arena);
 				if (raw instanceof float[] scores) {
 					int n = Math.min(candidates.size(), scores.length);

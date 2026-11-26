@@ -61,15 +61,21 @@ public class BlueGreenDrainAndUnloadTest {
 	@Test
 	public void testConcurrentZeroDelaySwapsAndDrainUnload() throws Exception {
 		Arena arenaA = Arena.ofShared();
-		MemorySegment offsetsA = TestSegmentHelper.allocateInts(arenaA, 0, 1, 1);
+		int[] offA = new int[22];
+		for (int i = 1; i < offA.length; i++)
+			offA[i] = 1;
+		MemorySegment offsetsA = TestSegmentHelper.allocateInts(arenaA, offA);
 		MemorySegment targetsA = TestSegmentHelper.allocateInts(arenaA, 10);
-		RelationSnapshot relA = new org.impulsegraph.storage.csr.RelationSnapshot(arenaA, 2, 1, offsetsA, targetsA);
+		RelationSnapshot relA = new org.impulsegraph.storage.csr.RelationSnapshot(arenaA, 21, 1, offsetsA, targetsA);
 		ImpulseGraphSnapshot snapshotA = new GraphSnapshot(arenaA, Map.of("userToGroup", relA));
 
 		Arena arenaB = Arena.ofShared();
-		MemorySegment offsetsB = TestSegmentHelper.allocateInts(arenaB, 0, 1, 1);
+		int[] offB = new int[22];
+		for (int i = 1; i < offB.length; i++)
+			offB[i] = 1;
+		MemorySegment offsetsB = TestSegmentHelper.allocateInts(arenaB, offB);
 		MemorySegment targetsB = TestSegmentHelper.allocateInts(arenaB, 20);
-		RelationSnapshot relB = new org.impulsegraph.storage.csr.RelationSnapshot(arenaB, 2, 1, offsetsB, targetsB);
+		RelationSnapshot relB = new org.impulsegraph.storage.csr.RelationSnapshot(arenaB, 21, 1, offsetsB, targetsB);
 		ImpulseGraphSnapshot snapshotB = new GraphSnapshot(arenaB, Map.of("userToGroup", relB));
 
 		ImpulseGraphQuery<ImpulseBitSet> query = ImpulseGraphQuery.<ImpulseBitSet>builder()

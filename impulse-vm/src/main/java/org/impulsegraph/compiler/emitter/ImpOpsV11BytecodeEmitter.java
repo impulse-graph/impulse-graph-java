@@ -154,6 +154,9 @@ public final class ImpOpsV11BytecodeEmitter {
 							d0);
 					paramMap.put("$seed", 0);
 					frontierInit = true;
+					curDom = d0;
+					actualStartDom = d0;
+					maxDomSeen = Math.max(maxDomSeen, d0);
 				}
 				maxDomSeen = Math.max(maxDomSeen, Math.max(d1, d2));
 				b.emitU16(V11IsaTables.OP_WALK, V11IsaTables.SUBOP_WALK_FWD, 0, dstF, srcF, 0, 0, rel1, 0);
@@ -347,6 +350,55 @@ public final class ImpOpsV11BytecodeEmitter {
 				activeIsVector = true;
 				activeIsScalar = false;
 				activeIsMultiLane = false;
+			} else if (step instanceof ScmVectorAnnSearch ann) {
+				frontierInit = true;
+				float[] qf = ann.queryVector();
+				double[] q = new double[qf.length];
+				for (int i = 0; i < q.length; i++) {
+					q[i] = qf[i];
+				}
+				int cpQ = b.addConstPoolVec(V11Vector.ofF64(q, V11Vector.allocValidAllTrue(q.length)));
+				b.emit(V11IsaTables.OP_LOAD_CONST_POOL, V11IsaTables.SUBOP_LOAD_CONST_POOL_VEC, 0, 1, 0, 0, 0, cpQ);
+				b.emitLoadConstI64(2, ann.topK());
+				b.emitU16(V11IsaTables.OP_VECTOR_ANN_SEARCH, V11IsaTables.SUBOP_VECTOR_ANN_SEARCH_IDS, 0, curV, 1, 2, 0,
+						curDom, ann.indexOrAttrId());
+				if (ann.fusedLaneFrontier()) {
+					b.emitU16(V11IsaTables.OP_LANE_INIT_SEEDS, V11IsaTables.SUBOP_LANE_INIT_SEEDS_AUTO_WIDTH, 0, dstF,
+							curV, 0, 0, curDom, 0);
+					curF = dstF;
+					activeIsMultiLane = true;
+					activeIsVector = false;
+				} else {
+					activeIsVector = true;
+					activeIsMultiLane = false;
+				}
+				activeIsScalar = false;
+			} else if (step instanceof ScmVectorRerankDot rr) {
+				float[] qf = rr.queryVector();
+				double[] q = new double[qf.length];
+				for (int i = 0; i < q.length; i++) {
+					q[i] = qf[i];
+				}
+				int cpQ = b.addConstPoolVec(V11Vector.ofF64(q, V11Vector.allocValidAllTrue(q.length)));
+				b.emit(V11IsaTables.OP_LOAD_CONST_POOL, V11IsaTables.SUBOP_LOAD_CONST_POOL_VEC, 0, 2, 0, 0, 0, cpQ);
+				int metricSub = switch (rr.metric() & 0x03) {
+					case 1 -> V11IsaTables.SUBOP_VECTOR_RERANK_NEG_L2_SQ;
+					case 2 -> V11IsaTables.SUBOP_VECTOR_RERANK_COSINE;
+					default -> V11IsaTables.SUBOP_VECTOR_RERANK_DOT;
+				};
+				if (!activeIsVector) {
+					if (!frontierInit) {
+						b.emitU16(V11IsaTables.OP_LOAD_PARAM, V11IsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, curF, 0, 0, 0,
+								0, curDom);
+						paramMap.put("$seed", 0);
+						frontierInit = true;
+					}
+					b.emit(V11IsaTables.OP_SET_CONVERT, V11IsaTables.SUBOP_SET_CONVERT_F2V_IDS, 0, curV, curF, 0, 0, 0);
+				}
+				b.emitU16(V11IsaTables.OP_VECTOR_RERANK, metricSub, 0, curV, curV, 2, 0, curDom, rr.attrId());
+				activeIsVector = true;
+				activeIsScalar = false;
+				activeIsMultiLane = false;
 			} else if (step instanceof ScmCollect collect) {
 				hasCollect = true;
 				if (activeIsMultiLane) {
@@ -422,6 +474,49 @@ public final class ImpOpsV11BytecodeEmitter {
 						}
 						int relOff = loopPc - b.pc();
 						b.emit(V11IsaTables.OP_LOOP_DECR, V11IsaTables.SUBOP_LOOP_DECR_DECR, 0, cntR, 0, 0, 0, relOff);
+					}
+				} else if ("repeat-until-stable".equals(opName) && list.elements().size() >= 2) {
+					if (!frontierInit) {
+						b.emitU16(V11IsaTables.OP_LOAD_PARAM, V11IsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, curF, 0, 0, 0,
+								0, curDom);
+						paramMap.put("$seed", 0);
+						frontierInit = true;
+					}
+					if (list.elements().get(1) instanceof ScmProgram subProg && !subProg.steps().isEmpty()) {
+						if (subProg.steps().size() == 1 && subProg.steps().get(0) instanceof ScmWalk walk) {
+							int rid = resolveRelId(snapshot, walk.relationName(), walk.relationId());
+							relIdMap.put(walk.relationName(), rid);
+							int fsub = (walk.direction() == ScmWalk.Direction.REVERSE_CSC)
+									? V11IsaTables.SUBOP_WALK_REV_FIXPOINT_STAR
+									: V11IsaTables.SUBOP_WALK_FWD_FIXPOINT_STAR;
+							b.emitU16(V11IsaTables.OP_WALK, fsub, 0, dstF, srcF, 0, 0, rid, 0);
+							curF = dstF;
+						} else {
+							int prevF = 2;
+							int loopPc = b.pc();
+							b.emit(V11IsaTables.OP_MOV, V11IsaTables.SUBOP_MOV_F, 0, prevF, curF, 0, 0, 0);
+							for (ImpScmNode sub : subProg.steps()) {
+								if (sub instanceof ScmWalk w) {
+									int rid = resolveRelId(snapshot, w.relationName(), w.relationId());
+									relIdMap.put(w.relationName(), rid);
+									int wsub = (w.direction() == ScmWalk.Direction.REVERSE_CSC)
+											? V11IsaTables.SUBOP_WALK_REV
+											: V11IsaTables.SUBOP_WALK_FWD;
+									int nxt = 1 - curF;
+									b.emitU16(V11IsaTables.OP_WALK, wsub, 0, nxt, curF, 0, 0, rid, 0);
+									curF = nxt;
+								}
+							}
+							b.emit(V11IsaTables.OP_SET_OP, V11IsaTables.SUBOP_SET_OP_UNION, 0, curF, curF, prevF, 0, 0);
+							if (curF != srcF) {
+								b.emit(V11IsaTables.OP_MOV, V11IsaTables.SUBOP_MOV_F, 0, srcF, curF, 0, 0, 0);
+								curF = srcF;
+							}
+							b.emit(V11IsaTables.OP_STABLE_CHECK, V11IsaTables.SUBOP_STABLE_CHECK_FRONTIER_EQ, 0, 0,
+									curF, prevF, 0, 0);
+							int relOff = loopPc - b.pc();
+							b.emit(V11IsaTables.OP_JCC, V11IsaTables.SUBOP_JCC_JNST, 0, 0, 0, 0, 0, relOff);
+						}
 					}
 				} else if ("fixpoint-max-hops".equals(opName) && list.elements().size() >= 3) {
 					int maxHops = (list.elements().get(1) instanceof ScmLiteral.ScmInt si) ? (int) si.value() : 16;
@@ -728,6 +823,8 @@ public final class ImpOpsV11BytecodeEmitter {
 
 		if (activeIsScalar && !hasCollect) {
 			b.emitU16(V11IsaTables.OP_COLLECT, V11IsaTables.SUBOP_COLLECT_SCALAR, 0, 0, curR, 0, 0, 0, 0);
+		} else if (activeIsVector && !hasCollect) {
+			b.emitU16(V11IsaTables.OP_COLLECT, V11IsaTables.SUBOP_COLLECT_VEC, 0, 0, curV, 0, 0, 0, 0);
 		}
 		b.emit(V11IsaTables.OP_HALT, V11IsaTables.SUBOP_HALT_OK, 0, 0, 0, 0, 0, 0);
 

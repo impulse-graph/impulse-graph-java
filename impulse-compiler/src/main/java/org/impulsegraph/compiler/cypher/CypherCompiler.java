@@ -4,7 +4,6 @@ import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.cel.CelAstNode;
 import org.impulsegraph.compiler.cel.CelParser;
-import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
 import org.impulsegraph.vm.CompiledQuery;
 
 import java.lang.foreign.Arena;
@@ -43,7 +42,7 @@ public final class CypherCompiler {
 	 */
 	public static CompiledQuery compileToExecutable(String cypherQuery, ImpulseGraphSnapshot snapshot, Arena arena) {
 		CompilationResult res = compile(cypherQuery);
-		return ImpOpsBytecodeEmitter.compileToExecutable(res.ast(), snapshot, arena);
+		return CompiledQuery.fromV11(res.ast(), snapshot);
 	}
 
 	/**

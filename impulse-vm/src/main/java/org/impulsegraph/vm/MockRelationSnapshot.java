@@ -10,6 +10,7 @@ import java.util.Map;
 public class MockRelationSnapshot implements RelationSnapshot {
 	private final int nodeCount;
 	private final long edgeCount;
+	private int relationId = 0;
 	private final MemorySegment rowOffsets;
 	private final MemorySegment colTargets;
 	private MemorySegment cscRowOffsets;
@@ -22,6 +23,15 @@ public class MockRelationSnapshot implements RelationSnapshot {
 		this.colTargets = arena.allocate((long) targets.length * 4).copyFrom(MemorySegment.ofArray(targets));
 		this.cscRowOffsets = this.rowOffsets;
 		this.cscColTargets = this.colTargets;
+	}
+
+	public void setRelationId(int relationId) {
+		this.relationId = relationId;
+	}
+
+	@Override
+	public int getRelationId() {
+		return relationId;
 	}
 
 	public void setCsc(MemorySegment cscRowOffsets, MemorySegment cscColTargets) {

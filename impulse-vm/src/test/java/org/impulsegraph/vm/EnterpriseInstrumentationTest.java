@@ -39,7 +39,7 @@ public class EnterpriseInstrumentationTest {
 					.input("USER", ArgType.SINGLE_NODE).collect(ReturnType.ROARING_BITSET);
 
 			// Execute query with default NOOP registry (zero overhead, pure JIT inlined)
-			ImpulseBitSet result = query.execute(graph, 0);
+			ImpulseBitSet result = query.execute(graph, new long[0]);
 			assertNotNull(result);
 			assertSame(ImpulseMetricsRegistry.NoopMetricsRegistry.INSTANCE, ImpulseMetricsRegistry.getInstance());
 		}
