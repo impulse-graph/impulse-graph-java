@@ -1531,7 +1531,7 @@ public final class BinarySnapshotLoader {
 							throw new IllegalArgumentException(
 									"Secondary index " + idxId + " references nonexistent domain ID " + domId);
 						}
-						if (attrIdx >= targetDom.attributes().size()) {
+						if (attrIdx >= targetDom.attributes().size() && !(idxTypeUnsigned == 4 && attrIdx == 0)) {
 							ImpulseAssert.checkWellFormed(false,
 									() -> "Secondary index " + idxId + " attrIdx " + attrIdx
 											+ " out of bounds for domain " + domId + " (attrCount="
