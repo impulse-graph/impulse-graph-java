@@ -89,14 +89,45 @@ public final class VmBenchRunner {
 			bf.emit(ImpulseIsaTables.OP_HALT, 0, 0, 0, 0, 0, 0, 0);
 			long[] wf = bf.toWordArray();
 
+			// 3. Morsel 2-Hop (WALK 1-hop + WALK_MORSEL.fwd + MORSEL_COMMIT.yield_frontier + CARD)
+			V11ProgramBuilder bm = new V11ProgramBuilder();
+			bm.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
+			bm.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 0, 0);
+			bm.emitU16(ImpulseIsaTables.OP_WALK_MORSEL, ImpulseIsaTables.SUBOP_WALK_MORSEL_FWD, 0, 0, 1, 0, 0, 0, 2);
+			bm.emitU16(ImpulseIsaTables.OP_MORSEL_COMMIT, ImpulseIsaTables.SUBOP_MORSEL_COMMIT_YIELD_FRONTIER, 0, 2, 9,
+					0, 0, 0, 0);
+			bm.emitU16(ImpulseIsaTables.OP_MORSEL_END, 0, 0, 0, 0, 0, 0, 0, 2);
+			bm.emit(ImpulseIsaTables.OP_SET_CARDINALITY, ImpulseIsaTables.SUBOP_SET_CARDINALITY_CARD_1BIT, 0, 0, 2, 0,
+					0, 0);
+			bm.emitU16(ImpulseIsaTables.OP_COLLECT, ImpulseIsaTables.SUBOP_COLLECT_SCALAR, 0, 0, 0, 0, 0, 0, 0);
+			bm.emit(ImpulseIsaTables.OP_HALT, 0, 0, 0, 0, 0, 0, 0);
+			long[] wm = bm.toWordArray();
+
+			// 4. Morsel Edge Count (WALK 1-hop + WALK_MORSEL.fwd + MORSEL_COMMIT.count_add_r)
+			V11ProgramBuilder bmc = new V11ProgramBuilder();
+			bmc.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
+			bmc.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 0, 0);
+			bmc.emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_I32, 0, 0, 0, 0, 0, 0);
+			bmc.emitU16(ImpulseIsaTables.OP_WALK_MORSEL, ImpulseIsaTables.SUBOP_WALK_MORSEL_FWD, 0, 0, 1, 0, 0, 0, 2);
+			bmc.emitU16(ImpulseIsaTables.OP_MORSEL_COMMIT, ImpulseIsaTables.SUBOP_MORSEL_COMMIT_COUNT_ADD_R, 0, 0, 0, 0,
+					0, 0, 0);
+			bmc.emitU16(ImpulseIsaTables.OP_MORSEL_END, 0, 0, 0, 0, 0, 0, 0, 2);
+			bmc.emitU16(ImpulseIsaTables.OP_COLLECT, ImpulseIsaTables.SUBOP_COLLECT_SCALAR, 0, 0, 0, 0, 0, 0, 0);
+			bmc.emit(ImpulseIsaTables.OP_HALT, 0, 0, 0, 0, 0, 0, 0);
+			long[] wmc = bmc.toWordArray();
+
 			long[] card2 = {-1};
 			long[] cardBfs = {-1};
+			long[] cardM2 = {-1};
+			long[] cntMc = {-1};
 			double us2 = runTimed(w2, binding, ws, seed, warmup, iters, card2);
 			double usBfs = runTimed(wf, binding, ws, seed, warmup, iters, cardBfs);
+			double usM2 = runTimed(wm, binding, ws, seed, warmup, iters, cardM2);
+			double usMc = runTimed(wmc, binding, ws, seed, warmup, iters, cntMc);
 
 			System.out.printf(Locale.ROOT,
-					"{\"engine\":\"java-v11\",\"snapshot\":\"%s\",\"2hop_us\":%.2f,\"2hop_card\":%d,\"bfs_us\":%.2f,\"bfs_card\":%d}%n",
-					path, us2, card2[0], usBfs, cardBfs[0]);
+					"{\"engine\":\"java-v11\",\"snapshot\":\"%s\",\"2hop_us\":%.2f,\"2hop_card\":%d,\"bfs_us\":%.2f,\"bfs_card\":%d,\"morsel_2hop_us\":%.2f,\"morsel_2hop_card\":%d,\"morsel_cnt_us\":%.2f,\"morsel_cnt\":%d}%n",
+					path, us2, card2[0], usBfs, cardBfs[0], usM2, cardM2[0], usMc, cntMc[0]);
 		}
 	}
 }

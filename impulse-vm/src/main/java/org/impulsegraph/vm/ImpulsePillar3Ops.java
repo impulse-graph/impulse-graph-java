@@ -1499,7 +1499,7 @@ public final class ImpulsePillar3Ops {
 						return false;
 				}
 				case OP_MORSEL_COMMIT -> {
-					if (subop != 0 || (flags & FLAG_ACCUM) != 0)
+					if ((subop != 0 && subop != 8) || (flags & FLAG_ACCUM) != 0)
 						return false;
 				}
 				default -> {
@@ -1518,17 +1518,24 @@ public final class ImpulsePillar3Ops {
 
 		// Pre-scan commit sinks (0..7)
 		int commitMaskBits = 0;
+		int countMaskBits = 0;
+		long[] countAcc = ws.arena.allocLongZeroed(8);
 		int[] sinkDom = ws.arena.allocInt(8);
 		for (int d = 0; d < 8; d++)
 			sinkDom[d] = -1;
 		for (int p = hdrPc + 1; p < endPc; p++) {
 			long cw = program[p];
 			if ((int) (cw & 0xFFL) == OP_MORSEL_COMMIT) {
+				int cSub = (int) ((cw >>> 8) & 0xFL);
 				int cDst = (int) ((cw >>> 20) & 0xFL);
-				int cLo = (int) ((cw >>> 32) & 0xFFFFL);
-				int dom = (cLo == 0xFFFF) ? defaultDom : cLo;
-				sinkDom[cDst] = dom;
-				commitMaskBits |= (1 << cDst);
+				if (cSub == 0) {
+					int cLo = (int) ((cw >>> 32) & 0xFFFFL);
+					int dom = (cLo == 0xFFFF) ? defaultDom : cLo;
+					sinkDom[cDst] = dom;
+					commitMaskBits |= (1 << cDst);
+				} else if (cSub == 8) {
+					countMaskBits |= (1 << cDst);
+				}
 			}
 		}
 
@@ -1598,26 +1605,53 @@ public final class ImpulsePillar3Ops {
 		int srcLen = fSrc.toSortedArrayInto(srcIds);
 
 		int srcIdx = 0;
-		int edgePos = (srcLen > 0) ? rel.csrRowOffset(srcIds[0]) : 0;
+		boolean fast32 = (rel.edgeIdxWidth == 4 && rel.nodeIdWidth == 4);
+		MemorySegment roSeg = fast32 ? rel.csrRowOffsetsSeg : null;
+		MemorySegment ctSeg = fast32 ? rel.csrColTargetsSeg : null;
+		int edgePos = (srcLen > 0)
+				? (fast32 ? roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) srcIds[0] << 2) : rel.csrRowOffset(srcIds[0]))
+				: 0;
 
 		while (ws.status == IMPULSE_VM_OK) {
 			// Fill up to mMax edges directly from off-heap CSR (zero intermediate
 			// List<long[]>)
 			int len = 0;
-			while (len < mMax && srcIdx < srcLen) {
-				int u = srcIds[srcIdx];
-				int eEnd = rel.csrRowOffset(u + 1);
-				while (edgePos < eEnd && len < mMax) {
-					m0[len] = u & 0xFFFFFFFFL;
-					m1[len] = rel.csrColTarget(edgePos) & 0xFFFFFFFFL;
-					m2[len] = edgePos & 0xFFFFFFFFL;
-					len++;
-					edgePos++;
+			if (fast32) {
+				while (len < mMax && srcIdx < srcLen) {
+					int u = srcIds[srcIdx];
+					int eEnd = roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) (u + 1) << 2);
+					int take = Math.min(eEnd - edgePos, mMax - len);
+					long u64 = u & 0xFFFFFFFFL;
+					for (int k = 0; k < take; k++) {
+						int e = edgePos + k;
+						m0[len + k] = u64;
+						m1[len + k] = ctSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2) & 0xFFFFFFFFL;
+						m2[len + k] = e & 0xFFFFFFFFL;
+					}
+					len += take;
+					edgePos += take;
+					if (edgePos >= eEnd) {
+						srcIdx++;
+						if (srcIdx < srcLen)
+							edgePos = roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) srcIds[srcIdx] << 2);
+					}
 				}
-				if (edgePos >= eEnd) {
-					srcIdx++;
-					if (srcIdx < srcLen)
-						edgePos = rel.csrRowOffset(srcIds[srcIdx]);
+			} else {
+				while (len < mMax && srcIdx < srcLen) {
+					int u = srcIds[srcIdx];
+					int eEnd = rel.csrRowOffset(u + 1);
+					while (edgePos < eEnd && len < mMax) {
+						m0[len] = u & 0xFFFFFFFFL;
+						m1[len] = rel.csrColTarget(edgePos) & 0xFFFFFFFFL;
+						m2[len] = edgePos & 0xFFFFFFFFL;
+						len++;
+						edgePos++;
+					}
+					if (edgePos >= eEnd) {
+						srcIdx++;
+						if (srcIdx < srcLen)
+							edgePos = rel.csrRowOffset(srcIds[srcIdx]);
+					}
 				}
 			}
 			if (len == 0)
@@ -1837,6 +1871,20 @@ public final class ImpulsePillar3Ops {
 						ws.setFInitialized(dst, true);
 					}
 					case OP_MORSEL_COMMIT -> {
+						boolean masked = (flags & FLAG_MASKED_S3) != 0;
+						if (subop == 8) { // .count_add_r
+							if (!masked) {
+								countAcc[dst] += len;
+							} else {
+								ImpulseFrontier fm = ws.fRegs[s3];
+								if (fm == null || fm.multiLane || !ws.isFInitialized(s3)) {
+									ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+									break;
+								}
+								countAcc[dst] += fm.cardinality();
+							}
+							break;
+						}
 						ImpulseVector ids = ws.vVectors[s1];
 						if (ids == null || ids.elemTag != ImpulseVector.TAG_U64) {
 							ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
@@ -1853,22 +1901,39 @@ public final class ImpulsePillar3Ops {
 							case 7 -> sinkBits7;
 							default -> null;
 						};
-						boolean masked = (flags & FLAG_MASKED_S3) != 0;
-						ImpulseFrontier fm = masked ? ws.fRegs[s3] : ws.fRegs[8];
-						if (fm == null || fm.multiLane || !ws.isFInitialized(masked ? s3 : 8)) {
-							ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
-							break;
-						}
-						int mc = fm.cardinality();
-						int nM = fm.toSortedArrayInto(scratchFIds);
 						long[] idData = ids.i64Data;
-						if (targetBits != null) {
-							for (int k = 0; k < nM; k++) {
-								int i = scratchFIds[k];
-								if (ids.isValidAt(i)) {
-									int v = (int) idData[i];
-									if (v >= 0 && (v >>> 6) < targetBits.length) {
-										targetBits[v >>> 6] |= (1L << (v & 63));
+						if (!masked && ids.validBits == allValid && targetBits != null) {
+							int tbLen = targetBits.length;
+							for (int i = 0; i < len; i++) {
+								int v = (int) idData[i];
+								int wi = v >>> 6;
+								if (v >= 0 && wi < tbLen) {
+									long bit = 1L << (v & 63);
+									if ((targetBits[wi] & bit) == 0L) {
+										targetBits[wi] |= bit;
+									}
+								}
+							}
+						} else {
+							ImpulseFrontier fm = masked ? ws.fRegs[s3] : ws.fRegs[8];
+							if (fm == null || fm.multiLane || !ws.isFInitialized(masked ? s3 : 8)) {
+								ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+								break;
+							}
+							int nM = fm.toSortedArrayInto(scratchFIds);
+							if (targetBits != null) {
+								int tbLen = targetBits.length;
+								for (int k = 0; k < nM; k++) {
+									int i = scratchFIds[k];
+									if (ids.isValidAt(i)) {
+										int v = (int) idData[i];
+										int wi = v >>> 6;
+										if (v >= 0 && wi < tbLen) {
+											long bit = 1L << (v & 63);
+											if ((targetBits[wi] & bit) == 0L) {
+												targetBits[wi] |= bit;
+											}
+										}
 									}
 								}
 							}
@@ -1919,6 +1984,11 @@ public final class ImpulsePillar3Ops {
 						anyNonEmpty = true;
 					ws.fRegs[d].initFromDenseBits(dom, dcard, b, dw, card, ws.geometry, false);
 					ws.setFInitialized(d, true);
+				}
+				if ((countMaskBits & (1 << d)) != 0) {
+					if (countAcc[d] != 0L)
+						anyNonEmpty = true;
+					ws.writeR(d, SCALAR_U64, countAcc[d]);
 				}
 			}
 			ws.zf = !anyNonEmpty;
