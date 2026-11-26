@@ -286,15 +286,35 @@ public final class ImpulsePillar3Ops {
 				if (rel.edgeIdxWidth == 4 && rel.nodeIdWidth == 4) {
 					var roSeg = rel.csrRowOffsetsSeg;
 					var ctSeg = rel.csrColTargetsSeg;
-					for (int i = 0; i < curLen; i++) {
-						int u = curQ[i];
-						if (u >= 0 && u < csrRows) {
-							int eStart = roSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) u << 2);
-							int eEnd = roSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) (u + 1) << 2);
-							for (int e = eStart; e < eEnd; e++) {
-								int v = ctSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2);
-								if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
-									outBits[v >>> 6] |= (1L << v);
+					if (exclBits == null) {
+						for (int i = 0; i < curLen; i++) {
+							int u = curQ[i];
+							if (u >= 0 && u < csrRows) {
+								int eStart = roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) u << 2);
+								int eEnd = roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) (u + 1) << 2);
+								for (int e = eStart; e < eEnd; e++) {
+									int v = ctSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2);
+									int wi = v >>> 6;
+									long bit = 1L << v;
+									if ((outBits[wi] & bit) == 0L) {
+										outBits[wi] |= bit;
+									}
+								}
+							}
+						}
+					} else {
+						for (int i = 0; i < curLen; i++) {
+							int u = curQ[i];
+							if (u >= 0 && u < csrRows) {
+								int eStart = roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) u << 2);
+								int eEnd = roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) (u + 1) << 2);
+								for (int e = eStart; e < eEnd; e++) {
+									int v = ctSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2);
+									int wi = v >>> 6;
+									long bit = 1L << v;
+									if ((outBits[wi] & bit) == 0L && (exclBits[wi] & bit) == 0L) {
+										outBits[wi] |= bit;
+									}
 								}
 							}
 						}
@@ -307,8 +327,10 @@ public final class ImpulsePillar3Ops {
 							int eEnd = rel.csrRowOffset(u + 1);
 							for (int e = eStart; e < eEnd; e++) {
 								int v = rel.csrColTarget(e);
-								if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
-									outBits[v >>> 6] |= (1L << v);
+								int wi = v >>> 6;
+								long bit = 1L << v;
+								if ((outBits[wi] & bit) == 0L && (exclBits == null || (exclBits[wi] & bit) == 0L)) {
+									outBits[wi] |= bit;
 								}
 							}
 						}
@@ -318,16 +340,35 @@ public final class ImpulsePillar3Ops {
 				if (rel.edgeIdxWidth == 4 && rel.nodeIdWidth == 4) {
 					var cscRoSeg = rel.cscRowOffsetsSeg;
 					var cscCtSeg = rel.cscColSourcesSeg;
-					for (int i = 0; i < curLen; i++) {
-						int u = curQ[i];
-						if (u >= 0 && u < cscRows) {
-							int eStart = cscRoSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) u << 2);
-							int eEnd = cscRoSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED,
-									(long) (u + 1) << 2);
-							for (int e = eStart; e < eEnd; e++) {
-								int v = cscCtSeg.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2);
-								if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
-									outBits[v >>> 6] |= (1L << v);
+					if (exclBits == null) {
+						for (int i = 0; i < curLen; i++) {
+							int u = curQ[i];
+							if (u >= 0 && u < cscRows) {
+								int eStart = cscRoSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) u << 2);
+								int eEnd = cscRoSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) (u + 1) << 2);
+								for (int e = eStart; e < eEnd; e++) {
+									int v = cscCtSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2);
+									int wi = v >>> 6;
+									long bit = 1L << v;
+									if ((outBits[wi] & bit) == 0L) {
+										outBits[wi] |= bit;
+									}
+								}
+							}
+						}
+					} else {
+						for (int i = 0; i < curLen; i++) {
+							int u = curQ[i];
+							if (u >= 0 && u < cscRows) {
+								int eStart = cscRoSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) u << 2);
+								int eEnd = cscRoSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) (u + 1) << 2);
+								for (int e = eStart; e < eEnd; e++) {
+									int v = cscCtSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2);
+									int wi = v >>> 6;
+									long bit = 1L << v;
+									if ((outBits[wi] & bit) == 0L && (exclBits[wi] & bit) == 0L) {
+										outBits[wi] |= bit;
+									}
 								}
 							}
 						}
@@ -340,8 +381,10 @@ public final class ImpulsePillar3Ops {
 							int eEnd = rel.cscRowOffset(u + 1);
 							for (int e = eStart; e < eEnd; e++) {
 								int v = rel.cscColSource(e);
-								if (exclBits == null || (exclBits[v >>> 6] & (1L << v)) == 0L) {
-									outBits[v >>> 6] |= (1L << v);
+								int wi = v >>> 6;
+								long bit = 1L << v;
+								if ((outBits[wi] & bit) == 0L && (exclBits == null || (exclBits[wi] & bit) == 0L)) {
+									outBits[wi] |= bit;
 								}
 							}
 						}
@@ -391,38 +434,102 @@ public final class ImpulsePillar3Ops {
 					}
 					curLen = w;
 				}
+				boolean fast32 = (rel.edgeIdxWidth == 4 && rel.nodeIdWidth == 4);
 				for (int hop = 0; hop < maxHops; hop++) {
 					int nextLen = 0;
 					if (!isRev) {
-						for (int i = 0; i < curLen; i++) {
-							int u = curQ[i];
-							if (u >= 0 && u < csrRows) {
-								int eStart = rel.csrRowOffset(u);
-								int eEnd = rel.csrRowOffset(u + 1);
-								for (int e = eStart; e < eEnd; e++) {
-									int v = rel.csrColTarget(e);
-									long bit = 1L << v;
-									int wi = v >>> 6;
-									if ((outBits[wi] & bit) == 0L && (exclBits == null || (exclBits[wi] & bit) == 0L)) {
-										outBits[wi] |= bit;
-										nextQ[nextLen++] = v;
+						if (fast32 && exclBits == null) {
+							var roSeg = rel.csrRowOffsetsSeg;
+							var ctSeg = rel.csrColTargetsSeg;
+							for (int i = 0; i < curLen; i++) {
+								int u = curQ[i];
+								if (u >= 0 && u < csrRows) {
+									int eStart = roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) u << 2);
+									int eEnd = roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) (u + 1) << 2);
+									for (int e = eStart; e < eEnd; e++) {
+										int v = ctSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2);
+										long bit = 1L << v;
+										int wi = v >>> 6;
+										if ((outBits[wi] & bit) == 0L) {
+											outBits[wi] |= bit;
+											nextQ[nextLen++] = v;
+										}
+									}
+								}
+							}
+						} else if (fast32) {
+							var roSeg = rel.csrRowOffsetsSeg;
+							var ctSeg = rel.csrColTargetsSeg;
+							for (int i = 0; i < curLen; i++) {
+								int u = curQ[i];
+								if (u >= 0 && u < csrRows) {
+									int eStart = roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) u << 2);
+									int eEnd = roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) (u + 1) << 2);
+									for (int e = eStart; e < eEnd; e++) {
+										int v = ctSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2);
+										long bit = 1L << v;
+										int wi = v >>> 6;
+										if ((outBits[wi] & bit) == 0L && (exclBits[wi] & bit) == 0L) {
+											outBits[wi] |= bit;
+											nextQ[nextLen++] = v;
+										}
+									}
+								}
+							}
+						} else {
+							for (int i = 0; i < curLen; i++) {
+								int u = curQ[i];
+								if (u >= 0 && u < csrRows) {
+									int eStart = rel.csrRowOffset(u);
+									int eEnd = rel.csrRowOffset(u + 1);
+									for (int e = eStart; e < eEnd; e++) {
+										int v = rel.csrColTarget(e);
+										long bit = 1L << v;
+										int wi = v >>> 6;
+										if ((outBits[wi] & bit) == 0L
+												&& (exclBits == null || (exclBits[wi] & bit) == 0L)) {
+											outBits[wi] |= bit;
+											nextQ[nextLen++] = v;
+										}
 									}
 								}
 							}
 						}
 					} else {
-						for (int i = 0; i < curLen; i++) {
-							int u = curQ[i];
-							if (u >= 0 && u < cscRows) {
-								int eStart = rel.cscRowOffset(u);
-								int eEnd = rel.cscRowOffset(u + 1);
-								for (int e = eStart; e < eEnd; e++) {
-									int v = rel.cscColSource(e);
-									long bit = 1L << v;
-									int wi = v >>> 6;
-									if ((outBits[wi] & bit) == 0L && (exclBits == null || (exclBits[wi] & bit) == 0L)) {
-										outBits[wi] |= bit;
-										nextQ[nextLen++] = v;
+						if (fast32 && exclBits == null) {
+							var cscRoSeg = rel.cscRowOffsetsSeg;
+							var cscCtSeg = rel.cscColSourcesSeg;
+							for (int i = 0; i < curLen; i++) {
+								int u = curQ[i];
+								if (u >= 0 && u < cscRows) {
+									int eStart = cscRoSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) u << 2);
+									int eEnd = cscRoSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) (u + 1) << 2);
+									for (int e = eStart; e < eEnd; e++) {
+										int v = cscCtSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2);
+										long bit = 1L << v;
+										int wi = v >>> 6;
+										if ((outBits[wi] & bit) == 0L) {
+											outBits[wi] |= bit;
+											nextQ[nextLen++] = v;
+										}
+									}
+								}
+							}
+						} else {
+							for (int i = 0; i < curLen; i++) {
+								int u = curQ[i];
+								if (u >= 0 && u < cscRows) {
+									int eStart = rel.cscRowOffset(u);
+									int eEnd = rel.cscRowOffset(u + 1);
+									for (int e = eStart; e < eEnd; e++) {
+										int v = rel.cscColSource(e);
+										long bit = 1L << v;
+										int wi = v >>> 6;
+										if ((outBits[wi] & bit) == 0L
+												&& (exclBits == null || (exclBits[wi] & bit) == 0L)) {
+											outBits[wi] |= bit;
+											nextQ[nextLen++] = v;
+										}
 									}
 								}
 							}
