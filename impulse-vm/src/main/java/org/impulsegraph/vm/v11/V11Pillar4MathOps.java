@@ -207,48 +207,64 @@ public final class V11Pillar4MathOps {
 		double[] out = ws.arena.allocDoubleZeroed(n);
 		long[] outValid = ws.arena.allocLongZeroed(words);
 
-		for (int i = 0; i < n; i++) {
-			if (!laneActive(mask, i) || !va.isValidAt(i))
-				continue;
-			double a = vecToF64(va, i);
-			if (Double.isNaN(a))
-				continue;
-			double res;
-			if (isBinary) {
-				if (scalarRhs ? !sValid : !vb.isValidAt(i))
-					continue;
-				double b = scalarRhs ? sVal : vecToF64(vb, i);
-				if (Double.isNaN(b))
-					continue;
-				res = switch (subop) {
-					case SUBOP_VEC_MATH_ARITH_ADD -> a + b;
-					case SUBOP_VEC_MATH_ARITH_SUB -> a - b;
-					case SUBOP_VEC_MATH_ARITH_MUL -> a * b;
-					case SUBOP_VEC_MATH_ARITH_DIV -> (b == 0.0) ? Double.NaN : (a / b);
-					case SUBOP_VEC_MATH_ARITH_REM -> (b == 0.0) ? Double.NaN : (a % b);
-					case SUBOP_VEC_MATH_ARITH_MIN -> ieeeMinF64(a, b);
-					case SUBOP_VEC_MATH_ARITH_MAX -> ieeeMaxF64(a, b);
-					case SUBOP_VEC_MATH_ARITH_COPYSIGN -> Math.copySign(a, b);
-					default -> Double.NaN;
-				};
+		if (mask == null && va.elemTag == V11Vector.TAG_F64 && n > 0
+				&& (subop <= 3 || subop == 8 || subop == 9 || subop == 10)
+				&& (!isBinary || scalarRhs || (vb != null && vb.elemTag == V11Vector.TAG_F64))) {
+			if (!isBinary) {
+				V11SimdKernels.f64ArithUnary(subop, va.f64Data, out, n);
+				V11SimdKernels.f64PackValidWords(out, va.validBits, null, false, false, outValid, n);
+			} else if (scalarRhs) {
+				if (sValid && !Double.isNaN(sVal)) {
+					V11SimdKernels.f64ArithScalar(subop, va.f64Data, sVal, out, n);
+					V11SimdKernels.f64PackValidWords(out, va.validBits, null, true, true, outValid, n);
+				}
 			} else {
-				res = switch (subop) {
-					case SUBOP_VEC_MATH_ARITH_NEG -> -a;
-					case SUBOP_VEC_MATH_ARITH_ABS -> Math.abs(a);
-					case SUBOP_VEC_MATH_ARITH_SQRT -> a < 0.0 ? Double.NaN : Math.sqrt(a);
-					case SUBOP_VEC_MATH_ARITH_RSQRT -> a <= 0.0 ? Double.NaN : (1.0 / Math.sqrt(a));
-					case SUBOP_VEC_MATH_ARITH_FLOOR -> Math.floor(a);
-					case SUBOP_VEC_MATH_ARITH_CEIL -> Math.ceil(a);
-					case SUBOP_VEC_MATH_ARITH_TRUNC -> a >= 0.0 ? Math.floor(a) : Math.ceil(a);
-					case SUBOP_VEC_MATH_ARITH_ROUND -> roundHalfAwayF64(a);
-					default -> Double.NaN;
-				};
+				V11SimdKernels.f64ArithVec(subop, va.f64Data, vb.f64Data, out, n);
+				V11SimdKernels.f64PackValidWords(out, va.validBits, vb.validBits, true, true, outValid, n);
 			}
-			if (!Double.isNaN(res)) {
-				out[i] = res;
-				outValid[i >>> 6] |= (1L << (i & 63));
+		} else
+			for (int i = 0; i < n; i++) {
+				if (!laneActive(mask, i) || !va.isValidAt(i))
+					continue;
+				double a = vecToF64(va, i);
+				if (Double.isNaN(a))
+					continue;
+				double res;
+				if (isBinary) {
+					if (scalarRhs ? !sValid : !vb.isValidAt(i))
+						continue;
+					double b = scalarRhs ? sVal : vecToF64(vb, i);
+					if (Double.isNaN(b))
+						continue;
+					res = switch (subop) {
+						case SUBOP_VEC_MATH_ARITH_ADD -> a + b;
+						case SUBOP_VEC_MATH_ARITH_SUB -> a - b;
+						case SUBOP_VEC_MATH_ARITH_MUL -> a * b;
+						case SUBOP_VEC_MATH_ARITH_DIV -> (b == 0.0) ? Double.NaN : (a / b);
+						case SUBOP_VEC_MATH_ARITH_REM -> (b == 0.0) ? Double.NaN : (a % b);
+						case SUBOP_VEC_MATH_ARITH_MIN -> ieeeMinF64(a, b);
+						case SUBOP_VEC_MATH_ARITH_MAX -> ieeeMaxF64(a, b);
+						case SUBOP_VEC_MATH_ARITH_COPYSIGN -> Math.copySign(a, b);
+						default -> Double.NaN;
+					};
+				} else {
+					res = switch (subop) {
+						case SUBOP_VEC_MATH_ARITH_NEG -> -a;
+						case SUBOP_VEC_MATH_ARITH_ABS -> Math.abs(a);
+						case SUBOP_VEC_MATH_ARITH_SQRT -> a < 0.0 ? Double.NaN : Math.sqrt(a);
+						case SUBOP_VEC_MATH_ARITH_RSQRT -> a <= 0.0 ? Double.NaN : (1.0 / Math.sqrt(a));
+						case SUBOP_VEC_MATH_ARITH_FLOOR -> Math.floor(a);
+						case SUBOP_VEC_MATH_ARITH_CEIL -> Math.ceil(a);
+						case SUBOP_VEC_MATH_ARITH_TRUNC -> a >= 0.0 ? Math.floor(a) : Math.ceil(a);
+						case SUBOP_VEC_MATH_ARITH_ROUND -> roundHalfAwayF64(a);
+						default -> Double.NaN;
+					};
+				}
+				if (!Double.isNaN(res)) {
+					out[i] = res;
+					outValid[i >>> 6] |= (1L << (i & 63));
+				}
 			}
-		}
 		ws.vVectors[dst] = ws.arena.allocF64(out, n, outValid);
 		ws.pc++;
 	}

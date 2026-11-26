@@ -711,32 +711,36 @@ public final class V11Pillar4Ops {
 					&& V11Pillar4MathOps.isScalarF64BitsValid(ws, s3);
 			double scVal = scValid ? V11Pillar4MathOps.readScalarF64Bits(ws, s3) : Double.NaN;
 
-			for (int i = 0; i < n; i++) {
-				if (!V11Pillar4MathOps.laneActive(mask, i) || !va.isValidAt(i))
-					continue;
-				double x = va.f64Data[i];
-				if (Double.isNaN(x))
-					continue;
-				if (scalarRhs ? !sbValid : !vb.isValidAt(i))
-					continue;
-				double y = scalarRhs ? sbVal : vecElemAsF64(vb, i);
-				if (Double.isNaN(y))
-					continue;
-				boolean ok;
-				if (subop == SUBOP_VEC_CMP_BETWEEN) {
-					if (scalarRhs ? !scValid : !vc.isValidAt(i))
+			if (mask == null && subop <= 5 && n > 0 && (scalarRhs || (vb != null && vb.elemTag == V11Vector.TAG_F64))) {
+				V11SimdKernels.f64CmpWords(subop, va.f64Data, vb != null ? vb.f64Data : null, scalarRhs, sbVal, sbValid,
+						va.validBits, vb != null ? vb.validBits : null, outValid, outData, n);
+			} else
+				for (int i = 0; i < n; i++) {
+					if (!V11Pillar4MathOps.laneActive(mask, i) || !va.isValidAt(i))
 						continue;
-					double hi = scalarRhs ? scVal : vecElemAsF64(vc, i);
-					if (Double.isNaN(hi))
+					double x = va.f64Data[i];
+					if (Double.isNaN(x))
 						continue;
-					ok = (x >= y && x <= hi);
-				} else {
-					ok = evalCmpF64(subop, x, y);
+					if (scalarRhs ? !sbValid : !vb.isValidAt(i))
+						continue;
+					double y = scalarRhs ? sbVal : vecElemAsF64(vb, i);
+					if (Double.isNaN(y))
+						continue;
+					boolean ok;
+					if (subop == SUBOP_VEC_CMP_BETWEEN) {
+						if (scalarRhs ? !scValid : !vc.isValidAt(i))
+							continue;
+						double hi = scalarRhs ? scVal : vecElemAsF64(vc, i);
+						if (Double.isNaN(hi))
+							continue;
+						ok = (x >= y && x <= hi);
+					} else {
+						ok = evalCmpF64(subop, x, y);
+					}
+					outValid[i >>> 6] |= (1L << (i & 63));
+					if (ok)
+						outData[i >>> 6] |= (1L << (i & 63));
 				}
-				outValid[i >>> 6] |= (1L << (i & 63));
-				if (ok)
-					outData[i >>> 6] |= (1L << (i & 63));
-			}
 			ws.vVectors[dst] = V11Vector.ofBool3vl(n, outValid, outData);
 			ws.pc++;
 			return;
