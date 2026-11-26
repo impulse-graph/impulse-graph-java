@@ -233,18 +233,25 @@ public final class ImpulseSnapshotAdapter {
 							: (byte) 0;
 					byte inferredType = (actualType != 0)
 							? actualType
-							: ((nEdges > 0 && seg.byteSize() == (long) nEdges * 8L) ? (byte) 10 : (byte) 9);
-					offHeapEdgeAttrs.put(a,
-							new ImpulseSnapshotView.OffHeapAttrColumn(inferredType, nEdges, false, seg, null, null));
+							: ((nEdges > 0 && seg.byteSize() == (long) nEdges * 8L) ? (byte) 7 : (byte) 6);
+					MemorySegment edgeValidSeg = (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot crs
+							&& a < crs.getValiditySegments().size()) ? crs.getValiditySegments().get(a) : null;
+					boolean edgeNullable = (inferredType & 0x80) != 0
+							|| (edgeValidSeg != null && !edgeValidSeg.equals(MemorySegment.NULL));
+					offHeapEdgeAttrs.put(a, new ImpulseSnapshotView.OffHeapAttrColumn(inferredType, nEdges,
+							edgeNullable, seg, edgeValidSeg, null));
 				}
 			}
 
-			boolean hasCoo = rel.hasCoo();
-			relViews[rid] = new ImpulseSnapshotView.RelView(rid, rel.getSrcDomainId(), rel.getTgtDomainId(), roSeg,
-					ctSeg, cscRoSeg, cscCtSeg, null, cooSrcSeg, cooTgtSeg, cooEdgeIdsSeg, nodeIdWidth, edgeIdxWidth,
-					srcNodeIdWidth, nodeIdWidth, rel.getCooOrder(), rel.getNodeCount(),
-					rel.hasCsc() ? rel.getCscNodeCount() : 0, nEdges, hasCoo ? nEdges : 0, null, offHeapEdgeAttrs,
-					rel.hasCsr(), rel.hasCsc(), hasCoo, false);
+			boolean hasCsr = rel.hasCsr() && roSeg != null && roSeg.byteSize() > 0;
+			boolean hasCsc = rel.hasCsc() && cscRoSeg != null && cscRoSeg.byteSize() > 0;
+			boolean hasCoo = rel.hasCoo() && cooSrcSeg != null && cooSrcSeg.byteSize() > 0;
+			relViews[rid] = new ImpulseSnapshotView.RelView(rid, rel.getSrcDomainId(), rel.getTgtDomainId(),
+					hasCsr ? roSeg : null, hasCsr ? ctSeg : null, hasCsc ? cscRoSeg : null, hasCsc ? cscCtSeg : null,
+					null, hasCoo ? cooSrcSeg : null, hasCoo ? cooTgtSeg : null, hasCoo ? cooEdgeIdsSeg : null,
+					nodeIdWidth, edgeIdxWidth, srcNodeIdWidth, nodeIdWidth, rel.getCooOrder(),
+					hasCsr ? rel.getNodeCount() : 0, hasCsc ? rel.getCscNodeCount() : 0, nEdges, hasCoo ? nEdges : 0,
+					null, offHeapEdgeAttrs, hasCsr, hasCsc, hasCoo, false);
 		}
 
 		return new ImpulseSnapshotView(domainCards, relViews, nodeEmbAttrs, offHeapNodeAttrs, Map.of(),
@@ -257,10 +264,10 @@ public final class ImpulseSnapshotAdapter {
 			return;
 		int baseType = attrType & 0x7F;
 		long elemBytes = switch (baseType) {
-			case 1, 5 -> 1L;
-			case 2, 6 -> 2L;
-			case 3, 7, 9 -> 4L;
-			case 4, 8, 10 -> 8L;
+			case 1 -> 1L;
+			case 2, 5 -> 2L;
+			case 3, 6 -> 4L;
+			case 4, 7, 8, 9 -> 8L;
 			default -> 0L;
 		};
 		if (elemBytes > 0 && dataSeg.byteSize() < (long) count * elemBytes) {

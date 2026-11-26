@@ -27,12 +27,21 @@ public final class ImpulseSnapshotView {
 			MemorySegment validSeg, MemorySegment offsetsSeg) {
 
 		public boolean isValidAt(int idx) {
-			if (!nullable || validSeg == null || validSeg.equals(MemorySegment.NULL))
-				return true;
-			long byteIdx = idx >>> 3;
-			if (byteIdx >= validSeg.byteSize())
-				return false;
-			return (validSeg.get(ValueLayout.JAVA_BYTE, byteIdx) & (1 << (idx & 7))) != 0;
+			if (nullable && validSeg != null && !validSeg.equals(MemorySegment.NULL)) {
+				long byteIdx = idx >>> 3;
+				if (byteIdx >= validSeg.byteSize())
+					return false;
+				if ((validSeg.get(ValueLayout.JAVA_BYTE, byteIdx) & (1 << (idx & 7))) == 0)
+					return false;
+			}
+			int base = typeCode & 0x7F;
+			if (base == 6) {
+				return !Float.isNaN(dataSeg.get(ValueLayout.JAVA_FLOAT_UNALIGNED, (long) idx << 2));
+			}
+			if (base == 7 || base == 10) {
+				return !Double.isNaN(dataSeg.get(ValueLayout.JAVA_DOUBLE_UNALIGNED, (long) idx << 3));
+			}
+			return true;
 		}
 
 		public long readI64(int idx) {
@@ -41,11 +50,7 @@ public final class ImpulseSnapshotView {
 				case 1 -> dataSeg.get(ValueLayout.JAVA_BYTE, idx);
 				case 2 -> dataSeg.get(ValueLayout.JAVA_SHORT_UNALIGNED, (long) idx << 1);
 				case 3 -> dataSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) idx << 2);
-				case 4 -> dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, (long) idx << 3);
-				case 5 -> Byte.toUnsignedLong(dataSeg.get(ValueLayout.JAVA_BYTE, idx));
-				case 6 -> Short.toUnsignedLong(dataSeg.get(ValueLayout.JAVA_SHORT_UNALIGNED, (long) idx << 1));
-				case 7 -> Integer.toUnsignedLong(dataSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) idx << 2));
-				case 8 -> dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, (long) idx << 3);
+				case 4, 8, 9 -> dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, (long) idx << 3);
 				default -> throw new IllegalStateException("Non-integer attribute typeCode: " + base);
 			};
 		}
@@ -53,8 +58,8 @@ public final class ImpulseSnapshotView {
 		public double readF64(int idx) {
 			int base = typeCode & 0x7F;
 			return switch (base) {
-				case 9 -> dataSeg.get(ValueLayout.JAVA_FLOAT_UNALIGNED, (long) idx << 2);
-				case 10 -> dataSeg.get(ValueLayout.JAVA_DOUBLE_UNALIGNED, (long) idx << 3);
+				case 6 -> dataSeg.get(ValueLayout.JAVA_FLOAT_UNALIGNED, (long) idx << 2);
+				case 7, 10 -> dataSeg.get(ValueLayout.JAVA_DOUBLE_UNALIGNED, (long) idx << 3);
 				default -> (double) readI64(idx);
 			};
 		}
@@ -75,10 +80,10 @@ public final class ImpulseSnapshotView {
 			int base = typeCode & 0x7F;
 			if (base >= 1 && base <= 4)
 				return ImpulseVector.TAG_I64;
-			if (base >= 5 && base <= 8)
-				return ImpulseVector.TAG_U64;
-			if (base == 9 || base == 10)
+			if (base == 6 || base == 7 || base == 10)
 				return ImpulseVector.TAG_F64;
+			if (base == 8 || base == 9)
+				return ImpulseVector.TAG_U64;
 			if (base == 11)
 				return ImpulseVector.TAG_STR;
 			return ImpulseVector.TAG_I64;
