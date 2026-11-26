@@ -110,7 +110,47 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 	}
 
 	public static CompiledQuery compileAst(ImpScmNode ast, ImpulseGraphSnapshot snapshot, Arena arena) {
+		if (canEmitV11(ast)) {
+			return CompiledQuery.fromV11(ast, snapshot);
+		}
 		return org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter.compileToExecutable(ast, snapshot, arena);
+	}
+
+	private static boolean canEmitV11(ImpScmNode ast) {
+		if (!(ast instanceof org.impulsegraph.compiler.ast.ScmProgram prog)) {
+			return false;
+		}
+		for (ImpScmNode step : prog.steps()) {
+			if (step instanceof org.impulsegraph.compiler.ast.ScmWalk
+					|| step instanceof org.impulsegraph.compiler.ast.ScmWalk2Hop
+					|| step instanceof org.impulsegraph.compiler.ast.ScmFixpoint
+					|| step instanceof org.impulsegraph.compiler.ast.ScmSetOp
+					|| step instanceof org.impulsegraph.compiler.ast.ScmReduce
+					|| step instanceof org.impulsegraph.compiler.ast.ScmLaneInitSeeds
+					|| step instanceof org.impulsegraph.compiler.ast.ScmLaneInitGroups
+					|| step instanceof org.impulsegraph.compiler.ast.ScmLanePruneMask
+					|| step instanceof org.impulsegraph.compiler.ast.ScmLaneWalk
+					|| step instanceof org.impulsegraph.compiler.ast.ScmLaneFilterQuorum
+					|| step instanceof org.impulsegraph.compiler.ast.ScmLaneReduceAnd
+					|| step instanceof org.impulsegraph.compiler.ast.ScmLaneReduceAttr
+					|| step instanceof org.impulsegraph.compiler.ast.ScmCollect) {
+				continue;
+			}
+			if (step instanceof org.impulsegraph.compiler.ast.ScmList list && !list.elements().isEmpty()
+					&& list.elements().get(0) instanceof org.impulsegraph.compiler.ast.ScmSymbol sym) {
+				String op = sym.name();
+				if ("domain-all".equals(op) || "repeat".equals(op) || "repeat-exact".equals(op)
+						|| "fixpoint-max-hops".equals(op) || "set-op-nodes".equals(op) || "cel-domain-filter".equals(op)
+						|| "cel-edge-walk".equals(op) || "cel-domain-reduce".equals(op)
+						|| "lane-init-domain-seeds".equals(op) || "lane-init-domain-groups".equals(op)
+						|| "lane-walk-both".equals(op) || "lane-walk-union".equals(op) || "lane-walk-where".equals(op)
+						|| "lane-fixpoint-max-hops".equals(op) || "lane-quorum-inplace".equals(op)) {
+					continue;
+				}
+			}
+			return false;
+		}
+		return true;
 	}
 
 	public static String disassembleQuery(ImpulseGraphQuery<?> query, ImpulseGraphSnapshot snapshot) {

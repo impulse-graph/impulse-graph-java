@@ -131,6 +131,9 @@ public final class V11SnapshotAdapter {
 			}
 		}
 
+		if (domCardMap.isEmpty() && relById.isEmpty()) {
+			maxDomId = 0;
+		}
 		int numDoms = Math.max(0, maxDomId + 1);
 		long[] domainCards = new long[numDoms];
 		for (int d = 0; d < numDoms; d++) {

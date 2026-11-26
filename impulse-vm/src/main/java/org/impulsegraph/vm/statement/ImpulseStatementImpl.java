@@ -148,7 +148,7 @@ public class ImpulseStatementImpl implements ImpulseStatement {
 				CompilerContext ctx = new CompilerContext(snapshot, CompilerOptions.DEFAULT,
 						new PassTracer(CompilerOptions.DEFAULT));
 				ImpScmNode bound = PhysicalBindingPass.INSTANCE.transform(targetAst, ctx);
-				cachedAstQuery = ImpOpsBytecodeEmitter.compileToExecutable(bound, snapshot, Arena.ofAuto());
+				cachedAstQuery = DefaultImpulseQueryEvaluator.compileAst(bound, snapshot, Arena.ofAuto());
 			}
 			return cachedAstQuery.execute(snapshot, input, null);
 		}

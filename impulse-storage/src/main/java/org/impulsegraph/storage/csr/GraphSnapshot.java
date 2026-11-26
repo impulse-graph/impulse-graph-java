@@ -88,6 +88,10 @@ public class GraphSnapshot
 			int maxNodes = maxDomNodes;
 			for (RelationSnapshot rel : copy.values()) {
 				if (rel != null) {
+					if (rel.getRelationId() < 0) {
+						rel.setCatalogMetadata(i, rel.getSrcDomainId(), rel.getTgtDomainId(), rel.getEncodingId(),
+								rel.getSectionFeatures(), rel.getComponentIds());
+					}
 					maxNodes = Math.max(maxNodes, rel.getNodeCount());
 					maxNodes = Math.max(maxNodes, rel.getTargetNodeCount());
 				}

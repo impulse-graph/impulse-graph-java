@@ -25,6 +25,7 @@ import org.impulsegraph.compiler.ast.ScmSymbol;
 import org.impulsegraph.compiler.ast.ScmWalk;
 import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
 import org.impulsegraph.vm.CompiledQuery;
+import org.impulsegraph.vm.DefaultImpulseQueryEvaluator;
 import org.impulsegraph.vm.VmLaneFrontier;
 
 import java.lang.foreign.Arena;
@@ -339,7 +340,7 @@ public final class DefaultMultiLaneTraversal implements MultiLaneTraversal {
 	public MultiLaneResult collect() {
 		ScmProgram prog = new ScmProgram(steps);
 		try (Arena arena = Arena.ofConfined()) {
-			CompiledQuery cq = ImpOpsBytecodeEmitter.compileToExecutable(prog, snapshot, arena);
+			CompiledQuery cq = DefaultImpulseQueryEvaluator.compileAst(prog, snapshot, arena);
 			Object raw = cq.execute(snapshot, 0L, arena);
 			org.impulsegraph.storage.csr.BinarySnapshotLoader.LoadedDomain loadedDom = (snapshot instanceof org.impulsegraph.storage.csr.GraphSnapshot gs)
 					? gs.getDomain(domainName)
@@ -376,7 +377,7 @@ public final class DefaultMultiLaneTraversal implements MultiLaneTraversal {
 		qSteps.add(ScmLaneFilterQuorum.of(Math.max(1, minLanes)));
 		ScmProgram prog = new ScmProgram(qSteps);
 		try (Arena arena = Arena.ofConfined()) {
-			CompiledQuery cq = ImpOpsBytecodeEmitter.compileToExecutable(prog, snapshot, arena);
+			CompiledQuery cq = DefaultImpulseQueryEvaluator.compileAst(prog, snapshot, arena);
 			Object raw = cq.execute(snapshot, 0L, arena);
 			if (raw instanceof ImpulseBitSet bs) {
 				List<Long> ids = new ArrayList<>();
