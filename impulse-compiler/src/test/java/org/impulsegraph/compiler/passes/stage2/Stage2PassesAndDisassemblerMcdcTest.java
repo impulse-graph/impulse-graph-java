@@ -10,7 +10,7 @@ import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
 import org.impulsegraph.storage.csr.GraphSnapshot;
 import org.impulsegraph.storage.csr.RelationSnapshot;
-import org.impulsegraph.vm.v11.V11IsaTables;
+import org.impulsegraph.vm.ImpulseIsaTables;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
@@ -125,12 +125,12 @@ class Stage2PassesAndDisassemblerMcdcTest {
 	@Test
 	void testImpAsmDisassemblerAllInstructionComments() {
 		V11ProgramBuilder b = new V11ProgramBuilder();
-		b.emitU16(V11IsaTables.OP_LOAD_PARAM, V11IsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
-		b.emitU16(V11IsaTables.OP_WALK, V11IsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 2, 0);
-		b.emitU16(V11IsaTables.OP_WALK, V11IsaTables.SUBOP_WALK_REV, 0, 2, 1, 0, 0, 3, 0);
-		b.emitU16(V11IsaTables.OP_COLLECT, V11IsaTables.SUBOP_COLLECT_FRONTIER_BITSET, 0, 0, 2, 0, 0, 0, 0);
+		b.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
+		b.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 2, 0);
+		b.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_REV, 0, 2, 1, 0, 0, 3, 0);
+		b.emitU16(ImpulseIsaTables.OP_COLLECT, ImpulseIsaTables.SUBOP_COLLECT_FRONTIER_BITSET, 0, 0, 2, 0, 0, 0, 0);
 		b.emit(0xFE, 0, 0, 0, 0, 0, 0, 0);
-		b.emit(V11IsaTables.OP_HALT, V11IsaTables.SUBOP_HALT_OK, 0, 0, 0, 0, 0, 0);
+		b.emit(ImpulseIsaTables.OP_HALT, ImpulseIsaTables.SUBOP_HALT_OK, 0, 0, 0, 0, 0, 0);
 
 		String asm = ImpAsmDisassembler.disassemble(b.toWordArray());
 		assertTrue(asm.contains(".version 0.11.0"));

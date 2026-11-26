@@ -2,7 +2,6 @@ package org.impulsegraph.vm;
 
 import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.compiler.ast.ImpScmNode;
-import org.impulsegraph.vm.v11.V11CompiledQuery;
 
 import java.lang.foreign.Arena;
 import java.util.Objects;
@@ -14,17 +13,17 @@ import java.util.Objects;
  */
 public final class CompiledQuery {
 
-	private final V11CompiledQuery v11Delegate;
+	private final ImpulseCompiledQuery v11Delegate;
 
 	public static CompiledQuery fromV11(ImpScmNode ast, ImpulseGraphSnapshot initialSnapshot) {
-		return new CompiledQuery(new V11CompiledQuery(ast, initialSnapshot));
+		return new CompiledQuery(new ImpulseCompiledQuery(ast, initialSnapshot));
 	}
 
-	private CompiledQuery(V11CompiledQuery v11Delegate) {
+	private CompiledQuery(ImpulseCompiledQuery v11Delegate) {
 		this.v11Delegate = Objects.requireNonNull(v11Delegate, "v11Delegate must not be null");
 	}
 
-	public V11CompiledQuery v11() {
+	public ImpulseCompiledQuery v11() {
 		return v11Delegate;
 	}
 

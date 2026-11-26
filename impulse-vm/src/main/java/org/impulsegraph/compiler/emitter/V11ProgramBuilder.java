@@ -1,8 +1,8 @@
 package org.impulsegraph.compiler.emitter;
 
-import org.impulsegraph.vm.v11.V11ImpbContainer;
-import org.impulsegraph.vm.v11.V11IsaTables;
-import org.impulsegraph.vm.v11.V11Vector;
+import org.impulsegraph.vm.ImpulseImpbContainer;
+import org.impulsegraph.vm.ImpulseIsaTables;
+import org.impulsegraph.vm.ImpulseVector;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,7 +15,7 @@ import java.util.List;
 public final class V11ProgramBuilder {
 
 	private final List<Long> words = new ArrayList<>();
-	private final List<V11ImpbContainer.ConstPoolEntry> constPool = new ArrayList<>();
+	private final List<ImpulseImpbContainer.ConstPoolEntry> constPool = new ArrayList<>();
 
 	public static long encodeWord(int opcode, int subop, int flags, int dst, int s1, int s2, int s3, int imm32) {
 		return (opcode & 0xFFL) | ((subop & 0x0FL) << 8) | ((flags & 0x0FL) << 12) | ((s1 & 0x0FL) << 16)
@@ -57,52 +57,52 @@ public final class V11ProgramBuilder {
 
 	public void emitLoadConstI64(int dst, long val) {
 		if (val >= Integer.MIN_VALUE && val <= Integer.MAX_VALUE) {
-			emit(V11IsaTables.OP_LOAD_CONST, V11IsaTables.SUBOP_LOAD_CONST_I32, 0, dst, 0, 0, 0, (int) val);
+			emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_I32, 0, dst, 0, 0, 0, (int) val);
 		} else {
-			emit(V11IsaTables.OP_LOAD_CONST, V11IsaTables.SUBOP_LOAD_CONST_I64, V11IsaTables.FLAG_EXTENDED, dst, 0, 0,
-					0, (int) (val & 0xFFFFFFFFL));
-			emit(V11IsaTables.OP_EXTENSION_PAYLOAD, 0, 0, 0, 0, 0, 0, (int) (val >>> 32));
+			emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_I64, ImpulseIsaTables.FLAG_EXTENDED,
+					dst, 0, 0, 0, (int) (val & 0xFFFFFFFFL));
+			emit(ImpulseIsaTables.OP_EXTENSION_PAYLOAD, 0, 0, 0, 0, 0, 0, (int) (val >>> 32));
 		}
 	}
 
 	public void emitLoadConstU64(int dst, long val) {
 		if (Long.compareUnsigned(val, 0xFFFFFFFFL) <= 0) {
-			emit(V11IsaTables.OP_LOAD_CONST, V11IsaTables.SUBOP_LOAD_CONST_U32, 0, dst, 0, 0, 0, (int) val);
+			emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_U32, 0, dst, 0, 0, 0, (int) val);
 		} else {
-			emit(V11IsaTables.OP_LOAD_CONST, V11IsaTables.SUBOP_LOAD_CONST_U64, V11IsaTables.FLAG_EXTENDED, dst, 0, 0,
-					0, (int) (val & 0xFFFFFFFFL));
-			emit(V11IsaTables.OP_EXTENSION_PAYLOAD, 0, 0, 0, 0, 0, 0, (int) (val >>> 32));
+			emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_U64, ImpulseIsaTables.FLAG_EXTENDED,
+					dst, 0, 0, 0, (int) (val & 0xFFFFFFFFL));
+			emit(ImpulseIsaTables.OP_EXTENSION_PAYLOAD, 0, 0, 0, 0, 0, 0, (int) (val >>> 32));
 		}
 	}
 
 	public void emitLoadConstF64(int dst, double val) {
 		float f32 = (float) val;
 		if ((double) f32 == val) {
-			emit(V11IsaTables.OP_LOAD_CONST, V11IsaTables.SUBOP_LOAD_CONST_F32, 0, dst, 0, 0, 0,
+			emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_F32, 0, dst, 0, 0, 0,
 					Float.floatToRawIntBits(f32));
 		} else {
 			long dbits = Double.doubleToRawLongBits(val);
-			emit(V11IsaTables.OP_LOAD_CONST, V11IsaTables.SUBOP_LOAD_CONST_F64, V11IsaTables.FLAG_EXTENDED, dst, 0, 0,
-					0, (int) (dbits & 0xFFFFFFFFL));
-			emit(V11IsaTables.OP_EXTENSION_PAYLOAD, 0, 0, 0, 0, 0, 0, (int) (dbits >>> 32));
+			emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_F64, ImpulseIsaTables.FLAG_EXTENDED,
+					dst, 0, 0, 0, (int) (dbits & 0xFFFFFFFFL));
+			emit(ImpulseIsaTables.OP_EXTENSION_PAYLOAD, 0, 0, 0, 0, 0, 0, (int) (dbits >>> 32));
 		}
 	}
 
 	public int addConstPoolStr(String s) {
 		int id = constPool.size();
-		constPool.add(V11ImpbContainer.ConstPoolEntry.ofStr(id, s));
+		constPool.add(ImpulseImpbContainer.ConstPoolEntry.ofStr(id, s));
 		return id;
 	}
 
 	public int addConstPoolFrontier(long[] ids) {
 		int id = constPool.size();
-		constPool.add(V11ImpbContainer.ConstPoolEntry.ofFrontier(id, ids));
+		constPool.add(ImpulseImpbContainer.ConstPoolEntry.ofFrontier(id, ids));
 		return id;
 	}
 
-	public int addConstPoolVec(V11Vector vec) {
+	public int addConstPoolVec(ImpulseVector vec) {
 		int id = constPool.size();
-		constPool.add(V11ImpbContainer.ConstPoolEntry.ofVec(id, vec));
+		constPool.add(ImpulseImpbContainer.ConstPoolEntry.ofVec(id, vec));
 		return id;
 	}
 
@@ -113,7 +113,7 @@ public final class V11ProgramBuilder {
 		return out;
 	}
 
-	public V11ImpbContainer buildImpb(int maxCallDepth, int entryPc, int requiredDomains) {
-		return V11ImpbContainer.encode(toWordArray(), constPool, maxCallDepth, entryPc, requiredDomains);
+	public ImpulseImpbContainer buildImpb(int maxCallDepth, int entryPc, int requiredDomains) {
+		return ImpulseImpbContainer.encode(toWordArray(), constPool, maxCallDepth, entryPc, requiredDomains);
 	}
 }

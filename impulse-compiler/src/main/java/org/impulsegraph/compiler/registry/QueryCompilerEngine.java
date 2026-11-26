@@ -1,7 +1,7 @@
 package org.impulsegraph.compiler.registry;
 
 import org.impulsegraph.compiler.ast.ImpScmNode;
-import org.impulsegraph.compiler.emitter.ImpOpsV11BytecodeEmitter;
+import org.impulsegraph.compiler.emitter.ImpOpsBytecodeEmitter;
 import org.impulsegraph.compiler.metrics.CompilerMetricsRecorder;
 import org.impulsegraph.compiler.metrics.PlanCacheMetricsRecorder;
 import org.impulsegraph.compiler.passes.CompilerContext;
@@ -123,7 +123,7 @@ public final class QueryCompilerEngine {
 	 * Executes Stage 2 (Snapshot-Bound) compilation targeting ImpulseVM v0.11.0
 	 * ({@code .impb} v11).
 	 */
-	public ImpOpsV11BytecodeEmitter.V11CompiledProgram compileStage2V11(QueryObject queryObject,
+	public ImpOpsBytecodeEmitter.CompiledProgram compileStage2V11(QueryObject queryObject,
 			ImpulseGraphSnapshot snapshot, CompilerOptions options) {
 		Objects.requireNonNull(queryObject, "queryObject must not be null");
 		Objects.requireNonNull(snapshot, "snapshot must not be null");
@@ -140,7 +140,7 @@ public final class QueryCompilerEngine {
 			ast = ctx.executePass(FilterPushdownPass.INSTANCE, ast);
 			ast = ctx.executePass(PhysicalBindingPass.INSTANCE, ast);
 
-			ImpOpsV11BytecodeEmitter.V11CompiledProgram compiled = ImpOpsV11BytecodeEmitter.emit(ast, snapshot);
+			ImpOpsBytecodeEmitter.CompiledProgram compiled = ImpOpsBytecodeEmitter.emit(ast, snapshot);
 			compilerMetrics.recordStage2(System.nanoTime() - start);
 			return compiled;
 		} catch (Exception e) {

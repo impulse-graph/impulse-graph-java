@@ -5,9 +5,9 @@ import org.impulsegraph.api.RelationSnapshot;
 import org.impulsegraph.compiler.emitter.V11ProgramBuilder;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 import org.impulsegraph.storage.csr.GraphSnapshot;
-import org.impulsegraph.vm.v11.V11ImpbContainer;
-import org.impulsegraph.vm.v11.V11IsaTables;
-import org.impulsegraph.vm.v11.V11Validator;
+import org.impulsegraph.vm.ImpulseImpbContainer;
+import org.impulsegraph.vm.ImpulseIsaTables;
+import org.impulsegraph.vm.ImpulseValidator;
 
 import java.util.*;
 
@@ -22,7 +22,7 @@ public final class ImpScmV11Compiler {
 	private ImpScmV11Compiler() {
 	}
 
-	public record CompileResult(V11ImpbContainer container, Map<String, Integer> paramNameToId,
+	public record CompileResult(ImpulseImpbContainer container, Map<String, Integer> paramNameToId,
 			List<String> outputNames) {
 		public long[] codeWords() {
 			return container.codeWords;
@@ -256,25 +256,25 @@ public final class ImpScmV11Compiler {
 			if ("domain-all".equals(head)) {
 				int dom = resolveDomain(e.elems.get(1).text);
 				int dst = allocF();
-				b.emitU16(V11IsaTables.OP_INIT_DOMAIN_SPAN, V11IsaTables.SUBOP_INIT_DOMAIN_SPAN_ALL_SPAN, 0, dst, 0, 0,
-						0, dom, 0);
+				b.emitU16(ImpulseIsaTables.OP_INIT_DOMAIN_SPAN, ImpulseIsaTables.SUBOP_INIT_DOMAIN_SPAN_ALL_SPAN, 0,
+						dst, 0, 0, 0, dom, 0);
 				return new TypedVal(ValBank.FRONTIER, dst, dom);
 			}
 			if ("seed".equals(head)) {
 				int dom = resolveDomain(e.elems.get(1).text);
 				int dst = allocF();
 				if (e.elems.size() == 2) {
-					b.emitU16(V11IsaTables.OP_FSEED, V11IsaTables.SUBOP_FSEED_EMPTY, 0, dst, 0, 0, 0, dom, 0);
+					b.emitU16(ImpulseIsaTables.OP_FSEED, ImpulseIsaTables.SUBOP_FSEED_EMPTY, 0, dst, 0, 0, 0, dom, 0);
 				} else {
 					TypedVal id0 = eval(e.elems.get(2));
 					if (id0.domId != 0xFFFF && id0.domId != dom)
 						throw new IllegalArgumentException("DOMAIN_MISMATCH: seed id domain mismatch");
-					b.emitU16(V11IsaTables.OP_FSEED, V11IsaTables.SUBOP_FSEED_SINGLE_REG, 0, dst, id0.reg, 0, 0, dom,
-							0);
+					b.emitU16(ImpulseIsaTables.OP_FSEED, ImpulseIsaTables.SUBOP_FSEED_SINGLE_REG, 0, dst, id0.reg, 0, 0,
+							dom, 0);
 					for (int i = 3; i < e.elems.size(); i++) {
 						TypedVal idi = eval(e.elems.get(i));
-						b.emitU16(V11IsaTables.OP_FSEED, V11IsaTables.SUBOP_FSEED_INSERT_REG, 0, dst, idi.reg, 0, 0,
-								dom, 0);
+						b.emitU16(ImpulseIsaTables.OP_FSEED, ImpulseIsaTables.SUBOP_FSEED_INSERT_REG, 0, dst, idi.reg,
+								0, 0, dom, 0);
 					}
 				}
 				return new TypedVal(ValBank.FRONTIER, dst, dom);
@@ -314,22 +314,26 @@ public final class ImpScmV11Compiler {
 				if (hasExcl && exclF.domId != outDom) {
 					throw new IllegalArgumentException("DOMAIN_MISMATCH: walk :exclude frontier domain mismatch");
 				}
-				int wsub = V11IsaTables.SUBOP_WALK_FWD;
+				int wsub = ImpulseIsaTables.SUBOP_WALK_FWD;
 				if (":fwd".equals(dir)) {
 					wsub = transStar
-							? V11IsaTables.SUBOP_WALK_FWD_FIXPOINT_STAR
-							: (transPlus ? V11IsaTables.SUBOP_WALK_FWD_FIXPOINT_PLUS : V11IsaTables.SUBOP_WALK_FWD);
+							? ImpulseIsaTables.SUBOP_WALK_FWD_FIXPOINT_STAR
+							: (transPlus
+									? ImpulseIsaTables.SUBOP_WALK_FWD_FIXPOINT_PLUS
+									: ImpulseIsaTables.SUBOP_WALK_FWD);
 				} else if (":rev".equals(dir)) {
 					wsub = transStar
-							? V11IsaTables.SUBOP_WALK_REV_FIXPOINT_STAR
-							: (transPlus ? V11IsaTables.SUBOP_WALK_REV_FIXPOINT_PLUS : V11IsaTables.SUBOP_WALK_REV);
+							? ImpulseIsaTables.SUBOP_WALK_REV_FIXPOINT_STAR
+							: (transPlus
+									? ImpulseIsaTables.SUBOP_WALK_REV_FIXPOINT_PLUS
+									: ImpulseIsaTables.SUBOP_WALK_REV);
 				} else if (":both".equals(dir)) {
-					wsub = V11IsaTables.SUBOP_WALK_BOTH;
+					wsub = ImpulseIsaTables.SUBOP_WALK_BOTH;
 				}
 				int dst = allocF();
-				int flags = hasExcl ? V11IsaTables.FLAG_MASKED_S3 : 0;
+				int flags = hasExcl ? ImpulseIsaTables.FLAG_MASKED_S3 : 0;
 				int s3 = hasExcl ? exclF.reg : 0;
-				b.emitU16(V11IsaTables.OP_WALK, wsub, flags, dst, srcF.reg, 0, s3, rel.relId, 0);
+				b.emitU16(ImpulseIsaTables.OP_WALK, wsub, flags, dst, srcF.reg, 0, s3, rel.relId, 0);
 				return new TypedVal(ValBank.FRONTIER, dst, outDom);
 			}
 			if ("set-union".equals(head) || "set-intersect".equals(head) || "set-diff".equals(head)
@@ -341,13 +345,13 @@ public final class ImpScmV11Compiler {
 				if (a.domId != bv.domId)
 					throw new IllegalArgumentException("DOMAIN_MISMATCH: set-op domain mismatch");
 				int ssub = switch (head) {
-					case "set-intersect" -> V11IsaTables.SUBOP_SET_OP_INTERSECT;
-					case "set-diff" -> V11IsaTables.SUBOP_SET_OP_DIFF;
-					case "set-sym-diff" -> V11IsaTables.SUBOP_SET_OP_SYM_DIFF;
-					default -> V11IsaTables.SUBOP_SET_OP_UNION;
+					case "set-intersect" -> ImpulseIsaTables.SUBOP_SET_OP_INTERSECT;
+					case "set-diff" -> ImpulseIsaTables.SUBOP_SET_OP_DIFF;
+					case "set-sym-diff" -> ImpulseIsaTables.SUBOP_SET_OP_SYM_DIFF;
+					default -> ImpulseIsaTables.SUBOP_SET_OP_UNION;
 				};
 				int dst = allocF();
-				b.emit(V11IsaTables.OP_SET_OP, ssub, 0, dst, a.reg, bv.reg, 0, 0);
+				b.emit(ImpulseIsaTables.OP_SET_OP, ssub, 0, dst, a.reg, bv.reg, 0, 0);
 				return new TypedVal(ValBank.FRONTIER, dst, a.domId);
 			}
 			if ("cardinality".equals(head)) {
@@ -355,8 +359,8 @@ public final class ImpScmV11Compiler {
 				if (f.bank != ValBank.FRONTIER)
 					throw new IllegalArgumentException("TYPE_MISMATCH: cardinality requires frontier");
 				int dst = allocR();
-				b.emit(V11IsaTables.OP_SET_CARDINALITY, V11IsaTables.SUBOP_SET_CARDINALITY_CARD_1BIT, 0, dst, f.reg, 0,
-						0, 0);
+				b.emit(ImpulseIsaTables.OP_SET_CARDINALITY, ImpulseIsaTables.SUBOP_SET_CARDINALITY_CARD_1BIT, 0, dst,
+						f.reg, 0, 0, 0);
 				return new TypedVal(ValBank.SCALAR_U64, dst, 0xFFFF);
 			}
 			if ("contains?".equals(head)) {
@@ -367,8 +371,8 @@ public final class ImpScmV11Compiler {
 				if (id.domId != 0xFFFF && id.domId != f.domId)
 					throw new IllegalArgumentException("DOMAIN_MISMATCH: contains? id domain mismatch");
 				int dst = allocR();
-				b.emit(V11IsaTables.OP_SET_CONTAINS, V11IsaTables.SUBOP_SET_CONTAINS_CONTAINS_1BIT, 0, dst, f.reg,
-						id.reg, 0, 0);
+				b.emit(ImpulseIsaTables.OP_SET_CONTAINS, ImpulseIsaTables.SUBOP_SET_CONTAINS_CONTAINS_1BIT, 0, dst,
+						f.reg, id.reg, 0, 0);
 				return new TypedVal(ValBank.SCALAR_BOOL, dst, 0xFFFF);
 			}
 			if ("+".equals(head) || "-".equals(head) || "*".equals(head) || "/".equals(head)) {
@@ -385,21 +389,21 @@ public final class ImpScmV11Compiler {
 				int dst = allocR();
 				if (li && ri) {
 					int asub = switch (head) {
-						case "-" -> V11IsaTables.SUBOP_SCALAR_INT_ALU_SUB;
-						case "*" -> V11IsaTables.SUBOP_SCALAR_INT_ALU_MUL;
-						case "/" -> V11IsaTables.SUBOP_SCALAR_INT_ALU_DIV_S;
-						default -> V11IsaTables.SUBOP_SCALAR_INT_ALU_ADD;
+						case "-" -> ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_SUB;
+						case "*" -> ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_MUL;
+						case "/" -> ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_DIV_S;
+						default -> ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_ADD;
 					};
-					b.emit(V11IsaTables.OP_SCALAR_INT_ALU, asub, 0, dst, lhs.reg, rhs.reg, 0, 0);
+					b.emit(ImpulseIsaTables.OP_SCALAR_INT_ALU, asub, 0, dst, lhs.reg, rhs.reg, 0, 0);
 					return new TypedVal(ValBank.SCALAR_I64, dst, 0xFFFF);
 				}
 				int fsub = switch (head) {
-					case "-" -> V11IsaTables.SUBOP_SCALAR_FP_ALU_SUB;
-					case "*" -> V11IsaTables.SUBOP_SCALAR_FP_ALU_MUL;
-					case "/" -> V11IsaTables.SUBOP_SCALAR_FP_ALU_DIV;
-					default -> V11IsaTables.SUBOP_SCALAR_FP_ALU_ADD;
+					case "-" -> ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_SUB;
+					case "*" -> ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_MUL;
+					case "/" -> ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_DIV;
+					default -> ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_ADD;
 				};
-				b.emit(V11IsaTables.OP_SCALAR_FP_ALU, fsub, 0, dst, lhs.reg, rhs.reg, 0, 0);
+				b.emit(ImpulseIsaTables.OP_SCALAR_FP_ALU, fsub, 0, dst, lhs.reg, rhs.reg, 0, 0);
 				return new TypedVal(ValBank.SCALAR_F64, dst, 0xFFFF);
 			}
 			if ("cast".equals(head)) {
@@ -407,12 +411,12 @@ public final class ImpScmV11Compiler {
 				String ty = e.elems.get(2).text;
 				int dst = allocR();
 				if ("f64".equals(ty) || "f32".equals(ty)) {
-					b.emit(V11IsaTables.OP_SCALAR_FP_ALU, V11IsaTables.SUBOP_SCALAR_FP_ALU_I64_TO_F64, 0, dst, v.reg, 0,
-							0, 0);
+					b.emit(ImpulseIsaTables.OP_SCALAR_FP_ALU, ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_I64_TO_F64, 0, dst,
+							v.reg, 0, 0, 0);
 					return new TypedVal(ValBank.SCALAR_F64, dst, 0xFFFF);
 				}
-				b.emit(V11IsaTables.OP_SCALAR_FP_ALU, V11IsaTables.SUBOP_SCALAR_FP_ALU_F64_TO_I64, 0, dst, v.reg, 0, 0,
-						0);
+				b.emit(ImpulseIsaTables.OP_SCALAR_FP_ALU, ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_F64_TO_I64, 0, dst,
+						v.reg, 0, 0, 0);
 				return new TypedVal(ValBank.SCALAR_I64, dst, 0xFFFF);
 			}
 			if ("collect".equals(head)) {
@@ -422,13 +426,13 @@ public final class ImpScmV11Compiler {
 				int slot = outputSlot++;
 				outputNames.add(cname);
 				int csub = switch (kind) {
-					case ":frontier-bitset" -> V11IsaTables.SUBOP_COLLECT_FRONTIER_BITSET;
-					case ":frontier-ids" -> V11IsaTables.SUBOP_COLLECT_FRONTIER_IDS;
-					case ":vec" -> V11IsaTables.SUBOP_COLLECT_VEC;
-					case ":scalar" -> V11IsaTables.SUBOP_COLLECT_SCALAR;
+					case ":frontier-bitset" -> ImpulseIsaTables.SUBOP_COLLECT_FRONTIER_BITSET;
+					case ":frontier-ids" -> ImpulseIsaTables.SUBOP_COLLECT_FRONTIER_IDS;
+					case ":vec" -> ImpulseIsaTables.SUBOP_COLLECT_VEC;
+					case ":scalar" -> ImpulseIsaTables.SUBOP_COLLECT_SCALAR;
 					default -> throw new IllegalArgumentException("PARSE_ERROR: unknown collect kind '" + kind + "'");
 				};
-				b.emitU16(V11IsaTables.OP_COLLECT, csub, 0, 0, v.reg, 0, 0, slot, 0);
+				b.emitU16(ImpulseIsaTables.OP_COLLECT, csub, 0, 0, v.reg, 0, 0, slot, 0);
 				return v;
 			}
 			throw new IllegalArgumentException("PARSE_ERROR: unsupported ImpScheme v0.11 form '" + head + "'");
@@ -451,14 +455,14 @@ public final class ImpScmV11Compiler {
 				if (ty.kind == Kind.LIST && ty.elems.size() == 2 && "id".equals(ty.elems.get(0).text)) {
 					int dom = ctx.resolveDomain(ty.elems.get(1).text);
 					int r = ctx.allocR();
-					ctx.b.emitU16(V11IsaTables.OP_LOAD_PARAM, V11IsaTables.SUBOP_LOAD_PARAM_SCALAR, 0, r, 0, 0, 0, pid,
-							V11IsaTables.SCALAR_U64);
+					ctx.b.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_SCALAR, 0, r, 0, 0,
+							0, pid, ImpulseIsaTables.SCALAR_U64);
 					ctx.env.put(pname, new TypedVal(ValBank.SCALAR_U64, r, dom));
 				} else if (ty.kind == Kind.LIST && ty.elems.size() == 2 && "frontier".equals(ty.elems.get(0).text)) {
 					int dom = ctx.resolveDomain(ty.elems.get(1).text);
 					int f = ctx.allocF();
-					ctx.b.emitU16(V11IsaTables.OP_LOAD_PARAM, V11IsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, f, 0, 0, 0,
-							pid, dom);
+					ctx.b.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, f, 0,
+							0, 0, pid, dom);
 					ctx.env.put(pname, new TypedVal(ValBank.FRONTIER, f, dom));
 				} else if (ty.kind == Kind.SYMBOL) {
 					int r = ctx.allocR();
@@ -469,13 +473,13 @@ public final class ImpScmV11Compiler {
 						default -> ValBank.SCALAR_I64;
 					};
 					int stag = switch (vb) {
-						case SCALAR_U64 -> V11IsaTables.SCALAR_U64;
-						case SCALAR_F64 -> V11IsaTables.SCALAR_F64;
-						case SCALAR_BOOL -> V11IsaTables.SCALAR_BOOL_3VL;
-						default -> V11IsaTables.SCALAR_I64;
+						case SCALAR_U64 -> ImpulseIsaTables.SCALAR_U64;
+						case SCALAR_F64 -> ImpulseIsaTables.SCALAR_F64;
+						case SCALAR_BOOL -> ImpulseIsaTables.SCALAR_BOOL_3VL;
+						default -> ImpulseIsaTables.SCALAR_I64;
 					};
-					ctx.b.emitU16(V11IsaTables.OP_LOAD_PARAM, V11IsaTables.SUBOP_LOAD_PARAM_SCALAR, 0, r, 0, 0, 0, pid,
-							stag);
+					ctx.b.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_SCALAR, 0, r, 0, 0,
+							0, pid, stag);
 					ctx.env.put(pname, new TypedVal(vb, r, 0xFFFF));
 				} else {
 					throw new IllegalArgumentException("PARSE_ERROR: unsupported param type");
@@ -485,14 +489,14 @@ public final class ImpScmV11Compiler {
 			}
 		}
 		if (!enableOptimizations) {
-			ctx.b.emit(V11IsaTables.OP_NOP, 0, 0, 0, 0, 0, 0, 0);
+			ctx.b.emit(ImpulseIsaTables.OP_NOP, 0, 0, 0, 0, 0, 0, 0);
 		}
-		ctx.b.emit(V11IsaTables.OP_HALT, V11IsaTables.SUBOP_HALT_OK, 0, 0, 0, 0, 0, 0);
+		ctx.b.emit(ImpulseIsaTables.OP_HALT, ImpulseIsaTables.SUBOP_HALT_OK, 0, 0, 0, 0, 0, 0);
 
 		int reqDoms = (snapshot != null && snapshot.getDomainNames() != null) ? snapshot.getDomainNames().size() : 0;
-		V11ImpbContainer container = ctx.b.buildImpb(0, 0, reqDoms);
-		V11Validator.ValidationResult vr = V11Validator.validate(container.codeWords);
-		if (vr.status() != V11IsaTables.IMPULSE_VM_OK) {
+		ImpulseImpbContainer container = ctx.b.buildImpb(0, 0, reqDoms);
+		ImpulseValidator.ValidationResult vr = ImpulseValidator.validate(container.codeWords);
+		if (vr.status() != ImpulseIsaTables.IMPULSE_VM_OK) {
 			throw new IllegalStateException("VALIDATION_ERROR: invalid v0.11 bytecode at pc=" + vr.badPc());
 		}
 		return new CompileResult(container, ctx.paramMap, ctx.outputNames);
