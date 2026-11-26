@@ -1929,16 +1929,19 @@ public final class V11Pillar3Ops {
 				}
 				V11Vector vd = ws.vVectors[d];
 				if (committedVF64[d] && vd != null && vd.elemTag == V11Vector.TAG_F64) {
-					accVF64[d] = Arrays.copyOf(vd.f64Data, vd.length);
-					accVF64Valid[d] = new boolean[vd.length];
 					if (accumVF64[d]) {
+						accVF64[d] = Arrays.copyOf(vd.f64Data, vd.length);
+						accVF64Valid[d] = new boolean[vd.length];
 						for (int i = 0; i < vd.length; i++)
 							accVF64Valid[d][i] = vd.isValidAt(i);
+					} else {
+						accVF64[d] = new double[vd.length];
+						accVF64Valid[d] = null; // Lazy all-valid for non-accum scatter_add
 					}
 				}
 				if (committedVU64[d] && vd != null
 						&& (vd.elemTag == V11Vector.TAG_U64 || vd.elemTag == V11Vector.TAG_I64)) {
-					accVU64[d] = Arrays.copyOf(vd.i64Data, vd.length);
+					accVU64[d] = accumVU64[d] ? Arrays.copyOf(vd.i64Data, vd.length) : new long[vd.length];
 					accVU64Valid[d] = new boolean[vd.length];
 					if (accumVU64[d]) {
 						for (int i = 0; i < vd.length; i++)
@@ -1950,7 +1953,8 @@ public final class V11Pillar3Ops {
 				}
 			}
 
-			// Re-apply non-accum initializers for subop 2 (scatter_add starts at 0.0 valid)
+			// Non-accum subops 3,4 (min/max) start invalid; subop 2 (scatter_add) keeps
+			// accVF64Valid==null
 			for (int p = hdrPc + 1; p < endPc; p++) {
 				long cw = program[p];
 				if ((int) (cw & 0xFFL) == OP_MORSEL_COMMIT) {
@@ -1958,9 +1962,8 @@ public final class V11Pillar3Ops {
 					int cFlags = (int) ((cw >>> 12) & 0xFL);
 					int cDst = (int) ((cw >>> 20) & 0xFL);
 					boolean cAccum = (cFlags & FLAG_ACCUM) != 0;
-					if (cSub == 2 && !cAccum && accVF64[cDst] != null) {
-						Arrays.fill(accVF64[cDst], 0.0);
-						Arrays.fill(accVF64Valid[cDst], true);
+					if ((cSub == 3 || cSub == 4) && !cAccum && accVF64[cDst] != null && accVF64Valid[cDst] == null) {
+						accVF64Valid[cDst] = new boolean[accVF64[cDst].length];
 					}
 				}
 			}
@@ -2087,12 +2090,28 @@ public final class V11Pillar3Ops {
 					}
 					if (committedVF64[d] && accVF64[d] != null) {
 						int n = accVF64[d].length;
-						long[] vBits = new long[Math.max(1, (n + 63) >>> 6)];
-						for (int i = 0; i < n; i++) {
-							if (accVF64Valid[d][i]) {
-								vBits[i >>> 6] |= (1L << (i & 63));
-								if (accVF64[d][i] != 0.0)
-									anyNonEmpty = true;
+						int vw = Math.max(1, (n + 63) >>> 6);
+						long[] vBits = new long[vw];
+						if (accVF64Valid[d] == null) {
+							Arrays.fill(vBits, -1L);
+							if ((n & 63) != 0)
+								vBits[vw - 1] = (1L << (n & 63)) - 1L;
+							if (!anyNonEmpty) {
+								double[] arr = accVF64[d];
+								for (int i = 0; i < n; i++) {
+									if (arr[i] != 0.0) {
+										anyNonEmpty = true;
+										break;
+									}
+								}
+							}
+						} else {
+							for (int i = 0; i < n; i++) {
+								if (accVF64Valid[d][i]) {
+									vBits[i >>> 6] |= (1L << (i & 63));
+									if (accVF64[d][i] != 0.0)
+										anyNonEmpty = true;
+								}
 							}
 						}
 						ws.vVectors[d] = V11Vector.ofF64(accVF64[d], vBits);
@@ -2118,6 +2137,114 @@ public final class V11Pillar3Ops {
 				ws.pc = endPc + 1;
 			}
 		}
+	}
+
+	private static void execMorselScatterF64(V11Workspace ws, MorselStreamSession sess, int subop, int dst, int s1,
+			int s2, boolean scalar, int[] commitIds, int commitCnt) {
+		V11Vector ids = ws.vVectors[s1];
+		double[] dstArr = sess.accVF64[dst];
+		if (ids == null || ids.elemTag != V11Vector.TAG_U64 || dstArr == null) {
+			ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+			return;
+		}
+		V11Vector vals = scalar ? null : ws.vVectors[s2];
+		boolean[] dstVal = sess.accVF64Valid[dst];
+		if (subop == 2 && !scalar && dstVal == null && vals != null && vals.elemTag == V11Vector.TAG_F64
+				&& ids.validBits == sess.allValid) {
+			long[] idArr = ids.i64Data;
+			double[] valArr = vals.f64Data;
+			long[] valBits = vals.validBits;
+			int dstLen = dstArr.length;
+			for (int k = 0; k < commitCnt; k++) {
+				int i = commitIds[k];
+				if (valBits != null && ((valBits[i >>> 6] >>> (i & 63)) & 1L) == 0L)
+					continue;
+				double v = valArr[i];
+				if (v != v)
+					continue;
+				long tgt64 = idArr[i];
+				int ti = (int) tgt64;
+				if (tgt64 < 0L || ti < 0 || ti >= dstLen) {
+					ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+					return;
+				}
+				double sum = dstArr[ti] + v;
+				if (sum == sum) {
+					dstArr[ti] = sum;
+				} else {
+					dstVal = new boolean[dstLen];
+					Arrays.fill(dstVal, true);
+					sess.accVF64Valid[dst] = dstVal;
+					dstVal[ti] = false;
+					for (int k2 = k + 1; k2 < commitCnt; k2++) {
+						int i2 = commitIds[k2];
+						if (valBits != null && ((valBits[i2 >>> 6] >>> (i2 & 63)) & 1L) == 0L)
+							continue;
+						double v2 = valArr[i2];
+						if (v2 != v2)
+							continue;
+						long t64 = idArr[i2];
+						int ti2 = (int) t64;
+						if (t64 < 0L || ti2 < 0 || ti2 >= dstLen) {
+							ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+							return;
+						}
+						double prev2 = dstVal[ti2] ? dstArr[ti2] : 0.0;
+						double s2v = prev2 + v2;
+						if (s2v != s2v)
+							dstVal[ti2] = false;
+						else {
+							dstArr[ti2] = s2v;
+							dstVal[ti2] = true;
+						}
+					}
+					break;
+				}
+			}
+			ws.pc++;
+			return;
+		}
+		if (dstVal == null) {
+			dstVal = new boolean[dstArr.length];
+			Arrays.fill(dstVal, true);
+			sess.accVF64Valid[dst] = dstVal;
+		}
+		boolean rOk = scalar && ws.isRValid(s2);
+		double rVal = rOk ? Double.longBitsToDouble(ws.rRegs[s2]) : Double.NaN;
+		for (int k = 0; k < commitCnt; k++) {
+			int i = commitIds[k];
+			if (!ids.isValidAt(i))
+				continue;
+			boolean hasV = scalar
+					? (rOk && !Double.isNaN(rVal))
+					: (vals != null && vals.elemTag == V11Vector.TAG_F64 && vals.isValidAt(i));
+			if (!hasV)
+				continue;
+			double v = scalar ? rVal : vals.f64Data[i];
+			long tgt64 = ids.i64Data[i];
+			int ti = (int) tgt64;
+			if (tgt64 < 0L || ti < 0 || ti >= dstArr.length) {
+				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+				return;
+			}
+			if (subop == 2) {
+				double prev = dstVal[ti] ? dstArr[ti] : 0.0;
+				double sum = prev + v;
+				if (Double.isNaN(sum)) {
+					dstVal[ti] = false;
+				} else {
+					dstArr[ti] = sum;
+					dstVal[ti] = true;
+				}
+			} else if (subop == 3) {
+				dstArr[ti] = dstVal[ti] ? ieeeMinF64(dstArr[ti], v) : v;
+				dstVal[ti] = true;
+			} else {
+				dstArr[ti] = dstVal[ti] ? ieeeMaxF64(dstArr[ti], v) : v;
+				dstVal[ti] = true;
+			}
+		}
+		ws.pc++;
 	}
 
 	private static void execMorselBodyInst(MorselStreamSession sess, int morselLen, long w) {
@@ -2631,19 +2758,17 @@ public final class V11Pillar3Ops {
 						&& (subop >= 8 || scalar
 								|| (rv != null && rv.elemTag == V11Vector.TAG_F64 && rv.length >= morselLen))) {
 					if (subop >= 8) {
-						V11SimdKernels.f64ArithUnary(subop, lhs.f64Data, out, morselLen);
-						V11SimdKernels.f64PackValidWords(out, lhs.validBits, null, false, false, vBits, morselLen);
+						V11SimdKernels.f64ArithUnaryValid(subop, lhs.f64Data, lhs.validBits, out, vBits, morselLen);
 					} else if (scalar) {
 						if (rScOk) {
-							V11SimdKernels.f64ArithScalar(subop, lhs.f64Data, rSc, out, morselLen);
-							V11SimdKernels.f64PackValidWords(out, lhs.validBits, null, true, true, vBits, morselLen);
+							V11SimdKernels.f64ArithScalarValid(subop, lhs.f64Data, rSc, lhs.validBits, out, vBits,
+									morselLen);
 						} else {
 							Arrays.fill(vBits, 0, words, 0L);
 						}
 					} else {
-						V11SimdKernels.f64ArithVec(subop, lhs.f64Data, rv.f64Data, out, morselLen);
-						V11SimdKernels.f64PackValidWords(out, lhs.validBits, rv.validBits, true, true, vBits,
-								morselLen);
+						V11SimdKernels.f64ArithVecValid(subop, lhs.f64Data, rv.f64Data, lhs.validBits, rv.validBits,
+								out, vBits, morselLen);
 					}
 				} else {
 					Arrays.fill(vBits, 0, words, 0L);
@@ -2835,50 +2960,7 @@ public final class V11Pillar3Ops {
 						ws.pc++;
 					}
 					case 2, 3, 4 -> { // .scatter_add / min / max
-						V11Vector ids = ws.vVectors[s1];
-						if (ids == null || ids.elemTag != V11Vector.TAG_U64 || accVF64[dst] == null) {
-							ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
-							return;
-						}
-						V11Vector vals = scalar ? null : ws.vVectors[s2];
-						boolean rOk = scalar && ws.isRValid(s2);
-						double rVal = rOk ? Double.longBitsToDouble(ws.rRegs[s2]) : Double.NaN;
-						double[] dstArr = accVF64[dst];
-						boolean[] dstVal = accVF64Valid[dst];
-						for (int k = 0; k < commitCnt; k++) {
-							int i = commitIds[k];
-							if (!ids.isValidAt(i))
-								continue;
-							boolean hasV = scalar
-									? (rOk && !Double.isNaN(rVal))
-									: (vals != null && vals.elemTag == V11Vector.TAG_F64 && vals.isValidAt(i));
-							if (!hasV)
-								continue;
-							double v = scalar ? rVal : vals.f64Data[i];
-							long tgt64 = ids.i64Data[i];
-							int ti = (int) tgt64;
-							if (tgt64 < 0L || ti < 0 || ti >= dstArr.length) {
-								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-								return;
-							}
-							if (subop == 2) {
-								double prev = dstVal[ti] ? dstArr[ti] : 0.0;
-								double sum = prev + v;
-								if (Double.isNaN(sum)) {
-									dstVal[ti] = false;
-								} else {
-									dstArr[ti] = sum;
-									dstVal[ti] = true;
-								}
-							} else if (subop == 3) {
-								dstArr[ti] = dstVal[ti] ? ieeeMinF64(dstArr[ti], v) : v;
-								dstVal[ti] = true;
-							} else {
-								dstArr[ti] = dstVal[ti] ? ieeeMaxF64(dstArr[ti], v) : v;
-								dstVal[ti] = true;
-							}
-						}
-						ws.pc++;
+						execMorselScatterF64(ws, sess, subop, dst, s1, s2, scalar, commitIds, commitCnt);
 					}
 					case 5, 6, 7 -> { // .scatter_min_src / argmin / argmax
 						V11Vector ids = ws.vVectors[s1];
