@@ -24,8 +24,9 @@ public final class DefaultSnapshotBuilder {
 	}
 
 	public static byte[] writeSnapshotBytes(GraphSnapshot graph) {
-		return new DefaultSnapshotBuilder().build(new BinarySnapshotLoader.DefaultLoadedSnapshot(SPEC_MAGIC,
-				(short) SPEC_VERSION_PACKED, graph, Map.of(), Map.of(), Map.of(), Map.of()));
+		return new DefaultSnapshotBuilder()
+				.build(new BinarySnapshotLoader.DefaultLoadedSnapshot(SPEC_MAGIC, (short) SPEC_VERSION_PACKED, graph,
+						Map.of(), Map.of(), Map.of(), graph != null ? graph.getMetadataMap() : Map.of()));
 	}
 
 	public static class DomainAttributeEntry {
