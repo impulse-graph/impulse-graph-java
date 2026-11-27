@@ -3148,7 +3148,7 @@ public final class ImpulsePillar3Ops {
 				vGather.length = len;
 				ws.vVectors[dst] = vGather;
 				return;
-			} else if ((base >= 1 && base <= 4) || base == 8 || base == 9) {
+			} else if ((base >= 1 && base <= 4) || base == 8 || base == 9 || base == 21) {
 				long[] scratchI64 = vGather.i64Data;
 				switch (base) {
 					case 1 -> {
@@ -3192,7 +3192,7 @@ public final class ImpulsePillar3Ops {
 						}
 					}
 				}
-				vGather.elemTag = (base <= 4) ? ImpulseVector.TAG_I64 : ImpulseVector.TAG_U64;
+				vGather.elemTag = (base <= 4 || base == 21) ? ImpulseVector.TAG_I64 : ImpulseVector.TAG_U64;
 				vGather.length = len;
 				ws.vVectors[dst] = vGather;
 				return;
@@ -3330,7 +3330,7 @@ public final class ImpulsePillar3Ops {
 				}
 				ws.pc++;
 				return;
-			} else if ((base >= 1 && base <= 4) || base == 8 || base == 9) {
+			} else if ((base >= 1 && base <= 4) || base == 8 || base == 9 || base == 21) {
 				long[] out = reuseDst ? sess.scratchVecI64[dst - 8].i64Data : ws.arena.allocLongZeroed(morselLen);
 				long[] vBits = reuseDst ? sess.scratchVecI64[dst - 8].validBits : ws.arena.allocLong(words);
 				Arrays.fill(vBits, 0, words, -1L);
@@ -3379,11 +3379,13 @@ public final class ImpulsePillar3Ops {
 					}
 				}
 				if (reuseDst) {
-					ImpulseVector sv = (base <= 4) ? sess.scratchVecI64[dst - 8] : sess.scratchVecU64[dst - 8];
+					ImpulseVector sv = (base <= 4 || base == 21)
+							? sess.scratchVecI64[dst - 8]
+							: sess.scratchVecU64[dst - 8];
 					sv.length = morselLen;
 					ws.vVectors[dst] = sv;
 				} else {
-					ws.vVectors[dst] = (base <= 4)
+					ws.vVectors[dst] = (base <= 4 || base == 21)
 							? ws.arena.allocI64(out, morselLen, vBits)
 							: ws.arena.allocU64(out, morselLen, vBits);
 				}
@@ -3450,7 +3452,7 @@ public final class ImpulsePillar3Ops {
 				} else {
 					ws.vVectors[dst] = ws.arena.allocF64(out, morselLen, vBits);
 				}
-			} else if ((base >= 1 && base <= 4) || base == 8 || base == 9) {
+			} else if ((base >= 1 && base <= 4) || base == 8 || base == 9 || base == 21) {
 				long[] out = reuseDst ? sess.scratchVecI64[dst - 8].i64Data : ws.arena.allocLongZeroed(morselLen);
 				if (useMask) {
 					for (int k = 0; k < maskCnt; k++) {
@@ -3475,11 +3477,13 @@ public final class ImpulsePillar3Ops {
 					}
 				}
 				if (reuseDst) {
-					ImpulseVector sv = (base <= 4) ? sess.scratchVecI64[dst - 8] : sess.scratchVecU64[dst - 8];
+					ImpulseVector sv = (base <= 4 || base == 21)
+							? sess.scratchVecI64[dst - 8]
+							: sess.scratchVecU64[dst - 8];
 					sv.length = morselLen;
 					ws.vVectors[dst] = sv;
 				} else {
-					ws.vVectors[dst] = (base <= 4)
+					ws.vVectors[dst] = (base <= 4 || base == 21)
 							? ws.arena.allocI64(out, morselLen, vBits)
 							: ws.arena.allocU64(out, morselLen, vBits);
 				}

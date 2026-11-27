@@ -438,11 +438,14 @@ public final class ImpulseMethodHandleCompiler {
 									else if (msub == 2)
 										clearVMask |= (1 << mdst);
 								}
-								yield (msub == 0)
-										? MethodHandles.insertArguments(MH_MORSEL_COMMIT_FRONTIER, 0, mdst, ms1, ms3,
-												(mflg & ImpulseInterpreter.FLAG_MASK) != 0)
-										: MethodHandles.insertArguments(MH_MORSEL_COMMIT_SCATTER_ADD, 0, mdst, ms1, ms2,
-												ms3, (mflg & ImpulseInterpreter.FLAG_MASK) != 0);
+								yield switch (msub) {
+									case 0 -> MethodHandles.insertArguments(MH_MORSEL_COMMIT_FRONTIER, 0, mdst, ms1, ms3,
+											(mflg & ImpulseInterpreter.FLAG_MASK) != 0);
+									case 2 -> MethodHandles.insertArguments(MH_MORSEL_COMMIT_SCATTER_ADD, 0, mdst, ms1, ms2,
+											ms3, (mflg & ImpulseInterpreter.FLAG_MASK) != 0);
+									default -> throw new IllegalArgumentException(
+											"Unsupported legacy JIT morsel commit subop: " + msub);
+								};
 							}
 							default -> throw new IllegalArgumentException(
 									"Unsupported morsel op: 0x" + Integer.toHexString(mop));
