@@ -352,7 +352,7 @@ public final class ImpulsePillar4Ops {
 		ws.pc++;
 	}
 
-	private static ImpulseVector materializeOffHeapColumn(ImpulseWorkspace ws,
+	static ImpulseVector materializeOffHeapColumn(ImpulseWorkspace ws,
 			ImpulseSnapshotView.OffHeapAttrColumn off) {
 		int n = off.count();
 		int vwords = Math.max(1, (n + 63) >>> 6);
@@ -483,8 +483,12 @@ public final class ImpulsePillar4Ops {
 		}
 		ImpulseVector col = view.getNodeAttr(domId, attrId);
 		if (col == null) {
-			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-			return;
+			ImpulseSnapshotView.OffHeapAttrColumn off = view.getOffHeapNodeAttr(domId, attrId);
+			if (off == null) {
+				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+				return;
+			}
+			col = materializeOffHeapColumn(ws, off);
 		}
 		switch (subop) {
 			case SUBOP_GATHER_NODE_ATTR_VEC -> {
@@ -568,8 +572,12 @@ public final class ImpulsePillar4Ops {
 		}
 		ImpulseVector col = view.relations[relId].edgeAttrs.get(attrId);
 		if (col == null) {
-			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-			return;
+			ImpulseSnapshotView.OffHeapAttrColumn off = view.relations[relId].offHeapEdgeAttrs.get(attrId);
+			if (off == null) {
+				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+				return;
+			}
+			col = materializeOffHeapColumn(ws, off);
 		}
 		switch (subop) {
 			case SUBOP_GATHER_EDGE_ATTR_VEC -> {
@@ -673,8 +681,12 @@ public final class ImpulsePillar4Ops {
 		}
 		ImpulseVector col = view.getNodeAttr(domId, attrId);
 		if (col == null) {
-			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-			return;
+			ImpulseSnapshotView.OffHeapAttrColumn off = view.getOffHeapNodeAttr(domId, attrId);
+			if (off == null) {
+				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+				return;
+			}
+			col = materializeOffHeapColumn(ws, off);
 		}
 		int domCard = (int) view.domainCards[domId];
 		boolean accum = (flags & FLAG_ACCUM) != 0;
@@ -2043,8 +2055,12 @@ public final class ImpulsePillar4Ops {
 		}
 		ImpulseVector col = view.getNodeAttr(domId, attrId);
 		if (col == null) {
-			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-			return;
+			ImpulseSnapshotView.OffHeapAttrColumn off = view.getOffHeapNodeAttr(domId, attrId);
+			if (off == null) {
+				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+				return;
+			}
+			col = materializeOffHeapColumn(ws, off);
 		}
 		int domCard = (int) view.domainCards[domId];
 		boolean accum = (flags & FLAG_ACCUM) != 0;

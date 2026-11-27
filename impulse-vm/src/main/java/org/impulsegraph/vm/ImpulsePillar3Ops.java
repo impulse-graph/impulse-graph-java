@@ -647,6 +647,12 @@ public final class ImpulsePillar3Ops {
 		}
 		ImpulseVector col = rel.edgeAttrs.get(attrId);
 		if (col == null) {
+			ImpulseSnapshotView.OffHeapAttrColumn off = rel.offHeapEdgeAttrs.get(attrId);
+			if (off != null) {
+				col = ImpulsePillar4Ops.materializeOffHeapColumn(ws, off);
+			}
+		}
+		if (col == null) {
 			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
 			return;
 		}
@@ -925,6 +931,12 @@ public final class ImpulsePillar3Ops {
 		ImpulseVector weightCol = null;
 		if (attrId != 0xFFFF) {
 			weightCol = rel.edgeAttrs.get(attrId);
+			if (weightCol == null) {
+				ImpulseSnapshotView.OffHeapAttrColumn off = rel.offHeapEdgeAttrs.get(attrId);
+				if (off != null) {
+					weightCol = ImpulsePillar4Ops.materializeOffHeapColumn(ws, off);
+				}
+			}
 			if (weightCol == null || (weightCol.elemTag != ImpulseVector.TAG_F64
 					&& weightCol.elemTag != ImpulseVector.TAG_I64 && weightCol.elemTag != ImpulseVector.TAG_U64)) {
 				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
@@ -1135,6 +1147,26 @@ public final class ImpulsePillar3Ops {
 					}
 				}
 			}
+		} else if (weightCol != null && rel.cscEdgeIdsSeg == null && rel.hasCsrSegments()) {
+			int nSrc = rel.csrRowCount();
+			for (int u = 0; u < nSrc; u++) {
+				if (tgtMask != null && !tgtMask.contains(u))
+					continue;
+				int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+				for (int e = s; e < end; e++) {
+					int v = rel.csrColTarget(e);
+					if (fSrc.contains(v)) {
+						edges.add(new int[]{v, u, e});
+					}
+				}
+			}
+			edges.sort((a, b) -> {
+				int c = Integer.compare(a[0], b[0]);
+				if (c != 0)
+					return c;
+				c = Integer.compare(a[1], b[1]);
+				return (c != 0) ? c : Integer.compare(a[2], b[2]);
+			});
 		} else {
 			if (!rel.hasCscSegments()) {
 				ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
