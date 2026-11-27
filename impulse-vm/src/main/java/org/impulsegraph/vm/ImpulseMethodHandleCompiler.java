@@ -267,8 +267,8 @@ public final class ImpulseMethodHandleCompiler {
 			case 3 -> MethodHandles.insertArguments(MH_LEAF_P3, 0, bind, program, w);
 			case 4 -> ((op >= ImpulseIsaTables.OP_VEC_MATH_ARITH && op <= ImpulseIsaTables.OP_VEC_TERNARY)
 					|| op == ImpulseIsaTables.OP_VEC_DECIMAL_ALU)
-					? MethodHandles.insertArguments(MH_LEAF_P4_MATH, 0, w)
-					: MethodHandles.insertArguments(MH_LEAF_P4, 0, bind, w);
+							? MethodHandles.insertArguments(MH_LEAF_P4_MATH, 0, w)
+							: MethodHandles.insertArguments(MH_LEAF_P4, 0, bind, w);
 			case 5 -> MethodHandles.insertArguments(MH_LEAF_P5, 0, bind, w);
 			default -> MH_LEAF_INVALID;
 		};
@@ -439,10 +439,10 @@ public final class ImpulseMethodHandleCompiler {
 										clearVMask |= (1 << mdst);
 								}
 								yield switch (msub) {
-									case 0 -> MethodHandles.insertArguments(MH_MORSEL_COMMIT_FRONTIER, 0, mdst, ms1, ms3,
-											(mflg & ImpulseInterpreter.FLAG_MASK) != 0);
-									case 2 -> MethodHandles.insertArguments(MH_MORSEL_COMMIT_SCATTER_ADD, 0, mdst, ms1, ms2,
+									case 0 -> MethodHandles.insertArguments(MH_MORSEL_COMMIT_FRONTIER, 0, mdst, ms1,
 											ms3, (mflg & ImpulseInterpreter.FLAG_MASK) != 0);
+									case 2 -> MethodHandles.insertArguments(MH_MORSEL_COMMIT_SCATTER_ADD, 0, mdst, ms1,
+											ms2, ms3, (mflg & ImpulseInterpreter.FLAG_MASK) != 0);
 									default -> throw new IllegalArgumentException(
 											"Unsupported legacy JIT morsel commit subop: " + msub);
 								};

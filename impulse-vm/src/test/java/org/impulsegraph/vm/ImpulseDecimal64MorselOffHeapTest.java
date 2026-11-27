@@ -98,8 +98,7 @@ public final class ImpulseDecimal64MorselOffHeapTest {
 			// e2: 1->2: edge(700) + src(2000) = 2700 -> dst[2] += 2700 => 4300
 			// e3: 2->3: edge(800) + src(3000) = 3800 -> dst[3] += 3800
 			// Total sum = 1500 + 4300 + 3800 = 9600
-			long[] progNonNull = {
-					enc(OP_VEC_INIT, 0, SUBOP_VEC_INIT_DOM_I64, 0, 0, 0, 0, pack(0, 0)),
+			long[] progNonNull = {enc(OP_VEC_INIT, 0, SUBOP_VEC_INIT_DOM_I64, 0, 0, 0, 0, pack(0, 0)),
 					enc(OP_INIT_DOMAIN_SPAN, 0, 0, 0, 0, 0, 0, 0),
 					enc(OP_WALK_MORSEL, 0, SUBOP_WALK_MORSEL_FWD, 0, 0, 0, 0, pack(0, 5)),
 					enc(OP_GATHER_EDGE_ATTR, 0, SUBOP_GATHER_EDGE_ATTR_VEC, 12, 10, 0, 0, pack(0, 0)),
@@ -108,8 +107,7 @@ public final class ImpulseDecimal64MorselOffHeapTest {
 					enc(OP_MORSEL_COMMIT, 0, SUBOP_MORSEL_COMMIT_SCATTER_ADD_CHK, 0, 9, 14, 0, 0),
 					enc(OP_MORSEL_END, 0, 0, 0, 0, 0, 0, pack(0, 5)),
 					enc(OP_VEC_REDUCE, 0, SUBOP_VEC_REDUCE_SUM_I64_CHK, 1, 0, 0, 0, 0),
-					enc(OP_HALT, 0, 0, 0, 0, 0, 0, 0),
-			};
+					enc(OP_HALT, 0, 0, 0, 0, 0, 0, 0),};
 			assertInterpAndJitMatch(progNonNull, bind, N, new long[]{0L, 1500L, 4300L, 3800L}, 9600L);
 
 			// Program 2: nullable DECIMAL64 (0x95) edge + node gather -> add_chk ->
@@ -120,8 +118,7 @@ public final class ImpulseDecimal64MorselOffHeapTest {
 			// e2: 1->2: edge(30) + src(NULL) = NULL -> skipped (no trap!)
 			// e3: 2->3: edge(40) + src(300) = 340 -> dst[3] += 340
 			// Total sum = 110 + 340 = 450
-			long[] progNullable = {
-					enc(OP_VEC_INIT, 0, SUBOP_VEC_INIT_DOM_I64, 0, 0, 0, 0, pack(0, 0)),
+			long[] progNullable = {enc(OP_VEC_INIT, 0, SUBOP_VEC_INIT_DOM_I64, 0, 0, 0, 0, pack(0, 0)),
 					enc(OP_INIT_DOMAIN_SPAN, 0, 0, 0, 0, 0, 0, 0),
 					enc(OP_WALK_MORSEL, 0, SUBOP_WALK_MORSEL_FWD, 0, 0, 0, 0, pack(0, 5)),
 					enc(OP_GATHER_EDGE_ATTR, 0, SUBOP_GATHER_EDGE_ATTR_VEC, 12, 10, 0, 0, pack(0, 1)),
@@ -130,8 +127,7 @@ public final class ImpulseDecimal64MorselOffHeapTest {
 					enc(OP_MORSEL_COMMIT, 0, SUBOP_MORSEL_COMMIT_SCATTER_ADD_CHK, 0, 9, 14, 0, 0),
 					enc(OP_MORSEL_END, 0, 0, 0, 0, 0, 0, pack(0, 5)),
 					enc(OP_VEC_REDUCE, 0, SUBOP_VEC_REDUCE_SUM_I64_CHK, 1, 0, 0, 0, 0),
-					enc(OP_HALT, 0, 0, 0, 0, 0, 0, 0),
-			};
+					enc(OP_HALT, 0, 0, 0, 0, 0, 0, 0),};
 			assertInterpAndJitMatch(progNullable, bind, N, new long[]{0L, 110L, 0L, 340L}, 450L);
 		}
 	}
@@ -165,13 +161,10 @@ public final class ImpulseDecimal64MorselOffHeapTest {
 			MockRelationSnapshot rel = new MockRelationSnapshot(arena, 2, 1L, new int[]{0, 1, 1}, new int[]{1});
 			MockImpulseGraphSnapshot snap = new MockImpulseGraphSnapshot(Map.of("r0", rel));
 			ImpulseInterpreter.SnapshotBinding bind = new ImpulseInterpreter.SnapshotBinding(snap);
-			long[] prog = {
-					enc(OP_INIT_DOMAIN_SPAN, 0, 0, 0, 0, 0, 0, 0),
+			long[] prog = {enc(OP_INIT_DOMAIN_SPAN, 0, 0, 0, 0, 0, 0, 0),
 					enc(OP_WALK_MORSEL, 0, SUBOP_WALK_MORSEL_FWD, 0, 0, 0, 0, pack(0, 2)),
 					enc(OP_MORSEL_COMMIT, 0, SUBOP_MORSEL_COMMIT_SCATTER_ADD_CHK, 0, 9, 10, 0, 0),
-					enc(OP_MORSEL_END, 0, 0, 0, 0, 0, 0, pack(0, 2)),
-					enc(OP_HALT, 0, 0, 0, 0, 0, 0, 0),
-			};
+					enc(OP_MORSEL_END, 0, 0, 0, 0, 0, 0, pack(0, 2)), enc(OP_HALT, 0, 0, 0, 0, 0, 0, 0),};
 			assertThrows(IllegalArgumentException.class, () -> ImpulseMethodHandleCompiler.compile(prog, bind));
 		}
 	}

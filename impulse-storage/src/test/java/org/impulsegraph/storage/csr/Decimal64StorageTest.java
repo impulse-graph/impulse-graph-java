@@ -36,7 +36,8 @@ class Decimal64StorageTest {
 				balBuf.putLong(v);
 			}
 
-			// Nullable amounts: [10050, NULL, -250, 77777] -> validity bits 0, 2, 3 set = 0b1101 = 0x0D
+			// Nullable amounts: [10050, NULL, -250, 77777] -> validity bits 0, 2, 3 set =
+			// 0b1101 = 0x0D
 			byte[] amtValidity = new byte[128];
 			amtValidity[0] = (byte) 0x0D;
 			long[] amounts = {10050L, 0L, -250L, 77777L};
@@ -119,16 +120,14 @@ class Decimal64StorageTest {
 					(byte) 4, (byte) 4);
 			rel.setAttributeNames(java.util.List.of("fee"));
 			rel.setAttributeTypeCodes(java.util.List.of(TYPE_DECIMAL64));
-			rel.setLoadedAttributes(
-					java.util.List.of(new BinarySnapshotLoader.LoadedAttribute("fee", TYPE_DECIMAL64, 1, 12, 4, 0, 0, 0,
-							16, 0, 0)),
+			rel.setLoadedAttributes(java.util.List
+					.of(new BinarySnapshotLoader.LoadedAttribute("fee", TYPE_DECIMAL64, 1, 12, 4, 0, 0, 0, 16, 0, 0)),
 					java.util.List.of(MemorySegment.NULL));
 
 			GraphSnapshot graph = new GraphSnapshot(arena, Map.of("TRANSFER", rel));
 			byte[] snap1 = new DefaultSnapshotBuilder().withVersion((short) 11)
-					.withDomain(0, "Account", (byte) 0x03, 4L)
-					.build(new BinarySnapshotLoader.DefaultLoadedSnapshot(0x494D5053, (short) 11, graph, Map.of(),
-							Map.of(), Map.of(), Map.of()));
+					.withDomain(0, "Account", (byte) 0x03, 4L).build(new BinarySnapshotLoader.DefaultLoadedSnapshot(
+							0x494D5053, (short) 11, graph, Map.of(), Map.of(), Map.of(), Map.of()));
 
 			BinarySnapshotLoader.LoadedSnapshot loaded1 = BinarySnapshotLoader.loadSnapshot(snap1, arena);
 			BinarySnapshotLoader.LoadedAttribute fee1 = loaded1.getRelation(0).attributes().get(0);
