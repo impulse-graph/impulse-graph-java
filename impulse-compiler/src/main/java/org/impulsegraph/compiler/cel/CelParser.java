@@ -29,7 +29,8 @@ public final class CelParser {
 	private CelToken curr;
 
 	public CelParser(String source) {
-		this.lexer = new CelLexer(Objects.requireNonNull(source, "source must not be null"));
+		this.lexer = new CelLexer(
+				CelCompiler.normalizeSqlCast(Objects.requireNonNull(source, "source must not be null")));
 		advance();
 	}
 
@@ -94,6 +95,7 @@ public final class CelParser {
 		return switch (t.type()) {
 			case INT_LITERAL -> CelAstNode.makeInt(t.intVal());
 			case FLOAT_LITERAL -> CelAstNode.makeFloat(t.floatVal());
+			case DECIMAL_LITERAL -> CelAstNode.makeDecimal(t.text());
 			case BOOL_LITERAL -> CelAstNode.makeBool(t.boolVal());
 			case STRING_LITERAL -> CelAstNode.makeString(t.text());
 			case IDENTIFIER -> CelAstNode.makeIdent(t.text());

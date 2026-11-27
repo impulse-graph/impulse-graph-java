@@ -106,6 +106,182 @@ public final class V11ProgramBuilder {
 		return id;
 	}
 
+	// --- 0x15 OP_SCALAR_DECIMAL_ALU helpers ---
+
+	public int emitScalarDecAddChk(int dst, int s1, int s2) {
+		return emit(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_ADD_CHK, 0, dst,
+				s1, s2, 0, 0);
+	}
+
+	public int emitScalarDecSubChk(int dst, int s1, int s2) {
+		return emit(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_SUB_CHK, 0, dst,
+				s1, s2, 0, 0);
+	}
+
+	public int emitScalarDecMulChk(int dst, int s1, int s2) {
+		return emit(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_MUL_CHK, 0, dst,
+				s1, s2, 0, 0);
+	}
+
+	public int emitScalarDecMulDivRound(int dst, int s1, int s2, int s3) {
+		return emit(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_MUL_DIV_ROUND, 0,
+				dst, s1, s2, s3, 0);
+	}
+
+	public int emitScalarDecDivRound(int dst, int s1, int s2) {
+		return emit(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_DIV_ROUND, 0, dst,
+				s1, s2, 0, 0);
+	}
+
+	public int emitScalarDecDivSafe(int dst, int s1, int s2) {
+		return emit(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_DIV_SAFE, 0, dst,
+				s1, s2, 0, 0);
+	}
+
+	public int emitScalarDecRescale(int dst, int s1, int deltaScale, boolean down) {
+		return emitU16(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_RESCALE, 0,
+				dst, s1, 0, 0, deltaScale, down ? 1 : 0);
+	}
+
+	public int emitScalarDecBoundChk(int dst, int s1, int precision) {
+		return emitU16(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_BOUND_CHK, 0,
+				dst, s1, 0, 0, precision, 0);
+	}
+
+	public int emitScalarDecAbsChk(int dst, int s1) {
+		return emit(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_ABS_CHK, 0, dst,
+				s1, 0, 0, 0);
+	}
+
+	public int emitScalarDecNegChk(int dst, int s1) {
+		return emit(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_NEG_CHK, 0, dst,
+				s1, 0, 0, 0);
+	}
+
+	public int emitScalarDecF64ToDec(int dst, int s1, int scale, int precision) {
+		return emitU16(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_F64_TO_DEC, 0,
+				dst, s1, 0, 0, scale, precision);
+	}
+
+	public int emitScalarDecToF64(int dst, int s1, int scale) {
+		return emitU16(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_DEC_TO_F64, 0,
+				dst, s1, 0, 0, scale, 0);
+	}
+
+	public int emitScalarDecRoundScale(int dst, int s1, int deltaScale) {
+		return emitU16(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_ROUND_SCALE, 0,
+				dst, s1, 0, 0, deltaScale, 0);
+	}
+
+	public int emitScalarDecTruncScale(int dst, int s1, int deltaScale) {
+		return emitU16(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_TRUNC_SCALE, 0,
+				dst, s1, 0, 0, deltaScale, 0);
+	}
+
+	public int emitScalarDecFloorScale(int dst, int s1, int deltaScale) {
+		return emitU16(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_FLOOR_SCALE, 0,
+				dst, s1, 0, 0, deltaScale, 0);
+	}
+
+	public int emitScalarDecCeilScale(int dst, int s1, int deltaScale) {
+		return emitU16(ImpulseIsaTables.OP_SCALAR_DECIMAL_ALU, ImpulseIsaTables.SUBOP_SCALAR_DECIMAL_ALU_CEIL_SCALE, 0,
+				dst, s1, 0, 0, deltaScale, 0);
+	}
+
+	// --- 0x58 OP_VEC_DECIMAL_ALU helpers ---
+
+	public int emitVecDecAddChk(int dst, int s1, int s2, int flags, int maskF) {
+		return emit(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_ADD_CHK, flags, dst, s1,
+				s2, maskF, 0);
+	}
+
+	public int emitVecDecSubChk(int dst, int s1, int s2, int flags, int maskF) {
+		return emit(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_SUB_CHK, flags, dst, s1,
+				s2, maskF, 0);
+	}
+
+	public int emitVecDecMulChk(int dst, int s1, int s2, int flags, int maskF) {
+		return emit(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_MUL_CHK, flags, dst, s1,
+				s2, maskF, 0);
+	}
+
+	public int emitVecDecMulDivR(int dst, int s1, int s2, int divR, int flags) {
+		return emit(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_MUL_DIV_R, flags, dst,
+				s1, s2, divR, 0);
+	}
+
+	public int emitVecDecMulDivV(int dst, int s1, int s2, int divV, int flags) {
+		return emit(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_MUL_DIV_V, flags, dst,
+				s1, s2, divV, 0);
+	}
+
+	public int emitVecDecMulDivSafeR(int dst, int s1, int s2, int divR, int flags) {
+		return emit(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_MUL_DIV_SAFE_R, flags,
+				dst, s1, s2, divR, 0);
+	}
+
+	public int emitVecDecDivRound(int dst, int s1, int s2, int flags, int maskF) {
+		return emit(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_DIV_ROUND, flags, dst,
+				s1, s2, maskF, 0);
+	}
+
+	public int emitVecDecDivSafe(int dst, int s1, int s2, int flags, int maskF) {
+		return emit(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_DIV_SAFE, flags, dst,
+				s1, s2, maskF, 0);
+	}
+
+	public int emitVecDecRescale(int dst, int s1, int deltaScale, boolean down, int flags, int maskF) {
+		return emitU16(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_RESCALE, flags, dst,
+				s1, 0, maskF, deltaScale, down ? 1 : 0);
+	}
+
+	public int emitVecDecBoundChk(int dst, int s1, int precision, int flags, int maskF) {
+		return emitU16(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_BOUND_CHK, flags,
+				dst, s1, 0, maskF, precision, 0);
+	}
+
+	public int emitVecDecAbsChk(int dst, int s1, int flags, int maskF) {
+		return emit(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_ABS_CHK, flags, dst, s1,
+				0, maskF, 0);
+	}
+
+	public int emitVecDecNegChk(int dst, int s1, int flags, int maskF) {
+		return emit(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_NEG_CHK, flags, dst, s1,
+				0, maskF, 0);
+	}
+
+	public int emitVecDecF64ToDec(int dst, int s1, int scale, int precision, int flags, int maskF) {
+		return emitU16(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_F64_TO_DEC, flags,
+				dst, s1, 0, maskF, scale, precision);
+	}
+
+	public int emitVecDecToF64(int dst, int s1, int scale, int flags, int maskF) {
+		return emitU16(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_DEC_TO_F64, flags,
+				dst, s1, 0, maskF, scale, 0);
+	}
+
+	public int emitVecDecRoundScale(int dst, int s1, int deltaScale, int flags, int maskF) {
+		return emitU16(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_ROUND_SCALE, flags,
+				dst, s1, 0, maskF, deltaScale, 0);
+	}
+
+	public int emitVecDecTruncScale(int dst, int s1, int deltaScale, int flags, int maskF) {
+		return emitU16(ImpulseIsaTables.OP_VEC_DECIMAL_ALU, ImpulseIsaTables.SUBOP_VEC_DECIMAL_ALU_TRUNC_SCALE, flags,
+				dst, s1, 0, maskF, deltaScale, 0);
+	}
+
+	// --- 0x52.sum_i64_chk & 0x37.scatter_add_chk helpers ---
+
+	public int emitVecReduceSumI64Chk(int dstR, int srcV, int flags, int maskF) {
+		return emit(ImpulseIsaTables.OP_VEC_REDUCE, ImpulseIsaTables.SUBOP_VEC_REDUCE_SUM_I64_CHK, flags, dstR, srcV, 0,
+				maskF, 0);
+	}
+
+	public int emitMorselCommitScatterAddChk(int dstV, int idxV, int valV, int flags, int predV) {
+		return emit(ImpulseIsaTables.OP_MORSEL_COMMIT, ImpulseIsaTables.SUBOP_MORSEL_COMMIT_SCATTER_ADD_CHK, flags,
+				dstV, idxV, valV, predV, 0);
+	}
+
 	public long[] toWordArray() {
 		long[] out = new long[words.size()];
 		for (int i = 0; i < words.size(); i++)

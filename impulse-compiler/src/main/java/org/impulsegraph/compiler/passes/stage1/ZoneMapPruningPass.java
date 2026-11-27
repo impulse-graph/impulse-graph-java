@@ -227,7 +227,7 @@ public final class ZoneMapPruningPass implements CompilerPass {
 				case "&&", "||", "==", "!=", "<", "<=", ">", ">=" -> true;
 				default -> false;
 			};
-			case LITERAL_INT, LITERAL_FLOAT, LITERAL_STRING, LIST_LITERAL -> false;
+			case LITERAL_INT, LITERAL_FLOAT, LITERAL_DECIMAL, LITERAL_STRING, LIST_LITERAL -> false;
 			default -> sig.interval() == null || !sig.interval().isBounded();
 		};
 	}

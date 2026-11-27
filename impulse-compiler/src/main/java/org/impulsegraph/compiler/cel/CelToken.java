@@ -16,6 +16,10 @@ public record CelToken(CelTokenType type, String text, long intVal, double float
 		return new CelToken(CelTokenType.FLOAT_LITERAL, text, 0, val, false, pos);
 	}
 
+	public static CelToken ofDecimal(String text, int pos) {
+		return new CelToken(CelTokenType.DECIMAL_LITERAL, text, 0, 0.0, false, pos);
+	}
+
 	public static CelToken ofBool(boolean val, String text, int pos) {
 		return new CelToken(CelTokenType.BOOL_LITERAL, text, 0, 0.0, val, pos);
 	}

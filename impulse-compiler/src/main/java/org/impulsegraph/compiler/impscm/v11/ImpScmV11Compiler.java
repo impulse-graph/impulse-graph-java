@@ -1,6 +1,8 @@
 package org.impulsegraph.compiler.impscm.v11;
 
+import org.impulsegraph.api.Decimal64;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.OutputColumnMeta;
 import org.impulsegraph.api.RelationSnapshot;
 import org.impulsegraph.compiler.emitter.V11ProgramBuilder;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
@@ -14,19 +16,31 @@ import java.util.*;
 /**
  * ImpScheme v0.11.0 SSA IR ({@code (query ...)}) Parser, Static Domain/Type
  * Validator ({@code IMPSCM_SPECIFICATION_v0_11.md} §7.1), and {@code .impb}
- * v0.11 Compiler. Mirrors C++ {@code impulse::compiler::v11::ImpScmV11Compiler}
- * bit-for-bit.
+ * v0.11 Compiler with full {@code DECIMAL(P, S)} static typing, strict coercion
+ * matrix, compile-time literal comparison boundary folding, and output schema
+ * metadata. Mirrors C++ {@code impulse::compiler::v11::ImpScmV11Compiler}.
  */
 public final class ImpScmV11Compiler {
+
+	private static final byte TYPE_CODE_DECIMAL64 = 0x15;
+	private static final byte TYPE_CODE_DECIMAL64_NULLABLE = (byte) 0x95;
 
 	private ImpScmV11Compiler() {
 	}
 
 	public record CompileResult(ImpulseImpbContainer container, Map<String, Integer> paramNameToId,
-			List<String> outputNames) {
+			List<String> outputNames, List<OutputColumnMeta> outputSchema) {
+
+		public CompileResult(ImpulseImpbContainer container, Map<String, Integer> paramNameToId,
+				List<String> outputNames) {
+			this(container, paramNameToId, outputNames,
+					outputNames.stream().map(n -> OutputColumnMeta.of(n, "UNKNOWN")).toList());
+		}
+
 		public long[] codeWords() {
 			return container.codeWords;
 		}
+
 		public byte[] impbBytes() {
 			return container.rawBytes;
 		}
@@ -151,34 +165,210 @@ public final class ImpScmV11Compiler {
 	}
 
 	private enum ValBank {
-		SCALAR_I64, SCALAR_U64, SCALAR_F64, SCALAR_BOOL, FRONTIER, VEC
+		SCALAR_I64, SCALAR_U64, SCALAR_F64, SCALAR_BOOL, SCALAR_STR, SCALAR_DECIMAL, FRONTIER, VEC_I64, VEC_U64, VEC_F64, VEC_BOOL, VEC_STR, VEC_DECIMAL;
+
+		boolean isScalar() {
+			return switch (this) {
+				case SCALAR_I64, SCALAR_U64, SCALAR_F64, SCALAR_BOOL, SCALAR_STR, SCALAR_DECIMAL -> true;
+				default -> false;
+			};
+		}
+
+		boolean isVec() {
+			return switch (this) {
+				case VEC_I64, VEC_U64, VEC_F64, VEC_BOOL, VEC_STR, VEC_DECIMAL -> true;
+				default -> false;
+			};
+		}
+
+		boolean isDecimal() {
+			return this == SCALAR_DECIMAL || this == VEC_DECIMAL;
+		}
+
+		boolean isInt() {
+			return this == SCALAR_I64 || this == SCALAR_U64 || this == VEC_I64 || this == VEC_U64;
+		}
+
+		boolean isFloat() {
+			return this == SCALAR_F64 || this == VEC_F64;
+		}
+
+		boolean isStr() {
+			return this == SCALAR_STR || this == VEC_STR;
+		}
+
+		boolean isBool() {
+			return this == SCALAR_BOOL || this == VEC_BOOL;
+		}
 	}
-	private record TypedVal(ValBank bank, int reg, int domId) {
+
+	private record TypedVal(ValBank bank, int reg, int domId, int precision, int scale, boolean isConst,
+			long constVal) {
+
+		static TypedVal scalar(ValBank bank, int reg) {
+			return new TypedVal(bank, reg, 0xFFFF, 0, 0, false, 0L);
+		}
+
+		static TypedVal scalarWithDom(ValBank bank, int reg, int domId) {
+			return new TypedVal(bank, reg, domId, 0, 0, false, 0L);
+		}
+
+		static TypedVal constInt(int reg, long val) {
+			return new TypedVal(ValBank.SCALAR_I64, reg, 0xFFFF, 0, 0, true, val);
+		}
+
+		static TypedVal decimal(int reg, int precision, int scale) {
+			return new TypedVal(ValBank.SCALAR_DECIMAL, reg, 0xFFFF, precision, scale, false, 0L);
+		}
+
+		static TypedVal constDecimal(int reg, int precision, int scale, long unscaled) {
+			return new TypedVal(ValBank.SCALAR_DECIMAL, reg, 0xFFFF, precision, scale, true, unscaled);
+		}
+
+		static TypedVal frontier(int reg, int domId) {
+			return new TypedVal(ValBank.FRONTIER, reg, domId, 0, 0, false, 0L);
+		}
+
+		static TypedVal vec(ValBank bank, int reg, int domId) {
+			return new TypedVal(bank, reg, domId, 0, 0, false, 0L);
+		}
+
+		static TypedVal vecDecimal(int reg, int domId, int precision, int scale) {
+			return new TypedVal(ValBank.VEC_DECIMAL, reg, domId, precision, scale, false, 0L);
+		}
+
+		OutputColumnMeta toOutputMeta(String name) {
+			if (bank.isDecimal()) {
+				return OutputColumnMeta.decimal(name, precision, scale);
+			}
+			String ty = switch (bank) {
+				case SCALAR_I64, VEC_I64 -> "I64";
+				case SCALAR_U64, VEC_U64 -> "U64";
+				case SCALAR_F64, VEC_F64 -> "F64";
+				case SCALAR_BOOL, VEC_BOOL -> "BOOL";
+				case SCALAR_STR, VEC_STR -> "STR";
+				case FRONTIER -> "FRONTIER";
+				default -> "UNKNOWN";
+			};
+			return OutputColumnMeta.of(name, ty);
+		}
 	}
-	private record RelInfo(int relId, int srcDom, int tgtDom) {
+
+	private record RelInfo(int relId, int srcDom, int tgtDom, String name) {
+	}
+
+	private record AttrInfo(int attrId, byte typeCode, int precision, int scale) {
+		boolean isDecimal() {
+			return typeCode == TYPE_CODE_DECIMAL64 || typeCode == TYPE_CODE_DECIMAL64_NULLABLE;
+		}
+	}
+
+	private record TypeSpec(ValBank scalarBank, int precision, int scale) {
+	}
+
+	private static final class MorselScope {
+		final RelInfo rel;
+		final String srcVar;
+		final String tgtVar;
+		final String edgeVar;
+		int predReg = -1;
+		int nextMorselV = 12; // V8=src, V9=tgt, V10=edge, V11=pred, V12..V15=temps
+
+		MorselScope(RelInfo rel, String srcVar, String tgtVar, String edgeVar) {
+			this.rel = rel;
+			this.srcVar = srcVar;
+			this.tgtVar = tgtVar;
+			this.edgeVar = edgeVar;
+		}
+
+		int allocTempV() {
+			int r = nextMorselV++;
+			if (r > 15) {
+				nextMorselV = 12;
+				r = nextMorselV++;
+			}
+			return r;
+		}
 	}
 
 	private static final class Ctx {
 		final ImpulseGraphSnapshot snap;
 		final V11ProgramBuilder b = new V11ProgramBuilder();
-		int nextR = 0, nextF = 0, nextParamId = 0, outputSlot = 0;
+		int nextR = 0, nextF = 0, nextV = 0, nextParamId = 0, outputSlot = 0;
+		int pinnedRMask = 0;
+		int pinnedVMask = 0;
 		Map<String, TypedVal> env = new HashMap<>();
 		final Map<String, Integer> paramMap = new LinkedHashMap<>();
 		final List<String> outputNames = new ArrayList<>();
+		final List<OutputColumnMeta> outputSchema = new ArrayList<>();
+		MorselScope morsel = null;
 
 		Ctx(ImpulseGraphSnapshot snap) {
 			this.snap = snap;
 		}
 
-		int allocR() {
-			if (nextR >= 16)
-				throw new IllegalStateException("REGISTER_EXHAUSTION: R0..R15");
-			return nextR++;
+		int liveRMask() {
+			int mask = pinnedRMask;
+			for (TypedVal v : env.values()) {
+				if (v.bank.isScalar() && v.reg >= 0 && v.reg < 16) {
+					mask |= (1 << v.reg);
+				}
+			}
+			return mask;
 		}
+
+		int liveVMask() {
+			int mask = pinnedVMask;
+			for (TypedVal v : env.values()) {
+				if (v.bank.isVec() && v.reg >= 0 && v.reg < 8) {
+					mask |= (1 << v.reg);
+				}
+			}
+			return mask;
+		}
+
+		int allocR() {
+			if (nextR < 16) {
+				int r = nextR++;
+				return r;
+			}
+			int live = liveRMask();
+			for (int r = 0; r < 16; r++) {
+				if ((live & (1 << r)) == 0) {
+					return r;
+				}
+			}
+			throw new IllegalStateException("REGISTER_EXHAUSTION: R0..R15");
+		}
+
 		int allocF() {
 			if (nextF >= 16)
 				throw new IllegalStateException("REGISTER_EXHAUSTION: F0..F15");
 			return nextF++;
+		}
+
+		int allocV() {
+			if (morsel != null) {
+				return morsel.allocTempV();
+			}
+			if (nextV < 8)
+				return nextV++;
+			int live = liveVMask();
+			for (int v = 0; v < 8; v++) {
+				if ((live & (1 << v)) == 0) {
+					return v;
+				}
+			}
+			throw new IllegalStateException("REGISTER_EXHAUSTION: V0..V7");
+		}
+
+		int pinR(TypedVal v) {
+			if (v != null && v.bank.isScalar() && v.reg >= 0 && v.reg < 16) {
+				int prev = pinnedRMask;
+				pinnedRMask |= (1 << v.reg);
+				return prev;
+			}
+			return pinnedRMask;
 		}
 
 		int resolveDomain(String name) {
@@ -200,32 +390,873 @@ public final class ImpScmV11Compiler {
 			throw new IllegalArgumentException("UNKNOWN_SCHEMA_ENTITY: unknown domain '" + name + "'");
 		}
 
+		String resolveDomainName(int domId) {
+			if (snap instanceof GraphSnapshot gs) {
+				for (String dn : gs.getDomainNames()) {
+					BinarySnapshotLoader.LoadedDomain ld = gs.getDomain(dn);
+					if (ld != null && ld.domainId() == domId) {
+						return dn;
+					}
+				}
+			}
+			if (snap != null && snap.getDomainNames() != null) {
+				int idx = 0;
+				for (String dn : snap.getDomainNames()) {
+					if (idx == domId)
+						return dn;
+					idx++;
+				}
+			}
+			return null;
+		}
+
 		RelInfo resolveRel(String name) {
 			if (snap == null)
-				return new RelInfo(0, 0, 0);
+				return new RelInfo(0, 0, 0, name);
 			RelationSnapshot rs = snap.getRelationSnapshot(name);
 			if (rs == null) {
 				throw new IllegalArgumentException("UNKNOWN_SCHEMA_ENTITY: unknown relation '" + name + "'");
 			}
 			int rid = rs.getRelationId() >= 0 ? rs.getRelationId() : 0;
-			return new RelInfo(rid, rs.getSrcDomainId(), rs.getTgtDomainId());
+			return new RelInfo(rid, rs.getSrcDomainId(), rs.getTgtDomainId(), name);
+		}
+
+		AttrInfo resolveNodeAttr(int domId, String attrName) {
+			if (snap instanceof GraphSnapshot gs) {
+				String domName = resolveDomainName(domId);
+				if (domName != null) {
+					BinarySnapshotLoader.LoadedDomain ld = gs.getDomain(domName);
+					if (ld != null) {
+						int idx = ld.getAttributeIndex(attrName);
+						if (idx >= 0) {
+							BinarySnapshotLoader.LoadedAttribute la = ld.getAttribute(idx);
+							return new AttrInfo(idx, la.typeCode(), la.precision(), la.scale());
+						}
+					}
+				}
+			}
+			throw new IllegalArgumentException(
+					"UNKNOWN_SCHEMA_ENTITY: unknown node attribute '" + attrName + "' on domain " + domId);
+		}
+
+		AttrInfo resolveEdgeAttr(String relName, String attrName) {
+			if (snap != null) {
+				RelationSnapshot rs = snap.getRelationSnapshot(relName);
+				if (rs instanceof org.impulsegraph.storage.csr.RelationSnapshot csrRel) {
+					List<BinarySnapshotLoader.LoadedAttribute> attrs = csrRel.getLoadedAttributes();
+					for (int i = 0; i < attrs.size(); i++) {
+						BinarySnapshotLoader.LoadedAttribute la = attrs.get(i);
+						if (la.name().equals(attrName)) {
+							return new AttrInfo(i, la.typeCode(), la.precision(), la.scale());
+						}
+					}
+				}
+			}
+			throw new IllegalArgumentException(
+					"UNKNOWN_SCHEMA_ENTITY: unknown edge attribute '" + attrName + "' on relation '" + relName + "'");
+		}
+
+		ValBank attrTypeToVecBank(AttrInfo ai) {
+			if (ai.isDecimal()) {
+				return ValBank.VEC_DECIMAL;
+			}
+			int base = ai.typeCode & 0x7F;
+			return switch (base) {
+				case 0x05, 0x06 -> ValBank.VEC_F64; // F32, F64
+				case 0x09 -> ValBank.VEC_BOOL; // BOOL
+				case 0x0A -> ValBank.VEC_STR; // STRING
+				case 0x07, 0x08 -> ValBank.VEC_U64; // U32, U64
+				default -> ValBank.VEC_I64;
+			};
+		}
+
+		TypeSpec parseScalarTypeSpec(SExpr ty) {
+			if (ty.kind == Kind.LIST && ty.elems.size() == 3 && "decimal".equals(ty.elems.get(0).text)) {
+				if (ty.elems.get(1).kind != Kind.INT || ty.elems.get(2).kind != Kind.INT) {
+					throw new IllegalArgumentException("PARSE_ERROR: (decimal P S) requires integer P and S");
+				}
+				int p = (int) ty.elems.get(1).iVal;
+				int s = (int) ty.elems.get(2).iVal;
+				Decimal64.validatePrecisionScale(p, s);
+				return new TypeSpec(ValBank.SCALAR_DECIMAL, p, s);
+			}
+			if (ty.kind == Kind.SYMBOL) {
+				return switch (ty.text) {
+					case "i64", "i32" -> new TypeSpec(ValBank.SCALAR_I64, 0, 0);
+					case "u64", "u32" -> new TypeSpec(ValBank.SCALAR_U64, 0, 0);
+					case "f64", "f32" -> new TypeSpec(ValBank.SCALAR_F64, 0, 0);
+					case "bool" -> new TypeSpec(ValBank.SCALAR_BOOL, 0, 0);
+					case "str" -> new TypeSpec(ValBank.SCALAR_STR, 0, 0);
+					default -> throw new IllegalArgumentException("PARSE_ERROR: unknown type '" + ty.text + "'");
+				};
+			}
+			throw new IllegalArgumentException("PARSE_ERROR: unsupported type expression");
+		}
+
+		private TypedVal ensureDecimal(TypedVal v, String opName) {
+			if (v.bank.isDecimal()) {
+				return v;
+			}
+			if (v.bank.isInt()) {
+				// Exact implicit promotion: INT -> DECIMAL(18, 0)
+				if (v.bank.isScalar()) {
+					return v.isConst ? TypedVal.constDecimal(v.reg, 18, 0, v.constVal) : TypedVal.decimal(v.reg, 18, 0);
+				}
+				return TypedVal.vecDecimal(v.reg, v.domId, 18, 0);
+			}
+			throw new IllegalArgumentException("TYPE_MISMATCH: decimal operator '" + opName
+					+ "' does not allow operand of type " + v.bank + "; use (cast ...)");
+		}
+
+		private TypedVal rescaleDecimalUp(TypedVal v, int targetScale) {
+			int delta = targetScale - v.scale;
+			if (delta == 0) {
+				return v;
+			}
+			int newP = Math.min(18, v.precision + delta);
+			if (v.bank.isScalar()) {
+				int savedPin = pinR(v);
+				int dst = allocR();
+				pinnedRMask = savedPin;
+				b.emitScalarDecRescale(dst, v.reg, delta, false);
+				return TypedVal.decimal(dst, newP, targetScale);
+			}
+			int dst = allocV();
+			b.emitVecDecRescale(dst, v.reg, delta, false, 0, 0);
+			return TypedVal.vecDecimal(dst, v.domId, newP, targetScale);
+		}
+
+		private TypedVal evalDecimalBinary(String head, TypedVal rawLhs, TypedVal rawRhs) {
+			int savedPin = pinR(rawLhs);
+			pinR(rawRhs);
+			try {
+				TypedVal lhs = ensureDecimal(rawLhs, head);
+				TypedVal rhs = ensureDecimal(rawRhs, head);
+
+				boolean lVec = lhs.bank.isVec();
+				boolean rVec = rhs.bank.isVec();
+				if (lVec && rVec && lhs.domId != rhs.domId) {
+					throw new IllegalArgumentException("DOMAIN_MISMATCH: vector decimal op domain mismatch");
+				}
+				int outDom = lVec ? lhs.domId : (rVec ? rhs.domId : 0xFFFF);
+
+				if ("+".equals(head) || "-".equals(head)) {
+					int s = Math.max(lhs.scale, rhs.scale);
+					int p = Math.min(18, Math.max(lhs.precision - lhs.scale, rhs.precision - rhs.scale) + s + 1);
+					TypedVal a = rescaleDecimalUp(lhs, s);
+					pinR(a);
+					TypedVal bVal = rescaleDecimalUp(rhs, s);
+					pinR(bVal);
+
+					if (!lVec && !rVec) {
+						int dst = allocR();
+						if ("+".equals(head)) {
+							b.emitScalarDecAddChk(dst, a.reg, bVal.reg);
+						} else {
+							b.emitScalarDecSubChk(dst, a.reg, bVal.reg);
+						}
+						return TypedVal.decimal(dst, p, s);
+					}
+					if (lVec && rVec) {
+						int dst = allocV();
+						if ("+".equals(head)) {
+							b.emitVecDecAddChk(dst, a.reg, bVal.reg, 0, 0);
+						} else {
+							b.emitVecDecSubChk(dst, a.reg, bVal.reg, 0, 0);
+						}
+						return TypedVal.vecDecimal(dst, outDom, p, s);
+					}
+					if (lVec) {
+						int dst = allocV();
+						if ("+".equals(head)) {
+							b.emitVecDecAddChk(dst, a.reg, bVal.reg, ImpulseIsaTables.FLAG_SCALAR_RHS, 0);
+						} else {
+							b.emitVecDecSubChk(dst, a.reg, bVal.reg, ImpulseIsaTables.FLAG_SCALAR_RHS, 0);
+						}
+						return TypedVal.vecDecimal(dst, outDom, p, s);
+					}
+					// scalar +/- vec
+					if ("+".equals(head)) {
+						int dst = allocV();
+						b.emitVecDecAddChk(dst, bVal.reg, a.reg, ImpulseIsaTables.FLAG_SCALAR_RHS, 0);
+						return TypedVal.vecDecimal(dst, outDom, p, s);
+					}
+					// scalar - vec => (-vec) + scalar
+					int negV = allocV();
+					b.emitVecDecNegChk(negV, bVal.reg, 0, 0);
+					int dst = allocV();
+					b.emitVecDecAddChk(dst, negV, a.reg, ImpulseIsaTables.FLAG_SCALAR_RHS, 0);
+					return TypedVal.vecDecimal(dst, outDom, p, s);
+				}
+
+				if ("*".equals(head)) {
+					int rawS = lhs.scale + rhs.scale;
+					int s = Math.min(18, rawS);
+					int p = Math.min(18, lhs.precision + rhs.precision);
+					int divPow = rawS - s; // 0 when rawS <= 18, else 1..18
+
+					if (!lVec && !rVec) {
+						int dst = allocR();
+						if (divPow == 0) {
+							b.emitScalarDecMulChk(dst, lhs.reg, rhs.reg);
+						} else {
+							int rDiv = allocR();
+							b.emitLoadConstI64(rDiv, Decimal64.POW10[divPow]);
+							b.emitScalarDecMulDivRound(dst, lhs.reg, rhs.reg, rDiv);
+						}
+						return TypedVal.decimal(dst, p, s);
+					}
+					// Vector * Vector, Vector * Scalar, or Scalar * Vector (commutative)
+					TypedVal vOp = lVec ? lhs : rhs;
+					TypedVal other = lVec ? rhs : lhs;
+					boolean scalarRhs = !other.bank.isVec();
+					int flags = scalarRhs ? ImpulseIsaTables.FLAG_SCALAR_RHS : 0;
+					int dst = allocV();
+					if (divPow == 0) {
+						b.emitVecDecMulChk(dst, vOp.reg, other.reg, flags, 0);
+					} else {
+						int rDiv = allocR();
+						b.emitLoadConstI64(rDiv, Decimal64.POW10[divPow]);
+						b.emitVecDecMulDivR(dst, vOp.reg, other.reg, rDiv, flags);
+					}
+					return TypedVal.vecDecimal(dst, outDom, p, s);
+				}
+
+				// "/" or "safe-div"
+				boolean isSafe = "safe-div".equals(head);
+				int s = Math.min(18, Math.max(6, lhs.scale));
+				int p = 18;
+				int k = s - lhs.scale + rhs.scale; // always >= 0
+				TypedVal num = lhs;
+				if (k > 18) {
+					int pre = k - 18;
+					num = rescaleDecimalUp(lhs, lhs.scale + pre);
+					pinR(num);
+					k = 18;
+				}
+				if (!lVec && !rVec) {
+					int dst = allocR();
+					if (!isSafe) {
+						int rMul = allocR();
+						b.emitLoadConstI64(rMul, Decimal64.POW10[k]);
+						b.emitScalarDecMulDivRound(dst, num.reg, rMul, rhs.reg);
+					} else if (k == 0) {
+						b.emitScalarDecDivSafe(dst, num.reg, rhs.reg);
+					} else {
+						// Safe-div with 128-bit scaling: if rhs == 0 -> NULL, else mul_div_round
+						int rZero = allocR();
+						int rIsZero = allocR();
+						int rMul = allocR();
+						b.emitLoadConstI64(rZero, 0L);
+						b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_EQ_I64, 0, rIsZero,
+								rhs.reg, rZero, 0, 0);
+						int jccPc = b.emit(ImpulseIsaTables.OP_JCC, 6, 0, 0, rIsZero, 0, 0, 0); // jcc if rIsZero != 0
+						b.emitLoadConstI64(rMul, Decimal64.POW10[k]);
+						b.emitScalarDecMulDivRound(dst, num.reg, rMul, rhs.reg);
+						int jmpEndPc = b.emit(ImpulseIsaTables.OP_JMP, 0, 0, 0, 0, 0, 0, 0);
+						int nullPc = b.pc();
+						b.patchImm32(jccPc, nullPc - jccPc);
+						b.emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_NULL, 0, dst, 0, 0, 0,
+								0);
+						int endPc = b.pc();
+						b.patchImm32(jmpEndPc, endPc - jmpEndPc);
+					}
+					return TypedVal.decimal(dst, p, s);
+				}
+
+				if (!lVec) {
+					// scalar / vec: materialize scalar into domain vector via OP_VEC_INIT
+					int vNum = allocV();
+					b.emitU16(ImpulseIsaTables.OP_VEC_INIT, ImpulseIsaTables.SUBOP_VEC_INIT_DOM_I64,
+							ImpulseIsaTables.FLAG_SCALAR_RHS, vNum, 0, num.reg, 0, outDom, 0);
+					num = TypedVal.vecDecimal(vNum, outDom, num.precision, num.scale);
+				}
+
+				int dst = allocV();
+				if (!rVec) {
+					// vec / scalar
+					int rMul = allocR();
+					b.emitLoadConstI64(rMul, Decimal64.POW10[k]);
+					if (isSafe) {
+						b.emitVecDecMulDivSafeR(dst, num.reg, rMul, rhs.reg, ImpulseIsaTables.FLAG_SCALAR_RHS);
+					} else {
+						b.emitVecDecMulDivR(dst, num.reg, rMul, rhs.reg, ImpulseIsaTables.FLAG_SCALAR_RHS);
+					}
+					return TypedVal.vecDecimal(dst, outDom, p, s);
+				}
+				// vec / vec
+				if (isSafe) {
+					TypedVal scaledNum = (k > 0) ? rescaleDecimalUp(num, num.scale + k) : num;
+					b.emitVecDecDivSafe(dst, scaledNum.reg, rhs.reg, 0, 0);
+				} else {
+					int rMul = allocR();
+					b.emitLoadConstI64(rMul, Decimal64.POW10[k]);
+					b.emitVecDecMulDivV(dst, num.reg, rMul, rhs.reg, ImpulseIsaTables.FLAG_SCALAR_RHS);
+				}
+				return TypedVal.vecDecimal(dst, outDom, p, s);
+			} finally {
+				pinnedRMask = savedPin;
+			}
+		}
+
+		private TypedVal evalCast(TypedVal v, TypeSpec target) {
+			int savedPin = pinR(v);
+			try {
+				boolean isVec = v.bank.isVec();
+				if (target.scalarBank == ValBank.SCALAR_DECIMAL) {
+					int tp = target.precision;
+					int ts = target.scale;
+					if (v.bank.isDecimal()) {
+						// DECIMAL(P1, S1) -> DECIMAL(P2, S2)
+						TypedVal cur = v;
+						if (ts > v.scale) {
+							int delta = ts - v.scale;
+							if (!isVec) {
+								int r1 = allocR();
+								b.emitScalarDecRescale(r1, v.reg, delta, false);
+								int r2 = allocR();
+								b.emitScalarDecBoundChk(r2, r1, tp);
+								return TypedVal.decimal(r2, tp, ts);
+							}
+							int v1 = allocV();
+							b.emitVecDecRescale(v1, v.reg, delta, false, 0, 0);
+							int v2 = allocV();
+							b.emitVecDecBoundChk(v2, v1, tp, 0, 0);
+							return TypedVal.vecDecimal(v2, v.domId, tp, ts);
+						} else if (ts < v.scale) {
+							int delta = v.scale - ts;
+							if (!isVec) {
+								int r1 = allocR();
+								b.emitScalarDecRoundScale(r1, v.reg, delta);
+								int r2 = allocR();
+								b.emitScalarDecBoundChk(r2, r1, tp);
+								return TypedVal.decimal(r2, tp, ts);
+							}
+							int v1 = allocV();
+							b.emitVecDecRoundScale(v1, v.reg, delta, 0, 0);
+							int v2 = allocV();
+							b.emitVecDecBoundChk(v2, v1, tp, 0, 0);
+							return TypedVal.vecDecimal(v2, v.domId, tp, ts);
+						} else {
+							if (tp < v.precision) {
+								if (!isVec) {
+									int r2 = allocR();
+									b.emitScalarDecBoundChk(r2, v.reg, tp);
+									return TypedVal.decimal(r2, tp, ts);
+								}
+								int v2 = allocV();
+								b.emitVecDecBoundChk(v2, v.reg, tp, 0, 0);
+								return TypedVal.vecDecimal(v2, v.domId, tp, ts);
+							}
+							return !isVec
+									? TypedVal.decimal(v.reg, tp, ts)
+									: TypedVal.vecDecimal(v.reg, v.domId, tp, ts);
+						}
+					}
+					if (v.bank.isInt()) {
+						// INT -> DECIMAL(P, S): rescale(x, S, mul) + bound_chk(P)
+						if (!isVec) {
+							int curR = v.reg;
+							if (ts > 0) {
+								int r1 = allocR();
+								b.emitScalarDecRescale(r1, curR, ts, false);
+								curR = r1;
+							}
+							int r2 = allocR();
+							b.emitScalarDecBoundChk(r2, curR, tp);
+							return TypedVal.decimal(r2, tp, ts);
+						}
+						int curV = v.reg;
+						if (ts > 0) {
+							int v1 = allocV();
+							b.emitVecDecRescale(v1, curV, ts, false, 0, 0);
+							curV = v1;
+						}
+						int v2 = allocV();
+						b.emitVecDecBoundChk(v2, curV, tp, 0, 0);
+						return TypedVal.vecDecimal(v2, v.domId, tp, ts);
+					}
+					if (v.bank.isFloat()) {
+						// FLOAT64 -> DECIMAL(P, S): f64_to_dec(x, S, P)
+						if (!isVec) {
+							int dst = allocR();
+							b.emitScalarDecF64ToDec(dst, v.reg, ts, tp);
+							return TypedVal.decimal(dst, tp, ts);
+						}
+						int dst = allocV();
+						b.emitVecDecF64ToDec(dst, v.reg, ts, tp, 0, 0);
+						return TypedVal.vecDecimal(dst, v.domId, tp, ts);
+					}
+					throw new IllegalArgumentException("TYPE_MISMATCH: cannot cast " + v.bank + " to DECIMAL");
+				}
+
+				if (target.scalarBank == ValBank.SCALAR_F64) {
+					if (v.bank.isDecimal()) {
+						// DECIMAL(P, S) -> FLOAT64: dec_to_f64(x, S)
+						if (!isVec) {
+							int dst = allocR();
+							b.emitScalarDecToF64(dst, v.reg, v.scale);
+							return TypedVal.scalar(ValBank.SCALAR_F64, dst);
+						}
+						int dst = allocV();
+						b.emitVecDecToF64(dst, v.reg, v.scale, 0, 0);
+						return TypedVal.vec(ValBank.VEC_F64, dst, v.domId);
+					}
+					if (!isVec) {
+						int dst = allocR();
+						b.emit(ImpulseIsaTables.OP_SCALAR_FP_ALU, ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_I64_TO_F64, 0,
+								dst, v.reg, 0, 0, 0);
+						return TypedVal.scalar(ValBank.SCALAR_F64, dst);
+					}
+					int dst = allocV();
+					b.emitU16(ImpulseIsaTables.OP_VEC_POINT, ImpulseIsaTables.SUBOP_VEC_POINT_VEC_CAST, 0, dst, v.reg,
+							0, 0, 4, 0); // 4 = F64
+					return TypedVal.vec(ValBank.VEC_F64, dst, v.domId);
+				}
+
+				if (target.scalarBank == ValBank.SCALAR_I64 || target.scalarBank == ValBank.SCALAR_U64) {
+					if (v.bank.isDecimal()) {
+						// DECIMAL(P, S) -> INT: trunc_scale(x, S)
+						if (!isVec) {
+							if (v.scale == 0) {
+								return TypedVal.scalar(target.scalarBank, v.reg);
+							}
+							int dst = allocR();
+							b.emitScalarDecTruncScale(dst, v.reg, v.scale);
+							return TypedVal.scalar(target.scalarBank, dst);
+						}
+						ValBank outVb = (target.scalarBank == ValBank.SCALAR_U64) ? ValBank.VEC_U64 : ValBank.VEC_I64;
+						if (v.scale == 0) {
+							return TypedVal.vec(outVb, v.reg, v.domId);
+						}
+						int dst = allocV();
+						b.emitVecDecTruncScale(dst, v.reg, v.scale, 0, 0);
+						return TypedVal.vec(outVb, dst, v.domId);
+					}
+					if (!isVec) {
+						int dst = allocR();
+						b.emit(ImpulseIsaTables.OP_SCALAR_FP_ALU, ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_F64_TO_I64, 0,
+								dst, v.reg, 0, 0, 0);
+						return TypedVal.scalar(target.scalarBank, dst);
+					}
+					int dst = allocV();
+					int tyCode = (target.scalarBank == ValBank.SCALAR_U64) ? 1 : 0;
+					b.emitU16(ImpulseIsaTables.OP_VEC_POINT, ImpulseIsaTables.SUBOP_VEC_POINT_VEC_CAST, 0, dst, v.reg,
+							0, 0, tyCode, 0);
+					return TypedVal.vec((tyCode == 1) ? ValBank.VEC_U64 : ValBank.VEC_I64, dst, v.domId);
+				}
+				throw new IllegalArgumentException("TYPE_MISMATCH: unsupported cast target " + target.scalarBank);
+			} finally {
+				pinnedRMask = savedPin;
+			}
+		}
+
+		private static DecimalBoundaryFolder.CmpOp parseCmpOp(String op) {
+			return switch (op) {
+				case "=" -> DecimalBoundaryFolder.CmpOp.EQ;
+				case "!=" -> DecimalBoundaryFolder.CmpOp.NE;
+				case "<" -> DecimalBoundaryFolder.CmpOp.LT;
+				case "<=" -> DecimalBoundaryFolder.CmpOp.LE;
+				case ">" -> DecimalBoundaryFolder.CmpOp.GT;
+				case ">=" -> DecimalBoundaryFolder.CmpOp.GE;
+				default -> null;
+			};
+		}
+
+		private static int cmpOpToNodeFilterSubop(DecimalBoundaryFolder.CmpOp op) {
+			return switch (op) {
+				case EQ -> ImpulseIsaTables.SUBOP_NODE_FILTER_EQ;
+				case NE -> ImpulseIsaTables.SUBOP_NODE_FILTER_NE;
+				case LT -> ImpulseIsaTables.SUBOP_NODE_FILTER_LT;
+				case LE -> ImpulseIsaTables.SUBOP_NODE_FILTER_LE;
+				case GT -> ImpulseIsaTables.SUBOP_NODE_FILTER_GT;
+				case GE -> ImpulseIsaTables.SUBOP_NODE_FILTER_GE;
+			};
+		}
+
+		private static int cmpOpToVecCmpSubop(DecimalBoundaryFolder.CmpOp op) {
+			return switch (op) {
+				case EQ -> ImpulseIsaTables.SUBOP_VEC_CMP_EQ;
+				case NE -> ImpulseIsaTables.SUBOP_VEC_CMP_NE;
+				case LT -> ImpulseIsaTables.SUBOP_VEC_CMP_LT;
+				case LE -> ImpulseIsaTables.SUBOP_VEC_CMP_LE;
+				case GT -> ImpulseIsaTables.SUBOP_VEC_CMP_GT;
+				case GE -> ImpulseIsaTables.SUBOP_VEC_CMP_GE;
+			};
+		}
+
+		private TypedVal evalComparison(String head, TypedVal lhs, TypedVal rhs) {
+			int savedPin = pinR(lhs);
+			pinR(rhs);
+			try {
+				DecimalBoundaryFolder.CmpOp cmpOp = parseCmpOp(head);
+				boolean anyDec = lhs.bank.isDecimal() || rhs.bank.isDecimal();
+				if (anyDec) {
+					TypedVal dl = ensureDecimal(lhs, head);
+					TypedVal dr = ensureDecimal(rhs, head);
+					boolean lVec = dl.bank.isVec();
+					boolean rVec = dr.bank.isVec();
+					int outDom = lVec ? dl.domId : (rVec ? dr.domId : 0xFFFF);
+
+					// Compile-time boundary folding when comparing a DECIMAL vector with a constant
+					// decimal/int literal
+					if (lVec && !rVec && dr.isConst) {
+						DecimalBoundaryFolder.FoldedComparison fc = DecimalBoundaryFolder.foldComparison(cmpOp,
+								dl.precision, dl.scale, dr.constVal, dr.scale);
+						if (fc.kind() == DecimalBoundaryFolder.FoldKind.COMPARE) {
+							int rThresh = allocR();
+							b.emitLoadConstI64(rThresh, fc.thresholdUnscaled());
+							int dst = allocV();
+							b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(fc.op()),
+									ImpulseIsaTables.FLAG_SCALAR_RHS, dst, dl.reg, rThresh, 0, 0);
+							return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
+						} else if (fc.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_FALSE) {
+							int rZero = allocR();
+							b.emitLoadConstI64(rZero, 0L);
+							int dst = allocV();
+							// Produce all-false bool vector of same length: cmp dl != dl (false for valid,
+							// null for null)
+							b.emit(ImpulseIsaTables.OP_VEC_CMP, ImpulseIsaTables.SUBOP_VEC_CMP_NE, 0, dst, dl.reg,
+									dl.reg, 0, 0);
+							return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
+						} else {
+							int dst = allocV();
+							// ALWAYS_TRUE for non-null: dl == dl
+							b.emit(ImpulseIsaTables.OP_VEC_CMP, ImpulseIsaTables.SUBOP_VEC_CMP_EQ, 0, dst, dl.reg,
+									dl.reg, 0, 0);
+							return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
+						}
+					}
+
+					int s = Math.max(dl.scale, dr.scale);
+					TypedVal a = rescaleDecimalUp(dl, s);
+					pinR(a);
+					TypedVal bVal = rescaleDecimalUp(dr, s);
+					pinR(bVal);
+
+					if (!lVec && !rVec) {
+						int dst = allocR();
+						emitScalarI64Cmp(cmpOp, dst, a.reg, bVal.reg);
+						return TypedVal.scalar(ValBank.SCALAR_BOOL, dst);
+					}
+					if (lVec && rVec) {
+						int dst = allocV();
+						b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(cmpOp), 0, dst, a.reg, bVal.reg, 0, 0);
+						return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
+					}
+					if (lVec) {
+						int dst = allocV();
+						b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(cmpOp), ImpulseIsaTables.FLAG_SCALAR_RHS,
+								dst, a.reg, bVal.reg, 0, 0);
+						return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
+					}
+					// scalar cmp vec -> flip operator
+					DecimalBoundaryFolder.CmpOp flipped = switch (cmpOp) {
+						case LT -> DecimalBoundaryFolder.CmpOp.GT;
+						case LE -> DecimalBoundaryFolder.CmpOp.GE;
+						case GT -> DecimalBoundaryFolder.CmpOp.LT;
+						case GE -> DecimalBoundaryFolder.CmpOp.LE;
+						case EQ, NE -> cmpOp;
+					};
+					int dst = allocV();
+					b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(flipped), ImpulseIsaTables.FLAG_SCALAR_RHS,
+							dst, bVal.reg, a.reg, 0, 0);
+					return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
+				}
+
+				// Non-decimal comparisons
+				if ((lhs.bank.isInt() && rhs.bank.isFloat()) || (lhs.bank.isFloat() && rhs.bank.isInt())) {
+					throw new IllegalArgumentException(
+							"TYPE_MISMATCH: implicit int/float comparison forbidden; use (cast ...)");
+				}
+				if (!lhs.bank.isVec() && !rhs.bank.isVec()) {
+					int dst = allocR();
+					if (lhs.bank.isFloat()) {
+						emitScalarF64Cmp(cmpOp, dst, lhs.reg, rhs.reg);
+					} else {
+						emitScalarI64Cmp(cmpOp, dst, lhs.reg, rhs.reg);
+					}
+					return TypedVal.scalar(ValBank.SCALAR_BOOL, dst);
+				}
+				int outDom = lhs.bank.isVec() ? lhs.domId : rhs.domId;
+				int dst = allocV();
+				if (lhs.bank.isVec() && rhs.bank.isVec()) {
+					b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(cmpOp), 0, dst, lhs.reg, rhs.reg, 0, 0);
+				} else if (lhs.bank.isVec()) {
+					b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(cmpOp), ImpulseIsaTables.FLAG_SCALAR_RHS,
+							dst, lhs.reg, rhs.reg, 0, 0);
+				} else {
+					DecimalBoundaryFolder.CmpOp flipped = switch (cmpOp) {
+						case LT -> DecimalBoundaryFolder.CmpOp.GT;
+						case LE -> DecimalBoundaryFolder.CmpOp.GE;
+						case GT -> DecimalBoundaryFolder.CmpOp.LT;
+						case GE -> DecimalBoundaryFolder.CmpOp.LE;
+						case EQ, NE -> cmpOp;
+					};
+					b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(flipped), ImpulseIsaTables.FLAG_SCALAR_RHS,
+							dst, rhs.reg, lhs.reg, 0, 0);
+				}
+				return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
+			} finally {
+				pinnedRMask = savedPin;
+			}
+		}
+
+		private void emitScalarI64Cmp(DecimalBoundaryFolder.CmpOp op, int dst, int a, int bReg) {
+			switch (op) {
+				case EQ -> b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_EQ_I64, 0, dst,
+						a, bReg, 0, 0);
+				case NE -> b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_NE_I64, 0, dst,
+						a, bReg, 0, 0);
+				case LT -> b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_LT_I64, 0, dst,
+						a, bReg, 0, 0);
+				case LE -> b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_LE_I64, 0, dst,
+						a, bReg, 0, 0);
+				case GT -> b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_LT_I64, 0, dst,
+						bReg, a, 0, 0);
+				case GE -> b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_LE_I64, 0, dst,
+						bReg, a, 0, 0);
+			}
+		}
+
+		private void emitScalarF64Cmp(DecimalBoundaryFolder.CmpOp op, int dst, int a, int bReg) {
+			switch (op) {
+				case EQ -> b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_EQ_F64, 0, dst,
+						a, bReg, 0, 0);
+				case NE -> b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_NE_F64, 0, dst,
+						a, bReg, 0, 0);
+				case LT -> b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_LT_F64, 0, dst,
+						a, bReg, 0, 0);
+				case LE -> b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_LE_F64, 0, dst,
+						a, bReg, 0, 0);
+				case GT -> b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_LT_F64, 0, dst,
+						bReg, a, 0, 0);
+				case GE -> b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_LE_F64, 0, dst,
+						bReg, a, 0, 0);
+			}
+		}
+
+		private TypedVal evalNodeFilter(SExpr e) {
+			// Form 1: (node-filter f "attr" op val)
+			// Form 2: (node-filter f (lambda (u) (op (attr u "attr") val)))
+			TypedVal srcF = eval(e.elems.get(1));
+			if (srcF.bank != ValBank.FRONTIER) {
+				throw new IllegalArgumentException("TYPE_MISMATCH: node-filter expects frontier");
+			}
+			String attrName;
+			String opStr;
+			SExpr rhsExpr;
+			if (e.elems.size() == 5 && e.elems.get(2).kind == Kind.STRING) {
+				attrName = e.elems.get(2).text;
+				opStr = e.elems.get(3).text;
+				rhsExpr = e.elems.get(4);
+			} else if (e.elems.size() == 3 && e.elems.get(2).kind == Kind.LIST
+					&& "lambda".equals(e.elems.get(2).elems.get(0).text)) {
+				SExpr pred = e.elems.get(2).elems.get(2);
+				if (pred.kind != Kind.LIST || pred.elems.size() != 3) {
+					throw new IllegalArgumentException("PARSE_ERROR: unsupported node-filter predicate");
+				}
+				opStr = pred.elems.get(0).text;
+				SExpr lhsForm = pred.elems.get(1);
+				rhsExpr = pred.elems.get(2);
+				if (lhsForm.kind != Kind.LIST || lhsForm.elems.size() != 3
+						|| !"attr".equals(lhsForm.elems.get(0).text)) {
+					throw new IllegalArgumentException("PARSE_ERROR: node-filter predicate expects (attr u \"name\")");
+				}
+				attrName = lhsForm.elems.get(2).text;
+			} else {
+				throw new IllegalArgumentException("PARSE_ERROR: malformed node-filter");
+			}
+
+			DecimalBoundaryFolder.CmpOp cmpOp = parseCmpOp(opStr);
+			if (cmpOp == null) {
+				throw new IllegalArgumentException("PARSE_ERROR: unsupported node-filter op '" + opStr + "'");
+			}
+			AttrInfo ai = resolveNodeAttr(srcF.domId, attrName);
+			TypedVal rhsVal = eval(rhsExpr);
+			int dstF = allocF();
+
+			if (ai.isDecimal()) {
+				TypedVal decRhs = ensureDecimal(rhsVal, opStr);
+				if (decRhs.isConst) {
+					// Compile-time boundary folding: zero runtime rescale!
+					DecimalBoundaryFolder.FoldedComparison fc = DecimalBoundaryFolder.foldComparison(cmpOp,
+							ai.precision, ai.scale, decRhs.constVal, decRhs.scale);
+					if (fc.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_FALSE) {
+						b.emitU16(ImpulseIsaTables.OP_FSEED, ImpulseIsaTables.SUBOP_FSEED_EMPTY, 0, dstF, 0, 0, 0,
+								srcF.domId, 0);
+						return TypedVal.frontier(dstF, srcF.domId);
+					}
+					if (fc.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_TRUE) {
+						b.emitU16(ImpulseIsaTables.OP_NODE_FILTER, ImpulseIsaTables.SUBOP_NODE_FILTER_IS_NOT_NULL, 0,
+								dstF, srcF.reg, 0, 0, srcF.domId, ai.attrId);
+						return TypedVal.frontier(dstF, srcF.domId);
+					}
+					int rThresh = allocR();
+					b.emitLoadConstI64(rThresh, fc.thresholdUnscaled());
+					b.emitU16(ImpulseIsaTables.OP_NODE_FILTER, cmpOpToNodeFilterSubop(fc.op()),
+							ImpulseIsaTables.FLAG_SCALAR_RHS, dstF, srcF.reg, rThresh, 0, srcF.domId, ai.attrId);
+					return TypedVal.frontier(dstF, srcF.domId);
+				}
+				// Dynamic scalar decimal param: rescale if decRhs.scale < ai.scale
+				int rCmp = decRhs.reg;
+				if (decRhs.scale < ai.scale) {
+					rCmp = rescaleDecimalUp(decRhs, ai.scale).reg;
+				} else if (decRhs.scale > ai.scale) {
+					// Load column & compare at aligned scale
+					int vCol = allocV();
+					b.emitU16(ImpulseIsaTables.OP_LOAD_COLUMN, ImpulseIsaTables.SUBOP_LOAD_COLUMN_NODE_ATTR, 0, vCol, 0,
+							0, 0, srcF.domId, ai.attrId);
+					TypedVal colScaled = rescaleDecimalUp(TypedVal.vecDecimal(vCol, srcF.domId, ai.precision, ai.scale),
+							decRhs.scale);
+					int vPred = allocV();
+					b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(cmpOp), ImpulseIsaTables.FLAG_SCALAR_RHS,
+							vPred, colScaled.reg, decRhs.reg, 0, 0);
+					// Filter frontier using OP_NODE_FILTER fallback? Keep simple: rescale param
+					// down
+					// only if exact; otherwise throw if unsupported
+					throw new IllegalArgumentException("TYPE_MISMATCH: dynamic node-filter parameter scale ("
+							+ decRhs.scale + ") exceeds column scale (" + ai.scale + "); cast parameter first");
+				}
+				b.emitU16(ImpulseIsaTables.OP_NODE_FILTER, cmpOpToNodeFilterSubop(cmpOp),
+						ImpulseIsaTables.FLAG_SCALAR_RHS, dstF, srcF.reg, rCmp, 0, srcF.domId, ai.attrId);
+				return TypedVal.frontier(dstF, srcF.domId);
+			}
+
+			b.emitU16(ImpulseIsaTables.OP_NODE_FILTER, cmpOpToNodeFilterSubop(cmpOp), ImpulseIsaTables.FLAG_SCALAR_RHS,
+					dstF, srcF.reg, rhsVal.reg, 0, srcF.domId, ai.attrId);
+			return TypedVal.frontier(dstF, srcF.domId);
+		}
+
+		private TypedVal evalEdgeStream(SExpr e) {
+			// (edge-stream :fwd|:rev "REL" f (lambda (src tgt edge) stmt...))
+			String dir = e.elems.get(1).text;
+			String relName = e.elems.get(2).text;
+			RelInfo rel = resolveRel(relName);
+			TypedVal srcF = eval(e.elems.get(3));
+			if (srcF.bank != ValBank.FRONTIER) {
+				throw new IllegalArgumentException("TYPE_MISMATCH: edge-stream expects frontier");
+			}
+			int expectedSrc = ":rev".equals(dir) ? rel.tgtDom : rel.srcDom;
+			if (srcF.domId != expectedSrc) {
+				throw new IllegalArgumentException(
+						"DOMAIN_MISMATCH: edge-stream source frontier domain mismatch on '" + relName + "'");
+			}
+			SExpr lam = e.elems.get(4);
+			if (lam.kind != Kind.LIST || lam.elems.size() < 3 || !"lambda".equals(lam.elems.get(0).text)) {
+				throw new IllegalArgumentException("PARSE_ERROR: edge-stream expects (lambda (src tgt edge) ...)");
+			}
+			List<SExpr> params = lam.elems.get(1).elems;
+			if (params.size() != 3) {
+				throw new IllegalArgumentException("PARSE_ERROR: edge-stream lambda requires 3 params (src tgt edge)");
+			}
+			String srcVar = params.get(0).text;
+			String tgtVar = params.get(1).text;
+			String edgeVar = params.get(2).text;
+
+			int wSub = ":rev".equals(dir)
+					? ImpulseIsaTables.SUBOP_WALK_MORSEL_REV
+					: ImpulseIsaTables.SUBOP_WALK_MORSEL_FWD;
+			int startPc = b.emitU16(ImpulseIsaTables.OP_WALK_MORSEL, wSub, 0, 0, srcF.reg, 0, 0, rel.relId, 0);
+
+			MorselScope prevMorsel = this.morsel;
+			this.morsel = new MorselScope(rel, srcVar, tgtVar, edgeVar);
+			TypedVal result = srcF;
+			try {
+				for (int i = 2; i < lam.elems.size(); i++) {
+					SExpr stmt = lam.elems.get(i);
+					if (stmt.kind != Kind.LIST || stmt.elems.isEmpty()) {
+						throw new IllegalArgumentException("PARSE_ERROR: malformed edge-stream statement");
+					}
+					String sh = stmt.elems.get(0).text;
+					if ("where".equals(sh)) {
+						TypedVal pred = eval(stmt.elems.get(1));
+						if (pred.bank != ValBank.VEC_BOOL) {
+							throw new IllegalArgumentException("TYPE_MISMATCH: where requires bool vector predicate");
+						}
+						this.morsel.predReg = pred.reg;
+					} else if ("scatter-add".equals(sh)) {
+						// (scatter-add out_vec tgt val_expr)
+						TypedVal outVec = eval(stmt.elems.get(1));
+						String idxSym = stmt.elems.get(2).text;
+						int idxReg = idxSym.equals(tgtVar) ? 9 : (idxSym.equals(srcVar) ? 8 : -1);
+						if (idxReg < 0) {
+							throw new IllegalArgumentException(
+									"PARSE_ERROR: scatter-add target must be src or tgt cursor");
+						}
+						TypedVal valExpr = eval(stmt.elems.get(3));
+						int flags = (this.morsel.predReg >= 0) ? ImpulseIsaTables.FLAG_MASKED_S3 : 0;
+						int predR = (this.morsel.predReg >= 0) ? this.morsel.predReg : 0;
+						if (outVec.bank.isDecimal() || valExpr.bank.isDecimal()) {
+							TypedVal decVal = ensureDecimal(valExpr, "scatter-add");
+							if (!outVec.bank.isDecimal()) {
+								throw new IllegalArgumentException(
+										"TYPE_MISMATCH: scatter-add decimal value into non-decimal accumulator");
+							}
+							if (decVal.scale < outVec.scale) {
+								decVal = rescaleDecimalUp(decVal, outVec.scale);
+							} else if (decVal.scale > outVec.scale) {
+								// Cast/round down to accumulator scale
+								int vRound = allocV();
+								b.emitVecDecRoundScale(vRound, decVal.reg, decVal.scale - outVec.scale, 0, 0);
+								decVal = TypedVal.vecDecimal(vRound, outVec.domId, outVec.precision, outVec.scale);
+							}
+							b.emitMorselCommitScatterAddChk(outVec.reg, idxReg, decVal.reg, flags, predR);
+						} else {
+							b.emit(ImpulseIsaTables.OP_MORSEL_COMMIT, ImpulseIsaTables.SUBOP_MORSEL_COMMIT_SCATTER_ADD,
+									flags, outVec.reg, idxReg, valExpr.reg, predR, 0);
+						}
+						result = outVec;
+					} else if ("yield-frontier".equals(sh)) {
+						TypedVal outF = eval(stmt.elems.get(1));
+						String idxSym = stmt.elems.get(2).text;
+						int idxReg = idxSym.equals(tgtVar) ? 9 : 8;
+						int flags = (this.morsel.predReg >= 0) ? ImpulseIsaTables.FLAG_MASKED_S3 : 0;
+						int predR = (this.morsel.predReg >= 0) ? this.morsel.predReg : 0;
+						b.emit(ImpulseIsaTables.OP_MORSEL_COMMIT, ImpulseIsaTables.SUBOP_MORSEL_COMMIT_YIELD_FRONTIER,
+								flags, outF.reg, idxReg, 0, predR, 0);
+						result = outF;
+					} else {
+						result = eval(stmt);
+					}
+				}
+			} finally {
+				this.morsel = prevMorsel;
+			}
+			int endPc = b.pc();
+			int bodyLen = endPc - startPc;
+			b.patchImm16Hi(startPc, bodyLen);
+			b.emitU16(ImpulseIsaTables.OP_MORSEL_END, 0, 0, 0, 0, 0, 0, rel.relId, bodyLen);
+			return result;
 		}
 
 		TypedVal eval(SExpr e) {
 			if (e.kind == Kind.INT) {
 				int r = allocR();
 				b.emitLoadConstI64(r, e.iVal);
-				return new TypedVal(ValBank.SCALAR_I64, r, 0xFFFF);
+				return TypedVal.constInt(r, e.iVal);
 			}
 			if (e.kind == Kind.FLOAT) {
 				int r = allocR();
 				b.emitLoadConstF64(r, e.fVal);
-				return new TypedVal(ValBank.SCALAR_F64, r, 0xFFFF);
+				return TypedVal.scalar(ValBank.SCALAR_F64, r);
 			}
 			if (e.kind == Kind.BOOL) {
 				int r = allocR();
 				b.emitLoadConstI64(r, e.bVal ? 1L : 0L);
-				return new TypedVal(ValBank.SCALAR_BOOL, r, 0xFFFF);
+				return TypedVal.scalar(ValBank.SCALAR_BOOL, r);
+			}
+			if (e.kind == Kind.STRING) {
+				int r = allocR();
+				int cpId = b.addConstPoolStr(e.text);
+				b.emit(ImpulseIsaTables.OP_LOAD_CONST_POOL, ImpulseIsaTables.SUBOP_LOAD_CONST_POOL_STR, 0, r, 0, 0, 0,
+						cpId);
+				return TypedVal.scalar(ValBank.SCALAR_STR, r);
+			}
+			if (e.kind == Kind.NULL) {
+				int r = allocR();
+				b.emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_NULL, 0, r, 0, 0, 0, 0);
+				return TypedVal.scalar(ValBank.SCALAR_I64, r);
 			}
 			if (e.kind == Kind.SYMBOL || e.kind == Kind.PARAM) {
 				TypedVal v = env.get(e.text);
@@ -237,6 +1268,20 @@ public final class ImpScmV11Compiler {
 				throw new IllegalArgumentException("PARSE_ERROR: expected form");
 			}
 			String head = e.elems.get(0).text;
+
+			// Exact decimal literal: (dec "123.45" P S)
+			if ("dec".equals(head)) {
+				if (e.elems.size() != 4 || e.elems.get(1).kind != Kind.STRING || e.elems.get(2).kind != Kind.INT
+						|| e.elems.get(3).kind != Kind.INT) {
+					throw new IllegalArgumentException("PARSE_ERROR: (dec \"digits\" P S) expected");
+				}
+				int p = (int) e.elems.get(2).iVal;
+				int s = (int) e.elems.get(3).iVal;
+				long unscaled = Decimal64.parseUnscaledExact(e.elems.get(1).text, p, s);
+				int r = allocR();
+				b.emitLoadConstI64(r, unscaled);
+				return TypedVal.constDecimal(r, p, s, unscaled);
+			}
 
 			if ("let".equals(head)) {
 				if (e.elems.size() < 3 || e.elems.get(1).kind != Kind.LIST)
@@ -258,7 +1303,7 @@ public final class ImpScmV11Compiler {
 				int dst = allocF();
 				b.emitU16(ImpulseIsaTables.OP_INIT_DOMAIN_SPAN, ImpulseIsaTables.SUBOP_INIT_DOMAIN_SPAN_ALL_SPAN, 0,
 						dst, 0, 0, 0, dom, 0);
-				return new TypedVal(ValBank.FRONTIER, dst, dom);
+				return TypedVal.frontier(dst, dom);
 			}
 			if ("seed".equals(head)) {
 				int dom = resolveDomain(e.elems.get(1).text);
@@ -277,7 +1322,7 @@ public final class ImpScmV11Compiler {
 								0, 0, dom, 0);
 					}
 				}
-				return new TypedVal(ValBank.FRONTIER, dst, dom);
+				return TypedVal.frontier(dst, dom);
 			}
 			if ("walk".equals(head)) {
 				String dir = e.elems.get(1).text;
@@ -334,7 +1379,7 @@ public final class ImpScmV11Compiler {
 				int flags = hasExcl ? ImpulseIsaTables.FLAG_MASKED_S3 : 0;
 				int s3 = hasExcl ? exclF.reg : 0;
 				b.emitU16(ImpulseIsaTables.OP_WALK, wsub, flags, dst, srcF.reg, 0, s3, rel.relId, 0);
-				return new TypedVal(ValBank.FRONTIER, dst, outDom);
+				return TypedVal.frontier(dst, outDom);
 			}
 			if ("set-union".equals(head) || "set-intersect".equals(head) || "set-diff".equals(head)
 					|| "set-sym-diff".equals(head)) {
@@ -352,7 +1397,7 @@ public final class ImpScmV11Compiler {
 				};
 				int dst = allocF();
 				b.emit(ImpulseIsaTables.OP_SET_OP, ssub, 0, dst, a.reg, bv.reg, 0, 0);
-				return new TypedVal(ValBank.FRONTIER, dst, a.domId);
+				return TypedVal.frontier(dst, a.domId);
 			}
 			if ("cardinality".equals(head)) {
 				TypedVal f = eval(e.elems.get(1));
@@ -361,7 +1406,7 @@ public final class ImpScmV11Compiler {
 				int dst = allocR();
 				b.emit(ImpulseIsaTables.OP_SET_CARDINALITY, ImpulseIsaTables.SUBOP_SET_CARDINALITY_CARD_1BIT, 0, dst,
 						f.reg, 0, 0, 0);
-				return new TypedVal(ValBank.SCALAR_U64, dst, 0xFFFF);
+				return TypedVal.scalar(ValBank.SCALAR_U64, dst);
 			}
 			if ("contains?".equals(head)) {
 				TypedVal f = eval(e.elems.get(1));
@@ -373,58 +1418,355 @@ public final class ImpScmV11Compiler {
 				int dst = allocR();
 				b.emit(ImpulseIsaTables.OP_SET_CONTAINS, ImpulseIsaTables.SUBOP_SET_CONTAINS_CONTAINS_1BIT, 0, dst,
 						f.reg, id.reg, 0, 0);
-				return new TypedVal(ValBank.SCALAR_BOOL, dst, 0xFFFF);
+				return TypedVal.scalar(ValBank.SCALAR_BOOL, dst);
 			}
-			if ("+".equals(head) || "-".equals(head) || "*".equals(head) || "/".equals(head)) {
+
+			// Columnar attributes & vectors
+			if ("load-node-attr".equals(head)) {
+				int dom = resolveDomain(e.elems.get(1).text);
+				String attrName = e.elems.get(2).text;
+				AttrInfo ai = resolveNodeAttr(dom, attrName);
+				int dstV = allocV();
+				b.emitU16(ImpulseIsaTables.OP_LOAD_COLUMN, ImpulseIsaTables.SUBOP_LOAD_COLUMN_NODE_ATTR, 0, dstV, 0, 0,
+						0, dom, ai.attrId);
+				if (ai.isDecimal()) {
+					return TypedVal.vecDecimal(dstV, dom, ai.precision, ai.scale);
+				}
+				return TypedVal.vec(attrTypeToVecBank(ai), dstV, dom);
+			}
+			if ("vec-fill".equals(head)) {
+				// (vec-fill "Dom" type val)
+				int dom = resolveDomain(e.elems.get(1).text);
+				TypeSpec ts = parseScalarTypeSpec(e.elems.get(2));
+				TypedVal initVal = eval(e.elems.get(3));
+				int dstV = allocV();
+				int sub = switch (ts.scalarBank) {
+					case SCALAR_I64, SCALAR_DECIMAL -> ImpulseIsaTables.SUBOP_VEC_INIT_DOM_I64;
+					case SCALAR_U64 -> ImpulseIsaTables.SUBOP_VEC_INIT_DOM_U64;
+					case SCALAR_F64 -> ImpulseIsaTables.SUBOP_VEC_INIT_DOM_F64;
+					case SCALAR_BOOL -> ImpulseIsaTables.SUBOP_VEC_INIT_DOM_BOOL_3VL;
+					default -> throw new IllegalArgumentException("TYPE_MISMATCH: unsupported vec-fill type");
+				};
+				if (ts.scalarBank == ValBank.SCALAR_DECIMAL) {
+					TypedVal dv = ensureDecimal(initVal, "vec-fill");
+					if (dv.scale < ts.scale) {
+						dv = rescaleDecimalUp(dv, ts.scale);
+					}
+					if (dv.isConst && dv.constVal == 0L) {
+						b.emitU16(ImpulseIsaTables.OP_VEC_INIT, sub, 0, dstV, 0, 0, 0, dom, 0);
+					} else {
+						b.emitU16(ImpulseIsaTables.OP_VEC_INIT, sub, ImpulseIsaTables.FLAG_SCALAR_RHS, dstV, 0, dv.reg,
+								0, dom, 0);
+					}
+					return TypedVal.vecDecimal(dstV, dom, ts.precision, ts.scale);
+				}
+				b.emitU16(ImpulseIsaTables.OP_VEC_INIT, sub, ImpulseIsaTables.FLAG_SCALAR_RHS, dstV, 0, initVal.reg, 0,
+						dom, 0);
+				ValBank vb = switch (ts.scalarBank) {
+					case SCALAR_U64 -> ValBank.VEC_U64;
+					case SCALAR_F64 -> ValBank.VEC_F64;
+					case SCALAR_BOOL -> ValBank.VEC_BOOL;
+					default -> ValBank.VEC_I64;
+				};
+				return TypedVal.vec(vb, dstV, dom);
+			}
+			if ("node-filter".equals(head)) {
+				return evalNodeFilter(e);
+			}
+			if ("edge-stream".equals(head)) {
+				return evalEdgeStream(e);
+			}
+			if ("edge-attr".equals(head)) {
+				if (morsel == null) {
+					throw new IllegalArgumentException("PARSE_ERROR: edge-attr only valid inside edge-stream");
+				}
+				String attrName = e.elems.get(2).text;
+				AttrInfo ai = resolveEdgeAttr(morsel.rel.name, attrName);
+				int dstV = allocV();
+				b.emitU16(ImpulseIsaTables.OP_GATHER_EDGE_ATTR, ImpulseIsaTables.SUBOP_GATHER_EDGE_ATTR_VEC, 0, dstV,
+						10, 0, 0, morsel.rel.relId, ai.attrId);
+				if (ai.isDecimal()) {
+					return TypedVal.vecDecimal(dstV, morsel.rel.tgtDom, ai.precision, ai.scale);
+				}
+				return TypedVal.vec(attrTypeToVecBank(ai), dstV, morsel.rel.tgtDom);
+			}
+			if ("attr".equals(head)) {
+				if (morsel == null) {
+					throw new IllegalArgumentException("PARSE_ERROR: attr only valid inside edge-stream/node-filter");
+				}
+				String cursor = e.elems.get(1).text;
+				String attrName = e.elems.get(2).text;
+				int idxV;
+				int domId;
+				if (cursor.equals(morsel.srcVar)) {
+					idxV = 8;
+					domId = morsel.rel.srcDom;
+				} else if (cursor.equals(morsel.tgtVar)) {
+					idxV = 9;
+					domId = morsel.rel.tgtDom;
+				} else {
+					throw new IllegalArgumentException("UNBOUND_SYMBOL: unknown morsel cursor '" + cursor + "'");
+				}
+				AttrInfo ai = resolveNodeAttr(domId, attrName);
+				int dstV = allocV();
+				b.emitU16(ImpulseIsaTables.OP_GATHER_NODE_ATTR, ImpulseIsaTables.SUBOP_GATHER_NODE_ATTR_VEC, 0, dstV,
+						idxV, 0, 0, domId, ai.attrId);
+				if (ai.isDecimal()) {
+					return TypedVal.vecDecimal(dstV, domId, ai.precision, ai.scale);
+				}
+				return TypedVal.vec(attrTypeToVecBank(ai), dstV, domId);
+			}
+			if ("vec-at".equals(head)) {
+				if (morsel == null) {
+					throw new IllegalArgumentException("PARSE_ERROR: vec-at only valid inside edge-stream");
+				}
+				TypedVal vec = eval(e.elems.get(1));
+				String cursor = e.elems.get(2).text;
+				int idxV = cursor.equals(morsel.srcVar) ? 8 : (cursor.equals(morsel.tgtVar) ? 9 : -1);
+				if (idxV < 0) {
+					throw new IllegalArgumentException("UNBOUND_SYMBOL: unknown morsel cursor '" + cursor + "'");
+				}
+				int dstV = allocV();
+				b.emit(ImpulseIsaTables.OP_GATHER_VEC, ImpulseIsaTables.SUBOP_GATHER_VEC_GATHER, 0, dstV, vec.reg, idxV,
+						0, 0);
+				return vec.bank.isDecimal()
+						? TypedVal.vecDecimal(dstV, vec.domId, vec.precision, vec.scale)
+						: TypedVal.vec(vec.bank, dstV, vec.domId);
+			}
+
+			// Reductions: (reduce :sum|:min|:max|:avg|:count-valid v [:mask f])
+			if ("reduce".equals(head)) {
+				String kind = e.elems.get(1).text;
+				TypedVal v = eval(e.elems.get(2));
+				if (!v.bank.isVec()) {
+					throw new IllegalArgumentException("TYPE_MISMATCH: reduce expects vector");
+				}
+				int flags = 0;
+				int maskF = 0;
+				if (e.elems.size() >= 5 && ":mask".equals(e.elems.get(3).text)) {
+					TypedVal mf = eval(e.elems.get(4));
+					if (mf.bank != ValBank.FRONTIER || mf.domId != v.domId) {
+						throw new IllegalArgumentException("DOMAIN_MISMATCH: reduce :mask frontier mismatch");
+					}
+					flags = ImpulseIsaTables.FLAG_MASKED_S3;
+					maskF = mf.reg;
+				}
+				if (v.bank == ValBank.VEC_DECIMAL) {
+					if (":sum".equals(kind)) {
+						int dst = allocR();
+						b.emitVecReduceSumI64Chk(dst, v.reg, flags, maskF);
+						return TypedVal.decimal(dst, 18, v.scale);
+					}
+					if (":min".equals(kind) || ":max".equals(kind)) {
+						int rIdx = allocR();
+						int argSub = ":min".equals(kind)
+								? ImpulseIsaTables.SUBOP_VEC_REDUCE_ARGMIN
+								: ImpulseIsaTables.SUBOP_VEC_REDUCE_ARGMAX;
+						b.emit(ImpulseIsaTables.OP_VEC_REDUCE, argSub, flags, rIdx, v.reg, 0, maskF, 0);
+						int dst = allocR();
+						b.emit(ImpulseIsaTables.OP_VEC_POINT, ImpulseIsaTables.SUBOP_VEC_POINT_VEC_GET, 0, dst, v.reg,
+								rIdx, 0, 0);
+						return TypedVal.decimal(dst, v.precision, v.scale);
+					}
+					if (":count-valid".equals(kind)) {
+						int dst = allocR();
+						b.emit(ImpulseIsaTables.OP_VEC_REDUCE, ImpulseIsaTables.SUBOP_VEC_REDUCE_COUNT_VALID, flags,
+								dst, v.reg, 0, maskF, 0);
+						return TypedVal.scalar(ValBank.SCALAR_U64, dst);
+					}
+					if (":avg".equals(kind) || ":mean".equals(kind)) {
+						int rSum = allocR();
+						int savedPin = pinnedRMask;
+						pinnedRMask |= (1 << rSum);
+						int rCnt = allocR();
+						pinnedRMask |= (1 << rCnt);
+						b.emitVecReduceSumI64Chk(rSum, v.reg, flags, maskF);
+						b.emit(ImpulseIsaTables.OP_VEC_REDUCE, ImpulseIsaTables.SUBOP_VEC_REDUCE_COUNT_VALID, flags,
+								rCnt, v.reg, 0, maskF, 0);
+						int dst = allocR();
+						pinnedRMask = savedPin;
+						b.emitScalarDecDivSafe(dst, rSum, rCnt);
+						return TypedVal.decimal(dst, 18, v.scale);
+					}
+					throw new IllegalArgumentException("TYPE_MISMATCH: unsupported decimal reduction '" + kind + "'");
+				}
+				int rsub = switch (kind) {
+					case ":sum" -> ImpulseIsaTables.SUBOP_VEC_REDUCE_SUM;
+					case ":min" -> ImpulseIsaTables.SUBOP_VEC_REDUCE_MIN;
+					case ":max" -> ImpulseIsaTables.SUBOP_VEC_REDUCE_MAX;
+					case ":count-valid" -> ImpulseIsaTables.SUBOP_VEC_REDUCE_COUNT_VALID;
+					case ":mean", ":avg" -> ImpulseIsaTables.SUBOP_VEC_REDUCE_MEAN;
+					default -> throw new IllegalArgumentException("PARSE_ERROR: unknown reduce kind '" + kind + "'");
+				};
+				int dst = allocR();
+				b.emit(ImpulseIsaTables.OP_VEC_REDUCE, rsub, flags, dst, v.reg, 0, maskF, 0);
+				ValBank outB = ":count-valid".equals(kind) ? ValBank.SCALAR_U64 : ValBank.SCALAR_F64;
+				return TypedVal.scalar(outB, dst);
+			}
+
+			// Unary math & decimal ops
+			if ("abs".equals(head) || "neg".equals(head)) {
+				TypedVal v = eval(e.elems.get(1));
+				if (v.bank.isDecimal()) {
+					if (v.bank.isScalar()) {
+						int dst = allocR();
+						if ("abs".equals(head)) {
+							b.emitScalarDecAbsChk(dst, v.reg);
+						} else {
+							b.emitScalarDecNegChk(dst, v.reg);
+						}
+						return TypedVal.decimal(dst, v.precision, v.scale);
+					}
+					int dst = allocV();
+					if ("abs".equals(head)) {
+						b.emitVecDecAbsChk(dst, v.reg, 0, 0);
+					} else {
+						b.emitVecDecNegChk(dst, v.reg, 0, 0);
+					}
+					return TypedVal.vecDecimal(dst, v.domId, v.precision, v.scale);
+				}
+				if (v.bank == ValBank.SCALAR_F64) {
+					int dst = allocR();
+					b.emit(ImpulseIsaTables.OP_SCALAR_FP_ALU,
+							"abs".equals(head)
+									? ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_ABS
+									: ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_NEG,
+							0, dst, v.reg, 0, 0, 0);
+					return TypedVal.scalar(ValBank.SCALAR_F64, dst);
+				}
+				if (v.bank == ValBank.VEC_F64) {
+					int dst = allocV();
+					b.emit(ImpulseIsaTables.OP_VEC_MATH_ARITH,
+							"abs".equals(head)
+									? ImpulseIsaTables.SUBOP_VEC_MATH_ARITH_ABS
+									: ImpulseIsaTables.SUBOP_VEC_MATH_ARITH_NEG,
+							0, dst, v.reg, 0, 0, 0);
+					return TypedVal.vec(ValBank.VEC_F64, dst, v.domId);
+				}
+				throw new IllegalArgumentException("TYPE_MISMATCH: " + head + " unsupported on " + v.bank);
+			}
+			if ("log".equals(head) || "exp".equals(head) || "sqrt".equals(head)) {
+				TypedVal v = eval(e.elems.get(1));
+				if (v.bank.isDecimal()) {
+					throw new IllegalArgumentException(
+							"TYPE_MISMATCH: transcendental math '" + head + "' forbids DECIMAL; use (cast expr f64)");
+				}
+				if (v.bank == ValBank.VEC_F64) {
+					int dst = allocV();
+					if ("sqrt".equals(head)) {
+						b.emit(ImpulseIsaTables.OP_VEC_MATH_ARITH, ImpulseIsaTables.SUBOP_VEC_MATH_ARITH_SQRT, 0, dst,
+								v.reg, 0, 0, 0);
+					} else {
+						int esub = "log".equals(head)
+								? ImpulseIsaTables.SUBOP_VEC_MATH_EXP_LOG_LOG
+								: ImpulseIsaTables.SUBOP_VEC_MATH_EXP_LOG_EXP;
+						b.emit(ImpulseIsaTables.OP_VEC_MATH_EXP_LOG, esub, 0, dst, v.reg, 0, 0, 0);
+					}
+					return TypedVal.vec(ValBank.VEC_F64, dst, v.domId);
+				}
+				if (v.bank == ValBank.SCALAR_F64 && "sqrt".equals(head)) {
+					int dst = allocR();
+					b.emit(ImpulseIsaTables.OP_SCALAR_FP_ALU, ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_SQRT, 0, dst, v.reg,
+							0, 0, 0);
+					return TypedVal.scalar(ValBank.SCALAR_F64, dst);
+				}
+				throw new IllegalArgumentException("TYPE_MISMATCH: " + head + " requires f64 vector, got " + v.bank);
+			}
+
+			// Binary arithmetic (+, -, *, /, safe-div)
+			if ("+".equals(head) || "-".equals(head) || "*".equals(head) || "/".equals(head)
+					|| "safe-div".equals(head)) {
 				TypedVal lhs = eval(e.elems.get(1));
-				TypedVal rhs = eval(e.elems.get(2));
-				boolean li = lhs.bank == ValBank.SCALAR_I64 || lhs.bank == ValBank.SCALAR_U64;
-				boolean ri = rhs.bank == ValBank.SCALAR_I64 || rhs.bank == ValBank.SCALAR_U64;
-				boolean lf = lhs.bank == ValBank.SCALAR_F64;
-				boolean rf = rhs.bank == ValBank.SCALAR_F64;
+				int savedPin = pinR(lhs);
+				TypedVal rhs;
+				try {
+					rhs = eval(e.elems.get(2));
+				} finally {
+					pinnedRMask = savedPin;
+				}
+				if (lhs.bank.isDecimal() || rhs.bank.isDecimal()) {
+					return evalDecimalBinary(head, lhs, rhs);
+				}
+				if (lhs.bank.isStr() || rhs.bank.isStr() || lhs.bank.isBool() || rhs.bank.isBool()) {
+					throw new IllegalArgumentException("TYPE_MISMATCH: arithmetic operator '" + head + "' invalid on "
+							+ lhs.bank + " and " + rhs.bank);
+				}
+				boolean li = lhs.bank.isInt();
+				boolean ri = rhs.bank.isInt();
+				boolean lf = lhs.bank.isFloat();
+				boolean rf = rhs.bank.isFloat();
 				if ((li && rf) || (lf && ri)) {
 					throw new IllegalArgumentException(
 							"TYPE_MISMATCH: implicit int/float mixing forbidden; use (cast ...)");
 				}
-				int dst = allocR();
-				if (li && ri) {
-					int asub = switch (head) {
-						case "-" -> ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_SUB;
-						case "*" -> ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_MUL;
-						case "/" -> ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_DIV_S;
-						default -> ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_ADD;
+				if (!lhs.bank.isVec() && !rhs.bank.isVec()) {
+					int dst = allocR();
+					if (li && ri) {
+						int asub = switch (head) {
+							case "-" -> ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_SUB;
+							case "*" -> ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_MUL;
+							case "/", "safe-div" -> ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_DIV_S;
+							default -> ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_ADD;
+						};
+						b.emit(ImpulseIsaTables.OP_SCALAR_INT_ALU, asub, 0, dst, lhs.reg, rhs.reg, 0, 0);
+						return TypedVal.scalar(ValBank.SCALAR_I64, dst);
+					}
+					int fsub = switch (head) {
+						case "-" -> ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_SUB;
+						case "*" -> ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_MUL;
+						case "/", "safe-div" -> ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_DIV;
+						default -> ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_ADD;
 					};
-					b.emit(ImpulseIsaTables.OP_SCALAR_INT_ALU, asub, 0, dst, lhs.reg, rhs.reg, 0, 0);
-					return new TypedVal(ValBank.SCALAR_I64, dst, 0xFFFF);
+					b.emit(ImpulseIsaTables.OP_SCALAR_FP_ALU, fsub, 0, dst, lhs.reg, rhs.reg, 0, 0);
+					return TypedVal.scalar(ValBank.SCALAR_F64, dst);
 				}
-				int fsub = switch (head) {
-					case "-" -> ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_SUB;
-					case "*" -> ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_MUL;
-					case "/" -> ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_DIV;
-					default -> ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_ADD;
+				int outDom = lhs.bank.isVec() ? lhs.domId : rhs.domId;
+				int msub = switch (head) {
+					case "-" -> ImpulseIsaTables.SUBOP_VEC_MATH_ARITH_SUB;
+					case "*" -> ImpulseIsaTables.SUBOP_VEC_MATH_ARITH_MUL;
+					case "/", "safe-div" -> ImpulseIsaTables.SUBOP_VEC_MATH_ARITH_DIV;
+					default -> ImpulseIsaTables.SUBOP_VEC_MATH_ARITH_ADD;
 				};
-				b.emit(ImpulseIsaTables.OP_SCALAR_FP_ALU, fsub, 0, dst, lhs.reg, rhs.reg, 0, 0);
-				return new TypedVal(ValBank.SCALAR_F64, dst, 0xFFFF);
+				int flags = (!rhs.bank.isVec()) ? ImpulseIsaTables.FLAG_SCALAR_RHS : 0;
+				int dst = allocV();
+				b.emit(ImpulseIsaTables.OP_VEC_MATH_ARITH, msub, flags, dst, lhs.reg, rhs.reg, 0, 0);
+				return TypedVal.vec(lf ? ValBank.VEC_F64 : ValBank.VEC_I64, dst, outDom);
 			}
+
+			// Comparisons (=, !=, <, <=, >, >=)
+			if ("=".equals(head) || "!=".equals(head) || "<".equals(head) || "<=".equals(head) || ">".equals(head)
+					|| ">=".equals(head)) {
+				TypedVal lhs = eval(e.elems.get(1));
+				int savedPin = pinR(lhs);
+				TypedVal rhs;
+				try {
+					rhs = eval(e.elems.get(2));
+				} finally {
+					pinnedRMask = savedPin;
+				}
+				return evalComparison(head, lhs, rhs);
+			}
+
 			if ("cast".equals(head)) {
 				TypedVal v = eval(e.elems.get(1));
-				String ty = e.elems.get(2).text;
-				int dst = allocR();
-				if ("f64".equals(ty) || "f32".equals(ty)) {
-					b.emit(ImpulseIsaTables.OP_SCALAR_FP_ALU, ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_I64_TO_F64, 0, dst,
-							v.reg, 0, 0, 0);
-					return new TypedVal(ValBank.SCALAR_F64, dst, 0xFFFF);
-				}
-				b.emit(ImpulseIsaTables.OP_SCALAR_FP_ALU, ImpulseIsaTables.SUBOP_SCALAR_FP_ALU_F64_TO_I64, 0, dst,
-						v.reg, 0, 0, 0);
-				return new TypedVal(ValBank.SCALAR_I64, dst, 0xFFFF);
+				TypeSpec target = parseScalarTypeSpec(e.elems.get(2));
+				return evalCast(v, target);
 			}
+
 			if ("collect".equals(head)) {
 				String kind = e.elems.get(1).text;
 				String cname = e.elems.get(2).text;
 				TypedVal v = eval(e.elems.get(3));
 				int slot = outputSlot++;
 				outputNames.add(cname);
+				outputSchema.add(v.toOutputMeta(cname));
+				int flags = 0;
+				int maskF = 0;
+				if (e.elems.size() >= 6 && ":mask".equals(e.elems.get(4).text)) {
+					TypedVal mf = eval(e.elems.get(5));
+					flags = ImpulseIsaTables.FLAG_MASKED_S3;
+					maskF = mf.reg;
+				}
 				int csub = switch (kind) {
 					case ":frontier-bitset" -> ImpulseIsaTables.SUBOP_COLLECT_FRONTIER_BITSET;
 					case ":frontier-ids" -> ImpulseIsaTables.SUBOP_COLLECT_FRONTIER_IDS;
@@ -432,7 +1774,7 @@ public final class ImpScmV11Compiler {
 					case ":scalar" -> ImpulseIsaTables.SUBOP_COLLECT_SCALAR;
 					default -> throw new IllegalArgumentException("PARSE_ERROR: unknown collect kind '" + kind + "'");
 				};
-				b.emitU16(ImpulseIsaTables.OP_COLLECT, csub, 0, 0, v.reg, 0, 0, slot, 0);
+				b.emitU16(ImpulseIsaTables.OP_COLLECT, csub, flags, 0, v.reg, 0, maskF, slot, 0);
 				return v;
 			}
 			throw new IllegalArgumentException("PARSE_ERROR: unsupported ImpScheme v0.11 form '" + head + "'");
@@ -457,30 +1799,38 @@ public final class ImpScmV11Compiler {
 					int r = ctx.allocR();
 					ctx.b.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_SCALAR, 0, r, 0, 0,
 							0, pid, ImpulseIsaTables.SCALAR_U64);
-					ctx.env.put(pname, new TypedVal(ValBank.SCALAR_U64, r, dom));
+					ctx.env.put(pname, TypedVal.scalarWithDom(ValBank.SCALAR_U64, r, dom));
 				} else if (ty.kind == Kind.LIST && ty.elems.size() == 2 && "frontier".equals(ty.elems.get(0).text)) {
 					int dom = ctx.resolveDomain(ty.elems.get(1).text);
 					int f = ctx.allocF();
 					ctx.b.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, f, 0,
 							0, 0, pid, dom);
-					ctx.env.put(pname, new TypedVal(ValBank.FRONTIER, f, dom));
+					ctx.env.put(pname, TypedVal.frontier(f, dom));
+				} else if (ty.kind == Kind.LIST && ty.elems.size() == 3 && "decimal".equals(ty.elems.get(0).text)) {
+					TypeSpec ts = ctx.parseScalarTypeSpec(ty);
+					int r = ctx.allocR();
+					ctx.b.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_SCALAR, 0, r, 0, 0,
+							0, pid, ImpulseIsaTables.SCALAR_I64);
+					ctx.env.put(pname, TypedVal.decimal(r, ts.precision, ts.scale));
 				} else if (ty.kind == Kind.SYMBOL) {
 					int r = ctx.allocR();
 					ValBank vb = switch (ty.text) {
 						case "u64", "u32" -> ValBank.SCALAR_U64;
 						case "f64", "f32" -> ValBank.SCALAR_F64;
 						case "bool" -> ValBank.SCALAR_BOOL;
+						case "str" -> ValBank.SCALAR_STR;
 						default -> ValBank.SCALAR_I64;
 					};
 					int stag = switch (vb) {
 						case SCALAR_U64 -> ImpulseIsaTables.SCALAR_U64;
 						case SCALAR_F64 -> ImpulseIsaTables.SCALAR_F64;
 						case SCALAR_BOOL -> ImpulseIsaTables.SCALAR_BOOL_3VL;
+						case SCALAR_STR -> ImpulseIsaTables.SCALAR_STR_HANDLE;
 						default -> ImpulseIsaTables.SCALAR_I64;
 					};
 					ctx.b.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_SCALAR, 0, r, 0, 0,
 							0, pid, stag);
-					ctx.env.put(pname, new TypedVal(vb, r, 0xFFFF));
+					ctx.env.put(pname, TypedVal.scalar(vb, r));
 				} else {
 					throw new IllegalArgumentException("PARSE_ERROR: unsupported param type");
 				}
@@ -499,6 +1849,6 @@ public final class ImpScmV11Compiler {
 		if (vr.status() != ImpulseIsaTables.IMPULSE_VM_OK) {
 			throw new IllegalStateException("VALIDATION_ERROR: invalid v0.11 bytecode at pc=" + vr.badPc());
 		}
-		return new CompileResult(container, ctx.paramMap, ctx.outputNames);
+		return new CompileResult(container, ctx.paramMap, ctx.outputNames, List.copyOf(ctx.outputSchema));
 	}
 }
