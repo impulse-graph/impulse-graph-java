@@ -247,8 +247,8 @@ public final class StorageCoverageBenchRunner {
 
 			StringBuilder sb = new StringBuilder(32768);
 			sb.append(String.format(Locale.ROOT,
-					"{\"engine\":\"java-v11\",\"snapshot\":\"%s\",\"domains\":%d,\"relations\":%d,\"topology\":[",
-					path, domCards.length, view.relations.length));
+					"{\"engine\":\"java-v11\",\"snapshot\":\"%s\",\"domains\":%d,\"relations\":%d,\"topology\":[", path,
+					domCards.length, view.relations.length));
 
 			boolean firstRel = true;
 			for (int r = 0; r < view.relations.length; r++) {
@@ -267,8 +267,10 @@ public final class StorageCoverageBenchRunner {
 
 				RunRes rCsr = runTimed(buildWalk1Hop(r, rv.srcDom, SUBOP_WALK_FWD), binding, ws, pfSrc, warmup, iters);
 				RunRes rCsc = runTimed(buildWalk1Hop(r, rv.tgtDom, SUBOP_WALK_REV), binding, ws, pfTgt, warmup, iters);
-				RunRes rCooF = runTimed(buildWalk1Hop(r, rv.srcDom, SUBOP_WALK_COO_FWD), binding, ws, pfSrc, warmup, iters);
-				RunRes rCooR = runTimed(buildWalk1Hop(r, rv.tgtDom, SUBOP_WALK_COO_REV), binding, ws, pfTgt, warmup, iters);
+				RunRes rCooF = runTimed(buildWalk1Hop(r, rv.srcDom, SUBOP_WALK_COO_FWD), binding, ws, pfSrc, warmup,
+						iters);
+				RunRes rCooR = runTimed(buildWalk1Hop(r, rv.tgtDom, SUBOP_WALK_COO_REV), binding, ws, pfTgt, warmup,
+						iters);
 				RunRes rMors = hasCsr
 						? runTimed(buildMorsel1Hop(r, rv.srcDom, rv.tgtDom, SUBOP_WALK_MORSEL_FWD), binding, ws, pfSrc,
 								warmup, iters)
@@ -381,8 +383,9 @@ public final class StorageCoverageBenchRunner {
 					emitMl.accept("ml_k1_force_w64_2hop", new Object[]{1,
 							runTimed(buildMl2Hop(canonRelId, canonRv.srcDom, true), binding, ws, sv, warmup, iters)});
 				}
-				emitMl.accept("ml_k" + k + "_morsel_2hop", new Object[]{k,
-						runTimed(buildMlMorsel2Hop(canonRelId, canonRv.srcDom, false), binding, ws, sv, warmup, iters)});
+				emitMl.accept("ml_k" + k + "_morsel_2hop",
+						new Object[]{k, runTimed(buildMlMorsel2Hop(canonRelId, canonRv.srcDom, false), binding, ws, sv,
+								warmup, iters)});
 			}
 
 			int kRef = Math.min(64, seeds.length);
