@@ -281,13 +281,18 @@ public final class ImpScmV11Compiler {
 			this.edgeVar = edgeVar;
 		}
 
-		int allocTempV() {
-			int r = nextMorselV++;
-			if (r > 15) {
-				nextMorselV = 12;
-				r = nextMorselV++;
+		int allocTempV(int pinnedVMask) {
+			for (int attempt = 0; attempt < 4; attempt++) {
+				int r = nextMorselV++;
+				if (nextMorselV > 15) {
+					nextMorselV = 12;
+				}
+				if (r == predReg || (pinnedVMask & (1 << r)) != 0) {
+					continue;
+				}
+				return r;
 			}
-			return r;
+			throw new IllegalStateException("REGISTER_EXHAUSTION: morsel V12..V15");
 		}
 	}
 
@@ -349,7 +354,7 @@ public final class ImpScmV11Compiler {
 
 		int allocV() {
 			if (morsel != null) {
-				return morsel.allocTempV();
+				return morsel.allocTempV(pinnedVMask);
 			}
 			if (nextV < 8)
 				return nextV++;
@@ -363,12 +368,67 @@ public final class ImpScmV11Compiler {
 		}
 
 		int pinR(TypedVal v) {
+			int prev = pinnedRMask;
 			if (v != null && v.bank.isScalar() && v.reg >= 0 && v.reg < 16) {
-				int prev = pinnedRMask;
 				pinnedRMask |= (1 << v.reg);
-				return prev;
 			}
-			return pinnedRMask;
+			return prev;
+		}
+
+		int pinV(TypedVal v) {
+			int prev = pinnedVMask;
+			if (v != null && v.bank.isVec() && v.reg >= 0 && v.reg < 16) {
+				pinnedVMask |= (1 << v.reg);
+			}
+			return prev;
+		}
+
+		int allocPinnedR() {
+			int r = allocR();
+			pinnedRMask |= (1 << r);
+			return r;
+		}
+
+		int allocPinnedV() {
+			int v = allocV();
+			pinnedVMask |= (1 << v);
+			return v;
+		}
+
+		boolean isVecInEnv(int reg) {
+			for (TypedVal v : env.values()) {
+				if (v.bank.isVec() && v.reg == reg) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		/**
+		 * Allocates a destination vector register, allowing safe in-place reuse of a
+		 * non-env temporary operand register when all V0..V7 slots are occupied (VM
+		 * vector ops read inputs before writing {@code ws.vVectors[dst]}).
+		 */
+		int allocDstV(TypedVal t1, TypedVal t2) {
+			if (morsel != null) {
+				return morsel.allocTempV(pinnedVMask);
+			}
+			if (nextV < 8) {
+				return nextV++;
+			}
+			int live = liveVMask();
+			for (int v = 0; v < 8; v++) {
+				if ((live & (1 << v)) == 0) {
+					return v;
+				}
+			}
+			if (t1 != null && t1.bank.isVec() && t1.reg >= 0 && t1.reg < 8 && !isVecInEnv(t1.reg)) {
+				return t1.reg;
+			}
+			if (t2 != null && t2.bank.isVec() && t2.reg >= 0 && t2.reg < 8 && !isVecInEnv(t2.reg)) {
+				return t2.reg;
+			}
+			throw new IllegalStateException("REGISTER_EXHAUSTION: V0..V7");
 		}
 
 		int resolveDomain(String name) {
@@ -475,8 +535,13 @@ public final class ImpScmV11Compiler {
 				if (ty.elems.get(1).kind != Kind.INT || ty.elems.get(2).kind != Kind.INT) {
 					throw new IllegalArgumentException("PARSE_ERROR: (decimal P S) requires integer P and S");
 				}
-				int p = (int) ty.elems.get(1).iVal;
-				int s = (int) ty.elems.get(2).iVal;
+				long pRaw = ty.elems.get(1).iVal;
+				long sRaw = ty.elems.get(2).iVal;
+				if (pRaw < 1L || pRaw > 18L || sRaw < 0L || sRaw > pRaw) {
+					throw new IllegalArgumentException("PARSE_ERROR: invalid DECIMAL(" + pRaw + ", " + sRaw + ")");
+				}
+				int p = (int) pRaw;
+				int s = (int) sRaw;
 				Decimal64.validatePrecisionScale(p, s);
 				return new TypeSpec(ValBank.SCALAR_DECIMAL, p, s);
 			}
@@ -527,8 +592,10 @@ public final class ImpScmV11Compiler {
 		}
 
 		private TypedVal evalDecimalBinary(String head, TypedVal rawLhs, TypedVal rawRhs) {
-			int savedPin = pinR(rawLhs);
+			int savedPinR = pinR(rawLhs);
+			int savedPinV = pinV(rawLhs);
 			pinR(rawRhs);
+			pinV(rawRhs);
 			try {
 				TypedVal lhs = ensureDecimal(rawLhs, head);
 				TypedVal rhs = ensureDecimal(rawRhs, head);
@@ -545,8 +612,10 @@ public final class ImpScmV11Compiler {
 					int p = Math.min(18, Math.max(lhs.precision - lhs.scale, rhs.precision - rhs.scale) + s + 1);
 					TypedVal a = rescaleDecimalUp(lhs, s);
 					pinR(a);
+					pinV(a);
 					TypedVal bVal = rescaleDecimalUp(rhs, s);
 					pinR(bVal);
+					pinV(bVal);
 
 					if (!lVec && !rVec) {
 						int dst = allocR();
@@ -558,7 +627,7 @@ public final class ImpScmV11Compiler {
 						return TypedVal.decimal(dst, p, s);
 					}
 					if (lVec && rVec) {
-						int dst = allocV();
+						int dst = allocDstV(a, bVal);
 						if ("+".equals(head)) {
 							b.emitVecDecAddChk(dst, a.reg, bVal.reg, 0, 0);
 						} else {
@@ -567,7 +636,7 @@ public final class ImpScmV11Compiler {
 						return TypedVal.vecDecimal(dst, outDom, p, s);
 					}
 					if (lVec) {
-						int dst = allocV();
+						int dst = allocDstV(a, null);
 						if ("+".equals(head)) {
 							b.emitVecDecAddChk(dst, a.reg, bVal.reg, ImpulseIsaTables.FLAG_SCALAR_RHS, 0);
 						} else {
@@ -577,14 +646,14 @@ public final class ImpScmV11Compiler {
 					}
 					// scalar +/- vec
 					if ("+".equals(head)) {
-						int dst = allocV();
+						int dst = allocDstV(bVal, null);
 						b.emitVecDecAddChk(dst, bVal.reg, a.reg, ImpulseIsaTables.FLAG_SCALAR_RHS, 0);
 						return TypedVal.vecDecimal(dst, outDom, p, s);
 					}
 					// scalar - vec => (-vec) + scalar
-					int negV = allocV();
+					int negV = allocPinnedV();
 					b.emitVecDecNegChk(negV, bVal.reg, 0, 0);
-					int dst = allocV();
+					int dst = allocDstV(bVal, null);
 					b.emitVecDecAddChk(dst, negV, a.reg, ImpulseIsaTables.FLAG_SCALAR_RHS, 0);
 					return TypedVal.vecDecimal(dst, outDom, p, s);
 				}
@@ -596,7 +665,7 @@ public final class ImpScmV11Compiler {
 					int divPow = rawS - s; // 0 when rawS <= 18, else 1..18
 
 					if (!lVec && !rVec) {
-						int dst = allocR();
+						int dst = allocPinnedR();
 						if (divPow == 0) {
 							b.emitScalarDecMulChk(dst, lhs.reg, rhs.reg);
 						} else {
@@ -611,7 +680,7 @@ public final class ImpScmV11Compiler {
 					TypedVal other = lVec ? rhs : lhs;
 					boolean scalarRhs = !other.bank.isVec();
 					int flags = scalarRhs ? ImpulseIsaTables.FLAG_SCALAR_RHS : 0;
-					int dst = allocV();
+					int dst = allocDstV(vOp, scalarRhs ? null : other);
 					if (divPow == 0) {
 						b.emitVecDecMulChk(dst, vOp.reg, other.reg, flags, 0);
 					} else {
@@ -626,31 +695,39 @@ public final class ImpScmV11Compiler {
 				boolean isSafe = "safe-div".equals(head);
 				int s = Math.min(18, Math.max(6, lhs.scale));
 				int p = 18;
-				int k = s - lhs.scale + rhs.scale; // always >= 0
-				TypedVal num = lhs;
-				if (k > 18) {
-					int pre = k - 18;
-					num = rescaleDecimalUp(lhs, lhs.scale + pre);
-					pinR(num);
-					k = 18;
-				}
+				int rawK = s - lhs.scale + rhs.scale; // always >= 0
+
 				if (!lVec && !rVec) {
-					int dst = allocR();
+					int dst = allocPinnedR();
 					if (!isSafe) {
+						TypedVal num = lhs;
+						int k = rawK;
+						if (k > 18) {
+							num = rescaleDecimalUp(lhs, lhs.scale + (k - 18));
+							pinR(num);
+							k = 18;
+						}
 						int rMul = allocR();
 						b.emitLoadConstI64(rMul, Decimal64.POW10[k]);
 						b.emitScalarDecMulDivRound(dst, num.reg, rMul, rhs.reg);
-					} else if (k == 0) {
-						b.emitScalarDecDivSafe(dst, num.reg, rhs.reg);
+					} else if (rawK == 0) {
+						b.emitScalarDecDivSafe(dst, lhs.reg, rhs.reg);
 					} else {
-						// Safe-div with 128-bit scaling: if rhs == 0 -> NULL, else mul_div_round
-						int rZero = allocR();
-						int rIsZero = allocR();
-						int rMul = allocR();
+						// Safe-div with 128-bit scaling: check rhs == 0 BEFORE any k > 18 pre-rescale!
+						int rZero = allocPinnedR();
+						int rIsZero = allocPinnedR();
 						b.emitLoadConstI64(rZero, 0L);
 						b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_EQ_I64, 0, rIsZero,
 								rhs.reg, rZero, 0, 0);
-						int jccPc = b.emit(ImpulseIsaTables.OP_JCC, 6, 0, 0, rIsZero, 0, 0, 0); // jcc if rIsZero != 0
+						int jccPc = b.emit(ImpulseIsaTables.OP_JCC, 6, 0, 0, rIsZero, 0, 0, 0);
+						TypedVal num = lhs;
+						int k = rawK;
+						if (k > 18) {
+							num = rescaleDecimalUp(lhs, lhs.scale + (k - 18));
+							pinR(num);
+							k = 18;
+						}
+						int rMul = allocR();
 						b.emitLoadConstI64(rMul, Decimal64.POW10[k]);
 						b.emitScalarDecMulDivRound(dst, num.reg, rMul, rhs.reg);
 						int jmpEndPc = b.emit(ImpulseIsaTables.OP_JMP, 0, 0, 0, 0, 0, 0, 0);
@@ -664,17 +741,50 @@ public final class ImpScmV11Compiler {
 					return TypedVal.decimal(dst, p, s);
 				}
 
+				TypedVal num = lhs;
 				if (!lVec) {
 					// scalar / vec: materialize scalar into domain vector via OP_VEC_INIT
-					int vNum = allocV();
+					int vNum = allocPinnedV();
 					b.emitU16(ImpulseIsaTables.OP_VEC_INIT, ImpulseIsaTables.SUBOP_VEC_INIT_DOM_I64,
 							ImpulseIsaTables.FLAG_SCALAR_RHS, vNum, 0, num.reg, 0, outDom, 0);
 					num = TypedVal.vecDecimal(vNum, outDom, num.precision, num.scale);
 				}
 
-				int dst = allocV();
 				if (!rVec) {
 					// vec / scalar
+					int k = rawK;
+					if (isSafe && k > 18) {
+						// Guard k > 18 pre-rescale against rhs == 0
+						int dst = allocPinnedV();
+						int rZero = allocPinnedR();
+						int rIsZero = allocPinnedR();
+						b.emitLoadConstI64(rZero, 0L);
+						b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_EQ_I64, 0, rIsZero,
+								rhs.reg, rZero, 0, 0);
+						int jccPc = b.emit(ImpulseIsaTables.OP_JCC, 6, 0, 0, rIsZero, 0, 0, 0);
+						TypedVal preNum = rescaleDecimalUp(num, num.scale + (k - 18));
+						pinV(preNum);
+						int rMul = allocR();
+						b.emitLoadConstI64(rMul, Decimal64.POW10[18]);
+						b.emitVecDecMulDivSafeR(dst, preNum.reg, rMul, rhs.reg, ImpulseIsaTables.FLAG_SCALAR_RHS);
+						int jmpEndPc = b.emit(ImpulseIsaTables.OP_JMP, 0, 0, 0, 0, 0, 0, 0);
+						int nullPc = b.pc();
+						b.patchImm32(jccPc, nullPc - jccPc);
+						int rNull = allocR();
+						b.emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_NULL, 0, rNull, 0, 0,
+								0, 0);
+						b.emitU16(ImpulseIsaTables.OP_VEC_INIT, ImpulseIsaTables.SUBOP_VEC_INIT_DOM_I64,
+								ImpulseIsaTables.FLAG_SCALAR_RHS, dst, 0, rNull, 0, outDom, 0);
+						int endPc = b.pc();
+						b.patchImm32(jmpEndPc, endPc - jmpEndPc);
+						return TypedVal.vecDecimal(dst, outDom, p, s);
+					}
+					if (k > 18) {
+						num = rescaleDecimalUp(num, num.scale + (k - 18));
+						pinV(num);
+						k = 18;
+					}
+					int dst = allocV();
 					int rMul = allocR();
 					b.emitLoadConstI64(rMul, Decimal64.POW10[k]);
 					if (isSafe) {
@@ -684,23 +794,62 @@ public final class ImpScmV11Compiler {
 					}
 					return TypedVal.vecDecimal(dst, outDom, p, s);
 				}
+
 				// vec / vec
 				if (isSafe) {
-					TypedVal scaledNum = (k > 0) ? rescaleDecimalUp(num, num.scale + k) : num;
-					b.emitVecDecDivSafe(dst, scaledNum.reg, rhs.reg, 0, 0);
-				} else {
+					// Zero-check blend + 128-bit mul_div_v:
+					// 1) vNonZero = (rhs != 0)
+					// 2) vSafeRhs = blend_kleene_vr(vNonZero, rhs, NULL) -> 0 lanes become NULL
+					// 3) if k > 18: mask num with vNonZero before pre-rescale so 0-divisor lanes
+					// never trap
+					// 4) emit 128-bit OP_VEC_DECIMAL_ALU.mul_div_v(num, 10^k, vSafeRhs)
+					int rZero = allocPinnedR();
+					int rNull = allocPinnedR();
+					b.emitLoadConstI64(rZero, 0L);
+					b.emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_NULL, 0, rNull, 0, 0, 0,
+							0);
+					int vNonZero = allocPinnedV();
+					b.emit(ImpulseIsaTables.OP_VEC_CMP, ImpulseIsaTables.SUBOP_VEC_CMP_NE,
+							ImpulseIsaTables.FLAG_SCALAR_RHS, vNonZero, rhs.reg, rZero, 0, 0);
+					int vSafeRhs = allocPinnedV();
+					b.emit(ImpulseIsaTables.OP_VEC_BLEND, ImpulseIsaTables.SUBOP_VEC_BLEND_KLEENE_VR, 0, vSafeRhs,
+							vNonZero, rhs.reg, rNull, 0);
+					int k = rawK;
+					if (k > 18) {
+						int vSafeNum = allocPinnedV();
+						b.emit(ImpulseIsaTables.OP_VEC_BLEND, ImpulseIsaTables.SUBOP_VEC_BLEND_KLEENE_VR, 0, vSafeNum,
+								vNonZero, num.reg, rNull, 0);
+						num = rescaleDecimalUp(TypedVal.vecDecimal(vSafeNum, outDom, num.precision, num.scale),
+								num.scale + (k - 18));
+						pinV(num);
+						k = 18;
+					}
 					int rMul = allocR();
 					b.emitLoadConstI64(rMul, Decimal64.POW10[k]);
-					b.emitVecDecMulDivV(dst, num.reg, rMul, rhs.reg, ImpulseIsaTables.FLAG_SCALAR_RHS);
+					int dst = allocV();
+					b.emitVecDecMulDivV(dst, num.reg, rMul, vSafeRhs, ImpulseIsaTables.FLAG_SCALAR_RHS);
+					return TypedVal.vecDecimal(dst, outDom, p, s);
 				}
+				int k = rawK;
+				if (k > 18) {
+					num = rescaleDecimalUp(num, num.scale + (k - 18));
+					pinV(num);
+					k = 18;
+				}
+				int dst = allocV();
+				int rMul = allocR();
+				b.emitLoadConstI64(rMul, Decimal64.POW10[k]);
+				b.emitVecDecMulDivV(dst, num.reg, rMul, rhs.reg, ImpulseIsaTables.FLAG_SCALAR_RHS);
 				return TypedVal.vecDecimal(dst, outDom, p, s);
 			} finally {
-				pinnedRMask = savedPin;
+				pinnedRMask = savedPinR;
+				pinnedVMask = savedPinV;
 			}
 		}
 
 		private TypedVal evalCast(TypedVal v, TypeSpec target) {
-			int savedPin = pinR(v);
+			int savedPinR = pinR(v);
+			int savedPinV = pinV(v);
 			try {
 				boolean isVec = v.bank.isVec();
 				if (target.scalarBank == ValBank.SCALAR_DECIMAL) {
@@ -847,7 +996,8 @@ public final class ImpScmV11Compiler {
 				}
 				throw new IllegalArgumentException("TYPE_MISMATCH: unsupported cast target " + target.scalarBank);
 			} finally {
-				pinnedRMask = savedPin;
+				pinnedRMask = savedPinR;
+				pinnedVMask = savedPinV;
 			}
 		}
 
@@ -885,9 +1035,46 @@ public final class ImpScmV11Compiler {
 			};
 		}
 
+		private static DecimalBoundaryFolder.CmpOp flipCmpOp(DecimalBoundaryFolder.CmpOp op) {
+			return switch (op) {
+				case LT -> DecimalBoundaryFolder.CmpOp.GT;
+				case LE -> DecimalBoundaryFolder.CmpOp.GE;
+				case GT -> DecimalBoundaryFolder.CmpOp.LT;
+				case GE -> DecimalBoundaryFolder.CmpOp.LE;
+				case EQ, NE -> op;
+			};
+		}
+
+		private TypedVal emitFoldedVecCmp(DecimalBoundaryFolder.CmpOp op, TypedVal vecDec, TypedVal constLit,
+				int outDom) {
+			DecimalBoundaryFolder.FoldedComparison fc = DecimalBoundaryFolder.foldComparison(op, vecDec.precision,
+					vecDec.scale, constLit.constVal, constLit.scale);
+			if (fc.kind() == DecimalBoundaryFolder.FoldKind.COMPARE) {
+				int rThresh = allocR();
+				b.emitLoadConstI64(rThresh, fc.thresholdUnscaled());
+				int dst = allocV();
+				b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(fc.op()), ImpulseIsaTables.FLAG_SCALAR_RHS, dst,
+						vecDec.reg, rThresh, 0, 0);
+				return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
+			}
+			int dst = allocV();
+			if (fc.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_FALSE) {
+				// All-false for valid lanes, NULL for NULL lanes: vecDec != vecDec
+				b.emit(ImpulseIsaTables.OP_VEC_CMP, ImpulseIsaTables.SUBOP_VEC_CMP_NE, 0, dst, vecDec.reg, vecDec.reg,
+						0, 0);
+			} else {
+				// All-true for valid lanes, NULL for NULL lanes: vecDec == vecDec
+				b.emit(ImpulseIsaTables.OP_VEC_CMP, ImpulseIsaTables.SUBOP_VEC_CMP_EQ, 0, dst, vecDec.reg, vecDec.reg,
+						0, 0);
+			}
+			return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
+		}
+
 		private TypedVal evalComparison(String head, TypedVal lhs, TypedVal rhs) {
-			int savedPin = pinR(lhs);
+			int savedPinR = pinR(lhs);
+			int savedPinV = pinV(lhs);
 			pinR(rhs);
+			pinV(rhs);
 			try {
 				DecimalBoundaryFolder.CmpOp cmpOp = parseCmpOp(head);
 				boolean anyDec = lhs.bank.isDecimal() || rhs.bank.isDecimal();
@@ -898,41 +1085,21 @@ public final class ImpScmV11Compiler {
 					boolean rVec = dr.bank.isVec();
 					int outDom = lVec ? dl.domId : (rVec ? dr.domId : 0xFFFF);
 
-					// Compile-time boundary folding when comparing a DECIMAL vector with a constant
-					// decimal/int literal
+					// Compile-time boundary folding (both vec <op> lit AND symmetric lit <op> vec)
 					if (lVec && !rVec && dr.isConst) {
-						DecimalBoundaryFolder.FoldedComparison fc = DecimalBoundaryFolder.foldComparison(cmpOp,
-								dl.precision, dl.scale, dr.constVal, dr.scale);
-						if (fc.kind() == DecimalBoundaryFolder.FoldKind.COMPARE) {
-							int rThresh = allocR();
-							b.emitLoadConstI64(rThresh, fc.thresholdUnscaled());
-							int dst = allocV();
-							b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(fc.op()),
-									ImpulseIsaTables.FLAG_SCALAR_RHS, dst, dl.reg, rThresh, 0, 0);
-							return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
-						} else if (fc.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_FALSE) {
-							int rZero = allocR();
-							b.emitLoadConstI64(rZero, 0L);
-							int dst = allocV();
-							// Produce all-false bool vector of same length: cmp dl != dl (false for valid,
-							// null for null)
-							b.emit(ImpulseIsaTables.OP_VEC_CMP, ImpulseIsaTables.SUBOP_VEC_CMP_NE, 0, dst, dl.reg,
-									dl.reg, 0, 0);
-							return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
-						} else {
-							int dst = allocV();
-							// ALWAYS_TRUE for non-null: dl == dl
-							b.emit(ImpulseIsaTables.OP_VEC_CMP, ImpulseIsaTables.SUBOP_VEC_CMP_EQ, 0, dst, dl.reg,
-									dl.reg, 0, 0);
-							return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
-						}
+						return emitFoldedVecCmp(cmpOp, dl, dr, outDom);
+					}
+					if (!lVec && rVec && dl.isConst) {
+						return emitFoldedVecCmp(flipCmpOp(cmpOp), dr, dl, outDom);
 					}
 
 					int s = Math.max(dl.scale, dr.scale);
 					TypedVal a = rescaleDecimalUp(dl, s);
 					pinR(a);
+					pinV(a);
 					TypedVal bVal = rescaleDecimalUp(dr, s);
 					pinR(bVal);
+					pinV(bVal);
 
 					if (!lVec && !rVec) {
 						int dst = allocR();
@@ -950,17 +1117,9 @@ public final class ImpScmV11Compiler {
 								dst, a.reg, bVal.reg, 0, 0);
 						return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
 					}
-					// scalar cmp vec -> flip operator
-					DecimalBoundaryFolder.CmpOp flipped = switch (cmpOp) {
-						case LT -> DecimalBoundaryFolder.CmpOp.GT;
-						case LE -> DecimalBoundaryFolder.CmpOp.GE;
-						case GT -> DecimalBoundaryFolder.CmpOp.LT;
-						case GE -> DecimalBoundaryFolder.CmpOp.LE;
-						case EQ, NE -> cmpOp;
-					};
 					int dst = allocV();
-					b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(flipped), ImpulseIsaTables.FLAG_SCALAR_RHS,
-							dst, bVal.reg, a.reg, 0, 0);
+					b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(flipCmpOp(cmpOp)),
+							ImpulseIsaTables.FLAG_SCALAR_RHS, dst, bVal.reg, a.reg, 0, 0);
 					return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
 				}
 
@@ -986,19 +1145,13 @@ public final class ImpScmV11Compiler {
 					b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(cmpOp), ImpulseIsaTables.FLAG_SCALAR_RHS,
 							dst, lhs.reg, rhs.reg, 0, 0);
 				} else {
-					DecimalBoundaryFolder.CmpOp flipped = switch (cmpOp) {
-						case LT -> DecimalBoundaryFolder.CmpOp.GT;
-						case LE -> DecimalBoundaryFolder.CmpOp.GE;
-						case GT -> DecimalBoundaryFolder.CmpOp.LT;
-						case GE -> DecimalBoundaryFolder.CmpOp.LE;
-						case EQ, NE -> cmpOp;
-					};
-					b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(flipped), ImpulseIsaTables.FLAG_SCALAR_RHS,
-							dst, rhs.reg, lhs.reg, 0, 0);
+					b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(flipCmpOp(cmpOp)),
+							ImpulseIsaTables.FLAG_SCALAR_RHS, dst, rhs.reg, lhs.reg, 0, 0);
 				}
 				return TypedVal.vec(ValBank.VEC_BOOL, dst, outDom);
 			} finally {
-				pinnedRMask = savedPin;
+				pinnedRMask = savedPinR;
+				pinnedVMask = savedPinV;
 			}
 		}
 
@@ -1076,12 +1229,27 @@ public final class ImpScmV11Compiler {
 			TypedVal rhsVal = eval(rhsExpr);
 			int dstF = allocF();
 
-			if (ai.isDecimal()) {
+			if (ai.isDecimal() || rhsVal.bank.isDecimal()) {
+				int colPrec;
+				int colScale;
+				if (ai.isDecimal()) {
+					colPrec = ai.precision;
+					colScale = ai.scale;
+				} else {
+					ValBank colBank = attrTypeToVecBank(ai);
+					if (!colBank.isInt()) {
+						throw new IllegalArgumentException("TYPE_MISMATCH: cannot compare non-decimal column '"
+								+ attrName + "' (" + colBank + ") with DECIMAL; use (cast ...)");
+					}
+					// Exact promotion of INT column to DECIMAL(18, 0)
+					colPrec = 18;
+					colScale = 0;
+				}
 				TypedVal decRhs = ensureDecimal(rhsVal, opStr);
 				if (decRhs.isConst) {
 					// Compile-time boundary folding: zero runtime rescale!
-					DecimalBoundaryFolder.FoldedComparison fc = DecimalBoundaryFolder.foldComparison(cmpOp,
-							ai.precision, ai.scale, decRhs.constVal, decRhs.scale);
+					DecimalBoundaryFolder.FoldedComparison fc = DecimalBoundaryFolder.foldComparison(cmpOp, colPrec,
+							colScale, decRhs.constVal, decRhs.scale);
 					if (fc.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_FALSE) {
 						b.emitU16(ImpulseIsaTables.OP_FSEED, ImpulseIsaTables.SUBOP_FSEED_EMPTY, 0, dstF, 0, 0, 0,
 								srcF.domId, 0);
@@ -1098,31 +1266,24 @@ public final class ImpScmV11Compiler {
 							ImpulseIsaTables.FLAG_SCALAR_RHS, dstF, srcF.reg, rThresh, 0, srcF.domId, ai.attrId);
 					return TypedVal.frontier(dstF, srcF.domId);
 				}
-				// Dynamic scalar decimal param: rescale if decRhs.scale < ai.scale
+				// Dynamic scalar decimal param: rescale if decRhs.scale < colScale
 				int rCmp = decRhs.reg;
-				if (decRhs.scale < ai.scale) {
-					rCmp = rescaleDecimalUp(decRhs, ai.scale).reg;
-				} else if (decRhs.scale > ai.scale) {
-					// Load column & compare at aligned scale
-					int vCol = allocV();
-					b.emitU16(ImpulseIsaTables.OP_LOAD_COLUMN, ImpulseIsaTables.SUBOP_LOAD_COLUMN_NODE_ATTR, 0, vCol, 0,
-							0, 0, srcF.domId, ai.attrId);
-					TypedVal colScaled = rescaleDecimalUp(TypedVal.vecDecimal(vCol, srcF.domId, ai.precision, ai.scale),
-							decRhs.scale);
-					int vPred = allocV();
-					b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(cmpOp), ImpulseIsaTables.FLAG_SCALAR_RHS,
-							vPred, colScaled.reg, decRhs.reg, 0, 0);
-					// Filter frontier using OP_NODE_FILTER fallback? Keep simple: rescale param
-					// down
-					// only if exact; otherwise throw if unsupported
+				if (decRhs.scale < colScale) {
+					rCmp = rescaleDecimalUp(decRhs, colScale).reg;
+				} else if (decRhs.scale > colScale) {
 					throw new IllegalArgumentException("TYPE_MISMATCH: dynamic node-filter parameter scale ("
-							+ decRhs.scale + ") exceeds column scale (" + ai.scale + "); cast parameter first");
+							+ decRhs.scale + ") exceeds column scale (" + colScale + "); cast parameter first");
 				}
 				b.emitU16(ImpulseIsaTables.OP_NODE_FILTER, cmpOpToNodeFilterSubop(cmpOp),
 						ImpulseIsaTables.FLAG_SCALAR_RHS, dstF, srcF.reg, rCmp, 0, srcF.domId, ai.attrId);
 				return TypedVal.frontier(dstF, srcF.domId);
 			}
 
+			ValBank colBank = attrTypeToVecBank(ai);
+			if ((colBank.isInt() && rhsVal.bank.isFloat()) || (colBank.isFloat() && rhsVal.bank.isInt())) {
+				throw new IllegalArgumentException(
+						"TYPE_MISMATCH: implicit int/float node-filter comparison forbidden; use (cast ...)");
+			}
 			b.emitU16(ImpulseIsaTables.OP_NODE_FILTER, cmpOpToNodeFilterSubop(cmpOp), ImpulseIsaTables.FLAG_SCALAR_RHS,
 					dstF, srcF.reg, rhsVal.reg, 0, srcF.domId, ai.attrId);
 			return TypedVal.frontier(dstF, srcF.domId);
@@ -1275,8 +1436,13 @@ public final class ImpScmV11Compiler {
 						|| e.elems.get(3).kind != Kind.INT) {
 					throw new IllegalArgumentException("PARSE_ERROR: (dec \"digits\" P S) expected");
 				}
-				int p = (int) e.elems.get(2).iVal;
-				int s = (int) e.elems.get(3).iVal;
+				long pRaw = e.elems.get(2).iVal;
+				long sRaw = e.elems.get(3).iVal;
+				if (pRaw < 1L || pRaw > 18L || sRaw < 0L || sRaw > pRaw) {
+					throw new IllegalArgumentException("PARSE_ERROR: invalid DECIMAL(" + pRaw + ", " + sRaw + ")");
+				}
+				int p = (int) pRaw;
+				int s = (int) sRaw;
 				long unscaled = Decimal64.parseUnscaledExact(e.elems.get(1).text, p, s);
 				int r = allocR();
 				b.emitLoadConstI64(r, unscaled);
@@ -1449,14 +1615,12 @@ public final class ImpScmV11Compiler {
 				};
 				if (ts.scalarBank == ValBank.SCALAR_DECIMAL) {
 					TypedVal dv = ensureDecimal(initVal, "vec-fill");
-					if (dv.scale < ts.scale) {
-						dv = rescaleDecimalUp(dv, ts.scale);
-					}
 					if (dv.isConst && dv.constVal == 0L) {
 						b.emitU16(ImpulseIsaTables.OP_VEC_INIT, sub, 0, dstV, 0, 0, 0, dom, 0);
 					} else {
-						b.emitU16(ImpulseIsaTables.OP_VEC_INIT, sub, ImpulseIsaTables.FLAG_SCALAR_RHS, dstV, 0, dv.reg,
-								0, dom, 0);
+						TypedVal castVal = evalCast(dv, ts);
+						b.emitU16(ImpulseIsaTables.OP_VEC_INIT, sub, ImpulseIsaTables.FLAG_SCALAR_RHS, dstV, 0,
+								castVal.reg, 0, dom, 0);
 					}
 					return TypedVal.vecDecimal(dstV, dom, ts.precision, ts.scale);
 				}
@@ -1558,15 +1722,79 @@ public final class ImpScmV11Compiler {
 						return TypedVal.decimal(dst, 18, v.scale);
 					}
 					if (":min".equals(kind) || ":max".equals(kind)) {
-						int rIdx = allocR();
-						int argSub = ":min".equals(kind)
-								? ImpulseIsaTables.SUBOP_VEC_REDUCE_ARGMIN
-								: ImpulseIsaTables.SUBOP_VEC_REDUCE_ARGMAX;
-						b.emit(ImpulseIsaTables.OP_VEC_REDUCE, argSub, flags, rIdx, v.reg, 0, maskF, 0);
-						int dst = allocR();
-						b.emit(ImpulseIsaTables.OP_VEC_POINT, ImpulseIsaTables.SUBOP_VEC_POINT_VEC_GET, 0, dst, v.reg,
-								rIdx, 0, 0);
-						return TypedVal.decimal(dst, v.precision, v.scale);
+						// Exact signed 64-bit integer min/max loop over active valid lanes (zero f64
+						// precision loss above 2^53, 100% 4-way C++/Java/OCaml parity).
+						boolean isMin = ":min".equals(kind);
+						int savedPinR = pinnedRMask;
+						int savedPinV = pinV(v);
+						try {
+							int rAcc = allocPinnedR();
+							int rIdx = allocPinnedR();
+							int rLen = allocPinnedR();
+							int rOne = allocPinnedR();
+							int rCur = allocPinnedR();
+							int rTmp = allocPinnedR();
+
+							b.emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_NULL, 0, rAcc, 0,
+									0, 0, 0);
+							b.emitLoadConstI64(rIdx, 0L);
+							b.emitLoadConstI64(rOne, 1L);
+							b.emit(ImpulseIsaTables.OP_VEC_POINT, ImpulseIsaTables.SUBOP_VEC_POINT_VEC_LEN, 0, rLen,
+									v.reg, 0, 0, 0);
+
+							int loopPc = b.pc();
+							b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_LT_I64, 0,
+									rTmp, rIdx, rLen, 0, 0);
+							int jccEndPc = b.emit(ImpulseIsaTables.OP_JCC, 7, 0, 0, rTmp, 0, 0, 0);
+
+							int jccSkipMaskPc = -1;
+							if ((flags & ImpulseIsaTables.FLAG_MASKED_S3) != 0) {
+								b.emit(ImpulseIsaTables.OP_SET_CONTAINS,
+										ImpulseIsaTables.SUBOP_SET_CONTAINS_CONTAINS_1BIT, 0, rTmp, maskF, rIdx, 0, 0);
+								jccSkipMaskPc = b.emit(ImpulseIsaTables.OP_JCC, 7, 0, 0, rTmp, 0, 0, 0);
+							}
+
+							b.emit(ImpulseIsaTables.OP_VEC_POINT, ImpulseIsaTables.SUBOP_VEC_POINT_VEC_GET, 0, rCur,
+									v.reg, rIdx, 0, 0);
+							b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_IS_NULL, 0, rTmp,
+									rCur, 0, 0, 0);
+							int jccSkipNullPc = b.emit(ImpulseIsaTables.OP_JCC, 6, 0, 0, rTmp, 0, 0, 0);
+
+							b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_IS_NULL, 0, rTmp,
+									rAcc, 0, 0, 0);
+							int jccTakeFirstPc = b.emit(ImpulseIsaTables.OP_JCC, 6, 0, 0, rTmp, 0, 0, 0);
+
+							if (isMin) {
+								b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_LT_I64, 0,
+										rTmp, rCur, rAcc, 0, 0);
+							} else {
+								b.emit(ImpulseIsaTables.OP_SCALAR_3VL, ImpulseIsaTables.SUBOP_SCALAR_3VL_CMP_LT_I64, 0,
+										rTmp, rAcc, rCur, 0, 0);
+							}
+							int jccNotBetterPc = b.emit(ImpulseIsaTables.OP_JCC, 7, 0, 0, rTmp, 0, 0, 0);
+
+							int takePc = b.pc();
+							b.patchImm32(jccTakeFirstPc, takePc - jccTakeFirstPc);
+							b.emit(ImpulseIsaTables.OP_MOV, ImpulseIsaTables.SUBOP_MOV_R, 0, rAcc, rCur, 0, 0, 0);
+
+							int nextPc = b.pc();
+							if (jccSkipMaskPc >= 0) {
+								b.patchImm32(jccSkipMaskPc, nextPc - jccSkipMaskPc);
+							}
+							b.patchImm32(jccSkipNullPc, nextPc - jccSkipNullPc);
+							b.patchImm32(jccNotBetterPc, nextPc - jccNotBetterPc);
+							b.emit(ImpulseIsaTables.OP_SCALAR_INT_ALU, ImpulseIsaTables.SUBOP_SCALAR_INT_ALU_ADD, 0,
+									rIdx, rIdx, rOne, 0, 0);
+							int jmpLoopPc = b.emit(ImpulseIsaTables.OP_JMP, 0, 0, 0, 0, 0, 0, 0);
+							b.patchImm32(jmpLoopPc, loopPc - jmpLoopPc);
+
+							int endPc = b.pc();
+							b.patchImm32(jccEndPc, endPc - jccEndPc);
+							return TypedVal.decimal(rAcc, v.precision, v.scale);
+						} finally {
+							pinnedRMask = savedPinR;
+							pinnedVMask = savedPinV;
+						}
 					}
 					if (":count-valid".equals(kind)) {
 						int dst = allocR();
@@ -1677,12 +1905,14 @@ public final class ImpScmV11Compiler {
 			if ("+".equals(head) || "-".equals(head) || "*".equals(head) || "/".equals(head)
 					|| "safe-div".equals(head)) {
 				TypedVal lhs = eval(e.elems.get(1));
-				int savedPin = pinR(lhs);
+				int savedPinR = pinR(lhs);
+				int savedPinV = pinV(lhs);
 				TypedVal rhs;
 				try {
 					rhs = eval(e.elems.get(2));
 				} finally {
-					pinnedRMask = savedPin;
+					pinnedRMask = savedPinR;
+					pinnedVMask = savedPinV;
 				}
 				if (lhs.bank.isDecimal() || rhs.bank.isDecimal()) {
 					return evalDecimalBinary(head, lhs, rhs);
@@ -1737,12 +1967,14 @@ public final class ImpScmV11Compiler {
 			if ("=".equals(head) || "!=".equals(head) || "<".equals(head) || "<=".equals(head) || ">".equals(head)
 					|| ">=".equals(head)) {
 				TypedVal lhs = eval(e.elems.get(1));
-				int savedPin = pinR(lhs);
+				int savedPinR = pinR(lhs);
+				int savedPinV = pinV(lhs);
 				TypedVal rhs;
 				try {
 					rhs = eval(e.elems.get(2));
 				} finally {
-					pinnedRMask = savedPin;
+					pinnedRMask = savedPinR;
+					pinnedVMask = savedPinV;
 				}
 				return evalComparison(head, lhs, rhs);
 			}
