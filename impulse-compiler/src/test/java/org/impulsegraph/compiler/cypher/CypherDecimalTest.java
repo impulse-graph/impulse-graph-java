@@ -259,11 +259,109 @@ class CypherDecimalTest {
 			var crIntPromo = CypherCompiler.compileToV11(
 					"MATCH (a:Account) WHERE a.balance < 0x10d RETURN CAST(a.balance + 5 AS INT64) AS trunc_i", snap);
 			ImpulseWorkspace wsInt = executeBothAndVerifyParity(crIntPromo, bind, null);
+			// All 4 accounts have balance < 269 -> masked :vec has 4 elements:
 			// [-20.00 + 5 = -15, 19.99 + 5 = 24, 20.00 + 5 = 25, 250.50 + 5 = 255]
+			assertEquals(4, wsInt.outputs.get(0).length);
 			assertEquals(-15L, wsInt.outputs.get(0).i64Data[0]);
 			assertEquals(24L, wsInt.outputs.get(0).i64Data[1]);
 			assertEquals(25L, wsInt.outputs.get(0).i64Data[2]);
 			assertEquals(255L, wsInt.outputs.get(0).i64Data[3]);
+		}
+	}
+
+	@Test
+	void auditRegressionsMaskOnVecComplexWherePostWithParamsStringsAndTargetAgg(@TempDir Path tempDir)
+			throws Exception {
+		try (Arena arena = Arena.ofConfined()) {
+			GraphSnapshot snap = buildLedgerSnapshot(tempDir, arena);
+			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
+			ImpulseInterpreter.SnapshotBinding bind = new ImpulseInterpreter.SnapshotBinding(new int[]{4}, view);
+
+			// [HIGH #1] RETURN :vec after WHERE must emit :mask and return only filtered
+			// rows (nodes 2 and 3 -> 2 elements, not 4!)
+			var crMaskedVec = CypherCompiler.compileToV11(
+					"MATCH (a:Account) WHERE a.balance >= 20.00d RETURN CAST(a.balance AS INT64) AS b_int", snap);
+			ImpulseWorkspace wsMasked = executeBothAndVerifyParity(crMaskedVec, bind, null);
+			assertEquals(2, wsMasked.outputs.get(0).length, "Filtered :vec RETURN must apply :mask");
+			assertEquals(20L, wsMasked.outputs.get(0).i64Data[0]);
+			assertEquals(250L, wsMasked.outputs.get(0).i64Data[1]);
+
+			// [HIGH #2 & MEDIUM #8] Complex WHERE predicates:
+			// (a) parenthesized arithmetic LHS: WHERE (a.balance + 10.00d) > 29.99d ->
+			// nodes 2 (30.00) and 3 (260.50)
+			var crParenArith = CypherCompiler
+					.compileToV11("MATCH (a:Account) WHERE (a.balance + 10.00d) > 29.99d RETURN a", snap);
+			ImpulseWorkspace wsParen = executeBothAndVerifyParity(crParenArith, bind, null);
+			assertEquals(2, wsParen.outputs.get(0).length);
+			assertEquals(2L, wsParen.outputs.get(0).i64Data[0]);
+			assertEquals(3L, wsParen.outputs.get(0).i64Data[1]);
+
+			// (b) CAST in WHERE: WHERE CAST(a.balance AS FLOAT64) > 20.0 -> node 3 (250.50)
+			var crCastWhere = CypherCompiler
+					.compileToV11("MATCH (a:Account) WHERE CAST(a.balance AS FLOAT64) > 20.0 RETURN a", snap);
+			ImpulseWorkspace wsCastWhere = executeBothAndVerifyParity(crCastWhere, bind, null);
+			assertEquals(1, wsCastWhere.outputs.get(0).length);
+			assertEquals(3L, wsCastWhere.outputs.get(0).i64Data[0]);
+
+			// (c) Flipped literal comparison: WHERE 100.00d < a.balance -> node 3 (250.50)
+			var crFlipped = CypherCompiler.compileToV11("MATCH (a:Account) WHERE 100.00d < a.balance RETURN a", snap);
+			ImpulseWorkspace wsFlipped = executeBothAndVerifyParity(crFlipped, bind, null);
+			assertEquals(1, wsFlipped.outputs.get(0).length);
+			assertEquals(3L, wsFlipped.outputs.get(0).i64Data[0]);
+
+			// (d) Post-WITH WHERE predicate emitted AFTER WITH let bindings
+			var crPostWith = CypherCompiler.compileToV11(
+					"MATCH (a:Account) WITH a.balance + 5.00d AS bumped WHERE bumped > 25.00d RETURN a", snap);
+			ImpulseWorkspace wsPostWith = executeBothAndVerifyParity(crPostWith, bind, null);
+			assertEquals(1, wsPostWith.outputs.get(0).length);
+			assertEquals(3L, wsPostWith.outputs.get(0).i64Data[0]);
+
+			// [HIGH #3] Compound RHS with $param extracts only valid $ident (not "$minBal +
+			// 5.00d")
+			String scmCompoundParam = CypherCompiler
+					.lowerToImpSchemeV11("MATCH (a:Account) WHERE a.balance > $minBal + 5.00d RETURN a", snap);
+			assertTrue(scmCompoundParam.contains("(param $minBal (decimal 10 2))"), scmCompoundParam);
+			var crCompoundParam = CypherCompiler
+					.compileToV11("MATCH (a:Account) WHERE a.balance > $minBal + 5.00d RETURN a", snap);
+			// $minBal = 15.00 (1500) -> balance > 20.00 -> node 3 (250.50)
+			ImpulseWorkspace wsCp = executeBothAndVerifyParity(crCompoundParam, bind,
+					Map.of(0, new ImpulseWorkspace.ParamScalar(SCALAR_I64, true, 1_500L)));
+			assertEquals(1, wsCp.outputs.get(0).length);
+			assertEquals(3L, wsCp.outputs.get(0).i64Data[0]);
+
+			// [HIGH #4] Cypher WHERE string literal preserves quotes in lowered ImpScheme
+			String scmStr = CypherCompiler.lowerToImpSchemeV11("MATCH (a:Account) WHERE a.currency = 'USD' RETURN a",
+					snap);
+			assertTrue(scmStr.contains("\"USD\""), "String literal must be quoted in ImpScheme: " + scmStr);
+
+			// [MEDIUM #6] Unary ! and AND/OR/NOT keywords in V11ExprLowerer + unclosed call
+			// rejected in CelParser
+			assertEquals("(not (= a b))",
+					org.impulsegraph.compiler.impscm.v11.V11ExprLowerer.lowerExpr("NOT (a = b)", id -> id, null));
+			assertEquals("(or (> a 1) (< b 2))",
+					org.impulsegraph.compiler.impscm.v11.V11ExprLowerer.lowerExpr("a > 1 OR b < 2", id -> id, null));
+			assertThrows(IllegalArgumentException.class,
+					() -> org.impulsegraph.compiler.cel.CelParser.parse("decimal(\"19.99\""));
+
+			// [MEDIUM #7] Scalar WITH alias emits :scalar (not :vec) AND tgtVar aggregate
+			// uses walkedFrontier mask
+			String scmScalarWith = CypherCompiler
+					.lowerToImpSchemeV11("MATCH (a:Account) WITH 19.99d + 0.01d AS c RETURN c", snap);
+			assertTrue(scmScalarWith.contains("(collect :scalar \"c\" c)"), scmScalarWith);
+			var crScalarWith = CypherCompiler.compileToV11("MATCH (a:Account) WITH 19.99d + 0.01d AS c RETURN c", snap);
+			ImpulseWorkspace wsSw = executeBothAndVerifyParity(crScalarWith, bind, null);
+			assertEquals(2000L, wsSw.outputs.get(0).i64Data[0]);
+
+			// tgtVar aggregate: MATCH (a:Account)-[r:TRANSFER]->(b:Account) WHERE r.amount
+			// > 19.99d RETURN SUM(b.balance)
+			// Filtered edges: 0->2 (20.00), 1->2 (20.00), 2->3 (125.75) -> reached targets
+			// {2, 3} -> balances 20.00 + 250.50 = 270.50
+			var crTgtAgg = CypherCompiler.compileToV11(
+					"MATCH (a:Account)-[r:TRANSFER]->(b:Account) WHERE r.amount > 19.99d RETURN SUM(b.balance) AS tgt_sum",
+					snap);
+			ImpulseWorkspace wsTgtAgg = executeBothAndVerifyParity(crTgtAgg, bind, null);
+			assertEquals(0, new BigDecimal("270.50")
+					.compareTo(new Decimal64(wsTgtAgg.outputs.get(0).i64Data[0], 18, 2).toBigDecimal()));
 		}
 	}
 }

@@ -162,7 +162,7 @@ public final class CypherCompiler {
 		for (CypherParser.WherePredicate pred : startPreds) {
 			String nextF = "f" + (++filterIdx);
 			String lhsRaw = pred.lhsExpr() != null ? pred.lhsExpr() : (pred.targetVar() + "." + pred.field());
-			String fullCmp = lhsRaw + " " + pred.op() + " " + pred.valueOrParam();
+			String fullCmp = lhsRaw + " " + pred.op() + " " + formatWhereRhs(pred);
 			String loweredCmp = V11ExprLowerer.lowerExpr(fullCmp, id -> id, (v, m) -> "(attr " + v + " \"" + m + "\")");
 			letBindings.add(
 					"[" + nextF + " (node-filter " + curFrontier + " (lambda (" + startVar + ") " + loweredCmp + "))]");
@@ -181,10 +181,32 @@ public final class CypherCompiler {
 			});
 		};
 
-		// Lower WITH items into let bindings
+		// Lower WITH items into let bindings, tracking vector vs scalar aliases
+		Set<String> vecWithAliases = new LinkedHashSet<>();
 		for (CypherParser.WithItem wi : query.withItems()) {
+			int beforeAttrs = loadedNodeAttrs.size();
 			String lowered = V11ExprLowerer.lowerExpr(wi.expr(), id -> id, topLevelMemberResolver);
+			boolean aliasIsVec = loadedNodeAttrs.size() > beforeAttrs
+					|| referencesAny(wi.expr(), loadedNodeAttrs.keySet()) || referencesAny(wi.expr(), vecWithAliases);
+			if (aliasIsVec) {
+				vecWithAliases.add(wi.alias());
+			}
 			letBindings.add("[" + wi.alias() + " " + lowered + "]");
+		}
+
+		// Apply post-WITH WHERE predicates AFTER WITH let bindings
+		for (CypherParser.WherePredicate pred : query.postWithPredicates()) {
+			inferParamTypeFromPredicate(pred, startVar, startDom, edgeVar, relName, snapshot, paramDecls);
+			String nextF = "f" + (++filterIdx);
+			String lhsRaw = pred.lhsExpr() != null
+					? pred.lhsExpr()
+					: (pred.field().isEmpty() ? pred.targetVar() : pred.targetVar() + "." + pred.field());
+			String fullCmp = lhsRaw + " " + pred.op() + " " + formatWhereRhs(pred);
+			String loweredCmp = V11ExprLowerer.lowerExpr(fullCmp, id -> id, (v, m) -> "(attr " + v + " \"" + m + "\")");
+			letBindings.add(
+					"[" + nextF + " (node-filter " + curFrontier + " (lambda (" + startVar + ") " + loweredCmp + "))]");
+			curFrontier = nextF;
+			filtered = true;
 		}
 
 		// Lower RETURN items
@@ -256,8 +278,20 @@ public final class CypherCompiler {
 					case "AVG" -> ":avg";
 					default -> throw new IllegalArgumentException("Unsupported aggregate: " + item.aggregateFn());
 				};
+				boolean targetsTgtNode = firstStep != null && tgtVar != null && !tgtVar.equals(startVar)
+						&& (tgtVar.equals(item.targetVar())
+								|| (item.expr() != null && item.expr().contains(tgtVar + ".")));
+				String maskPart;
+				if (targetsTgtNode) {
+					if (walkedFrontier == null) {
+						walkedFrontier = emitEdgeWalkOrStream(firstStep, startVar, tgtVar, edgeVar, tgtDom, curFrontier,
+								edgePreds, snapshot, letBindings);
+					}
+					maskPart = " :mask " + walkedFrontier;
+				} else {
+					maskPart = filtered ? " :mask " + curFrontier : "";
+				}
 				String loweredExpr = V11ExprLowerer.lowerExpr(item.expr(), id -> id, topLevelMemberResolver);
-				String maskPart = filtered ? " :mask " + curFrontier : "";
 				collects.add("(collect :scalar \"" + outName + "\" (reduce " + reduceOp + " " + loweredExpr + maskPart
 						+ "))");
 				continue;
@@ -281,8 +315,25 @@ public final class CypherCompiler {
 			int beforeAttrs = loadedNodeAttrs.size();
 			String loweredExpr = V11ExprLowerer.lowerExpr(item.expr(), id -> id, topLevelMemberResolver);
 			boolean isVec = loadedNodeAttrs.size() > beforeAttrs || referencesAny(item.expr(), loadedNodeAttrs.keySet())
-					|| referencesAny(item.expr(), withAliases);
-			collects.add("(collect " + (isVec ? ":vec" : ":scalar") + " \"" + outName + "\" " + loweredExpr + ")");
+					|| referencesAny(item.expr(), vecWithAliases);
+			if (isVec) {
+				boolean targetsTgtNode = firstStep != null && tgtVar != null && !tgtVar.equals(startVar)
+						&& (tgtVar.equals(item.targetVar())
+								|| (item.expr() != null && item.expr().contains(tgtVar + ".")));
+				String maskPart;
+				if (targetsTgtNode) {
+					if (walkedFrontier == null) {
+						walkedFrontier = emitEdgeWalkOrStream(firstStep, startVar, tgtVar, edgeVar, tgtDom, curFrontier,
+								edgePreds, snapshot, letBindings);
+					}
+					maskPart = " :mask " + walkedFrontier;
+				} else {
+					maskPart = filtered ? " :mask " + curFrontier : "";
+				}
+				collects.add("(collect :vec \"" + outName + "\" " + loweredExpr + maskPart + ")");
+			} else {
+				collects.add("(collect :scalar \"" + outName + "\" " + loweredExpr + ")");
+			}
 		}
 
 		// Assemble (query (param ...) (let ([...] ...) (collect ...)))
@@ -332,7 +383,7 @@ public final class CypherCompiler {
 			String lhsRaw = pred.lhsExpr() != null ? pred.lhsExpr() : (pred.targetVar() + "." + pred.field());
 			String lhsScm = V11ExprLowerer.lowerExpr(lhsRaw, id -> id, (v,
 					m) -> v.equals(edgeVar) ? "(edge-attr " + v + " \"" + m + "\")" : "(attr " + v + " \"" + m + "\")");
-			String rhsScm = V11ExprLowerer.lowerExpr(pred.valueOrParam(), id -> id, (v,
+			String rhsScm = V11ExprLowerer.lowerExpr(formatWhereRhs(pred), id -> id, (v,
 					m) -> v.equals(edgeVar) ? "(edge-attr " + v + " \"" + m + "\")" : "(attr " + v + " \"" + m + "\")");
 			if (!rhsScm.contains("(edge-attr ") && !rhsScm.contains("(attr ") && !rhsScm.startsWith("$")) {
 				String hoistVar = "__ek" + (++hoistIdx);
@@ -361,24 +412,35 @@ public final class CypherCompiler {
 		return acc;
 	}
 
+	private static final java.util.regex.Pattern PARAM_IDENT_PATTERN = java.util.regex.Pattern
+			.compile("\\$[A-Za-z_][A-Za-z0-9_]*");
+
+	private static String formatWhereRhs(CypherParser.WherePredicate pred) {
+		if (pred.isStringLiteral()) {
+			return "\"" + pred.valueOrParam().replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+		}
+		return pred.valueOrParam();
+	}
+
 	private static void inferParamTypeFromPredicate(CypherParser.WherePredicate pred, String startVar, String startDom,
 			String edgeVar, String relName, ImpulseGraphSnapshot snapshot, Map<String, String> paramDecls) {
 		String rhs = pred.valueOrParam();
-		if (rhs == null || !rhs.startsWith("$") || paramDecls.containsKey(rhs)) {
+		if (rhs == null || pred.isStringLiteral() || !rhs.contains("$")) {
 			return;
 		}
+		int[] ps = null;
 		if (edgeVar != null && edgeVar.equals(pred.targetVar()) && relName != null) {
-			int[] ps = lookupEdgeDecimalPS(snapshot, relName, pred.field());
-			if (ps != null) {
-				paramDecls.put(rhs, "(decimal " + ps[0] + " " + ps[1] + ")");
-				return;
-			}
+			ps = lookupEdgeDecimalPS(snapshot, relName, pred.field());
+		} else if (startVar.equals(pred.targetVar()) && pred.field() != null && !pred.field().isEmpty()) {
+			ps = lookupNodeDecimalPS(snapshot, startDom, pred.field());
 		}
-		if (startVar.equals(pred.targetVar())) {
-			int[] ps = lookupNodeDecimalPS(snapshot, startDom, pred.field());
-			if (ps != null) {
-				paramDecls.put(rhs, "(decimal " + ps[0] + " " + ps[1] + ")");
-			}
+		if (ps == null) {
+			return;
+		}
+		String decType = "(decimal " + ps[0] + " " + ps[1] + ")";
+		java.util.regex.Matcher m = PARAM_IDENT_PATTERN.matcher(rhs);
+		while (m.find()) {
+			paramDecls.putIfAbsent(m.group(), decType);
 		}
 	}
 

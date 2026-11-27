@@ -195,6 +195,45 @@ class ImpLogDecimalTest {
 			ImpulseWorkspace wsHex = executeBothAndVerifyParity(crHex, bind, null);
 			assertEquals(1, wsHex.outputs.get(0).length);
 			assertEquals(3L, wsHex.outputs.get(0).i64Data[0]);
+
+			// [HIGH #2] Complex node predicate in Datalog: CAST(Bal AS FLOAT64) > 20.0 ->
+			// node 3 (500.00)
+			var crNodeCast = DatalogParser.compileToV11("big_f(X) :- account(X, Bal), CAST(Bal AS FLOAT64) > 20.0.",
+					snap);
+			ImpulseWorkspace wsNc = executeBothAndVerifyParity(crNodeCast, bind, null);
+			assertEquals(1, wsNc.outputs.get(0).length);
+			assertEquals(3L, wsNc.outputs.get(0).i64Data[0]);
+
+			// [HIGH #3] Compound $param in Datalog extracts only valid $ident
+			String scmParam = DatalogParser
+					.lowerToImpSchemeV11("hi(X, Y) :- transfer(X, Y, Amt), Amt > $minAmt + 5.00d.", snap);
+			assertTrue(scmParam.contains("(param $minAmt (decimal 10 2))"), scmParam);
+
+			// [MEDIUM #9] Quote-aware stripInlineComment and parseAtom argument splitting
+			List<ImpLogCompiler.ParsedRule> quotedRules = DatalogParser
+					.parseRules("tagged(X) :- label(X, \"50% off, a//b\"), X > 0. % trailing comment");
+			assertEquals(1, quotedRules.size());
+			assertEquals(List.of("X", "\"50% off, a//b\""), quotedRules.get(0).body().get(0).args());
+
+			// [LOW #11] Multiple (where ...) clauses in one edge-stream intersect cleanly
+			String multiWhere = """
+					(query
+					  (let ([src (domain-all "Account")]
+					        [lo (dec "19.99" 4 2)]
+					        [hi (dec "100.00" 5 2)]
+					        [out (seed "Account")]
+					        [res (edge-stream :fwd "TRANSFER" src
+					               (lambda (x y e)
+					                 (where (> (edge-attr e "amount") lo))
+					                 (where (< (edge-attr e "amount") hi))
+					                 (yield-frontier out y)))])
+					    (collect :frontier-ids "mid" res)))
+					""";
+			var crMultiWhere = org.impulsegraph.compiler.impscm.v11.ImpScmV11Compiler.compile(multiWhere, snap, true);
+			// Only e1 (0->2, 20.00) satisfies 19.99 < amount < 100.00 -> target {2}
+			ImpulseWorkspace wsMw = executeBothAndVerifyParity(crMultiWhere, bind, null);
+			assertEquals(1, wsMw.outputs.get(0).length);
+			assertEquals(2L, wsMw.outputs.get(0).i64Data[0]);
 		}
 	}
 }

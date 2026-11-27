@@ -325,12 +325,22 @@ public final class ImpLogCompiler {
 		return acc;
 	}
 
+	private static final java.util.regex.Pattern PARAM_IDENT_PATTERN = java.util.regex.Pattern
+			.compile("\\$[A-Za-z_][A-Za-z0-9_]*");
+
 	private static void inferParamFromComparison(ParsedComparison cmp, String attrVar, int[] decPS,
 			Map<String, String> paramDecls) {
-		if (cmp.lhs().trim().equals(attrVar) && cmp.rhs().trim().startsWith("$")) {
-			paramDecls.putIfAbsent(cmp.rhs().trim(), "(decimal " + decPS[0] + " " + decPS[1] + ")");
-		} else if (cmp.rhs().trim().equals(attrVar) && cmp.lhs().trim().startsWith("$")) {
-			paramDecls.putIfAbsent(cmp.lhs().trim(), "(decimal " + decPS[0] + " " + decPS[1] + ")");
+		String decType = "(decimal " + decPS[0] + " " + decPS[1] + ")";
+		if (cmp.lhs().trim().equals(attrVar) && cmp.rhs().contains("$")) {
+			java.util.regex.Matcher m = PARAM_IDENT_PATTERN.matcher(cmp.rhs());
+			while (m.find()) {
+				paramDecls.putIfAbsent(m.group(), decType);
+			}
+		} else if (cmp.rhs().trim().equals(attrVar) && cmp.lhs().contains("$")) {
+			java.util.regex.Matcher m = PARAM_IDENT_PATTERN.matcher(cmp.lhs());
+			while (m.find()) {
+				paramDecls.putIfAbsent(m.group(), decType);
+			}
 		}
 	}
 
@@ -672,13 +682,25 @@ public final class ImpLogCompiler {
 	}
 
 	private static String stripInlineComment(String line) {
-		int slash = line.indexOf("//");
-		if (slash >= 0) {
-			line = line.substring(0, slash);
-		}
-		int pct = line.indexOf('%');
-		if (pct >= 0) {
-			line = line.substring(0, pct);
+		boolean inStr = false;
+		char quote = 0;
+		int n = line.length();
+		for (int i = 0; i < n; i++) {
+			char c = line.charAt(i);
+			if (inStr) {
+				if (c == '\\' && i + 1 < n) {
+					i++;
+				} else if (c == quote) {
+					inStr = false;
+				}
+				continue;
+			}
+			if (c == '"' || c == '\'') {
+				inStr = true;
+				quote = c;
+			} else if (c == '%' || (c == '/' && i + 1 < n && line.charAt(i + 1) == '/')) {
+				return line.substring(0, i);
+			}
 		}
 		return line;
 	}
@@ -774,7 +796,7 @@ public final class ImpLogCompiler {
 			pred = t.substring(0, lp).replaceAll("\\s+", "");
 			String inside = t.substring(lp + 1, rp).trim();
 			if (!inside.isEmpty()) {
-				for (String part : inside.split(",")) {
+				for (String part : splitTopLevelAtoms(inside)) {
 					args.add(part.trim());
 				}
 			}

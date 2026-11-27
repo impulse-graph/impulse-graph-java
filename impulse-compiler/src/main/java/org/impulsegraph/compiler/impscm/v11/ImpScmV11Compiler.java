@@ -307,6 +307,8 @@ public final class ImpScmV11Compiler {
 		final List<String> outputNames = new ArrayList<>();
 		final List<OutputColumnMeta> outputSchema = new ArrayList<>();
 		MorselScope morsel = null;
+		String nodeFilterVar = null;
+		int nodeFilterDom = -1;
 
 		Ctx(ImpulseGraphSnapshot snap) {
 			this.snap = snap;
@@ -1194,36 +1196,93 @@ public final class ImpScmV11Compiler {
 			}
 		}
 
+		private static boolean sexprMentionsSymbol(SExpr e, String sym) {
+			if (e == null) {
+				return false;
+			}
+			if (e.kind == Kind.SYMBOL && sym.equals(e.text)) {
+				return true;
+			}
+			if (e.kind == Kind.LIST && e.elems != null) {
+				for (SExpr child : e.elems) {
+					if (sexprMentionsSymbol(child, sym)) {
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+
 		private TypedVal evalNodeFilter(SExpr e) {
 			// Form 1: (node-filter f "attr" op val)
-			// Form 2: (node-filter f (lambda (u) (op (attr u "attr") val)))
+			// Form 2: (node-filter f (lambda (u) <expr>))
 			TypedVal srcF = eval(e.elems.get(1));
 			if (srcF.bank != ValBank.FRONTIER) {
 				throw new IllegalArgumentException("TYPE_MISMATCH: node-filter expects frontier");
 			}
-			String attrName;
-			String opStr;
-			SExpr rhsExpr;
+			String attrName = null;
+			String opStr = null;
+			SExpr rhsExpr = null;
+			boolean fastPath = false;
+			String lamVar = null;
+			SExpr lamBody = null;
+
 			if (e.elems.size() == 5 && e.elems.get(2).kind == Kind.STRING) {
 				attrName = e.elems.get(2).text;
 				opStr = e.elems.get(3).text;
 				rhsExpr = e.elems.get(4);
+				fastPath = true;
 			} else if (e.elems.size() == 3 && e.elems.get(2).kind == Kind.LIST
 					&& "lambda".equals(e.elems.get(2).elems.get(0).text)) {
-				SExpr pred = e.elems.get(2).elems.get(2);
-				if (pred.kind != Kind.LIST || pred.elems.size() != 3) {
-					throw new IllegalArgumentException("PARSE_ERROR: unsupported node-filter predicate");
+				SExpr lam = e.elems.get(2);
+				if (lam.elems.size() < 3 || lam.elems.get(1).kind != Kind.LIST || lam.elems.get(1).elems.isEmpty()) {
+					throw new IllegalArgumentException("PARSE_ERROR: malformed node-filter lambda");
 				}
-				opStr = pred.elems.get(0).text;
-				SExpr lhsForm = pred.elems.get(1);
-				rhsExpr = pred.elems.get(2);
-				if (lhsForm.kind != Kind.LIST || lhsForm.elems.size() != 3
-						|| !"attr".equals(lhsForm.elems.get(0).text)) {
-					throw new IllegalArgumentException("PARSE_ERROR: node-filter predicate expects (attr u \"name\")");
+				lamVar = lam.elems.get(1).elems.get(0).text;
+				lamBody = lam.elems.get(2);
+				// Fast OP_NODE_FILTER pushdown for simple (cmpOp (attr u "name") scalarRhs)
+				if (lamBody.kind == Kind.LIST && lamBody.elems.size() == 3
+						&& parseCmpOp(lamBody.elems.get(0).text) != null) {
+					SExpr lhsForm = lamBody.elems.get(1);
+					SExpr candRhs = lamBody.elems.get(2);
+					if (lhsForm.kind == Kind.LIST && lhsForm.elems.size() == 3
+							&& "attr".equals(lhsForm.elems.get(0).text) && lamVar.equals(lhsForm.elems.get(1).text)
+							&& lhsForm.elems.get(2).kind == Kind.STRING && !sexprMentionsSymbol(candRhs, lamVar)) {
+						attrName = lhsForm.elems.get(2).text;
+						opStr = lamBody.elems.get(0).text;
+						rhsExpr = candRhs;
+						fastPath = true;
+					}
 				}
-				attrName = lhsForm.elems.get(2).text;
 			} else {
 				throw new IllegalArgumentException("PARSE_ERROR: malformed node-filter");
+			}
+
+			if (!fastPath) {
+				// General fallback: evaluate lambda body over domain vectors -> BOOL_3VL ->
+				// OP_SET_CONVERT.b2f -> OP_SET_OP.intersect with srcF
+				String prevVar = this.nodeFilterVar;
+				int prevDom = this.nodeFilterDom;
+				this.nodeFilterVar = lamVar;
+				this.nodeFilterDom = srcF.domId;
+				TypedVal predVec;
+				try {
+					predVec = eval(lamBody);
+				} finally {
+					this.nodeFilterVar = prevVar;
+					this.nodeFilterDom = prevDom;
+				}
+				if (predVec.bank != ValBank.VEC_BOOL) {
+					throw new IllegalArgumentException(
+							"TYPE_MISMATCH: node-filter predicate must evaluate to BOOL vector, got " + predVec.bank);
+				}
+				int fPred = allocF();
+				b.emitU16(ImpulseIsaTables.OP_SET_CONVERT, ImpulseIsaTables.SUBOP_SET_CONVERT_B2F, 0, fPred,
+						predVec.reg, 0, 0, srcF.domId, 0);
+				int dstF = allocF();
+				b.emit(ImpulseIsaTables.OP_SET_OP, ImpulseIsaTables.SUBOP_SET_OP_INTERSECT, 0, dstF, srcF.reg, fPred, 0,
+						0);
+				return TypedVal.frontier(dstF, srcF.domId);
 			}
 
 			DecimalBoundaryFolder.CmpOp cmpOp = parseCmpOp(opStr);
@@ -1232,6 +1291,33 @@ public final class ImpScmV11Compiler {
 			}
 			AttrInfo ai = resolveNodeAttr(srcF.domId, attrName);
 			TypedVal rhsVal = eval(rhsExpr);
+			if (rhsVal.bank.isVec()) {
+				// If RHS evaluated to a vector (e.g. a WITH alias), use general vector path
+				String prevVar = this.nodeFilterVar;
+				int prevDom = this.nodeFilterDom;
+				this.nodeFilterVar = lamVar != null ? lamVar : "__u";
+				this.nodeFilterDom = srcF.domId;
+				TypedVal colVec;
+				try {
+					int vCol = allocV();
+					b.emitU16(ImpulseIsaTables.OP_LOAD_COLUMN, ImpulseIsaTables.SUBOP_LOAD_COLUMN_NODE_ATTR, 0, vCol, 0,
+							0, 0, srcF.domId, ai.attrId);
+					colVec = ai.isDecimal()
+							? TypedVal.vecDecimal(vCol, srcF.domId, ai.precision, ai.scale)
+							: TypedVal.vec(attrTypeToVecBank(ai), vCol, srcF.domId);
+				} finally {
+					this.nodeFilterVar = prevVar;
+					this.nodeFilterDom = prevDom;
+				}
+				TypedVal predVec = evalComparison(opStr, colVec, rhsVal);
+				int fPred = allocF();
+				b.emitU16(ImpulseIsaTables.OP_SET_CONVERT, ImpulseIsaTables.SUBOP_SET_CONVERT_B2F, 0, fPred,
+						predVec.reg, 0, 0, srcF.domId, 0);
+				int dstF = allocF();
+				b.emit(ImpulseIsaTables.OP_SET_OP, ImpulseIsaTables.SUBOP_SET_OP_INTERSECT, 0, dstF, srcF.reg, fPred, 0,
+						0);
+				return TypedVal.frontier(dstF, srcF.domId);
+			}
 			int dstF = allocF();
 
 			if (ai.isDecimal() || rhsVal.bank.isDecimal()) {
@@ -1340,10 +1426,18 @@ public final class ImpScmV11Compiler {
 						if (pred.bank != ValBank.VEC_BOOL) {
 							throw new IllegalArgumentException("TYPE_MISMATCH: where requires bool vector predicate");
 						}
-						// Convert 3VL bool vector into morsel frontier register F9 for FLAG_MASKED_S3
-						b.emit(ImpulseIsaTables.OP_SET_CONVERT, ImpulseIsaTables.SUBOP_SET_CONVERT_B2F, 0, 9, pred.reg,
-								0, 0, 0);
-						this.morsel.predReg = 9;
+						// Convert 3VL bool vector into morsel frontier register F9 (or intersect F9 &
+						// F10 if multiple where clauses appear in one edge-stream)
+						if (this.morsel.predReg < 0) {
+							b.emit(ImpulseIsaTables.OP_SET_CONVERT, ImpulseIsaTables.SUBOP_SET_CONVERT_B2F, 0, 9,
+									pred.reg, 0, 0, 0);
+							this.morsel.predReg = 9;
+						} else {
+							b.emit(ImpulseIsaTables.OP_SET_CONVERT, ImpulseIsaTables.SUBOP_SET_CONVERT_B2F, 0, 10,
+									pred.reg, 0, 0, 0);
+							b.emit(ImpulseIsaTables.OP_SET_OP, ImpulseIsaTables.SUBOP_SET_OP_INTERSECT, 0, 9, 9, 10, 0,
+									0);
+						}
 					} else if ("scatter-add".equals(sh)) {
 						// (scatter-add out_vec tgt val_expr)
 						TypedVal outVec = eval(stmt.elems.get(1));
@@ -1663,11 +1757,21 @@ public final class ImpScmV11Compiler {
 				return TypedVal.vec(attrTypeToVecBank(ai), dstV, morsel.rel.tgtDom);
 			}
 			if ("attr".equals(head)) {
+				String cursor = e.elems.get(1).text;
+				String attrName = e.elems.get(2).text;
+				if (morsel == null && nodeFilterVar != null && cursor.equals(nodeFilterVar)) {
+					AttrInfo ai = resolveNodeAttr(nodeFilterDom, attrName);
+					int dstV = allocV();
+					b.emitU16(ImpulseIsaTables.OP_LOAD_COLUMN, ImpulseIsaTables.SUBOP_LOAD_COLUMN_NODE_ATTR, 0, dstV, 0,
+							0, 0, nodeFilterDom, ai.attrId);
+					if (ai.isDecimal()) {
+						return TypedVal.vecDecimal(dstV, nodeFilterDom, ai.precision, ai.scale);
+					}
+					return TypedVal.vec(attrTypeToVecBank(ai), dstV, nodeFilterDom);
+				}
 				if (morsel == null) {
 					throw new IllegalArgumentException("PARSE_ERROR: attr only valid inside edge-stream/node-filter");
 				}
-				String cursor = e.elems.get(1).text;
-				String attrName = e.elems.get(2).text;
 				int idxV;
 				int domId;
 				if (cursor.equals(morsel.srcVar)) {
@@ -1687,6 +1791,36 @@ public final class ImpScmV11Compiler {
 					return TypedVal.vecDecimal(dstV, domId, ai.precision, ai.scale);
 				}
 				return TypedVal.vec(attrTypeToVecBank(ai), dstV, domId);
+			}
+			if ("and".equals(head) || "or".equals(head)) {
+				TypedVal lhs = eval(e.elems.get(1));
+				int savedPinV = pinV(lhs);
+				TypedVal rhs;
+				try {
+					rhs = eval(e.elems.get(2));
+				} finally {
+					pinnedVMask = savedPinV;
+				}
+				if (lhs.bank == ValBank.VEC_BOOL && rhs.bank == ValBank.VEC_BOOL) {
+					int dst = allocDstV(lhs, rhs);
+					int sub = "and".equals(head)
+							? ImpulseIsaTables.SUBOP_VEC_3VL_OP_AND
+							: ImpulseIsaTables.SUBOP_VEC_3VL_OP_OR;
+					b.emit(ImpulseIsaTables.OP_VEC_3VL_OP, sub, 0, dst, lhs.reg, rhs.reg, 0, 0);
+					return TypedVal.vec(ValBank.VEC_BOOL, dst, lhs.domId);
+				}
+				throw new IllegalArgumentException(
+						"TYPE_MISMATCH: " + head + " expects BOOL vectors, got " + lhs.bank + " and " + rhs.bank);
+			}
+			if ("not".equals(head)) {
+				TypedVal v = eval(e.elems.get(1));
+				if (v.bank == ValBank.VEC_BOOL) {
+					int dst = allocDstV(v, null);
+					b.emit(ImpulseIsaTables.OP_VEC_3VL_OP, ImpulseIsaTables.SUBOP_VEC_3VL_OP_NOT, 0, dst, v.reg, 0, 0,
+							0);
+					return TypedVal.vec(ValBank.VEC_BOOL, dst, v.domId);
+				}
+				throw new IllegalArgumentException("TYPE_MISMATCH: not expects BOOL vector, got " + v.bank);
 			}
 			if ("vec-at".equals(head)) {
 				if (morsel == null) {
