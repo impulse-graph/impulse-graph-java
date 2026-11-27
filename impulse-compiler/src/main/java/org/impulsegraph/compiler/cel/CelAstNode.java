@@ -15,8 +15,10 @@ import java.util.Objects;
 public final class CelAstNode {
 
 	public enum Kind {
-		LITERAL_INT, LITERAL_FLOAT, LITERAL_BOOL, LITERAL_STRING, IDENTIFIER, PARAMETER_REF, // e.g. @p1, @P1,
-																								// @threshold
+		LITERAL_INT, LITERAL_FLOAT, LITERAL_DECIMAL, LITERAL_BOOL, LITERAL_STRING, IDENTIFIER, PARAMETER_REF, // e.g.
+																												// @p1,
+																												// @P1,
+																												// @threshold
 		MEMBER_ACCESS, UNARY_OP, BINARY_OP, TERNARY_OP, FUNCTION_CALL, LIST_LITERAL
 	}
 
@@ -79,6 +81,10 @@ public final class CelAstNode {
 	public static CelAstNode makeFloat(double val) {
 		return new CelAstNode(Kind.LITERAL_FLOAT, String.valueOf(val), 0, val, false, "", List.of(),
 				AlgebraicSignature.ofConstantFloat(val));
+	}
+
+	public static CelAstNode makeDecimal(String digits) {
+		return new CelAstNode(Kind.LITERAL_DECIMAL, digits, 0, 0.0, false, digits, List.of());
 	}
 
 	public static CelAstNode makeBool(boolean val) {

@@ -94,7 +94,7 @@ public final class CelLexer {
 			case '^' -> CelToken.of(CelTokenType.CARET, "^", start);
 			case '~' -> CelToken.of(CelTokenType.TILDE, "~", start);
 
-			case '@' -> parseParam(start);
+			case '@', '$' -> parseParam(start);
 
 			case '"', '\'' -> parseString(c, start);
 
@@ -131,7 +131,8 @@ public final class CelLexer {
 	}
 
 	private CelToken parseParam(int start) {
-		StringBuilder sb = new StringBuilder("@");
+		StringBuilder sb = new StringBuilder();
+		sb.append(src.charAt(start));
 		while (cursor < src.length()) {
 			char c = src.charAt(cursor);
 			if (Character.isLetterOrDigit(c) || c == '_') {
@@ -242,6 +243,17 @@ public final class CelLexer {
 		}
 
 		String text = sb.toString();
+		// Exact base-10 decimal literal suffix: 19.99d / 19.99D (bare 19.99 remains
+		// FLOAT_LITERAL)
+		if (cursor < src.length() && (src.charAt(cursor) == 'd' || src.charAt(cursor) == 'D')
+				&& (cursor + 1 >= src.length() || !Character.isLetterOrDigit(src.charAt(cursor + 1)))) {
+			cursor++;
+			if (text.indexOf('e') >= 0 || text.indexOf('E') >= 0) {
+				throw new IllegalArgumentException(
+						"Scientific notation is not supported on DECIMAL literal '" + text + "d' at position " + start);
+			}
+			return CelToken.ofDecimal(text, start);
+		}
 		if (isFloat) {
 			double fVal = Double.parseDouble(text);
 			return CelToken.ofFloat(fVal, text, start);
