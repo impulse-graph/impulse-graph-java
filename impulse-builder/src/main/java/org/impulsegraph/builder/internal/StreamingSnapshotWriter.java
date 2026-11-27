@@ -175,8 +175,8 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 			}
 
 			// 3. Stage Domain Attributes
-			record StagedDomainAttr(String name, byte typeCode, int dimension, long dataBytes, Path dataFile,
-					long validityBytes, Path valFile, long offsBytes, Path offsFile) {
+			record StagedDomainAttr(String name, byte typeCode, int dimension, int precision, int scale, long dataBytes,
+					Path dataFile, long validityBytes, Path valFile, long offsBytes, Path offsFile) {
 			}
 
 			List<List<StagedDomainAttr>> stagedDomainAttrs = new ArrayList<>();
@@ -234,8 +234,8 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 							}
 						}
 
-						attrs.add(new StagedDomainAttr(aName, typeCode, dimension, dataBytes, dataFile, valBytes,
-								valFile, 0L, null));
+						attrs.add(new StagedDomainAttr(aName, typeCode, dimension, dt.precision(), dt.scale(), dataBytes,
+								dataFile, valBytes, valFile, 0L, null));
 						aIdx++;
 					}
 				}
@@ -487,8 +487,8 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 						ByteBuffer descBuf = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
 						descBuf.putInt(aNameOff);
 						descBuf.put(attr.typeCode());
-						descBuf.put((byte) 0); // reserved1
-						descBuf.putShort((short) 0); // reserved2
+						descBuf.put((byte) attr.scale()); // reserved1 (scale for DECIMAL64)
+						descBuf.putShort((short) attr.precision()); // reserved2 (precision for DECIMAL64)
 						descBuf.putInt(attr.dimension());
 						descBuf.putLong(descDataOff);
 						descBuf.putLong(descDataBytes);
