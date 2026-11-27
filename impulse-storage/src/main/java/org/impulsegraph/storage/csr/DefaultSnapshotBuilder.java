@@ -33,15 +33,24 @@ public final class DefaultSnapshotBuilder {
 		private final String name;
 		private final byte typeCode;
 		private final int dimension;
+		private final int precision;
+		private final int scale;
 		private final byte[] data;
 		private final byte[] offsets;
 		private final byte[] validity;
 
 		public DomainAttributeEntry(String name, byte typeCode, int dimension, byte[] data, byte[] offsets,
 				byte[] validity) {
+			this(name, typeCode, dimension, 0, 0, data, offsets, validity);
+		}
+
+		public DomainAttributeEntry(String name, byte typeCode, int dimension, int precision, int scale, byte[] data,
+				byte[] offsets, byte[] validity) {
 			this.name = Objects.requireNonNull(name, "attribute name cannot be null");
 			this.typeCode = typeCode;
 			this.dimension = dimension;
+			this.precision = precision;
+			this.scale = scale;
 			this.data = data != null ? data : new byte[0];
 			this.offsets = offsets != null ? offsets : new byte[0];
 			this.validity = validity != null ? validity : new byte[0];
@@ -55,6 +64,12 @@ public final class DefaultSnapshotBuilder {
 		}
 		public int dimension() {
 			return dimension;
+		}
+		public int precision() {
+			return precision;
+		}
+		public int scale() {
+			return scale;
 		}
 		public byte[] data() {
 			return data;
@@ -170,11 +185,17 @@ public final class DefaultSnapshotBuilder {
 
 	public DefaultSnapshotBuilder withDomainAttribute(int domainId, String name, byte typeCode, int dimension,
 			byte[] data, byte[] offsets, byte[] validity) {
+		return withDomainAttribute(domainId, name, typeCode, dimension, 0, 0, data, offsets, validity);
+	}
+
+	public DefaultSnapshotBuilder withDomainAttribute(int domainId, String name, byte typeCode, int dimension,
+			int precision, int scale, byte[] data, byte[] offsets, byte[] validity) {
 		DomainEntry dom = findDomain(domainId);
 		if (dom == null) {
 			throw new IllegalArgumentException("Domain ID not found: " + domainId);
 		}
-		dom.attributes().add(new DomainAttributeEntry(name, typeCode, dimension, data, offsets, validity));
+		dom.attributes().add(
+				new DomainAttributeEntry(name, typeCode, dimension, precision, scale, data, offsets, validity));
 		return this;
 	}
 
@@ -366,8 +387,9 @@ public final class DefaultSnapshotBuilder {
 					byte[] vBytes = (vSeg != null && vSeg != MemorySegment.NULL)
 							? vSeg.toArray(ValueLayout.JAVA_BYTE)
 							: new byte[0];
-					domAttrs.add(
-							new DomainAttributeEntry(la.name(), la.typeCode(), la.dimension(), dBytes, oBytes, vBytes));
+					byte rawTypeCode = la.isNullable() ? (byte) (la.typeCode() | 0x80) : la.typeCode();
+					domAttrs.add(new DomainAttributeEntry(la.name(), rawTypeCode, la.dimension(), la.precision(),
+							la.scale(), dBytes, oBytes, vBytes));
 				}
 				domainList.add(new DomainEntry(ld.domainId(), ld.name(), ld.keyType(), ld.nodeCount(),
 						ld.keyAttrIndex(), domAttrs));
@@ -505,8 +527,8 @@ public final class DefaultSnapshotBuilder {
 						ByteBuffer descBuf = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
 						descBuf.putInt(aNameOff);
 						descBuf.put(typeCode);
-						descBuf.put((byte) 0); // reserved1
-						descBuf.putShort((short) 0); // reserved2
+						descBuf.put((byte) a.scale()); // reserved1 (scale for DECIMAL64)
+						descBuf.putShort((short) a.precision()); // reserved2 (precision for DECIMAL64)
 						descBuf.putInt(a.dimension());
 						if (isNullable) {
 							descBuf.putLong(validityOff);

@@ -20,17 +20,46 @@ public final class DataType {
 	public static final DataType BYTES = new DataType((byte) 0x0C, 0, 0, "VAR_BYTES");
 	public static final DataType INTERVAL_SEC_32 = new DataType((byte) 0x0D, 8, 1, "INTERVAL_SEC_32");
 	public static final DataType INTERVAL_MS_64 = new DataType((byte) 0x0E, 16, 1, "INTERVAL_MS_64");
+	public static final DataType BOOL = new DataType((byte) 0x0F, 1, 1, "BOOL");
 
 	private final byte baseCode;
 	private final int elementSize;
 	private final int dimension;
+	private final int precision;
+	private final int scale;
 	private final String name;
 
 	private DataType(byte baseCode, int elementSize, int dimension, String name) {
+		this(baseCode, elementSize, dimension, 0, 0, name);
+	}
+
+	private DataType(byte baseCode, int elementSize, int dimension, int precision, int scale, String name) {
 		this.baseCode = baseCode;
 		this.elementSize = elementSize;
 		this.dimension = dimension;
+		this.precision = precision;
+		this.scale = scale;
 		this.name = name;
+	}
+
+	/**
+	 * Fixed-point 64-bit signed decimal ({@code type_code = 0x15}, Parquet
+	 * {@code DECIMAL64} layout).
+	 *
+	 * @param precision
+	 *            total decimal digits ({@code 1 <= precision <= 18})
+	 * @param scale
+	 *            fractional decimal digits ({@code 0 <= scale <= precision})
+	 */
+	public static DataType decimal64(int precision, int scale) {
+		if (precision < 1 || precision > 18) {
+			throw new IllegalArgumentException("DECIMAL64 precision must be in [1, 18], got " + precision);
+		}
+		if (scale < 0 || scale > precision) {
+			throw new IllegalArgumentException(
+					"DECIMAL64 scale must be in [0, " + precision + "], got " + scale);
+		}
+		return new DataType((byte) 0x15, 8, 1, precision, scale, "DECIMAL64(" + precision + "," + scale + ")");
 	}
 
 	public static DataType vector(DataType base, int dimension) {
@@ -41,7 +70,8 @@ public final class DataType {
 		if (base.isVariableLength()) {
 			throw new IllegalArgumentException("Variable length types cannot be fixed-width vectors");
 		}
-		return new DataType(base.baseCode, base.elementSize, dimension, base.name + "[" + dimension + "]");
+		return new DataType(base.baseCode, base.elementSize, dimension, base.precision, base.scale,
+				base.name + "[" + dimension + "]");
 	}
 
 	public static DataType fixedBytes(int dimension) {
@@ -67,6 +97,14 @@ public final class DataType {
 		return dimension;
 	}
 
+	public int precision() {
+		return precision;
+	}
+
+	public int scale() {
+		return scale;
+	}
+
 	public int totalValueBytes() {
 		return elementSize * dimension;
 	}
@@ -90,11 +128,12 @@ public final class DataType {
 			return true;
 		if (!(o instanceof DataType dataType))
 			return false;
-		return baseCode == dataType.baseCode && elementSize == dataType.elementSize && dimension == dataType.dimension;
+		return baseCode == dataType.baseCode && elementSize == dataType.elementSize && dimension == dataType.dimension
+				&& precision == dataType.precision && scale == dataType.scale;
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(baseCode, elementSize, dimension);
+		return Objects.hash(baseCode, elementSize, dimension, precision, scale);
 	}
 }
