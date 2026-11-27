@@ -234,8 +234,8 @@ public final class StreamingSnapshotWriter implements SnapshotBuilder {
 							}
 						}
 
-						attrs.add(new StagedDomainAttr(aName, typeCode, dimension, dt.precision(), dt.scale(), dataBytes,
-								dataFile, valBytes, valFile, 0L, null));
+						attrs.add(new StagedDomainAttr(aName, typeCode, dimension, dt.precision(), dt.scale(),
+								dataBytes, dataFile, valBytes, valFile, 0L, null));
 						aIdx++;
 					}
 				}

@@ -56,8 +56,7 @@ public final class DataType {
 			throw new IllegalArgumentException("DECIMAL64 precision must be in [1, 18], got " + precision);
 		}
 		if (scale < 0 || scale > precision) {
-			throw new IllegalArgumentException(
-					"DECIMAL64 scale must be in [0, " + precision + "], got " + scale);
+			throw new IllegalArgumentException("DECIMAL64 scale must be in [0, " + precision + "], got " + scale);
 		}
 		return new DataType((byte) 0x15, 8, 1, precision, scale, "DECIMAL64(" + precision + "," + scale + ")");
 	}

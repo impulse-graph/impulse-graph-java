@@ -187,8 +187,7 @@ public final class ZeroAllocAllOpcodesTest {
 
 			// 5. DECIMAL64 zero-alloc: 0x15 OP_SCALAR_DECIMAL_ALU + 0x58 OP_VEC_DECIMAL_ALU
 			// + 0x52.sum_i64_chk + 0x37.scatter_add_chk + 0x4D.mul_div_i64_r
-			long[] decimal64Ops = {
-					enc(OP_LOAD_CONST, 0, SUBOP_LOAD_CONST_I32, 0, 0, 0, 0, 10_000), // R0 = 10000
+			long[] decimal64Ops = {enc(OP_LOAD_CONST, 0, SUBOP_LOAD_CONST_I32, 0, 0, 0, 0, 10_000), // R0 = 10000
 					enc(OP_LOAD_CONST, 0, SUBOP_LOAD_CONST_I32, 1, 0, 0, 0, 250), // R1 = 250
 					enc(OP_LOAD_CONST, 0, SUBOP_LOAD_CONST_I32, 2, 0, 0, 0, 100), // R2 = 100
 					enc(OP_SCALAR_DECIMAL_ALU, 0, SUBOP_SCALAR_DECIMAL_ALU_MUL_DIV_ROUND, 3, 0, 1, 2, 0),
@@ -203,9 +202,7 @@ public final class ZeroAllocAllOpcodesTest {
 					enc(OP_VEC_TERNARY, FLAG_SCALAR_RHS, SUBOP_VEC_TERNARY_MUL_DIV_I64_R, 1, 0, 1, 2, 0),
 					enc(OP_VEC_REDUCE, 0, SUBOP_VEC_REDUCE_SUM_I64_CHK, 5, 1, 0, 0, 0),
 					enc(OP_COLLECT, 0, SUBOP_COLLECT_SCALAR, 0, 5, 0, 0, 0),
-					enc(OP_COLLECT, 0, SUBOP_COLLECT_VEC, 0, 1, 0, 0, 1),
-					enc(OP_HALT, 0, 0, 0, 0, 0, 0, 0),
-			};
+					enc(OP_COLLECT, 0, SUBOP_COLLECT_VEC, 0, 1, 0, 0, 1), enc(OP_HALT, 0, 0, 0, 0, 0, 0, 0),};
 			assertZeroAllocAfterWarmup("DECIMAL64(0x15+0x58+0x52.sum_i64_chk+0x37.scatter_add_chk+0x4D.mul_div_i64_r)",
 					decimal64Ops, bind, ws);
 		}

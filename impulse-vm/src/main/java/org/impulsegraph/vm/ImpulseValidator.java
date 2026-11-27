@@ -488,9 +488,9 @@ public final class ImpulseValidator {
 					|| ((subop <= 2 || (subop >= 4 && subop <= 9)) && !scalar && checkUninitMask(s2, wm));
 			case OP_VEC_TERNARY -> checkUninitMask(s1, wm) || (!scalar && checkUninitMask(s2, wm))
 					|| ((subop == 0 || subop == 2 || subop == 4 || subop == 6) && checkUninitMask(s3, wm));
-			case OP_VEC_DECIMAL_ALU -> checkUninitMask(s1, wm)
-					|| ((subop <= 6 || subop == 15) && !scalar && checkUninitMask(s2, wm))
-					|| (subop == 4 && checkUninitMask(s3, wm));
+			case OP_VEC_DECIMAL_ALU ->
+				checkUninitMask(s1, wm) || ((subop <= 6 || subop == 15) && !scalar && checkUninitMask(s2, wm))
+						|| (subop == 4 && checkUninitMask(s3, wm));
 			case OP_VEC_BLEND -> checkUninitMask(s1, wm) || (!scalar && checkUninitMask(s2, wm))
 					|| ((subop == 0 || subop == 2) && checkUninitMask(s3, wm));
 			case OP_VECTOR_RERANK -> subop >= 4 && (checkUninitMask(s1, wm) || checkUninitMask(s2, wm));
