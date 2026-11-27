@@ -1,6 +1,7 @@
 package org.impulsegraph.compiler.datalog;
 
 import org.impulsegraph.api.ImpulseGraphSnapshot;
+import org.impulsegraph.api.RelationSnapshot;
 import org.impulsegraph.compiler.ast.ImpScmNode;
 import org.impulsegraph.compiler.ast.ScmCollect;
 import org.impulsegraph.compiler.ast.ScmFixpoint;
@@ -12,6 +13,10 @@ import org.impulsegraph.compiler.ast.ScmProgram;
 import org.impulsegraph.compiler.ast.ScmSetOp;
 import org.impulsegraph.compiler.ast.ScmWalk;
 import org.impulsegraph.compiler.datalog.StratificationValidator.DependencyEdge;
+import org.impulsegraph.compiler.impscm.v11.ImpScmV11Compiler;
+import org.impulsegraph.compiler.impscm.v11.V11ExprLowerer;
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+import org.impulsegraph.storage.csr.GraphSnapshot;
 import org.impulsegraph.vm.CompiledQuery;
 
 import java.lang.foreign.Arena;
@@ -33,7 +38,20 @@ public final class ImpLogCompiler {
 	public record ParsedAtom(String predicate, List<String> args, boolean negated, boolean reverseDirection) {
 	}
 
-	public record ParsedRule(String headPredicate, List<String> headArgs, List<ParsedAtom> body) {
+	public record ParsedComparison(String lhs, String op, String rhs) {
+	}
+
+	public record ParsedRule(String headPredicate, List<String> headArgs, List<ParsedAtom> body,
+			List<ParsedComparison> comparisons) {
+		public ParsedRule {
+			headArgs = headArgs != null ? List.copyOf(headArgs) : List.of();
+			body = body != null ? List.copyOf(body) : List.of();
+			comparisons = comparisons != null ? List.copyOf(comparisons) : List.of();
+		}
+
+		public ParsedRule(String headPredicate, List<String> headArgs, List<ParsedAtom> body) {
+			this(headPredicate, headArgs, body, List.of());
+		}
 	}
 
 	private ImpLogCompiler() {
@@ -87,6 +105,431 @@ public final class ImpLogCompiler {
 		return CompiledQuery.fromV11(prog, snapshot);
 	}
 
+	/**
+	 * Parses all Datalog rules (including comparison predicates with
+	 * {@code DECIMAL(P, S)} literals and {@code CAST(...)}) from the given ImpLog
+	 * source.
+	 */
+	public static List<ParsedRule> parseRules(String source) {
+		Objects.requireNonNull(source, "source must not be null");
+		List<ParsedRule> rules = new ArrayList<>();
+		String[] lines = source.split("\\r?\\n");
+		for (String rawLine : lines) {
+			String trimmed = stripInlineComment(rawLine).trim();
+			if (trimmed.isEmpty() || trimmed.startsWith("//") || trimmed.startsWith("%") || trimmed.startsWith("#")
+					|| trimmed.startsWith(".decl") || trimmed.startsWith("?-")) {
+				continue;
+			}
+			int arrowPos = trimmed.indexOf(":-");
+			if (arrowPos < 0) {
+				continue;
+			}
+			String headStr = trimmed.substring(0, arrowPos).trim();
+			String bodyStr = trimmed.substring(arrowPos + 2).trim();
+			while (bodyStr.endsWith(".") || bodyStr.endsWith(" ") || bodyStr.endsWith("\t")) {
+				bodyStr = bodyStr.substring(0, bodyStr.length() - 1).trim();
+			}
+			ParsedAtom headAtom = parseAtom(headStr);
+			if (headAtom.predicate().isEmpty()) {
+				continue;
+			}
+			List<String> rawBodyTerms = splitTopLevelAtoms(bodyStr);
+			List<ParsedAtom> bodyAtoms = new ArrayList<>();
+			List<ParsedComparison> comparisons = new ArrayList<>();
+			for (String rawTerm : rawBodyTerms) {
+				ParsedComparison cmp = tryParseComparison(rawTerm);
+				if (cmp != null) {
+					// Validate expression syntax eagerly (rejects malformed literals like 1e5d)
+					V11ExprLowerer.parseExpr(cmp.lhs() + " " + cmp.op() + " " + cmp.rhs());
+					comparisons.add(cmp);
+				} else {
+					ParsedAtom atom = parseAtom(rawTerm);
+					if (!atom.predicate().isEmpty()) {
+						bodyAtoms.add(atom);
+					}
+				}
+			}
+			rules.add(new ParsedRule(headAtom.predicate(), headAtom.args(), bodyAtoms, comparisons));
+		}
+		return rules;
+	}
+
+	/**
+	 * Lowers an ImpLog Datalog program (including decimal comparison predicates in
+	 * rule bodies) into canonical ImpScheme v0.11 S-expression IR.
+	 */
+	public static String lowerToImpSchemeV11(String source, ImpulseGraphSnapshot snapshot) {
+		return lowerToImpSchemeV11(source, snapshot, Map.of());
+	}
+
+	/**
+	 * Lowers an ImpLog Datalog program with optional explicit parameter types into
+	 * canonical ImpScheme v0.11 S-expression IR.
+	 */
+	public static String lowerToImpSchemeV11(String source, ImpulseGraphSnapshot snapshot,
+			Map<String, String> explicitParamTypes) {
+		List<ParsedRule> rules = parseRules(source);
+		if (rules.isEmpty()) {
+			throw new IllegalArgumentException("PARSE_ERROR: no Datalog rules found");
+		}
+		ParsedRule rule = rules.get(rules.size() - 1);
+		if (rule.body().isEmpty()) {
+			throw new IllegalArgumentException("PARSE_ERROR: Datalog rule has empty body");
+		}
+
+		Map<String, String> paramDecls = new LinkedHashMap<>();
+		if (explicitParamTypes != null) {
+			for (Map.Entry<String, String> e : explicitParamTypes.entrySet()) {
+				String pname = e.getKey().startsWith("$") ? e.getKey() : "$" + e.getKey();
+				paramDecls.put(pname, V11ExprLowerer.normalizeParamType(e.getValue()));
+			}
+		}
+
+		ParsedAtom primaryAtom = rule.body().get(0);
+		String matchedRel = findMatchingRelation(primaryAtom.predicate(), snapshot);
+
+		// Edge-relation rule: e.g. high_value(X, Y) :- transfer(X, Y, Amt), Amt >
+		// 19.99d.
+		if (matchedRel != null && primaryAtom.args().size() >= 2) {
+			String srcVar = primaryAtom.args().get(0);
+			String tgtVar = primaryAtom.args().get(1);
+			String attrVar = primaryAtom.args().size() >= 3 ? primaryAtom.args().get(2) : null;
+			String edgeAttrName = attrVar != null ? resolveEdgeAttrName(matchedRel, attrVar, snapshot) : null;
+			String srcDom = resolveRelSrcDom(matchedRel, snapshot);
+			String tgtDom = resolveRelTgtDom(matchedRel, snapshot);
+			String dir = primaryAtom.reverseDirection() ? ":rev" : ":fwd";
+
+			// Infer $param type if compared against a DECIMAL64 edge attribute
+			int[] edgeDecPS = (attrVar != null && edgeAttrName != null)
+					? lookupEdgeDecimalPS(snapshot, matchedRel, edgeAttrName)
+					: null;
+			if (edgeDecPS != null) {
+				for (ParsedComparison cmp : rule.comparisons()) {
+					inferParamFromComparison(cmp, attrVar, edgeDecPS, paramDecls);
+				}
+			}
+
+			StringBuilder scm = new StringBuilder("(query\n");
+			for (Map.Entry<String, String> p : paramDecls.entrySet()) {
+				scm.append("  (param ").append(p.getKey()).append(' ').append(p.getValue()).append(")\n");
+			}
+			scm.append("  (let ([__src (domain-all \"").append(srcDom).append("\")]\n");
+			if (rule.comparisons().isEmpty()) {
+				scm.append("        [__res (walk ").append(dir).append(" \"").append(matchedRel)
+						.append("\" __src)])\n");
+			} else {
+				List<String> hoistBindings = new ArrayList<>();
+				String whereExpr = lowerEdgeComparisonsToV11(rule.comparisons(), attrVar, edgeAttrName, edgeDecPS,
+						hoistBindings);
+				for (String hb : hoistBindings) {
+					scm.append("        ").append(hb).append('\n');
+				}
+				scm.append("        [__out (seed \"").append(tgtDom).append("\")]\n");
+				scm.append("        [__res (edge-stream ").append(dir).append(" \"").append(matchedRel)
+						.append("\" __src (lambda (").append(srcVar).append(' ').append(tgtVar).append(" __e) (where ")
+						.append(whereExpr).append(") (yield-frontier __out ").append(tgtVar).append(")))])\n");
+			}
+			scm.append("    (collect :frontier-ids \"").append(rule.headPredicate()).append("\" __res)))");
+			return scm.toString();
+		}
+
+		// Node-attribute rule: e.g. rich(X) :- account(X, Bal), Bal >= 1000.00d.
+		String matchedDom = findMatchingDomain(primaryAtom.predicate(), snapshot);
+		String nodeVar = primaryAtom.args().isEmpty() ? "x" : primaryAtom.args().get(0);
+		String attrVar = primaryAtom.args().size() >= 2 ? primaryAtom.args().get(1) : null;
+		String nodeAttrName = attrVar != null ? resolveNodeAttrName(matchedDom, attrVar, snapshot) : null;
+
+		if (attrVar != null && nodeAttrName != null) {
+			int[] decPS = lookupNodeDecimalPS(snapshot, matchedDom, nodeAttrName);
+			if (decPS != null) {
+				for (ParsedComparison cmp : rule.comparisons()) {
+					inferParamFromComparison(cmp, attrVar, decPS, paramDecls);
+				}
+			}
+		}
+
+		StringBuilder scm = new StringBuilder("(query\n");
+		for (Map.Entry<String, String> p : paramDecls.entrySet()) {
+			scm.append("  (param ").append(p.getKey()).append(' ').append(p.getValue()).append(")\n");
+		}
+		scm.append("  (let ([__all (domain-all \"").append(matchedDom).append("\")]");
+		String curF = "__all";
+		int fIdx = 0;
+		for (ParsedComparison cmp : rule.comparisons()) {
+			String nextF = "__f" + (++fIdx);
+			String lowered = V11ExprLowerer.lowerExpr(cmp.lhs() + " " + cmp.op() + " " + cmp.rhs(),
+					id -> id.equals(attrVar) ? "(attr " + nodeVar + " \"" + nodeAttrName + "\")" : id,
+					(v, m) -> "(attr " + v + " \"" + m + "\")");
+			scm.append("\n        [").append(nextF).append(" (node-filter ").append(curF).append(" (lambda (")
+					.append(nodeVar).append(") ").append(lowered).append("))]");
+			curF = nextF;
+		}
+		scm.append(")\n    (collect :frontier-ids \"").append(rule.headPredicate()).append("\" ").append(curF)
+				.append(")))");
+		return scm.toString();
+	}
+
+	/**
+	 * Compiles an ImpLog Datalog program directly to validated v0.11 bytecode via
+	 * {@link ImpScmV11Compiler}.
+	 */
+	public static ImpScmV11Compiler.CompileResult compileToV11(String source, ImpulseGraphSnapshot snapshot) {
+		return compileToV11(source, snapshot, Map.of());
+	}
+
+	/**
+	 * Compiles an ImpLog Datalog program with explicit parameter types directly to
+	 * validated v0.11 bytecode via {@link ImpScmV11Compiler}.
+	 */
+	public static ImpScmV11Compiler.CompileResult compileToV11(String source, ImpulseGraphSnapshot snapshot,
+			Map<String, String> paramTypes) {
+		String scm = lowerToImpSchemeV11(source, snapshot, paramTypes);
+		return ImpScmV11Compiler.compile(scm, snapshot, true);
+	}
+
+	private static String lowerEdgeComparisonsToV11(List<ParsedComparison> comparisons, String attrVar,
+			String edgeAttrName, int[] edgeDecPS, List<String> hoistBindings) {
+		java.util.function.Function<String, String> identResolver = id -> id.equals(attrVar)
+				? "(edge-attr __e \"" + edgeAttrName + "\")"
+				: id;
+		List<String> parts = new ArrayList<>();
+		int hoistIdx = 0;
+		for (ParsedComparison cmp : comparisons) {
+			String lhsScm = V11ExprLowerer.lowerExpr(cmp.lhs(), identResolver,
+					(v, m) -> "(attr " + v + " \"" + m + "\")");
+			String rhsScm = V11ExprLowerer.lowerExpr(cmp.rhs(), identResolver,
+					(v, m) -> "(attr " + v + " \"" + m + "\")");
+			if (!rhsScm.contains("(edge-attr ") && !rhsScm.contains("(attr ") && !rhsScm.startsWith("$")) {
+				String hoistVar = "__ek" + (++hoistIdx);
+				if (edgeDecPS != null && cmp.lhs().trim().equals(attrVar) && rhsScm.matches("-?\\d+")) {
+					hoistBindings.add("[" + hoistVar + " (cast " + rhsScm + " (decimal 18 " + edgeDecPS[1] + "))]");
+				} else {
+					hoistBindings.add("[" + hoistVar + " " + rhsScm + "]");
+				}
+				rhsScm = hoistVar;
+			}
+			String scmOp = switch (cmp.op()) {
+				case "==" -> "=";
+				case "<>" -> "!=";
+				default -> cmp.op();
+			};
+			parts.add("(" + scmOp + " " + lhsScm + " " + rhsScm + ")");
+		}
+		if (parts.size() == 1) {
+			return parts.get(0);
+		}
+		String acc = parts.get(0);
+		for (int i = 1; i < parts.size(); i++) {
+			acc = "(and " + acc + " " + parts.get(i) + ")";
+		}
+		return acc;
+	}
+
+	private static void inferParamFromComparison(ParsedComparison cmp, String attrVar, int[] decPS,
+			Map<String, String> paramDecls) {
+		if (cmp.lhs().trim().equals(attrVar) && cmp.rhs().trim().startsWith("$")) {
+			paramDecls.putIfAbsent(cmp.rhs().trim(), "(decimal " + decPS[0] + " " + decPS[1] + ")");
+		} else if (cmp.rhs().trim().equals(attrVar) && cmp.lhs().trim().startsWith("$")) {
+			paramDecls.putIfAbsent(cmp.lhs().trim(), "(decimal " + decPS[0] + " " + decPS[1] + ")");
+		}
+	}
+
+	private static String findMatchingRelation(String predName, ImpulseGraphSnapshot snapshot) {
+		if (snapshot == null || snapshot.getRelationNames() == null) {
+			return null;
+		}
+		for (String rel : snapshot.getRelationNames()) {
+			if (rel.equalsIgnoreCase(predName)) {
+				return rel;
+			}
+		}
+		return null;
+	}
+
+	private static String findMatchingDomain(String predName, ImpulseGraphSnapshot snapshot) {
+		if (snapshot != null && snapshot.getDomainNames() != null) {
+			for (String dom : snapshot.getDomainNames()) {
+				if (dom.equalsIgnoreCase(predName)) {
+					return dom;
+				}
+			}
+			if (!snapshot.getDomainNames().isEmpty()) {
+				return snapshot.getDomainNames().iterator().next();
+			}
+		}
+		return predName;
+	}
+
+	private static String resolveRelSrcDom(String relName, ImpulseGraphSnapshot snapshot) {
+		if (snapshot instanceof GraphSnapshot gs) {
+			RelationSnapshot rs = gs.getRelationSnapshot(relName);
+			if (rs != null) {
+				String dn = domainNameById(gs, rs.getSrcDomainId());
+				if (dn != null) {
+					return dn;
+				}
+			}
+		}
+		return findMatchingDomain("Node", snapshot);
+	}
+
+	private static String resolveRelTgtDom(String relName, ImpulseGraphSnapshot snapshot) {
+		if (snapshot instanceof GraphSnapshot gs) {
+			RelationSnapshot rs = gs.getRelationSnapshot(relName);
+			if (rs != null) {
+				String dn = domainNameById(gs, rs.getTgtDomainId());
+				if (dn != null) {
+					return dn;
+				}
+			}
+		}
+		return findMatchingDomain("Node", snapshot);
+	}
+
+	private static String domainNameById(GraphSnapshot gs, int domId) {
+		for (String dn : gs.getDomainNames()) {
+			BinarySnapshotLoader.LoadedDomain ld = gs.getDomain(dn);
+			if (ld != null && ld.domainId() == domId) {
+				return dn;
+			}
+		}
+		return null;
+	}
+
+	private static String resolveEdgeAttrName(String relName, String varHint, ImpulseGraphSnapshot snapshot) {
+		if (snapshot != null) {
+			RelationSnapshot rs = snapshot.getRelationSnapshot(relName);
+			if (rs instanceof org.impulsegraph.storage.csr.RelationSnapshot csrRel) {
+				List<BinarySnapshotLoader.LoadedAttribute> attrs = csrRel.getLoadedAttributes();
+				String hintLower = varHint.toLowerCase();
+				for (BinarySnapshotLoader.LoadedAttribute la : attrs) {
+					if (la.name().equalsIgnoreCase(varHint)) {
+						return la.name();
+					}
+				}
+				for (BinarySnapshotLoader.LoadedAttribute la : attrs) {
+					if (la.name().toLowerCase().startsWith(hintLower)
+							|| hintLower.startsWith(la.name().toLowerCase())) {
+						return la.name();
+					}
+				}
+				for (BinarySnapshotLoader.LoadedAttribute la : attrs) {
+					if (la.typeCode() == 0x15 || la.typeCode() == (byte) 0x95) {
+						return la.name();
+					}
+				}
+				if (!attrs.isEmpty()) {
+					return attrs.get(0).name();
+				}
+			}
+		}
+		return varHint.toLowerCase();
+	}
+
+	private static String resolveNodeAttrName(String domName, String varHint, ImpulseGraphSnapshot snapshot) {
+		if (snapshot instanceof GraphSnapshot gs) {
+			BinarySnapshotLoader.LoadedDomain ld = gs.getDomain(domName);
+			if (ld != null) {
+				String hintLower = varHint.toLowerCase();
+				for (BinarySnapshotLoader.LoadedAttribute la : ld.attributes()) {
+					if (la.name().equalsIgnoreCase(varHint)) {
+						return la.name();
+					}
+				}
+				for (BinarySnapshotLoader.LoadedAttribute la : ld.attributes()) {
+					if (la.name().toLowerCase().startsWith(hintLower)
+							|| hintLower.startsWith(la.name().toLowerCase())) {
+						return la.name();
+					}
+				}
+				for (BinarySnapshotLoader.LoadedAttribute la : ld.attributes()) {
+					if (la.typeCode() == 0x15 || la.typeCode() == (byte) 0x95) {
+						return la.name();
+					}
+				}
+				if (!ld.attributes().isEmpty()) {
+					return ld.attributes().get(0).name();
+				}
+			}
+		}
+		return varHint.toLowerCase();
+	}
+
+	private static int[] lookupEdgeDecimalPS(ImpulseGraphSnapshot snapshot, String relName, String attrName) {
+		if (snapshot != null && relName != null && attrName != null) {
+			RelationSnapshot rs = snapshot.getRelationSnapshot(relName);
+			if (rs instanceof org.impulsegraph.storage.csr.RelationSnapshot csrRel) {
+				for (BinarySnapshotLoader.LoadedAttribute la : csrRel.getLoadedAttributes()) {
+					if (la.name().equals(attrName) && (la.typeCode() == 0x15 || la.typeCode() == (byte) 0x95)) {
+						return new int[]{la.precision(), la.scale()};
+					}
+				}
+			}
+		}
+		return null;
+	}
+
+	private static int[] lookupNodeDecimalPS(ImpulseGraphSnapshot snapshot, String domName, String attrName) {
+		if (snapshot instanceof GraphSnapshot gs && domName != null && attrName != null) {
+			BinarySnapshotLoader.LoadedDomain ld = gs.getDomain(domName);
+			if (ld != null) {
+				int idx = ld.getAttributeIndex(attrName);
+				if (idx >= 0) {
+					BinarySnapshotLoader.LoadedAttribute la = ld.getAttribute(idx);
+					if (la.typeCode() == 0x15 || la.typeCode() == (byte) 0x95) {
+						return new int[]{la.precision(), la.scale()};
+					}
+				}
+			}
+		}
+		return null;
+	}
+
+	static ParsedComparison tryParseComparison(String rawTerm) {
+		String t = rawTerm.trim();
+		int depth = 0;
+		boolean inStr = false;
+		char quote = 0;
+		int n = t.length();
+		for (int i = 0; i < n; i++) {
+			char c = t.charAt(i);
+			if (inStr) {
+				if (c == '\\' && i + 1 < n) {
+					i++;
+				} else if (c == quote) {
+					inStr = false;
+				}
+				continue;
+			}
+			if (c == '"' || c == '\'') {
+				inStr = true;
+				quote = c;
+				continue;
+			}
+			if (c == '(') {
+				depth++;
+				continue;
+			}
+			if (c == ')') {
+				depth = Math.max(0, depth - 1);
+				continue;
+			}
+			if (depth == 0) {
+				if (i + 1 < n) {
+					String two = t.substring(i, i + 2);
+					if (two.equals(">=") || two.equals("<=") || two.equals("!=") || two.equals("<>")
+							|| two.equals("==")) {
+						return new ParsedComparison(t.substring(0, i).trim(), two, t.substring(i + 2).trim());
+					}
+				}
+				if (c == '>' || c == '<' || c == '=') {
+					return new ParsedComparison(t.substring(0, i).trim(), String.valueOf(c), t.substring(i + 1).trim());
+				}
+			}
+		}
+		return null;
+	}
+
 	private static ScmProgram compile(String source, List<Long> explicitSeeds, List<Long> explicitGroupPairs,
 			int explicitNumGroups, List<Long> explicitDenyNodes) {
 		Objects.requireNonNull(source, "source must not be null");
@@ -126,14 +569,21 @@ public final class ImpLogCompiler {
 
 			List<String> rawBodyTerms = splitTopLevelAtoms(bodyStr);
 			List<ParsedAtom> bodyAtoms = new ArrayList<>();
+			List<ParsedComparison> comparisons = new ArrayList<>();
 			for (String rawTerm : rawBodyTerms) {
-				ParsedAtom atom = parseAtom(rawTerm);
-				if (!atom.predicate().isEmpty()) {
-					bodyAtoms.add(atom);
-					edges.add(new DependencyEdge(headAtom.predicate(), atom.predicate(), atom.negated()));
+				ParsedComparison cmp = tryParseComparison(rawTerm);
+				if (cmp != null) {
+					V11ExprLowerer.parseExpr(cmp.lhs() + " " + cmp.op() + " " + cmp.rhs());
+					comparisons.add(cmp);
+				} else {
+					ParsedAtom atom = parseAtom(rawTerm);
+					if (!atom.predicate().isEmpty()) {
+						bodyAtoms.add(atom);
+						edges.add(new DependencyEdge(headAtom.predicate(), atom.predicate(), atom.negated()));
+					}
 				}
 			}
-			rules.add(new ParsedRule(headAtom.predicate(), headAtom.args(), bodyAtoms));
+			rules.add(new ParsedRule(headAtom.predicate(), headAtom.args(), bodyAtoms, comparisons));
 		}
 
 		StratificationValidator.validate(edges);
@@ -275,10 +725,23 @@ public final class ImpLogCompiler {
 	private static List<String> splitTopLevelAtoms(String body) {
 		List<String> out = new ArrayList<>();
 		int depth = 0;
+		boolean inStr = false;
+		char quote = 0;
 		int start = 0;
 		for (int i = 0; i < body.length(); i++) {
 			char c = body.charAt(i);
-			if (c == '(') {
+			if (inStr) {
+				if (c == '\\' && i + 1 < body.length()) {
+					i++;
+				} else if (c == quote) {
+					inStr = false;
+				}
+				continue;
+			}
+			if (c == '"' || c == '\'') {
+				inStr = true;
+				quote = c;
+			} else if (c == '(') {
 				depth++;
 			} else if (c == ')') {
 				depth = Math.max(0, depth - 1);
