@@ -469,6 +469,11 @@ public final class VmFixtureBatchMain {
 			}
 		}
 
+		int repeatRuns = root.containsKey("repeat_runs") ? (int) asLong(root.get("repeat_runs")) : 1;
+		long plannedScratch = (preloadedBind != null && words.length > 0)
+				? ImpulseMemoryPlanner.plan(words, preloadedBind.view).scratchBytes()
+				: 0L;
+
 		if (useJit) {
 			ImpulseMethodHandleCompiler.CompiledProgram compiled = ImpulseMethodHandleCompiler.compileValidated(words,
 					bind);
@@ -477,7 +482,21 @@ public final class VmFixtureBatchMain {
 			ImpulseInterpreter.executeValidated(words, bind, ws, maxSteps);
 		}
 		ImpulseContextHash.Digest digest = ImpulseContextHash.compute(ws);
-		return formatResultJson(ws, digest);
+		Boolean repeatHashMatch = null;
+		if (repeatRuns >= 2) {
+			ws.reset();
+			if (useJit) {
+				ImpulseMethodHandleCompiler.CompiledProgram compiled = ImpulseMethodHandleCompiler
+						.compileValidated(words, bind);
+				compiled.execute(ws, maxSteps);
+			} else {
+				ImpulseInterpreter.executeValidated(words, bind, ws, maxSteps);
+			}
+			ImpulseContextHash.Digest digest2 = ImpulseContextHash.compute(ws);
+			repeatHashMatch = (digest.logicalHash() == digest2.logicalHash()
+					&& digest.physicalHash() == digest2.physicalHash());
+		}
+		return formatResultJson(ws, digest, plannedScratch, repeatHashMatch);
 	}
 
 	private static ImpulseVector parseVecFromJson(String ty, List<Object> vals) {
@@ -587,11 +606,16 @@ public final class VmFixtureBatchMain {
 		};
 	}
 
-	private static String formatResultJson(ImpulseWorkspace ws, ImpulseContextHash.Digest digest) {
+	private static String formatResultJson(ImpulseWorkspace ws, ImpulseContextHash.Digest digest, long plannedScratch,
+			Boolean repeatHashMatch) {
 		StringBuilder sb = new StringBuilder(512);
 		sb.append('{');
 		sb.append("\"status\":\"").append(statusName(ws.status)).append("\",");
 		sb.append("\"status_code\":").append(ws.status).append(',');
+		sb.append("\"planned_scratch_bytes\":").append(plannedScratch).append(',');
+		if (repeatHashMatch != null) {
+			sb.append("\"repeat_hash_match\":").append(repeatHashMatch).append(',');
+		}
 		sb.append("\"user_throw_code\":").append(ws.userThrowCode & 0xFFFFFFFFL).append(',');
 		sb.append("\"pc\":").append(ws.pc).append(',');
 		sb.append("\"max_dop\":").append(ws.maxDop).append(',');
