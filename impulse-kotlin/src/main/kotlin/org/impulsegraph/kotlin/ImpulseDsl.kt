@@ -1,6 +1,7 @@
 package org.impulsegraph.kotlin
 
 import org.impulsegraph.api.ArgType
+import org.impulsegraph.api.Decimal64
 import org.impulsegraph.api.ImpulseGraphQuery
 import org.impulsegraph.api.ImpulseGraphSnapshot
 import org.impulsegraph.api.ImpulseQueryBuilder
@@ -232,6 +233,26 @@ class ImpulseQueryDsl<R>(
     }
 
     /**
+     * Add a filtered CSR edge walk step comparing a `DECIMAL64` edge attribute against an exact [Decimal64] threshold.
+     */
+    fun walkEdgeFilteredAttribute(
+        relationName: String,
+        attributeName: String,
+        op: String,
+        value: Decimal64,
+    ): ImpulseQueryDsl<R> {
+        builder.walkEdgeWithCel(relationName, "edge.$attributeName $op ${value.toDecimalString()}")
+        return this
+    }
+
+    fun walkEdgeFilteredAttribute(
+        relationName: RelationName,
+        attributeName: String,
+        op: String,
+        value: Decimal64,
+    ): ImpulseQueryDsl<R> = walkEdgeFilteredAttribute(relationName.value, attributeName, op, value)
+
+    /**
      * Walk to target relation domain nodes.
      */
     infix fun walkTarget(relationName: String): ImpulseQueryDsl<R> {
@@ -256,6 +277,18 @@ class ImpulseQueryDsl<R>(
         value: Double,
     ): ImpulseQueryDsl<R> {
         builder.filterNodeAttribute(attributeName, op, value)
+        return this
+    }
+
+    /**
+     * Filter active candidate node set by comparing a `DECIMAL64` node attribute against an exact [Decimal64] threshold.
+     */
+    fun filterNodeAttribute(
+        attributeName: String,
+        op: String,
+        value: Decimal64,
+    ): ImpulseQueryDsl<R> {
+        builder.filterWithCel("node.$attributeName $op ${value.toDecimalString()}")
         return this
     }
 
