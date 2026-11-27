@@ -194,8 +194,8 @@ public final class DefaultSnapshotBuilder {
 		if (dom == null) {
 			throw new IllegalArgumentException("Domain ID not found: " + domainId);
 		}
-		dom.attributes().add(
-				new DomainAttributeEntry(name, typeCode, dimension, precision, scale, data, offsets, validity));
+		dom.attributes()
+				.add(new DomainAttributeEntry(name, typeCode, dimension, precision, scale, data, offsets, validity));
 		return this;
 	}
 
@@ -741,9 +741,7 @@ public final class DefaultSnapshotBuilder {
 
 					int attrScale = (loadedAttr != null) ? loadedAttr.scale() : 0;
 					int attrPrecision = (loadedAttr != null) ? loadedAttr.precision() : 0;
-					int attrDimension = (loadedAttr != null && loadedAttr.dimension() > 0)
-							? loadedAttr.dimension()
-							: 1;
+					int attrDimension = (loadedAttr != null && loadedAttr.dimension() > 0) ? loadedAttr.dimension() : 1;
 
 					attrDescsBuf.putInt(attrNameOff);
 					attrDescsBuf.put(typeCode);

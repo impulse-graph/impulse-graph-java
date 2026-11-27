@@ -979,7 +979,8 @@ public final class BinarySnapshotLoader {
 						int attrNameOff = dirBuf.getInt();
 						byte typeCode = dirBuf.get();
 						int attrScale = Byte.toUnsignedInt(dirBuf.get()); // reserved1 (scale for DECIMAL64)
-						int attrPrecision = Short.toUnsignedInt(dirBuf.getShort()); // reserved2 (precision for DECIMAL64)
+						int attrPrecision = Short.toUnsignedInt(dirBuf.getShort()); // reserved2 (precision for
+																					// DECIMAL64)
 						int dimension = dirBuf.getInt();
 						long dataOff = dirBuf.getLong();
 						long dataBytes = dirBuf.getLong();
