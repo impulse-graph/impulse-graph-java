@@ -336,6 +336,66 @@ public class GraphSnapshot
 	}
 
 	@Override
+	public org.impulsegraph.api.Decimal64 getDomainAttributeDecimal64(String domainName, String attrName, long nodeId) {
+		return readDomainDecimal64Internal(domainName, attrName, nodeId, -1, -1);
+	}
+
+	@Override
+	public org.impulsegraph.api.Decimal64 getDomainAttributeDecimal64(String domainName, String attrName, long nodeId,
+			int expectedPrecision, int expectedScale) {
+		org.impulsegraph.api.Decimal64.validatePrecisionScale(expectedPrecision, expectedScale);
+		return readDomainDecimal64Internal(domainName, attrName, nodeId, expectedPrecision, expectedScale);
+	}
+
+	private org.impulsegraph.api.Decimal64 readDomainDecimal64Internal(String domainName, String attrName, long nodeId,
+			int expectedPrecision, int expectedScale) {
+		Objects.requireNonNull(domainName, "domainName must not be null");
+		Objects.requireNonNull(attrName, "attrName must not be null");
+		BinarySnapshotLoader.LoadedDomain dom = getDomain(domainName);
+		if (dom == null) {
+			throw new IllegalArgumentException("Domain not found: " + domainName);
+		}
+		long nodeCount = dom.nodeCount();
+		if (nodeId < 0L || nodeId >= nodeCount) {
+			throw new IllegalArgumentException("nodeId " + nodeId + " out of bounds for domain '" + domainName
+					+ "' (nodeCount=" + nodeCount + ")");
+		}
+		BinarySnapshotLoader.LoadedAttribute attr = dom.getAttribute(attrName);
+		if (attr == null) {
+			throw new IllegalArgumentException("Attribute '" + attrName + "' not found on domain '" + domainName + "'");
+		}
+		if (attr.typeCode() != (byte) 0x15) {
+			throw new IllegalArgumentException("Attribute '" + domainName + "." + attrName
+					+ "' is not DECIMAL64 (typeCode=0x" + Integer.toHexString(attr.typeCode() & 0xFF) + ")");
+		}
+		if (expectedPrecision >= 0 && (attr.precision() != expectedPrecision || attr.scale() != expectedScale)) {
+			throw new IllegalArgumentException(
+					"Attribute '" + domainName + "." + attrName + "' has DECIMAL(" + attr.precision() + ", "
+							+ attr.scale() + "), expected DECIMAL(" + expectedPrecision + ", " + expectedScale + ")");
+		}
+		if (attr.isNullable()) {
+			java.lang.foreign.MemorySegment valSeg = dom.getValiditySegment(attrName);
+			if (valSeg == null || valSeg.address() == 0L || valSeg.byteSize() <= (nodeId >>> 3)) {
+				throw new IllegalStateException("Validity bitmap unavailable for nullable DECIMAL64 attribute '"
+						+ domainName + "." + attrName + "'");
+			}
+			byte b = valSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE, nodeId >>> 3);
+			if ((b & (1 << (int) (nodeId & 7L))) == 0) {
+				return null;
+			}
+		}
+		java.lang.foreign.MemorySegment dataSeg = dom.getAttributeSegment(attrName);
+		if (dataSeg == null || dataSeg.address() == 0L || dataSeg.byteSize() < (nodeId + 1L) * 8L) {
+			throw new IllegalStateException(
+					"Attribute segment unavailable for '" + domainName + "." + attrName + "' at nodeId=" + nodeId);
+		}
+		long unscaled = dataSeg.get(
+				java.lang.foreign.ValueLayout.JAVA_LONG_UNALIGNED.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN),
+				nodeId * 8L);
+		return new org.impulsegraph.api.Decimal64(unscaled, attr.precision(), attr.scale());
+	}
+
+	@Override
 	public int getDomainKeyAttrIndex(String domainName) {
 		BinarySnapshotLoader.LoadedDomain dom = getDomain(domainName);
 		return dom != null ? dom.keyAttrIndex() : 0xFFFF;

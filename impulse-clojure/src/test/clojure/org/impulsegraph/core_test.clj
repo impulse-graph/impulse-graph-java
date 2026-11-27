@@ -3,6 +3,7 @@
             [org.impulsegraph.core :as imp])
   (:import [org.impulsegraph.api Decimal64]
            [org.impulsegraph.api.bitset OffHeapBitSet]
+           [org.impulsegraph.compiler.cel CelCompiler]
            [org.impulsegraph.storage.csr BinarySnapshotLoader BinarySnapshotLoader$DefaultLoadedSnapshot
             DefaultSnapshotBuilder GraphSnapshot RelationSnapshot]
            [java.lang.foreign Arena ValueLayout]
@@ -264,7 +265,11 @@
       (is (= -5 (.unscaled d4)))
       (is (= -0.05M (imp/->bigdec d4)))
       (is (thrown? IllegalArgumentException (imp/dec64 "19.995" 10 2)))
-      (is (thrown? ArithmeticException (imp/dec64 "100.00" 4 2)))))
+      (is (thrown? ArithmeticException (imp/dec64 "100.00" 4 2)))
+      ;; BigInt overflow must throw ArithmeticException instead of silently truncating
+      (is (thrown? ArithmeticException (imp/dec64 18446744073709551617N)))
+      (is (thrown? ArithmeticException (imp/dec64 18446744073709551617N 18 0)))
+      (is (thrown? ArithmeticException (imp/unscaled->decimal64 18446744073709551617N 18 0)))))
 
   (testing "DECIMAL(18, 2) values > 2^53 preserve exact precision without float drift"
     (let [above53-str (imp/dec64 "90071992547409.93" 18 2)
@@ -277,22 +282,26 @@
       (is (= 999999999999999999 (.unscaled max18)))
       (is (= 9999999999999999.99M (imp/->bigdec max18)))))
 
-  (testing "with-param and filter-decimal preserve exact Decimal64 and BigDecimal values"
+  (testing "with-param and filter-decimal emit valid CEL decimal(\"digits\", P, S) and preserve exact types"
     (let [min-bal (imp/dec64 "90071992547409.93" 18 2)
           trav (-> (imp/traverse nil :Account 0)
                    (imp/with-param "$minBal" min-bal)
                    (imp/with-param "$feeCap" 12.34M)
                    (imp/filter-decimal :balance :>= min-bal))
-          scm (imp/to-scm-string trav)]
+          scm (imp/to-scm-string trav)
+          cel-expr "node.balance >= decimal(\"90071992547409.93\", 18, 2)"
+          compiled-cel (CelCompiler/compileToImpScheme cel-expr)]
       (is (imp/decimal64? (get-in trav [:params "minBal"])))
       (is (= min-bal (get-in trav [:params "minBal"])))
       (is (instance? java.math.BigDecimal (get-in trav [:params "feeCap"])))
       (is (= 12.34M (get-in trav [:params "feeCap"])))
-      (is (.contains scm "node.balance >= 90071992547409.93"))))
+      (is (.contains scm cel-expr))
+      (is (.contains compiled-cel "(dec \"90071992547409.93\" 18 2)"))))
 
-  (testing "DECIMAL64 snapshot (0x15 non-null and 0x95 nullable) build & read roundtrip"
+  (testing "DECIMAL64 snapshot (0x15 non-null and 0x95 nullable) build, NULL/bounds/type validation, & statement roundtrip"
     (let [tmp (Files/createTempFile "clojure-decimal64-test" ".imps"
                                     (make-array java.nio.file.attribute.FileAttribute 0))
+          type-int64 (byte 0x04)
           type-dec (byte 0x15)
           type-dec-nullable (unchecked-byte (bit-or 0x15 0x80))
           balances [(imp/dec64 "123.45" 10 2)
@@ -304,10 +313,13 @@
                      (imp/dec64 "-90071992547409.93" 18 2)
                      (imp/dec64 "9999999999999999.99" 18 2)]
           bal-buf (.order (ByteBuffer/allocate (* 4 8)) ByteOrder/LITTLE_ENDIAN)
+          tier-buf (.order (ByteBuffer/allocate (* 4 8)) ByteOrder/LITTLE_ENDIAN)
           not-buf (.order (ByteBuffer/allocate (* 4 8)) ByteOrder/LITTLE_ENDIAN)
           not-val (byte-array 128)]
       (doseq [^Decimal64 d balances]
         (.putLong bal-buf (.unscaled d)))
+      (doseq [t [1 2 3 4]]
+        (.putLong tier-buf (long t)))
       (let [mask (reduce-kv (fn [m idx d]
                               (if (some? d)
                                 (do (.putLong not-buf (.unscaled ^Decimal64 d))
@@ -325,7 +337,8 @@
                             (.withVersion (short 11))
                             (.withDomain 0 "Account" (byte 0x03) 4)
                             (.withDomainAttribute 0 "balance" type-dec 1 10 2 (.array bal-buf) nil nil)
-                            (.withDomainAttribute 0 "notional" type-dec-nullable 1 18 2 (.array not-buf) nil not-val))
+                            (.withDomainAttribute 0 "notional" type-dec-nullable 1 18 2 (.array not-buf) nil not-val)
+                            (.withDomainAttribute 0 "tier" type-int64 1 0 0 (.array tier-buf) nil nil))
                 loaded-input (BinarySnapshotLoader$DefaultLoadedSnapshot.
                                0x494D5053 (short 11) graph {} {} {} {})
                 bytes (.build builder loaded-input)]
@@ -336,10 +349,23 @@
               (is (.isNullable (.getAttribute dom "notional")))
               (is (= 0x0D (bit-and 0xFF (.get (.getValiditySegment dom "notional") ValueLayout/JAVA_BYTE 0)))))))
         (imp/with-snapshot [snap tmp]
-          (is (= (nth balances 0) (imp/domain-decimal64 snap :Account :balance 0 10 2)))
+          (is (= (nth balances 0) (imp/domain-decimal64 snap :Account :balance 0)))
           (is (= (nth balances 3) (imp/domain-decimal64 snap :Account :balance 3 10 2)))
-          (is (= (nth notionals 0) (imp/domain-decimal64 snap :Account :notional 0 18 2)))
+          (is (= (nth notionals 0) (imp/domain-decimal64 snap :Account :notional 0)))
+          (is (nil? (imp/domain-decimal64 snap :Account :notional 1)))
+          (is (nil? (imp/domain-decimal64 snap :Account :notional 1 18 2)))
           (is (= (nth notionals 3) (imp/domain-decimal64 snap :Account :notional 3 18 2)))
+          ;; Bounds, non-decimal type, and precision/scale mismatch checks
+          (is (thrown? IllegalArgumentException (imp/domain-decimal64 snap :Account :balance -1)))
+          (is (thrown? IllegalArgumentException (imp/domain-decimal64 snap :Account :balance 4)))
+          (is (thrown? IllegalArgumentException (imp/domain-decimal64 snap :Account :tier 0)))
+          (is (thrown? IllegalArgumentException (imp/domain-decimal64 snap :Account :balance 0 10 4)))
+          (is (thrown? IllegalArgumentException (imp/domain-decimal64 snap :Account :notional 1 10 2)))
+          ;; ImpulseStatement bind-params with Decimal64
+          (imp/with-statement [stmt snap "FROM Account -> transfer"]
+            (imp/bind-params stmt {:minNotional (nth notionals 0)})
+            (.bindNode stmt "id" 0)
+            (is (= #{1} (set (seq (.executeBitSet stmt))))))
           (is (= #{1} (-> (imp/traverse snap :Account 0)
                           (imp/out "transfer")
                           imp/to-set))))

@@ -116,6 +116,14 @@ public class ImpulseStatementImpl implements ImpulseStatement {
 	}
 
 	@Override
+	public ImpulseStatement bindDecimal64(String param, org.impulsegraph.api.Decimal64 value) {
+		Objects.requireNonNull(param, "param must not be null");
+		Objects.requireNonNull(value, "value must not be null");
+		namedBindings.put(param, value);
+		return this;
+	}
+
+	@Override
 	public ImpulseStatement bindStrings(String param, java.util.Collection<String> values) {
 		namedBindings.put(param, new java.util.ArrayList<>(values));
 		return this;

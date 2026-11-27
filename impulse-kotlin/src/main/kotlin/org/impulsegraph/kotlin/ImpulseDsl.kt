@@ -241,7 +241,10 @@ class ImpulseQueryDsl<R>(
         op: String,
         value: Decimal64,
     ): ImpulseQueryDsl<R> {
-        builder.walkEdgeWithCel(relationName, "edge.$attributeName $op ${value.toDecimalString()}")
+        builder.walkEdgeWithCel(
+            relationName,
+            "edge.$attributeName $op decimal(\"${value.toDecimalString()}\", ${value.precision()}, ${value.scale()})",
+        )
         return this
     }
 
@@ -288,7 +291,9 @@ class ImpulseQueryDsl<R>(
         op: String,
         value: Decimal64,
     ): ImpulseQueryDsl<R> {
-        builder.filterWithCel("node.$attributeName $op ${value.toDecimalString()}")
+        builder.filterWithCel(
+            "node.$attributeName $op decimal(\"${value.toDecimalString()}\", ${value.precision()}, ${value.scale()})",
+        )
         return this
     }
 

@@ -68,6 +68,14 @@ public interface ImpulseStatement extends AutoCloseable {
 	ImpulseStatement bindString(String param, String value);
 
 	/**
+	 * Binds an exact {@link org.impulsegraph.api.Decimal64} fixed-point value
+	 * (preserving precision and scale) to a named parameter.
+	 */
+	default ImpulseStatement bindDecimal64(String param, org.impulsegraph.api.Decimal64 value) {
+		throw new UnsupportedOperationException("bindDecimal64 not implemented by this provider");
+	}
+
+	/**
 	 * Binds a list or collection of string values to a named parameter.
 	 */
 	default ImpulseStatement bindStrings(String param, java.util.Collection<String> values) {

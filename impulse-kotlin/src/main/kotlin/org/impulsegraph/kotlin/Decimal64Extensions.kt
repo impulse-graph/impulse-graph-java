@@ -2,13 +2,8 @@ package org.impulsegraph.kotlin
 
 import org.impulsegraph.api.Decimal64
 import org.impulsegraph.api.ImpulseGraphSnapshot
-import org.impulsegraph.api.statement.ImpulseStatement
 import org.impulsegraph.api.statement.RowReader
-import java.lang.foreign.ValueLayout
 import java.math.BigDecimal
-import java.nio.ByteOrder
-
-private val LE_LONG: ValueLayout.OfLong = ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN)
 
 /**
  * Parses an exact base-10 decimal string into a [Decimal64] with the specified [precision] and [scale].
@@ -78,14 +73,6 @@ fun Decimal64.rescale(
 ): Decimal64 = Decimal64.fromBigDecimal(this.toBigDecimal(), newPrecision, newScale)
 
 /**
- * Binds a [Decimal64] parameter to an [ImpulseStatement] by its exact unscaled `i64` representation.
- */
-fun ImpulseStatement.bindDecimal64(
-    param: String,
-    value: Decimal64,
-): ImpulseStatement = bindLong(param, value.unscaled())
-
-/**
  * Reads a [Decimal64] column at [columnIndex] from a [RowReader].
  */
 fun RowReader.getDecimal64(
@@ -104,7 +91,18 @@ fun RowReader.getDecimal64(
 ): Decimal64 = Decimal64(getLong(columnName), precision, scale)
 
 /**
- * Reads a non-nullable [Decimal64] domain attribute value directly from the snapshot's off-heap attribute segment.
+ * Reads a `DECIMAL64` (`0x15` non-null or `0x95` nullable) domain attribute value for [nodeId],
+ * returning `null` if the column is nullable and the entry is NULL.
+ */
+fun ImpulseGraphSnapshot.getDomainDecimal64(
+    domainName: String,
+    attributeName: String,
+    nodeId: Long,
+): Decimal64? = getDomainAttributeDecimal64(domainName, attributeName, nodeId)
+
+/**
+ * Reads a `DECIMAL64` domain attribute value for [nodeId], validating that the snapshot's stored
+ * `(precision, scale)` matches the expected values and returning `null` if nullable and NULL.
  */
 fun ImpulseGraphSnapshot.getDomainDecimal64(
     domainName: String,
@@ -112,10 +110,4 @@ fun ImpulseGraphSnapshot.getDomainDecimal64(
     nodeId: Long,
     precision: Int,
     scale: Int,
-): Decimal64 {
-    val seg = getDomainAttributeSegment(domainName, attributeName)
-    require(seg.address() != 0L && seg.byteSize() >= (nodeId + 1L) * 8L) {
-        "Domain '$domainName' attribute '$attributeName' segment unavailable for node $nodeId"
-    }
-    return Decimal64(seg.get(LE_LONG, nodeId * 8L), precision, scale)
-}
+): Decimal64? = getDomainAttributeDecimal64(domainName, attributeName, nodeId, precision, scale)

@@ -2,6 +2,7 @@ package org.impulsegraph.scala
 
 import org.impulsegraph.api.{ArgType, Decimal64}
 import org.impulsegraph.api.bitset.ImpulseBitSet
+import org.impulsegraph.compiler.cel.CelCompiler
 import org.impulsegraph.storage.csr.{BinarySnapshotLoader, DefaultSnapshotBuilder, GraphSnapshot, RelationSnapshot}
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
@@ -13,6 +14,7 @@ import java.util
 
 class ImpulseScalaDecimal64Test:
 
+  private val TypeInt64: Byte = 0x04.toByte
   private val TypeDecimal64: Byte = 0x15.toByte
   private val TypeDecimal64Nullable: Byte = (0x15 | 0x80).toByte
 
@@ -74,7 +76,7 @@ class ImpulseScalaDecimal64Test:
     assertTrue(above53 < max18)
 
   @Test
-  def testSnapshotBuilderAndQueryRoundtrip(): Unit =
+  def testSnapshotBuilderNullable0x95CelCompileAndQueryRoundtrip(): Unit =
     val tmp = Files.createTempFile("scala-decimal64-test", ".imps")
     try
       val balances = Array(
@@ -89,9 +91,13 @@ class ImpulseScalaDecimal64Test:
         Some("-90071992547409.93".toDecimal64(18, 2)),
         Some("9999999999999999.99".toDecimal64(18, 2))
       )
+      val tiers = Array(1L, 2L, 3L, 4L)
 
       val balBuf = ByteBuffer.allocate(balances.length * 8).order(ByteOrder.LITTLE_ENDIAN)
       balances.foreach(d => balBuf.putLong(d.unscaled))
+
+      val tierBuf = ByteBuffer.allocate(tiers.length * 8).order(ByteOrder.LITTLE_ENDIAN)
+      tiers.foreach(tierBuf.putLong)
 
       val notBuf = ByteBuffer.allocate(notionals.length * 8).order(ByteOrder.LITTLE_ENDIAN)
       val notValidity = new Array[Byte](128)
@@ -117,6 +123,7 @@ class ImpulseScalaDecimal64Test:
           .withDomain(0, "Account", 0x03.toByte, 4L)
           .withDomainAttribute(0, "balance", TypeDecimal64, 1, 10, 2, balBuf.array(), null, null)
           .withDomainAttribute(0, "notional", TypeDecimal64Nullable, 1, 18, 2, notBuf.array(), null, notValidity)
+          .withDomainAttribute(0, "tier", TypeInt64, 1, 0, 0, tierBuf.array(), null, null)
 
         val bytes = builder.build(
           new BinarySnapshotLoader.DefaultLoadedSnapshot(
@@ -150,8 +157,13 @@ class ImpulseScalaDecimal64Test:
 
       assertEquals(minNotional, filterQuery.getParameters.get("@minNotional"))
       val ast = filterQuery.exportAst()
-      assertTrue(ast.contains("node.balance >= 100.00"))
-      assertTrue(ast.contains("edge.fee <= 1.25"))
+      assertTrue(ast.contains("""node.balance >= decimal("100.00", 10, 2)"""))
+      assertTrue(ast.contains("""edge.fee <= decimal("1.25", 10, 2)"""))
+
+      val compiledNodeCel = CelCompiler.compileToImpScheme("""node.balance >= decimal("100.00", 10, 2)""")
+      assertTrue(compiledNodeCel.contains("""(dec "100.00" 10 2)"""))
+      val compiledEdgeCel = CelCompiler.compileToImpScheme("""edge.fee <= decimal("1.25", 10, 2)""")
+      assertTrue(compiledEdgeCel.contains("""(dec "1.25" 10 2)"""))
 
       val walkQuery = impulseQuery[ImpulseBitSet] {
         input("Account", ArgType.SINGLE_NODE)
@@ -159,10 +171,26 @@ class ImpulseScalaDecimal64Test:
       }.collectBitSet()
 
       val roundtrip = ImpulseSnapshots.withSnapshot(tmp) { snap =>
-        assertEquals(balances(0), snap.domainDecimal64("Account", "balance", 0L, 10, 2))
-        assertEquals(balances(3), snap.domainDecimal64("Account", "balance", 3L, 10, 2))
-        assertEquals(notionals(0).get, snap.domainDecimal64("Account", "notional", 0L, 18, 2))
-        assertEquals(notionals(3).get, snap.domainDecimal64("Account", "notional", 3L, 18, 2))
+        assertEquals(Some(balances(0)), snap.domainDecimal64("Account", "balance", 0L))
+        assertEquals(Some(balances(3)), snap.domainDecimal64("Account", "balance", 3L, 10, 2))
+        assertEquals(notionals(0), snap.domainDecimal64("Account", "notional", 0L))
+        assertEquals(None, snap.domainDecimal64("Account", "notional", 1L))
+        assertEquals(None, snap.domainDecimal64("Account", "notional", 1L, 18, 2))
+        assertEquals(notionals(3), snap.domainDecimal64("Account", "notional", 3L, 18, 2))
+
+        assertThrows(classOf[IllegalArgumentException], () => snap.domainDecimal64("Account", "balance", -1L))
+        assertThrows(classOf[IllegalArgumentException], () => snap.domainDecimal64("Account", "balance", 4L))
+        assertThrows(classOf[IllegalArgumentException], () => snap.domainDecimal64("Account", "tier", 0L))
+        assertThrows(classOf[IllegalArgumentException], () => snap.domainDecimal64("Account", "balance", 0L, 10, 4))
+        assertThrows(classOf[IllegalArgumentException], () => snap.domainDecimal64("Account", "notional", 1L, 10, 2))
+
+        val stmtRes = snap.usingStatement("FROM Account -> transfer") { stmt =>
+          stmt.bindNode("id", 0L).bindDecimal64("minNotional", minNotional)
+          stmt.executeBitSet().toScalaSet
+        }
+        assertTrue(stmtRes.isSuccess)
+        assertEquals(Set(1), stmtRes.get)
+
         snap(walkQuery, 0L).toScalaSet
       }
       assertTrue(roundtrip.isSuccess)

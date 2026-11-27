@@ -100,8 +100,8 @@ public class SchemaCodeGenerator {
 				sb.append("    public ").append(className).append("<R> ").append(filterMethod).append("(String op, ")
 						.append(javaType).append(" val) {\n");
 				if (isDecimal) {
-					sb.append("        this.builder.filter(\"node.").append(attrName)
-							.append(" \" + op + \" \" + val.toDecimalString());\n");
+					sb.append("        this.builder.filter(\"node.").append(attrName).append(
+							" \" + op + \" decimal(\\\"\" + val.toDecimalString() + \"\\\", \" + val.precision() + \", \" + val.scale() + \")\");\n");
 				} else {
 					sb.append("        this.builder.filter(\"node.").append(attrName)
 							.append(" \" + op + \" \" + val);\n");
@@ -119,7 +119,7 @@ public class SchemaCodeGenerator {
 		if (attrType == null) {
 			return false;
 		}
-		String upper = attrType.trim().toUpperCase();
+		String upper = attrType.trim().toUpperCase(java.util.Locale.ROOT);
 		return upper.equals("DECIMAL") || upper.equals("DECIMAL64") || upper.startsWith("DECIMAL(")
 				|| upper.startsWith("DECIMAL64(") || upper.equals("0X15") || upper.equals("0X95");
 	}
@@ -131,7 +131,7 @@ public class SchemaCodeGenerator {
 		if (isDecimal64Type(attrType)) {
 			return "Decimal64";
 		}
-		return switch (attrType.trim().toUpperCase()) {
+		return switch (attrType.trim().toUpperCase(java.util.Locale.ROOT)) {
 			case "DOUBLE", "FLOAT64" -> "double";
 			case "FLOAT", "FLOAT32" -> "float";
 			case "INT", "INT32" -> "int";

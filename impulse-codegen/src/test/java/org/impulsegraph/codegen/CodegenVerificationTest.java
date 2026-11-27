@@ -70,7 +70,9 @@ public class CodegenVerificationTest {
 				"0x15 should map to Decimal64");
 		assertTrue(code.contains("public AccountQueryBuilder<R> filterAdjustment(String op, Decimal64 val)"),
 				"0x95 should map to Decimal64");
-		assertTrue(code.contains("val.toDecimalString()"), "Should format Decimal64 with exact toDecimalString()");
+		assertTrue(code.contains(
+				"decimal(\\\"\" + val.toDecimalString() + \"\\\", \" + val.precision() + \", \" + val.scale() + \")"),
+				"Should emit exact CEL decimal(\"digits\", P, S) literal");
 		assertTrue(code.contains("public AccountQueryBuilder<R> filterActive(String op, Object val)"),
 				"Unmapped types should fall back to Object");
 	}

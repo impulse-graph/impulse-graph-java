@@ -274,11 +274,16 @@ class Decimal64IndexScanCompilerTest {
 			// 2. HIGH #3: Cypher predicate referencing another variable (b.balance >
 			// 100.0d)
 			// must NOT trigger index-scan on startVar 'a'
+			java.lang.foreign.MemorySegment relRow = arena.allocate(5L * 4L, 4L);
+			int[] rowVals = {0, 1, 1, 1, 1};
+			for (int i = 0; i < rowVals.length; i++) {
+				relRow.setAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, i, rowVals[i]);
+			}
+			java.lang.foreign.MemorySegment relCol = arena.allocate(4L, 4L);
+			relCol.setAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, 0, 3);
 			org.impulsegraph.storage.csr.RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena,
-					N, 1, arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, 0, 1, 1, 1, 1),
-					arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, 3),
-					java.lang.foreign.MemorySegment.NULL, java.lang.foreign.MemorySegment.NULL, List.of(), List.of(),
-					(byte) 4, (byte) 4, (byte) 4);
+					N, 1, relRow, relCol, java.lang.foreign.MemorySegment.NULL, java.lang.foreign.MemorySegment.NULL,
+					List.of(), List.of(), (byte) 4, (byte) 4, (byte) 4);
 			GraphSnapshot relGraph = new GraphSnapshot(arena, Map.of("TRANSFER", rel));
 			byte[] bytesWithRel = new DefaultSnapshotBuilder().withVersion((short) 11)
 					.withDomain(0, "Account", (byte) 0x03, N)

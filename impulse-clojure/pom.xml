@@ -33,6 +33,12 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>org.impulsegraph</groupId>
+            <artifactId>impulse-compiler</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.clojure</groupId>
             <artifactId>clojure</artifactId>
             <version>1.12.7</version>
