@@ -161,7 +161,7 @@ public final class ImpulsePillar3Ops {
 	private static int mlSortAndCoalesce(long[] nodes, long[] masks, int count) {
 		if (count <= 0)
 			return 0;
-		for (int i = (count - 2) >>> 1; i >= 0; i--) {
+		for (int i = (count >>> 1) - 1; i >= 0; i--) {
 			mlSiftDown(nodes, masks, i, count);
 		}
 		for (int end = count - 1; end > 0; end--) {

@@ -75,8 +75,13 @@ public class DifferentialCorrectnessHarnessTest {
 			assertInstanceOf(ScmProgram.class, pruned);
 			ScmProgram prunedProg = (ScmProgram) pruned;
 
-			// The impossible walk branch should have been pruned out of the pipeline!
-			assertTrue(prunedProg.steps().isEmpty() || prunedProg.steps().size() == 1);
+			// Constant-FALSE walk must retain its constant-false shader marker (never
+			// silently drop to pass-through)
+			assertEquals(2, prunedProg.steps().size());
+			assertInstanceOf(ScmWalk.class, prunedProg.steps().get(0));
+			ScmWalk prunedWalk = (ScmWalk) prunedProg.steps().get(0);
+			assertEquals(1, prunedWalk.shaderSteps().size());
+			assertTrue(ZoneMapPruningPass.INSTANCE.isConstantFalse(prunedWalk.shaderSteps().get(0)));
 		}
 	}
 
