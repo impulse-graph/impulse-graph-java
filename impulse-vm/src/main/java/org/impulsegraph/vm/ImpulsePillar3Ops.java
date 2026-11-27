@@ -338,7 +338,7 @@ public final class ImpulsePillar3Ops {
 					}
 				}
 			} else if (subop == 1) {
-				if (rel.edgeIdxWidth == 4 && rel.nodeIdWidth == 4) {
+				if (rel.edgeIdxWidth == 4 && rel.cooSrcWidth == 4) {
 					var cscRoSeg = rel.cscRowOffsetsSeg;
 					var cscCtSeg = rel.cscColSourcesSeg;
 					if (exclBits == null) {
@@ -435,7 +435,7 @@ public final class ImpulsePillar3Ops {
 					}
 					curLen = w;
 				}
-				boolean fast32 = (rel.edgeIdxWidth == 4 && rel.nodeIdWidth == 4);
+				boolean fast32 = (rel.edgeIdxWidth == 4 && (isRev ? rel.cooSrcWidth == 4 : rel.nodeIdWidth == 4));
 				for (int hop = 0; hop < maxHops; hop++) {
 					int nextLen = 0;
 					if (!isRev) {
