@@ -543,4 +543,204 @@ class ImpScmV11DecimalCompilerTest {
 					"Steady-state E2E financial ledger query must allocate 0 bytes/query, allocated " + delta);
 		}
 	}
+
+	@Test
+	void auditRegressionsVectorPinningMinMaxOver2Pow53SafeDivVecFillNodeFilterAndCastScanner(@TempDir Path tempDir)
+			throws Exception {
+		// 1. [MEDIUM] CelCompiler balanced-paren & string-literal-aware SQL CAST
+		// scanner + 2-arg decimal() rejection
+		assertEquals("(cast (+ a b) (decimal 10 2))",
+				CelCompiler.compileToImpScheme("CAST((a + b) AS DECIMAL(10, 2))"));
+		assertEquals("(cast (cast a f64) (decimal 10 2))",
+				CelCompiler.compileToImpScheme("CAST(CAST(a AS FLOAT64) AS DECIMAL(10, 2))"));
+		assertEquals("\"CAST(x AS INT64)\"", CelCompiler.compileToImpScheme("\"CAST(x AS INT64)\""));
+		assertThrows(IllegalArgumentException.class, () -> CelCompiler.compileToImpScheme("decimal(\"19.99\", 10)"));
+
+		// 2. [CRITICAL] safe-div on scalar with k > 18 and rhs == 0 must return Kleene
+		// NULL (not overflow or trap!)
+		ImpulseWorkspace wsScalarK18Zero = runScalarQuery(
+				"(query (collect :scalar \"q\" (safe-div (dec \"999999999999999999\" 18 0) (dec \"0.000000000000000000\" 18 18))))",
+				null);
+		assertEquals(IMPULSE_VM_OK, wsScalarK18Zero.status);
+		assertFalse(wsScalarK18Zero.outputs.get(0).isValidAt(0), "safe-div with k>18 and rhs==0 must return NULL");
+
+		// Build a real .imps snapshot with:
+		// - big: DECIMAL(18, 2) [90071992547409.92, 90071992547409.93] (> 2^53!)
+		// - large: DECIMAL(15, 2) [1000000000000.00, 1000000000000.00]
+		// - divs: DECIMAL(15, 2) [1000000000000.00, 0.00]
+		// - intCol: I64 [10, 25]
+		// - fltCol: F64 [10.5, 25.5]
+		try (Arena arena = Arena.ofConfined()) {
+			final int N = 2;
+			long[] bigVals = {9_007_199_254_740_992L, 9_007_199_254_740_993L};
+			long[] largeVals = {100_000_000_000_000L, 100_000_000_000_000L};
+			long[] divVals = {100_000_000_000_000L, 0L};
+			long[] intVals = {10L, 25L};
+			double[] fltVals = {10.5, 25.5};
+
+			ByteBuffer bigBuf = ByteBuffer.allocate(N * 8).order(ByteOrder.LITTLE_ENDIAN);
+			ByteBuffer largeBuf = ByteBuffer.allocate(N * 8).order(ByteOrder.LITTLE_ENDIAN);
+			ByteBuffer divBuf = ByteBuffer.allocate(N * 8).order(ByteOrder.LITTLE_ENDIAN);
+			ByteBuffer intBuf = ByteBuffer.allocate(N * 8).order(ByteOrder.LITTLE_ENDIAN);
+			ByteBuffer fltBuf = ByteBuffer.allocate(N * 8).order(ByteOrder.LITTLE_ENDIAN);
+			for (int i = 0; i < N; i++) {
+				bigBuf.putLong(bigVals[i]);
+				largeBuf.putLong(largeVals[i]);
+				divBuf.putLong(divVals[i]);
+				intBuf.putLong(intVals[i]);
+				fltBuf.putDouble(fltVals[i]);
+			}
+
+			RelationSnapshot rel = new RelationSnapshot(arena, N, 1, new int[]{0, 1, 1}, new int[]{1});
+			GraphSnapshot raw = new GraphSnapshot(arena, Map.of("E", rel));
+			byte[] bytes = new DefaultSnapshotBuilder().withVersion((short) 11).withDomain(0, "Node", (byte) 0x03, N)
+					.withDomainAttribute(0, "big", TYPE_DECIMAL64, 1, 18, 2, bigBuf.array(), null, null)
+					.withDomainAttribute(0, "large", TYPE_DECIMAL64, 1, 15, 2, largeBuf.array(), null, null)
+					.withDomainAttribute(0, "divs", TYPE_DECIMAL64, 1, 15, 2, divBuf.array(), null, null)
+					.withDomainAttribute(0, "intCol", (byte) 0x04, 1, intBuf.array(), null, null)
+					.withDomainAttribute(0, "fltCol", (byte) 0x06, 1, fltBuf.array(), null, null)
+					.build(new BinarySnapshotLoader.DefaultLoadedSnapshot(0x494D5053, (short) 11, raw, Map.of(),
+							Map.of(), Map.of(), Map.of()));
+			Path path = tempDir.resolve("audit_regressions.imps");
+			Files.write(path, bytes);
+
+			GraphSnapshot snap = BinarySnapshotLoader.loadSnapshot(path, arena).graph();
+			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
+			ImpulseInterpreter.SnapshotBinding bind = new ImpulseInterpreter.SnapshotBinding(new int[]{N}, view);
+
+			// 3. [CRITICAL] reduce :min / :max on DECIMAL(18, 2) > 2^53 (exact 64-bit, zero
+			// double loss)
+			String qMinMax = """
+					(query
+					  (let ([v (load-node-attr "Node" "big")])
+					    (collect :scalar "mn" (reduce :min v))
+					    (collect :scalar "mx" (reduce :max v))))
+					""";
+			var crMinMax = ImpScmV11Compiler.compile(qMinMax, snap, true);
+			ImpulseWorkspace wsMinMax = new ImpulseWorkspace(16);
+			assertEquals(IMPULSE_VM_OK,
+					ImpulseInterpreter.executeValidated(crMinMax.codeWords(), bind, wsMinMax, 10000L));
+			assertEquals(9_007_199_254_740_992L, wsMinMax.outputs.get(0).i64Data[0], "exact min > 2^53");
+			assertEquals(9_007_199_254_740_993L, wsMinMax.outputs.get(1).i64Data[0], "exact max > 2^53");
+
+			// 4. [CRITICAL] safe-div on vec / vec with 1000000000000.00 / 1000000000000.00
+			// (128-bit intermediate, no 64-bit pre-scale overflow) and lane 1 rhs == 0 ->
+			// NULL
+			String qSafeVec = """
+					(query
+					  (let ([a (load-node-attr "Node" "large")]
+					        [b (load-node-attr "Node" "divs")])
+					    (collect :vec "q" (safe-div a b))))
+					""";
+			var crSafeVec = ImpScmV11Compiler.compile(qSafeVec, snap, true);
+			ImpulseWorkspace wsSafeVec = new ImpulseWorkspace(16);
+			assertEquals(IMPULSE_VM_OK,
+					ImpulseInterpreter.executeValidated(crSafeVec.codeWords(), bind, wsSafeVec, 10000L));
+			assertTrue(wsSafeVec.outputs.get(0).isValidAt(0));
+			assertEquals(1_000_000L, wsSafeVec.outputs.get(0).i64Data[0], "1.000000 at scale 6");
+			assertFalse(wsSafeVec.outputs.get(0).isValidAt(1), "lane 1 div-by-0 must be NULL");
+
+			// 5. [CRITICAL] Vector register pinning: deep nested binary vector tree
+			// (+ (+ (+ a b) (+ c d)) (+ (+ e f) (+ g h))) -> 8 * 1.00 = 8.00
+			String qNested = """
+					(query
+					  (let ([x (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))]
+					        [res (+ (+ (+ (+ x (dec "1.00" 10 2)) (+ x (dec "2.00" 10 2)))
+					                   (+ (+ x (dec "3.00" 10 2)) (+ x (dec "4.00" 10 2))))
+					                (* (+ x (dec "1.00" 10 2)) (+ x (dec "2.00" 10 2))))])
+					    (collect :vec "r" res)))
+					""";
+			var crNested = ImpScmV11Compiler.compile(qNested, snap, true);
+			ImpulseWorkspace wsNested = new ImpulseWorkspace(16);
+			assertEquals(IMPULSE_VM_OK,
+					ImpulseInterpreter.executeValidated(crNested.codeWords(), bind, wsNested, 10000L));
+			// (2+3)+(4+5) = 14.00, 2*3 = 6.0000 => 14.0000 + 6.0000 = 20.0000 (200000 at
+			// scale 4)
+			assertEquals(200_000L, wsNested.outputs.get(0).i64Data[0]);
+
+			// 6 let-bound vectors + (* (+ x 1.00) (+ x 2.00)) uses V0..V7 without clobber;
+			// 7 let-bound vectors + (* (+ x 1.00) (+ x 2.00)) must fail fast with
+			// REGISTER_EXHAUSTION instead of silently clobbering!
+			String qSixBound = """
+					(query
+					  (let ([v0 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))]
+					        [v1 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))]
+					        [v2 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))]
+					        [v3 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))]
+					        [v4 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))]
+					        [v5 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))])
+					    (collect :vec "p" (* (+ v0 (dec "1.00" 10 2)) (+ v0 (dec "2.00" 10 2))))))
+					""";
+			var crSix = ImpScmV11Compiler.compile(qSixBound, snap, true);
+			ImpulseWorkspace wsSix = new ImpulseWorkspace(16);
+			assertEquals(IMPULSE_VM_OK, ImpulseInterpreter.executeValidated(crSix.codeWords(), bind, wsSix, 10000L));
+			assertEquals(60_000L, wsSix.outputs.get(0).i64Data[0]); // 2.00 * 3.00 = 6.0000
+
+			String qSevenBound = """
+					(query
+					  (let ([v0 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))]
+					        [v1 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))]
+					        [v2 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))]
+					        [v3 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))]
+					        [v4 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))]
+					        [v5 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))]
+					        [v6 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))])
+					    (collect :vec "p" (* (+ v0 (dec "1.00" 10 2)) (+ v0 (dec "2.00" 10 2))))))
+					""";
+			IllegalStateException exh = assertThrows(IllegalStateException.class,
+					() -> ImpScmV11Compiler.compile(qSevenBound, snap, true));
+			assertTrue(exh.getMessage().startsWith("REGISTER_EXHAUSTION"), exh.getMessage());
+
+			// 6. [HIGH] vec-fill scale narrowing (1.2345 -> DECIMAL(10, 2) = 1.23)
+			String qFill = """
+					(query
+					  (collect :vec "v" (vec-fill "Node" (decimal 10 2) (dec "1.2345" 5 4))))
+					""";
+			var crFill = ImpScmV11Compiler.compile(qFill, snap, true);
+			ImpulseWorkspace wsFill = new ImpulseWorkspace(16);
+			assertEquals(IMPULSE_VM_OK, ImpulseInterpreter.executeValidated(crFill.codeWords(), bind, wsFill, 10000L));
+			assertEquals(123L, wsFill.outputs.get(0).i64Data[0]);
+
+			// 7. [HIGH] node-filter on non-decimal columns with decimal RHS:
+			// INT column promotes to DECIMAL(18, 0) & folds (intCol > 10.5 -> intCol >= 11
+			// -> node 1)
+			String qIntDecFilter = """
+					(query
+					  (let ([all (domain-all "Node")]
+					        [f (node-filter all "intCol" > (dec "10.5" 5 1))])
+					    (collect :frontier-ids "hits" f)))
+					""";
+			var crIntDec = ImpScmV11Compiler.compile(qIntDecFilter, snap, true);
+			assertZeroDecimalAluOpcodes(crIntDec.codeWords());
+			ImpulseWorkspace wsIntDec = new ImpulseWorkspace(16);
+			assertEquals(IMPULSE_VM_OK,
+					ImpulseInterpreter.executeValidated(crIntDec.codeWords(), bind, wsIntDec, 10000L));
+			assertEquals(1, wsIntDec.outputs.get(0).length);
+			assertEquals(1L, wsIntDec.outputs.get(0).i64Data[0]);
+
+			// FLOAT column compared against DECIMAL must throw TYPE_MISMATCH!
+			String qFltDecFilter = """
+					(query
+					  (let ([all (domain-all "Node")]
+					        [f (node-filter all "fltCol" > (dec "10.5" 5 1))])
+					    (collect :frontier-ids "hits" f)))
+					""";
+			IllegalArgumentException fltEx = assertThrows(IllegalArgumentException.class,
+					() -> ImpScmV11Compiler.compile(qFltDecFilter, snap, true));
+			assertTrue(fltEx.getMessage().startsWith("TYPE_MISMATCH"), fltEx.getMessage());
+
+			// 8. [MEDIUM] Symmetric boundary folding: (< (dec "19.995" 10 3) v) folds with
+			// zero rescale!
+			String qSymFold = """
+					(query
+					  (let ([v (vec-fill "Node" (decimal 10 2) (dec "20.00" 10 2))])
+					    (collect :vec "m" (< (dec "19.995" 10 3) v))))
+					""";
+			var crSym = ImpScmV11Compiler.compile(qSymFold, snap, true);
+			assertZeroDecimalAluOpcodes(crSym.codeWords());
+			ImpulseWorkspace wsSym = new ImpulseWorkspace(16);
+			assertEquals(IMPULSE_VM_OK, ImpulseInterpreter.executeValidated(crSym.codeWords(), bind, wsSym, 10000L));
+			assertTrue(wsSym.outputs.get(0).boolDataAt(0));
+		}
+	}
 }
