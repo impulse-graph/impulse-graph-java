@@ -171,6 +171,8 @@ public final class ImpulseWorkspace {
 
 	public final int maxDomainCard;
 	public final ImpulseArena arena;
+	/** Reusable morsel stream session holder (zero steady-state allocation). */
+	public Object reusableMorselSession;
 
 	/**
 	 * Optional per-opcode profiling toggle

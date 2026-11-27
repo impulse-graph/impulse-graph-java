@@ -122,9 +122,18 @@ public final class ImpOpsBytecodeEmitter {
 					for (ImpScmNode sstep : walk.shaderSteps()) {
 						if (sstep instanceof ScmStreamFilter sf) {
 							int predM = emitMorselExpr(sf.predicate(), b, regs, snapshot, tgtDom, relId, false);
-							b.emit(ImpulseIsaTables.OP_SET_CONVERT, ImpulseIsaTables.SUBOP_SET_CONVERT_B2F, 0,
-									9 /* MF1 */, predM, 0, 0, 0);
-							activeMaskF = 9;
+							if (activeMaskF == 8) {
+								b.emit(ImpulseIsaTables.OP_SET_CONVERT, ImpulseIsaTables.SUBOP_SET_CONVERT_B2F, 0,
+										9 /* MF1 */, predM, 0, 0, 0);
+								activeMaskF = 9;
+							} else {
+								b.emit(ImpulseIsaTables.OP_SET_CONVERT, ImpulseIsaTables.SUBOP_SET_CONVERT_B2F, 0,
+										10 /* MF2 */, predM, 0, 0, 0);
+								b.emit(ImpulseIsaTables.OP_SET_OP, ImpulseIsaTables.SUBOP_SET_OP_INTERSECT, 0,
+										9 /* MF1 */, 9 /* MF1 */, 10 /* MF2 */, 0, 0);
+							}
+							regs[0] = 12;
+							regs[1] = 1;
 						}
 					}
 					b.emit(ImpulseIsaTables.OP_MORSEL_COMMIT, ImpulseIsaTables.SUBOP_MORSEL_COMMIT_YIELD_FRONTIER,
@@ -210,6 +219,10 @@ public final class ImpOpsBytecodeEmitter {
 						}
 					}
 					b.emit(ImpulseIsaTables.OP_SET_OP, ImpulseIsaTables.SUBOP_SET_OP_UNION, 0, curF, curF, prevF, 0, 0);
+					if (curF != srcF) {
+						b.emit(ImpulseIsaTables.OP_MOV, ImpulseIsaTables.SUBOP_MOV_F, 0, srcF, curF, 0, 0, 0);
+						curF = srcF;
+					}
 					b.emit(ImpulseIsaTables.OP_STABLE_CHECK, ImpulseIsaTables.SUBOP_STABLE_CHECK_FRONTIER_EQ, 0, 0,
 							curF, prevF, 0, 0);
 					int relOff = loopPc - b.pc();
@@ -883,9 +896,9 @@ public final class ImpOpsBytecodeEmitter {
 			};
 			if (csub >= 0 && list.elements().size() >= 3) {
 				int lhs = emitMorselExpr(list.elements().get(1), b, regs, snap, tgtDom, relId, isNodeMorsel);
-				int dst = regs[0]++;
+				int dst = allocMReg(regs);
 				if (list.elements().get(2) instanceof ScmLiteral lit) {
-					int r = regs[1]++;
+					int r = allocRReg(regs);
 					if (lit instanceof ScmLiteral.ScmFloat sf)
 						b.emitLoadConstF64(r, sf.value());
 					else if (lit instanceof ScmLiteral.ScmInt si)
@@ -903,7 +916,7 @@ public final class ImpOpsBytecodeEmitter {
 					&& list.elements().size() >= 3) {
 				int lhs = emitMorselExpr(list.elements().get(1), b, regs, snap, tgtDom, relId, isNodeMorsel);
 				int rhs = emitMorselExpr(list.elements().get(2), b, regs, snap, tgtDom, relId, isNodeMorsel);
-				int dst = regs[0]++;
+				int dst = allocMReg(regs);
 				b.emit(ImpulseIsaTables.OP_VEC_3VL_OP, ImpulseIsaTables.SUBOP_VEC_3VL_OP_AND, 0, dst, lhs, rhs, 0, 0);
 				return dst;
 			}
@@ -911,7 +924,7 @@ public final class ImpOpsBytecodeEmitter {
 					&& list.elements().size() >= 3) {
 				int lhs = emitMorselExpr(list.elements().get(1), b, regs, snap, tgtDom, relId, isNodeMorsel);
 				int rhs = emitMorselExpr(list.elements().get(2), b, regs, snap, tgtDom, relId, isNodeMorsel);
-				int dst = regs[0]++;
+				int dst = allocMReg(regs);
 				b.emit(ImpulseIsaTables.OP_VEC_3VL_OP, ImpulseIsaTables.SUBOP_VEC_3VL_OP_OR, 0, dst, lhs, rhs, 0, 0);
 				return dst;
 			}
@@ -929,7 +942,7 @@ public final class ImpOpsBytecodeEmitter {
 							aid = idx;
 					}
 				}
-				int dst = regs[0]++;
+				int dst = allocMReg(regs);
 				int idxReg = isNodeMorsel ? 8 : 9;
 				b.emitU16(ImpulseIsaTables.OP_GATHER_NODE_ATTR, ImpulseIsaTables.SUBOP_GATHER_NODE_ATTR_VEC, 0, dst,
 						idxReg, 0, 0, tgtDom, aid);
@@ -1089,13 +1102,20 @@ public final class ImpOpsBytecodeEmitter {
 
 	private static int allocMReg(int[] regs) {
 		int r = regs[0];
-		regs[0] = (r >= 15) ? 12 : (r + 1);
+		if (r < 12 || r > 15) {
+			throw new IllegalStateException("Morsel register overflow: register " + r + " outside M4..M7 (12..15)");
+		}
+		regs[0] = r + 1;
 		return r;
 	}
 
 	private static int allocRReg(int[] regs) {
 		int r = regs[1];
-		regs[1] = (r >= 7) ? 1 : (r + 1);
+		if (r < 1 || r > 7) {
+			throw new IllegalStateException(
+					"Morsel scalar register overflow: register " + r + " outside R1..R7 (1..7)");
+		}
+		regs[1] = r + 1;
 		return r;
 	}
 

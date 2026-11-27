@@ -69,6 +69,9 @@ jobs:
         if: matrix.check_format
         run: mvn spotless:check --batch-mode --errors
 
+      - name: Check Core Engine Invariants (Zero-New / Zero-Synthesis)
+        run: python3 scripts/check_engine_invariants.py --java-only --java-root .
+
       - name: Build & Run Test Suites (${{ matrix.name }})
         run: mvn clean test ${{ matrix.profile }} --batch-mode --errors
 

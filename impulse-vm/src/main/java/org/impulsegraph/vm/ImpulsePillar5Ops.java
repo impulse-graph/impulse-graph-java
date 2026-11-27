@@ -1,10 +1,6 @@
 package org.impulsegraph.vm;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 
 import static org.impulsegraph.vm.ImpulseIsaTables.*;
 
@@ -151,27 +147,198 @@ public final class ImpulsePillar5Ops {
 		return ws.fRegs[reg];
 	}
 
-	private static TreeMap<Long, Long> fmlToMap(ImpulseFrontier f) {
-		TreeMap<Long, Long> m = new TreeMap<>();
-		for (int i = 0; i < f.mlCount; i++) {
-			if (f.mlMasks[i] != 0L)
-				m.put(f.mlNodes[i], f.mlMasks[i]);
+	private static final class MlBuf {
+		final long[] nodes;
+		final long[] masks;
+		final int count;
+
+		MlBuf(long[] nodes, long[] masks, int count) {
+			this.nodes = nodes;
+			this.masks = masks;
+			this.count = count;
 		}
-		return m;
+	}
+
+	private static final MlBuf EMPTY_ML = new MlBuf(null, null, 0);
+
+	private static long mlLookup(long[] nodes, long[] masks, int cnt, long key) {
+		if (cnt == 0)
+			return 0L;
+		int pos = Arrays.binarySearch(nodes, 0, cnt, key);
+		return pos >= 0 ? masks[pos] : 0L;
+	}
+
+	private static void mlSiftDown(long[] nodes, long[] masks, int start, int end) {
+		int root = start;
+		while ((root << 1) + 1 < end) {
+			int child = (root << 1) + 1;
+			int swap = root;
+			if (nodes[swap] < nodes[child])
+				swap = child;
+			if (child + 1 < end && nodes[swap] < nodes[child + 1])
+				swap = child + 1;
+			if (swap == root)
+				return;
+			long tn = nodes[root];
+			nodes[root] = nodes[swap];
+			nodes[swap] = tn;
+			long tm = masks[root];
+			masks[root] = masks[swap];
+			masks[swap] = tm;
+			root = swap;
+		}
+	}
+
+	private static int mlSortAndCoalesce(long[] nodes, long[] masks, int count) {
+		if (count <= 0)
+			return 0;
+		for (int i = (count - 2) >>> 1; i >= 0; i--) {
+			mlSiftDown(nodes, masks, i, count);
+		}
+		for (int end = count - 1; end > 0; end--) {
+			long tn = nodes[end];
+			nodes[end] = nodes[0];
+			nodes[0] = tn;
+			long tm = masks[end];
+			masks[end] = masks[0];
+			masks[0] = tm;
+			mlSiftDown(nodes, masks, 0, end);
+		}
+		int w = 0;
+		int i = 0;
+		while (i < count) {
+			long u = nodes[i];
+			long m = masks[i];
+			i++;
+			while (i < count && nodes[i] == u) {
+				m |= masks[i];
+				i++;
+			}
+			if (m != 0L) {
+				nodes[w] = u;
+				masks[w] = m;
+				w++;
+			}
+		}
+		return w;
+	}
+
+	private static MlBuf mlUnion(ImpulseWorkspace ws, MlBuf a, MlBuf b) {
+		if (a.count == 0)
+			return b;
+		if (b.count == 0)
+			return a;
+		int cap = a.count + b.count;
+		long[] outN = ws.arena.allocLong(cap);
+		long[] outM = ws.arena.allocLong(cap);
+		int ia = 0, ib = 0, w = 0;
+		while (ia < a.count && ib < b.count) {
+			long ua = a.nodes[ia], ub = b.nodes[ib];
+			if (ua < ub) {
+				if (a.masks[ia] != 0L) {
+					outN[w] = ua;
+					outM[w] = a.masks[ia];
+					w++;
+				}
+				ia++;
+			} else if (ub < ua) {
+				if (b.masks[ib] != 0L) {
+					outN[w] = ub;
+					outM[w] = b.masks[ib];
+					w++;
+				}
+				ib++;
+			} else {
+				long m = a.masks[ia] | b.masks[ib];
+				if (m != 0L) {
+					outN[w] = ua;
+					outM[w] = m;
+					w++;
+				}
+				ia++;
+				ib++;
+			}
+		}
+		while (ia < a.count) {
+			if (a.masks[ia] != 0L) {
+				outN[w] = a.nodes[ia];
+				outM[w] = a.masks[ia];
+				w++;
+			}
+			ia++;
+		}
+		while (ib < b.count) {
+			if (b.masks[ib] != 0L) {
+				outN[w] = b.nodes[ib];
+				outM[w] = b.masks[ib];
+				w++;
+			}
+			ib++;
+		}
+		return new MlBuf(outN, outM, w);
+	}
+
+	private static MlBuf mlDiff(ImpulseWorkspace ws, MlBuf a, MlBuf b) {
+		if (a.count == 0)
+			return EMPTY_ML;
+		if (b.count == 0)
+			return a;
+		long[] outN = ws.arena.allocLong(a.count);
+		long[] outM = ws.arena.allocLong(a.count);
+		int ia = 0, ib = 0, w = 0;
+		while (ia < a.count && ib < b.count) {
+			long ua = a.nodes[ia], ub = b.nodes[ib];
+			if (ua < ub) {
+				if (a.masks[ia] != 0L) {
+					outN[w] = ua;
+					outM[w] = a.masks[ia];
+					w++;
+				}
+				ia++;
+			} else if (ub < ua) {
+				ib++;
+			} else {
+				long m = a.masks[ia] & ~b.masks[ib];
+				if (m != 0L) {
+					outN[w] = ua;
+					outM[w] = m;
+					w++;
+				}
+				ia++;
+				ib++;
+			}
+		}
+		while (ia < a.count) {
+			if (a.masks[ia] != 0L) {
+				outN[w] = a.nodes[ia];
+				outM[w] = a.masks[ia];
+				w++;
+			}
+			ia++;
+		}
+		return new MlBuf(outN, outM, w);
+	}
+
+	private static MlBuf fmlToBuf(ImpulseWorkspace ws, ImpulseFrontier f) {
+		if (f.mlCount == 0)
+			return EMPTY_ML;
+		long[] ns = ws.arena.allocLong(f.mlCount);
+		long[] ms = ws.arena.allocLong(f.mlCount);
+		int w = 0;
+		for (int i = 0; i < f.mlCount; i++) {
+			if (f.mlMasks[i] != 0L) {
+				ns[w] = f.mlNodes[i];
+				ms[w] = f.mlMasks[i];
+				w++;
+			}
+		}
+		return new MlBuf(ns, ms, w);
 	}
 
 	private static void writeFml(ImpulseWorkspace ws, int dst, int domId, int domCard, int allocWidth,
-			int activeLaneCount, TreeMap<Long, Long> map) {
-		int n = map.size();
-		long[] nodes = new long[n];
-		long[] masks = new long[n];
-		int i = 0;
-		for (Map.Entry<Long, Long> e : map.entrySet()) {
-			nodes[i] = e.getKey();
-			masks[i] = e.getValue();
-			i++;
-		}
-		ws.fRegs[dst].initMultiLane(domId, domCard, allocWidth, activeLaneCount, nodes, masks, ws.geometry);
+			int activeLaneCount, MlBuf buf) {
+		ws.fRegs[dst].initMultiLane(domId, domCard, allocWidth, activeLaneCount, buf.nodes, buf.masks, buf.count,
+				ws.geometry);
 		ws.setFInitialized(dst, true);
 	}
 
@@ -180,12 +347,12 @@ public final class ImpulsePillar5Ops {
 		ws.setFInitialized(dst, true);
 	}
 
-	private static double[] vecToF64Dense(ImpulseVector v) {
+	private static double[] vecToF64Dense(ImpulseWorkspace ws, ImpulseVector v) {
 		if (v == null || (v.elemTag != ImpulseVector.TAG_F64 && v.elemTag != ImpulseVector.TAG_I64
 				&& v.elemTag != ImpulseVector.TAG_U64)) {
 			return null;
 		}
-		double[] out = new double[v.length];
+		double[] out = ws.arena.allocDouble(v.length);
 		for (int i = 0; i < v.length; i++) {
 			if (!v.isValidAt(i))
 				out[i] = 0.0;
@@ -195,8 +362,8 @@ public final class ImpulsePillar5Ops {
 		return out;
 	}
 
-	private static double simMetric(int metric, double[] a, double[] b) {
-		int d = Math.min(a.length, b.length);
+	private static double simMetric(int metric, double[] a, int aLen, double[] b, int bLen) {
+		int d = Math.min(aLen, bLen);
 		double dot = 0.0, na = 0.0, nb = 0.0, l2 = 0.0;
 		for (int i = 0; i < d; i++) {
 			double x = a[i], y = b[i];
@@ -310,8 +477,8 @@ public final class ImpulsePillar5Ops {
 			return;
 		}
 
-		TreeMap<Long, Long> map;
 		int initAc;
+		ImpulseFrontier fdInit = null;
 		if ((flags & FLAG_ACCUM) != 0) {
 			ImpulseFrontier fd = getFml(ws, dst);
 			if (fd == null)
@@ -320,11 +487,25 @@ public final class ImpulsePillar5Ops {
 				ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
 				return;
 			}
-			map = fmlToMap(fd);
+			fdInit = fd;
 			initAc = fd.activeLaneCount;
 		} else {
-			map = new TreeMap<>();
 			initAc = 0;
+		}
+
+		int initCnt = (fdInit != null) ? fdInit.mlCount : 0;
+		int cap = Math.max(1, initCnt + nodes.length);
+		long[] tmpN = ws.arena.allocLong(cap);
+		long[] tmpM = ws.arena.allocLong(cap);
+		int w = 0;
+		if (fdInit != null) {
+			for (int i = 0; i < fdInit.mlCount; i++) {
+				if (fdInit.mlMasks[i] != 0L) {
+					tmpN[w] = fdInit.mlNodes[i];
+					tmpM[w] = fdInit.mlMasks[i];
+					w++;
+				}
+			}
 		}
 
 		int maxLane = initAc - 1;
@@ -340,76 +521,146 @@ public final class ImpulsePillar5Ops {
 			int l = (int) l64;
 			if (l > maxLane)
 				maxLane = l;
-			long prev = map.getOrDefault(u, 0L);
-			map.put(u, prev | (1L << l));
+			tmpN[w] = u;
+			tmpM[w] = 1L << l;
+			w++;
 		}
+		int cnt = mlSortAndCoalesce(tmpN, tmpM, w);
 		int ac = Math.max(0, maxLane + 1);
-		writeFml(ws, dst, dom, (int) dcard, chooseWidth(ac), ac, map);
-		ws.zf = map.isEmpty();
+		ws.fRegs[dst].initMultiLane(dom, (int) dcard, chooseWidth(ac), ac, tmpN, tmpM, cnt, ws.geometry);
+		ws.setFInitialized(dst, true);
+		ws.zf = (cnt == 0);
 		ws.pc++;
 	}
 
 	// --- 0x63 OP_LANE_WALK ---
 
-	private static TreeMap<Long, Long> unionMl(TreeMap<Long, Long> a, TreeMap<Long, Long> b) {
-		TreeMap<Long, Long> out = new TreeMap<>(a);
-		for (Map.Entry<Long, Long> e : b.entrySet()) {
-			long r = out.getOrDefault(e.getKey(), 0L) | e.getValue();
-			if (r != 0L)
-				out.put(e.getKey(), r);
-		}
-		return out;
-	}
-
-	private static TreeMap<Long, Long> diffMl(TreeMap<Long, Long> a, TreeMap<Long, Long> b) {
-		TreeMap<Long, Long> out = new TreeMap<>();
-		for (Map.Entry<Long, Long> e : a.entrySet()) {
-			long r = e.getValue() & ~b.getOrDefault(e.getKey(), 0L);
-			if (r != 0L)
-				out.put(e.getKey(), r);
-		}
-		return out;
-	}
-
-	private static TreeMap<Long, Long> laneWalkStepOnce(int subop, ImpulseSnapshotView.RelView rel,
-			ImpulseVector edgeMask, TreeMap<Long, Long> cur, TreeMap<Long, Long> excl) {
-		TreeMap<Long, Long> out = new TreeMap<>();
+	private static MlBuf laneWalkStepOnce(ImpulseWorkspace ws, int subop, ImpulseSnapshotView.RelView rel, int outCard,
+			ImpulseVector edgeMask, MlBuf cur, MlBuf excl) {
+		if (cur.count == 0)
+			return EMPTY_ML;
 		boolean doFwd = (subop == 0 || subop == 3 || subop == 4 || subop == 7 || subop == 2 || subop == 8
 				|| subop == 9);
 		boolean doRev = (subop == 1 || subop == 5 || subop == 6 || subop == 2 || subop == 8 || subop == 9);
 
+		if (outCard >= 0 && outCard <= 1_000_000) {
+			long[] dense = ws.arena.allocLongZeroed(Math.max(1, outCard));
+			if (doFwd) {
+				for (int i = 0; i < cur.count; i++) {
+					int u = (int) cur.nodes[i];
+					long mask = cur.masks[i];
+					int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+					for (int e = s; e < end; e++) {
+						int v = rel.csrColTarget(e);
+						long ev = (edgeMask == null) ? -1L : (edgeMask.isValidAt(e) ? edgeMask.i64Data[e] : 0L);
+						long ex = mlLookup(excl.nodes, excl.masks, excl.count, v & 0xFFFFFFFFL);
+						long pass = mask & ev & ~ex;
+						if (pass != 0L && v >= 0 && v < outCard)
+							dense[v] |= pass;
+					}
+				}
+			}
+			if (doRev) {
+				for (int i = 0; i < cur.count; i++) {
+					int v = (int) cur.nodes[i];
+					long mask = cur.masks[i];
+					int s = rel.cscRowOffset(v), end = rel.cscRowOffset(v + 1);
+					for (int p = s; p < end; p++) {
+						int u = rel.cscColSource(p);
+						int e = rel.cscEdgeId(p);
+						long ev = (edgeMask == null) ? -1L : (edgeMask.isValidAt(e) ? edgeMask.i64Data[e] : 0L);
+						long ex = mlLookup(excl.nodes, excl.masks, excl.count, u & 0xFFFFFFFFL);
+						long pass = mask & ev & ~ex;
+						if (pass != 0L && u >= 0 && u < outCard)
+							dense[u] |= pass;
+					}
+				}
+			}
+			int cnt = 0;
+			for (int i = 0; i < outCard; i++) {
+				if (dense[i] != 0L)
+					cnt++;
+			}
+			if (cnt == 0)
+				return EMPTY_ML;
+			long[] outN = ws.arena.allocLong(cnt);
+			long[] outM = ws.arena.allocLong(cnt);
+			int k = 0;
+			for (int i = 0; i < outCard; i++) {
+				long m = dense[i];
+				if (m != 0L) {
+					outN[k] = i & 0xFFFFFFFFL;
+					outM[k] = m;
+					k++;
+				}
+			}
+			return new MlBuf(outN, outM, cnt);
+		}
+
+		// Sparse fallback for very large domains (> 1M)
+		int cap = Math.max(64, cur.count * 4);
+		long[] outN = ws.arena.allocLong(cap);
+		long[] outM = ws.arena.allocLong(cap);
+		int w = 0;
 		if (doFwd) {
-			for (Map.Entry<Long, Long> entry : cur.entrySet()) {
-				int u = entry.getKey().intValue();
-				long mask = entry.getValue();
+			for (int i = 0; i < cur.count; i++) {
+				int u = (int) cur.nodes[i];
+				long mask = cur.masks[i];
 				int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
 				for (int e = s; e < end; e++) {
 					long v = rel.csrColTarget(e) & 0xFFFFFFFFL;
 					long ev = (edgeMask == null) ? -1L : (edgeMask.isValidAt(e) ? edgeMask.i64Data[e] : 0L);
-					long ex = excl.getOrDefault(v, 0L);
+					long ex = mlLookup(excl.nodes, excl.masks, excl.count, v);
 					long pass = mask & ev & ~ex;
-					if (pass != 0L)
-						out.put(v, out.getOrDefault(v, 0L) | pass);
+					if (pass != 0L) {
+						if (w >= cap) {
+							int ncap = cap * 2;
+							long[] nn = ws.arena.allocLong(ncap);
+							long[] nm = ws.arena.allocLong(ncap);
+							System.arraycopy(outN, 0, nn, 0, w);
+							System.arraycopy(outM, 0, nm, 0, w);
+							outN = nn;
+							outM = nm;
+							cap = ncap;
+						}
+						outN[w] = v;
+						outM[w] = pass;
+						w++;
+					}
 				}
 			}
 		}
 		if (doRev) {
-			for (Map.Entry<Long, Long> entry : cur.entrySet()) {
-				int v = entry.getKey().intValue();
-				long mask = entry.getValue();
+			for (int i = 0; i < cur.count; i++) {
+				int v = (int) cur.nodes[i];
+				long mask = cur.masks[i];
 				int s = rel.cscRowOffset(v), end = rel.cscRowOffset(v + 1);
 				for (int p = s; p < end; p++) {
 					long u = rel.cscColSource(p) & 0xFFFFFFFFL;
 					int e = rel.cscEdgeId(p);
 					long ev = (edgeMask == null) ? -1L : (edgeMask.isValidAt(e) ? edgeMask.i64Data[e] : 0L);
-					long ex = excl.getOrDefault(u, 0L);
+					long ex = mlLookup(excl.nodes, excl.masks, excl.count, u);
 					long pass = mask & ev & ~ex;
-					if (pass != 0L)
-						out.put(u, out.getOrDefault(u, 0L) | pass);
+					if (pass != 0L) {
+						if (w >= cap) {
+							int ncap = cap * 2;
+							long[] nn = ws.arena.allocLong(ncap);
+							long[] nm = ws.arena.allocLong(ncap);
+							System.arraycopy(outN, 0, nn, 0, w);
+							System.arraycopy(outM, 0, nm, 0, w);
+							outN = nn;
+							outM = nm;
+							cap = ncap;
+						}
+						outN[w] = u;
+						outM[w] = pass;
+						w++;
+					}
 				}
 			}
 		}
-		return out;
+		int cnt = mlSortAndCoalesce(outN, outM, w);
+		return cnt == 0 ? EMPTY_ML : new MlBuf(outN, outM, cnt);
 	}
 
 	private static void execLaneWalk(ImpulseWorkspace ws, ImpulseInterpreter.SnapshotBinding bind, int subop, int flags,
@@ -421,6 +672,10 @@ public final class ImpulsePillar5Ops {
 		if (fSrc == null)
 			return;
 
+		if (subop < 0 || subop > 9) {
+			ws.status = IMPULSE_VM_ERR_INVALID_OPCODE;
+			return;
+		}
 		boolean endo = (rel.srcDom == rel.tgtDom);
 		boolean isRev = (subop == 1 || subop == 5 || subop == 6);
 		boolean needsEndo = (subop >= 2 && subop != 7);
@@ -449,10 +704,22 @@ public final class ImpulsePillar5Ops {
 			}
 		}
 
+		boolean needsFwd = (subop == 0 || subop == 3 || subop == 4 || subop == 7 || subop == 2 || subop == 8
+				|| subop == 9);
+		boolean needsRev = (isRev || subop == 2 || subop == 8 || subop == 9);
+		if (needsFwd && !rel.hasCsrSegments()) {
+			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+			return;
+		}
+		if (needsRev && !rel.hasCscSegments()) {
+			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+			return;
+		}
+
+		int outCard = (int) bind.view.domainCards[outDom];
 		if (subop == 0 && (flags & (FLAG_MASKED_S3 | FLAG_ACCUM)) == 0) {
-			int outCard = (int) bind.view.domainCards[outDom];
 			if (outCard >= 0 && outCard <= 1_000_000) {
-				long[] dense = ws.arena.allocLongZeroed(outCard);
+				long[] dense = ws.arena.allocLongZeroed(Math.max(1, outCard));
 				int srcCnt = fSrc.mlCount;
 				long[] srcNodes = fSrc.mlNodes;
 				long[] srcMasks = fSrc.mlMasks;
@@ -494,7 +761,7 @@ public final class ImpulsePillar5Ops {
 			}
 		}
 
-		TreeMap<Long, Long> mExcl = new TreeMap<>();
+		MlBuf mExcl = EMPTY_ML;
 		if ((flags & FLAG_MASKED_S3) != 0) {
 			ImpulseFrontier fe = getFml(ws, s3);
 			if (fe == null)
@@ -503,10 +770,10 @@ public final class ImpulsePillar5Ops {
 				ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
 				return;
 			}
-			mExcl = fmlToMap(fe);
+			mExcl = fmlToBuf(ws, fe);
 		}
 
-		TreeMap<Long, Long> mAccum = new TreeMap<>();
+		MlBuf mAccum = EMPTY_ML;
 		if ((flags & FLAG_ACCUM) != 0) {
 			ImpulseFrontier fd = getFml(ws, dst);
 			if (fd == null)
@@ -515,45 +782,35 @@ public final class ImpulsePillar5Ops {
 				ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
 				return;
 			}
-			mAccum = fmlToMap(fd);
+			mAccum = fmlToBuf(ws, fd);
 		}
 
-		boolean needsFwd = (subop == 0 || subop == 3 || subop == 4 || subop == 7 || subop == 2 || subop == 8
-				|| subop == 9);
-		boolean needsRev = (isRev || subop == 2 || subop == 8 || subop == 9);
-		if (needsFwd && !rel.hasCsrSegments()) {
-			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
-			return;
-		}
-		if (needsRev && !rel.hasCscSegments()) {
-			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
-			return;
-		}
-		TreeMap<Long, Long> mSrc = fmlToMap(fSrc);
+		MlBuf mSrc = fmlToBuf(ws, fSrc);
 		int aw = fSrc.allocWidth;
 		int ac = fSrc.activeLaneCount;
 
-		TreeMap<Long, Long> outM;
+		MlBuf outM;
 		boolean stFlag = ws.st;
 		switch (subop) {
-			case 0, 1, 2, 7 -> outM = laneWalkStepOnce(subop, rel, edgeMask, mSrc, mExcl);
+			case 0, 1, 2, 7 -> outM = laneWalkStepOnce(ws, subop, rel, outCard, edgeMask, mSrc, mExcl);
 			case 3, 5 -> { // fixpoint_plus
-				TreeMap<Long, Long> visited = new TreeMap<>();
-				TreeMap<Long, Long> frontier = laneWalkStepOnce(subop, rel, edgeMask, mSrc, mExcl);
-				while (!frontier.isEmpty()) {
-					visited = unionMl(visited, frontier);
-					frontier = laneWalkStepOnce(subop, rel, edgeMask, frontier, unionMl(mExcl, visited));
+				MlBuf visited = EMPTY_ML;
+				MlBuf frontier = laneWalkStepOnce(ws, subop, rel, outCard, edgeMask, mSrc, mExcl);
+				while (frontier.count > 0) {
+					visited = mlUnion(ws, visited, frontier);
+					frontier = laneWalkStepOnce(ws, subop, rel, outCard, edgeMask, frontier,
+							mlUnion(ws, mExcl, visited));
 				}
 				outM = visited;
 				stFlag = true;
 			}
 			case 4, 6, 8, 9 -> { // fixpoint_star
-				TreeMap<Long, Long> visited = diffMl(mSrc, mExcl);
-				TreeMap<Long, Long> frontier = visited;
-				while (!frontier.isEmpty()) {
-					TreeMap<Long, Long> next = laneWalkStepOnce(subop, rel, edgeMask, frontier,
-							unionMl(mExcl, visited));
-					visited = unionMl(visited, next);
+				MlBuf visited = mlDiff(ws, mSrc, mExcl);
+				MlBuf frontier = visited;
+				while (frontier.count > 0) {
+					MlBuf next = laneWalkStepOnce(ws, subop, rel, outCard, edgeMask, frontier,
+							mlUnion(ws, mExcl, visited));
+					visited = mlUnion(ws, visited, next);
 					frontier = next;
 				}
 				outM = visited;
@@ -565,9 +822,9 @@ public final class ImpulsePillar5Ops {
 			}
 		}
 
-		TreeMap<Long, Long> finalM = unionMl(mAccum, outM);
-		writeFml(ws, dst, outDom, (int) bind.view.domainCards[outDom], aw, ac, finalM);
-		ws.zf = finalM.isEmpty();
+		MlBuf finalM = mlUnion(ws, mAccum, outM);
+		writeFml(ws, dst, outDom, outCard, aw, ac, finalM);
+		ws.zf = (finalM.count == 0);
 		ws.st = stFlag;
 		ws.pc++;
 	}
@@ -579,7 +836,7 @@ public final class ImpulsePillar5Ops {
 		ImpulseFrontier fa = getFml(ws, s1);
 		if (fa == null)
 			return;
-		TreeMap<Long, Long> ma = fmlToMap(fa);
+		MlBuf ma = fmlToBuf(ws, fa);
 		int domId = fa.domainId, domCard = fa.domainCard, aw = fa.allocWidth, ac = fa.activeLaneCount;
 
 		switch (subop) {
@@ -594,14 +851,19 @@ public final class ImpulsePillar5Ops {
 				} else {
 					m = imm16Lo & 0xFFFFL;
 				}
-				TreeMap<Long, Long> out = new TreeMap<>();
-				for (Map.Entry<Long, Long> e : ma.entrySet()) {
-					long r = (subop == 0) ? (e.getValue() & ~m) : (e.getValue() & m);
-					if (r != 0L)
-						out.put(e.getKey(), r);
+				long[] outN = ws.arena.allocLong(ma.count);
+				long[] outM = ws.arena.allocLong(ma.count);
+				int w = 0;
+				for (int i = 0; i < ma.count; i++) {
+					long r = (subop == 0) ? (ma.masks[i] & ~m) : (ma.masks[i] & m);
+					if (r != 0L) {
+						outN[w] = ma.nodes[i];
+						outM[w] = r;
+						w++;
+					}
 				}
-				writeFml(ws, dst, domId, domCard, aw, ac, out);
-				ws.zf = out.isEmpty();
+				writeFml(ws, dst, domId, domCard, aw, ac, new MlBuf(outN, outM, w));
+				ws.zf = (w == 0);
 				ws.pc++;
 			}
 			case 2 -> { // and_not_lanes
@@ -612,9 +874,9 @@ public final class ImpulsePillar5Ops {
 					ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
 					return;
 				}
-				TreeMap<Long, Long> out = diffMl(ma, fmlToMap(fb));
+				MlBuf out = mlDiff(ws, ma, fmlToBuf(ws, fb));
 				writeFml(ws, dst, domId, domCard, aw, ac, out);
-				ws.zf = out.isEmpty();
+				ws.zf = (out.count == 0);
 				ws.pc++;
 			}
 			case 3 -> { // extract_lane -> 1-bit F[dst]
@@ -638,11 +900,11 @@ public final class ImpulsePillar5Ops {
 					lane = imm16Lo;
 				}
 				long bit = 1L << lane;
-				ImpulseFrontier out = new ImpulseFrontier(Math.max(domCard, 64));
+				ImpulseFrontier out = ws.arena.allocFrontier(Math.max(domCard, 64));
 				out.resetEmpty(domId, domCard);
-				for (Map.Entry<Long, Long> e : ma.entrySet()) {
-					if ((e.getValue() & bit) != 0L)
-						out.add(e.getKey().intValue());
+				for (int i = 0; i < ma.count; i++) {
+					if ((ma.masks[i] & bit) != 0L)
+						out.add((int) ma.nodes[i]);
 				}
 				writeF1Bit(ws, dst, domId, domCard, out);
 				ws.zf = out.isEmpty();
@@ -670,7 +932,7 @@ public final class ImpulsePillar5Ops {
 			k = imm16Lo;
 		}
 		int domId = fa.domainId, domCard = fa.domainCard;
-		ImpulseFrontier out = new ImpulseFrontier(Math.max(domCard, 64));
+		ImpulseFrontier out = ws.arena.allocFrontier(Math.max(domCard, 64));
 		if ((flags & FLAG_ACCUM) != 0) {
 			ImpulseFrontier fd = getF1Bit(ws, dst);
 			if (fd == null)
@@ -716,7 +978,7 @@ public final class ImpulsePillar5Ops {
 			req = activeLaneMaskOfCount(fa.activeLaneCount);
 		}
 		int domId = fa.domainId, domCard = fa.domainCard;
-		ImpulseFrontier out = new ImpulseFrontier(Math.max(domCard, 64));
+		ImpulseFrontier out = ws.arena.allocFrontier(Math.max(domCard, 64));
 		if ((flags & FLAG_ACCUM) != 0) {
 			ImpulseFrontier fd = getF1Bit(ws, dst);
 			if (fd == null)
@@ -748,7 +1010,7 @@ public final class ImpulsePillar5Ops {
 			return;
 		int ac = fa.activeLaneCount;
 		if (subop == 3) { // count
-			long[] counts = new long[ac];
+			long[] counts = ws.arena.allocLongZeroed(ac);
 			for (int i = 0; i < fa.mlCount; i++) {
 				long lm = fa.mlMasks[i];
 				for (int l = 0; l < ac; l++) {
@@ -756,7 +1018,7 @@ public final class ImpulsePillar5Ops {
 						counts[l]++;
 				}
 			}
-			ws.vVectors[dst] = ImpulseVector.ofU64(counts, ImpulseVector.allocValidAllTrue(ac));
+			ws.vVectors[dst] = ws.arena.allocU64(counts, ac, ws.arena.allocValidAllTrue(ac));
 			ws.zf = (ac == 0);
 			ws.pc++;
 			return;
@@ -767,11 +1029,10 @@ public final class ImpulsePillar5Ops {
 			ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
 			return;
 		}
-		double[] acc = new double[ac];
-		long[] valid = new long[Math.max(1, (ac + 63) >>> 6)];
-		if (subop == 0) {
-			valid = ImpulseVector.allocValidAllTrue(ac);
-		}
+		double[] acc = ws.arena.allocDoubleZeroed(ac);
+		long[] valid = (subop == 0)
+				? ws.arena.allocValidAllTrue(ac)
+				: ws.arena.allocLongZeroed(Math.max(1, (ac + 63) >>> 6));
 		for (int i = 0; i < fa.mlCount; i++) {
 			long u64 = fa.mlNodes[i];
 			int u = (int) u64;
@@ -799,23 +1060,54 @@ public final class ImpulsePillar5Ops {
 				}
 			}
 		}
-		ws.vVectors[dst] = ImpulseVector.ofF64(acc, valid);
+		ws.vVectors[dst] = ws.arena.allocF64(acc, ac, valid);
 		ws.zf = (ac == 0);
 		ws.pc++;
 	}
 
 	// --- 0x69 OP_VECTOR_ANN_SEARCH ---
 
+	private static boolean annBetter(double scA, int idA, double scB, int idB) {
+		if (scA != scB)
+			return scA > scB;
+		return idA < idB;
+	}
+
+	private static void annSiftDown(double[] scores, int[] ids, int start, int end) {
+		int root = start;
+		while ((root << 1) + 1 < end) {
+			int child = (root << 1) + 1;
+			int swap = root;
+			// Max-heap by WORSE element so heapsort outputs best-first (descending score,
+			// ascending id)
+			if (annBetter(scores[swap], ids[swap], scores[child], ids[child]))
+				swap = child;
+			if (child + 1 < end && annBetter(scores[swap], ids[swap], scores[child + 1], ids[child + 1]))
+				swap = child + 1;
+			if (swap == root)
+				return;
+			double ts = scores[root];
+			scores[root] = scores[swap];
+			scores[swap] = ts;
+			int ti = ids[root];
+			ids[root] = ids[swap];
+			ids[swap] = ti;
+			root = swap;
+		}
+	}
+
 	private static void execVectorAnnSearch(ImpulseWorkspace ws, ImpulseInterpreter.SnapshotBinding bind, int subop,
 			int flags, int dst, int s1, int s2, int s3, int dom, int aid) {
 		ImpulseSnapshotView view = requireView(ws, bind);
 		if (view == null)
 			return;
-		double[] q = vecToF64Dense(ws.vVectors[s1]);
+		ImpulseVector qVec = ws.vVectors[s1];
+		double[] q = vecToF64Dense(ws, qVec);
 		if (q == null) {
 			ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
 			return;
 		}
+		int qLen = qVec.length;
 		if (!ws.isRValid(s2)) {
 			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
 			return;
@@ -842,38 +1134,49 @@ public final class ImpulsePillar5Ops {
 			return;
 		}
 
-		List<double[]> scored = new ArrayList<>(); // [score, nodeId]
+		double[] scores = ws.arena.allocDouble(col.length);
+		int[] ids = ws.arena.allocInt(col.length);
+		int scoredCnt = 0;
 		for (int u = 0; u < col.length; u++) {
 			if (mask != null && !mask.contains(u))
 				continue;
 			if (!col.isValidAt(u))
 				continue;
-			double sc = simMetric(1, q, col.embData[u]);
-			if (!Double.isNaN(sc))
-				scored.add(new double[]{sc, u});
-		}
-		scored.sort((a, b) -> {
-			int c = b[0] < a[0] ? -1 : (b[0] > a[0] ? 1 : 0);
-			return c != 0 ? c : Integer.compare((int) a[1], (int) b[1]);
-		});
-
-		List<Long> selected = new ArrayList<>();
-		if (subop == 0) {
-			int k = (int) Math.min(r2Bits, scored.size());
-			for (int i = 0; i < k; i++)
-				selected.add((long) (int) scored.get(i)[1]);
-		} else {
-			double thresh = Double.longBitsToDouble(r2Bits);
-			for (double[] p : scored) {
-				if (p[0] >= thresh)
-					selected.add((long) (int) p[1]);
+			double sc = simMetric(1, q, qLen, col.embData[u], col.embData[u].length);
+			if (!Double.isNaN(sc)) {
+				scores[scoredCnt] = sc;
+				ids[scoredCnt] = u;
+				scoredCnt++;
 			}
 		}
-		long[] out = new long[selected.size()];
-		for (int i = 0; i < out.length; i++)
-			out[i] = selected.get(i);
-		ws.vVectors[dst] = ImpulseVector.ofU64(out, ImpulseVector.allocValidAllTrue(out.length));
-		ws.zf = (out.length == 0);
+		for (int i = (scoredCnt - 2) >>> 1; i >= 0; i--) {
+			annSiftDown(scores, ids, i, scoredCnt);
+		}
+		for (int end = scoredCnt - 1; end > 0; end--) {
+			double ts = scores[end];
+			scores[end] = scores[0];
+			scores[0] = ts;
+			int ti = ids[end];
+			ids[end] = ids[0];
+			ids[0] = ti;
+			annSiftDown(scores, ids, 0, end);
+		}
+
+		int outCnt;
+		if (subop == 0) {
+			outCnt = (int) Math.min(r2Bits, scoredCnt);
+		} else {
+			double thresh = Double.longBitsToDouble(r2Bits);
+			outCnt = 0;
+			while (outCnt < scoredCnt && scores[outCnt] >= thresh) {
+				outCnt++;
+			}
+		}
+		long[] out = ws.arena.allocLong(outCnt);
+		for (int i = 0; i < outCnt; i++)
+			out[i] = ids[i] & 0xFFFFFFFFL;
+		ws.vVectors[dst] = ws.arena.allocU64(out, outCnt, ws.arena.allocValidAllTrue(outCnt));
+		ws.zf = (outCnt == 0);
 		ws.pc++;
 	}
 
@@ -898,15 +1201,17 @@ public final class ImpulsePillar5Ops {
 		int metric = subop & 3;
 		if (subop <= 3) {
 			ImpulseVector ids = ws.vVectors[s1];
-			double[] q = vecToF64Dense(ws.vVectors[s2]);
+			ImpulseVector qVec = ws.vVectors[s2];
+			double[] q = vecToF64Dense(ws, qVec);
 			if (ids == null || (ids.elemTag != ImpulseVector.TAG_U64 && ids.elemTag != ImpulseVector.TAG_I64)
 					|| q == null) {
 				ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
 				return;
 			}
+			int qLen = qVec.length;
 			int n = ids.length;
-			double[] out = new double[n];
-			long[] valid = new long[Math.max(1, (n + 63) >>> 6)];
+			double[] out = ws.arena.allocDoubleZeroed(n);
+			long[] valid = ws.arena.allocLongZeroed(Math.max(1, (n + 63) >>> 6));
 			boolean any = false;
 			for (int i = 0; i < n; i++) {
 				if (mask != null && !mask.contains(i))
@@ -920,7 +1225,7 @@ public final class ImpulsePillar5Ops {
 					return;
 				}
 				if (col.isValidAt(u)) {
-					double sc = simMetric(metric, q, col.embData[u]);
+					double sc = simMetric(metric, q, qLen, col.embData[u], col.embData[u].length);
 					if (!Double.isNaN(sc)) {
 						out[i] = sc;
 						valid[i >>> 6] |= (1L << (i & 63));
@@ -928,7 +1233,7 @@ public final class ImpulsePillar5Ops {
 					}
 				}
 			}
-			ws.vVectors[dst] = ImpulseVector.ofF64(out, valid);
+			ws.vVectors[dst] = ws.arena.allocF64(out, n, valid);
 			ws.zf = !any;
 			ws.pc++;
 		} else {
@@ -941,8 +1246,8 @@ public final class ImpulsePillar5Ops {
 				return;
 			}
 			int n = va.length;
-			double[] out = new double[n];
-			long[] valid = new long[Math.max(1, (n + 63) >>> 6)];
+			double[] out = ws.arena.allocDoubleZeroed(n);
+			long[] valid = ws.arena.allocLongZeroed(Math.max(1, (n + 63) >>> 6));
 			boolean any = false;
 			for (int i = 0; i < n; i++) {
 				if (mask != null && !mask.contains(i))
@@ -958,7 +1263,8 @@ public final class ImpulsePillar5Ops {
 					return;
 				}
 				if (col.isValidAt(u) && col.isValidAt(v)) {
-					double sc = simMetric(metric, col.embData[u], col.embData[v]);
+					double sc = simMetric(metric, col.embData[u], col.embData[u].length, col.embData[v],
+							col.embData[v].length);
 					if (!Double.isNaN(sc)) {
 						out[i] = sc;
 						valid[i >>> 6] |= (1L << (i & 63));
@@ -966,7 +1272,7 @@ public final class ImpulsePillar5Ops {
 					}
 				}
 			}
-			ws.vVectors[dst] = ImpulseVector.ofF64(out, valid);
+			ws.vVectors[dst] = ws.arena.allocF64(out, n, valid);
 			ws.zf = !any;
 			ws.pc++;
 		}
@@ -1134,6 +1440,10 @@ public final class ImpulsePillar5Ops {
 		byte[] snapInValid = ls.lsValidFlat;
 		int hits = 0;
 		if (!isRev) {
+			if (!rel.hasCsrSegments()) {
+				ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+				return;
+			}
 			for (int u = 0; u < ls.length; u++) {
 				int uBase = u * k;
 				int s = rel.csrRowOffset(u);
@@ -1143,31 +1453,6 @@ public final class ImpulsePillar5Ops {
 					hits += relaxLaneEdgeFlat(u, uBase, v, v * k, e, k, semi, mask, scalarW, scalarWValid, scalarWVal,
 							weightCol, snapIn, snapInValid, outVals, outValid, outWit, outWitValid);
 				}
-			}
-		} else if (weightCol != null && rel.cscEdgeIdsSeg == null && rel.hasCsrSegments()) {
-			int nSrc = rel.csrRowCount();
-			List<int[]> revEdges = new ArrayList<>();
-			for (int u = 0; u < nSrc; u++) {
-				int s = rel.csrRowOffset(u);
-				int eEnd = rel.csrRowOffset(u + 1);
-				for (int e = s; e < eEnd; e++) {
-					int v = rel.csrColTarget(e);
-					if (v >= 0 && v < ls.length) {
-						revEdges.add(new int[]{v, u, e});
-					}
-				}
-			}
-			revEdges.sort((a, b) -> {
-				int c = Integer.compare(a[0], b[0]);
-				if (c != 0)
-					return c;
-				c = Integer.compare(a[1], b[1]);
-				return (c != 0) ? c : Integer.compare(a[2], b[2]);
-			});
-			for (int[] ed : revEdges) {
-				int v = ed[0], u = ed[1], e = ed[2];
-				hits += relaxLaneEdgeFlat(v, v * k, u, u * k, e, k, semi, mask, scalarW, scalarWValid, scalarWVal,
-						weightCol, snapIn, snapInValid, outVals, outValid, outWit, outWitValid);
 			}
 		} else {
 			if (!rel.hasCscSegments()) {
@@ -1503,11 +1788,12 @@ public final class ImpulsePillar5Ops {
 				normSq += x * x;
 			}
 			double norm = Math.sqrt(normSq);
-			double[] out = new double[n];
-			long[] valid = new long[Math.max(1, (n + 63) >>> 6)];
+			double[] out = ws.arena.allocDoubleZeroed(n);
+			long[] valid;
 			if (norm == 0.0) {
-				valid = ImpulseVector.allocValidAllTrue(n);
+				valid = ws.arena.allocValidAllTrue(n);
 			} else {
+				valid = ws.arena.allocLongZeroed(Math.max(1, (n + 63) >>> 6));
 				for (int i = 0; i < n; i++) {
 					if (!v.isValidAt(i))
 						continue;
@@ -1516,7 +1802,7 @@ public final class ImpulsePillar5Ops {
 					valid[i >>> 6] |= (1L << (i & 63));
 				}
 			}
-			ws.vVectors[dst] = ImpulseVector.ofF64(out, valid);
+			ws.vVectors[dst] = ws.arena.allocF64(out, n, valid);
 			ws.zf = (norm == 0.0);
 			ws.pc++;
 			return;
@@ -1547,10 +1833,13 @@ public final class ImpulsePillar5Ops {
 			}
 			int u = (int) u64;
 			if (!col.isValidAt(u)) {
-				ws.vVectors[dst] = ImpulseVector.ofF64(new double[dim], new long[Math.max(1, (dim + 63) >>> 6)]);
+				ws.vVectors[dst] = ws.arena.allocF64(ws.arena.allocDoubleZeroed(dim), dim,
+						ws.arena.allocLongZeroed(Math.max(1, (dim + 63) >>> 6)));
 				ws.zf = true;
 			} else {
-				ws.vVectors[dst] = ImpulseVector.ofF64(col.embData[u].clone(), ImpulseVector.allocValidAllTrue(dim));
+				double[] copy = ws.arena.allocDouble(dim);
+				System.arraycopy(col.embData[u], 0, copy, 0, dim);
+				ws.vVectors[dst] = ws.arena.allocF64(copy, dim, ws.arena.allocValidAllTrue(dim));
 				ws.zf = false;
 			}
 			ws.pc++;
@@ -1564,9 +1853,13 @@ public final class ImpulsePillar5Ops {
 			ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
 			return;
 		}
-		double[] acc = new double[dim];
+		double[] acc = ws.arena.allocDoubleZeroed(dim);
 		int cnt = 0;
-		for (int u : fa.toSortedArray()) {
+		int fCard = fa.cardinality();
+		int[] fIds = ws.arena.allocInt(Math.max(1, fCard));
+		int fn = fa.toSortedArrayInto(fIds);
+		for (int fi = 0; fi < fn; fi++) {
+			int u = fIds[fi];
 			if (u >= 0 && u < col.length && col.isValidAt(u)) {
 				cnt++;
 				double[] r = col.embData[u];
@@ -1579,7 +1872,7 @@ public final class ImpulsePillar5Ops {
 			for (int i = 0; i < dim; i++)
 				acc[i] *= inv;
 		}
-		ws.vVectors[dst] = ImpulseVector.ofF64(acc, ImpulseVector.allocValidAllTrue(dim));
+		ws.vVectors[dst] = ws.arena.allocF64(acc, dim, ws.arena.allocValidAllTrue(dim));
 		ws.zf = (cnt == 0);
 		ws.pc++;
 	}

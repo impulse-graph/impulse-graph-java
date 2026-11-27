@@ -1343,6 +1343,21 @@ public final class BinarySnapshotLoader {
 						? segment.asSlice(cscColIdxOffset, cscColIdxBytes)
 						: MemorySegment.NULL;
 
+				if (!isVirtualRel && edgeCount > 0) {
+					if (csrRowOffOffset > 0 && csrColIdxOffset == 0) {
+						ImpulseAssert.checkWellFormed(false, () -> "CSR col_idx offset missing for relation " + relId
+								+ " with edgeCount=" + edgeCount);
+						throw new IllegalArgumentException(
+								"CSR col_idx offset missing for relation " + relId + " with edgeCount=" + edgeCount);
+					}
+					if (cscRowOffOffset > 0 && cscColIdxOffset == 0) {
+						ImpulseAssert.checkWellFormed(false, () -> "CSC col_idx offset missing for relation " + relId
+								+ " with edgeCount=" + edgeCount);
+						throw new IllegalArgumentException(
+								"CSC col_idx offset missing for relation " + relId + " with edgeCount=" + edgeCount);
+					}
+				}
+
 				boolean hasCoo = isV011 && (((secFeatures & 0x100L) != 0L) || cooSrcOffset > 0 || cooSrcBytes > 0
 						|| cooTgtOffset > 0 || cooTgtBytes > 0 || cooEdgeIdOffset > 0 || cooEdgeIdBytes > 0);
 				if (isV011 && !isVirtualRel && edgeCount > 0 && MemorySegment.NULL.equals(offsetsSeg)
@@ -1495,7 +1510,7 @@ public final class BinarySnapshotLoader {
 			align128(dirBuf);
 
 			List<LoadedIndex> loadedIndices = new ArrayList<>();
-			if (isV010 && indexCount > 0) {
+			if (isV010Plus && indexCount > 0) {
 				for (int x = 0; x < indexCount; x++) {
 					final int idxEntryIdx = x;
 					if (dirBuf.remaining() < 64) {
@@ -2144,6 +2159,13 @@ public final class BinarySnapshotLoader {
 			}
 		}
 
+		if (!MemorySegment.NULL.equals(offsetsSeg) && edgeCount > 0 && MemorySegment.NULL.equals(targetsSeg)) {
+			ImpulseAssert.checkWellFormed(false,
+					() -> "CSR col_idx targets segment missing for relation " + relId + " with edgeCount=" + edgeCount);
+			throw new IllegalArgumentException(
+					"CSR col_idx targets segment missing for relation " + relId + " with edgeCount=" + edgeCount);
+		}
+
 		long flatFwdSlots = flatForward ? nodeCount : edgeCount;
 		long reqTargetsBytes = checkedMultiply(flatFwdSlots, tgtWidth, "CSR reqTargetsBytes");
 		if (!MemorySegment.NULL.equals(targetsSeg)) {
@@ -2172,9 +2194,7 @@ public final class BinarySnapshotLoader {
 
 		if (!MemorySegment.NULL.equals(cscOffsetsSeg)) {
 			long segmentNodes = Math.max(0L, (cscOffsetsSeg.byteSize() / (long) offWidth) - 1L);
-			long effectiveTgt = (tgtDomainNodeCount > 0 && tgtDomainNodeCount == segmentNodes)
-					? tgtDomainNodeCount
-					: segmentNodes;
+			long effectiveTgt = (tgtDomainNodeCount > 0) ? Math.max(tgtDomainNodeCount, segmentNodes) : segmentNodes;
 			long reqCscOffsetsBytes = checkedMultiply(checkedAdd(effectiveTgt, 1L, "CSC effectiveTgt+1"), offWidth,
 					"CSC reqCscOffsetsBytes");
 			if (cscOffsetsSeg.byteSize() < reqCscOffsetsBytes) {
@@ -2182,6 +2202,12 @@ public final class BinarySnapshotLoader {
 						+ ": actual=" + cscOffsetsSeg.byteSize() + ", expected=" + reqCscOffsetsBytes);
 				throw new IllegalArgumentException("CSC row_offsets segment undersized for relation " + relId
 						+ ": actual=" + cscOffsetsSeg.byteSize() + ", expected=" + reqCscOffsetsBytes);
+			}
+			if (edgeCount > 0 && MemorySegment.NULL.equals(cscTargetsSeg)) {
+				ImpulseAssert.checkWellFormed(false, () -> "CSC col_idx targets segment missing for relation " + relId
+						+ " with edgeCount=" + edgeCount);
+				throw new IllegalArgumentException(
+						"CSC col_idx targets segment missing for relation " + relId + " with edgeCount=" + edgeCount);
 			}
 			long firstCsc = readUnsignedAt(cscOffsetsSeg, 0, offWidth);
 			long lastCsc = readUnsignedAt(cscOffsetsSeg, effectiveTgt, offWidth);

@@ -540,8 +540,9 @@ public final class ImpulsePillar4MathOps {
 		boolean sValid = !isUnary && scalarRhs && ws.isRValid(s2);
 		long sVal = sValid ? ws.rRegs[s2] : 0L;
 
-		long[] out = new long[n];
-		long[] outValid = new long[Math.max(1, (n + 63) >>> 6)];
+		int words = Math.max(1, (n + 63) >>> 6);
+		long[] out = ws.arena.allocLongZeroed(n);
+		long[] outValid = ws.arena.allocLongZeroed(words);
 
 		for (int i = 0; i < n; i++) {
 			if (!laneActive(mask, i) || !va.isValidAt(i))
@@ -580,8 +581,8 @@ public final class ImpulsePillar4MathOps {
 		}
 
 		ws.vVectors[dst] = (va.elemTag == ImpulseVector.TAG_U64)
-				? ImpulseVector.ofU64(out, outValid)
-				: ImpulseVector.ofI64(out, outValid);
+				? ws.arena.allocU64(out, n, outValid)
+				: ws.arena.allocI64(out, n, outValid);
 		ws.pc++;
 	}
 
@@ -603,8 +604,8 @@ public final class ImpulsePillar4MathOps {
 			}
 			int n = vStart.length;
 			int words = Math.max(1, (n + 63) >>> 6);
-			long[] outValid = new long[words];
-			long[] outData = new long[words];
+			long[] outValid = ws.arena.allocLongZeroed(words);
+			long[] outData = ws.arena.allocLongZeroed(words);
 			if (ws.isRValid(s3)) {
 				long ts = ws.rRegs[s3];
 				for (int i = 0; i < n; i++) {
@@ -617,7 +618,7 @@ public final class ImpulsePillar4MathOps {
 						outData[i >>> 6] |= (1L << (i & 63));
 				}
 			}
-			ws.vVectors[dst] = ImpulseVector.ofBool3vl(n, outValid, outData);
+			ws.vVectors[dst] = ws.arena.allocBool3vl(n, outValid, outData);
 			ws.pc++;
 			return;
 		}
@@ -642,8 +643,8 @@ public final class ImpulsePillar4MathOps {
 					return;
 				}
 			}
-			long[] out = new long[n];
-			long[] outValid = new long[Math.max(1, (n + 63) >>> 6)];
+			long[] out = ws.arena.allocLongZeroed(n);
+			long[] outValid = ws.arena.allocLongZeroed(Math.max(1, (n + 63) >>> 6));
 			boolean bScalarValid = scalarB && ws.isRValid(s2);
 			long bScalar = ws.rRegs[s2];
 			boolean dValid = ws.isRValid(s3);
@@ -663,7 +664,7 @@ public final class ImpulsePillar4MathOps {
 					}
 				}
 			}
-			ws.vVectors[dst] = ImpulseVector.ofI64(out, outValid);
+			ws.vVectors[dst] = ws.arena.allocI64(out, n, outValid);
 			ws.pc++;
 			return;
 		}

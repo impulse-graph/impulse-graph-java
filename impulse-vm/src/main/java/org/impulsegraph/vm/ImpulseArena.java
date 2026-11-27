@@ -31,6 +31,12 @@ public final class ImpulseArena {
 	private boolean[][] boolPool = new boolean[INITIAL_SLOTS][];
 	private int boolPos;
 
+	private String[][] stringPool = new String[INITIAL_SLOTS][];
+	private int stringPos;
+
+	private double[][][] double2DPool = new double[INITIAL_SLOTS][][];
+	private int double2DPos;
+
 	private ImpulseVector[] vecPool = new ImpulseVector[INITIAL_SLOTS];
 	private int vecPos;
 
@@ -70,6 +76,8 @@ public final class ImpulseArena {
 		intPos = 0;
 		bytePos = 0;
 		boolPos = 0;
+		stringPos = 0;
+		double2DPos = 0;
 		vecPos = 0;
 		frontierPos = 0;
 	}
@@ -180,6 +188,44 @@ public final class ImpulseArena {
 		return arr;
 	}
 
+	public String[] allocString(int len) {
+		int idx = stringPos++;
+		if (idx >= stringPool.length) {
+			stringPool = Arrays.copyOf(stringPool, stringPool.length * 2);
+		}
+		String[] arr = stringPool[idx];
+		if (arr == null || arr.length < len) {
+			arr = new String[Math.max(len, 64)];
+			stringPool[idx] = arr;
+		}
+		return arr;
+	}
+
+	public String[] allocStringZeroed(int len) {
+		String[] arr = allocString(len);
+		Arrays.fill(arr, 0, len, null);
+		return arr;
+	}
+
+	public double[][] allocDouble2D(int len) {
+		int idx = double2DPos++;
+		if (idx >= double2DPool.length) {
+			double2DPool = Arrays.copyOf(double2DPool, double2DPool.length * 2);
+		}
+		double[][] arr = double2DPool[idx];
+		if (arr == null || arr.length < len) {
+			arr = new double[Math.max(len, 64)][];
+			double2DPool[idx] = arr;
+		}
+		return arr;
+	}
+
+	public double[][] allocDouble2DZeroed(int len) {
+		double[][] arr = allocDouble2D(len);
+		Arrays.fill(arr, 0, len, null);
+		return arr;
+	}
+
 	public ImpulseVector allocVec() {
 		int idx = vecPos++;
 		if (idx >= vecPool.length) {
@@ -227,6 +273,23 @@ public final class ImpulseArena {
 		v.length = len;
 		v.validBits = validBits;
 		v.boolDataBits = dataBits;
+		return v;
+	}
+
+	public ImpulseVector allocStr(String[] data, int len) {
+		ImpulseVector v = allocVec();
+		v.elemTag = ImpulseVector.TAG_STR;
+		v.length = len;
+		v.strData = data;
+		return v;
+	}
+
+	public ImpulseVector allocEmb(int dim, double[][] rows, int len) {
+		ImpulseVector v = allocVec();
+		v.elemTag = ImpulseVector.TAG_EMB;
+		v.length = len;
+		v.embDim = dim;
+		v.embData = rows;
 		return v;
 	}
 

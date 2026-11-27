@@ -105,14 +105,42 @@ public final class AlgebraicTypeInferencePass implements CompilerPass {
 		return nodeWithChildren.withSignature(sig);
 	}
 
+	private AlgebraicSignature inferAttributeStats(AttributeStatistics attrStats) {
+		if (attrStats == null) {
+			return AlgebraicSignature.defaultGeneral();
+		}
+		// Never attach a constant-foldable bound to nullable attributes (3VL
+		// NULL/UNKNOWN).
+		if (attrStats.hasNulls() || attrStats.nullCount() > 0) {
+			return new AlgebraicSignature(IntervalBound.UNBOUNDED, MorphismClass.GENERAL, AlgebraicSignature.ALG_NONE,
+					attrStats.monotonicity(), AlgebraicSignature.HOMO_NONE, true, false, false, 0, 0.0);
+		}
+		boolean isFloatAttr = (attrStats.minIntVal() > attrStats.maxIntVal())
+				|| ((double) attrStats.minIntVal() != attrStats.minFloatVal())
+				|| ((double) attrStats.maxIntVal() != attrStats.maxFloatVal());
+		IntervalBound bound;
+		if (isFloatAttr) {
+			if (Double.isFinite(attrStats.minFloatVal()) && Double.isFinite(attrStats.maxFloatVal())
+					&& attrStats.minFloatVal() <= attrStats.maxFloatVal()) {
+				bound = IntervalBound.ofFloat(attrStats.minFloatVal(), attrStats.maxFloatVal());
+			} else {
+				bound = IntervalBound.UNBOUNDED;
+			}
+		} else if (attrStats.minIntVal() <= attrStats.maxIntVal()) {
+			bound = IntervalBound.ofInt(attrStats.minIntVal(), attrStats.maxIntVal());
+		} else {
+			bound = IntervalBound.UNBOUNDED;
+		}
+		return new AlgebraicSignature(bound, MorphismClass.GENERAL, AlgebraicSignature.ALG_NONE,
+				attrStats.monotonicity(), AlgebraicSignature.HOMO_NONE, true, false, false, 0, 0.0);
+	}
+
 	private AlgebraicSignature inferMemberAccess(CelAstNode node, GraphStatistics stats) {
 		String field = node.text();
 		if (stats != null) {
 			AttributeStatistics attrStats = stats.getAttributeStatistics(field);
 			if (attrStats != null) {
-				IntervalBound bound = IntervalBound.ofInt(attrStats.minIntVal(), attrStats.maxIntVal());
-				return new AlgebraicSignature(bound, MorphismClass.GENERAL, AlgebraicSignature.ALG_NONE,
-						attrStats.monotonicity(), AlgebraicSignature.HOMO_NONE, true, false, false, 0, 0.0);
+				return inferAttributeStats(attrStats);
 			}
 		}
 		return AlgebraicSignature.defaultGeneral();
@@ -123,9 +151,7 @@ public final class AlgebraicTypeInferencePass implements CompilerPass {
 		if (stats != null) {
 			AttributeStatistics attrStats = stats.getAttributeStatistics(name);
 			if (attrStats != null) {
-				IntervalBound bound = IntervalBound.ofInt(attrStats.minIntVal(), attrStats.maxIntVal());
-				return new AlgebraicSignature(bound, MorphismClass.GENERAL, AlgebraicSignature.ALG_NONE,
-						attrStats.monotonicity(), AlgebraicSignature.HOMO_NONE, true, false, false, 0, 0.0);
+				return inferAttributeStats(attrStats);
 			}
 		}
 		return AlgebraicSignature.defaultGeneral();
@@ -186,33 +212,38 @@ public final class AlgebraicTypeInferencePass implements CompilerPass {
 						left.constantFloatVal() + right.constantFloatVal());
 			}
 
-			// Comparison bounds checking (Zone map evaluation)
-			if (">".equals(op)) {
-				if (l.minInt() > r.maxInt())
-					return AlgebraicSignature.ofConstantBool(true);
-				if (l.maxInt() <= r.minInt())
-					return AlgebraicSignature.ofConstantBool(false);
-			} else if (">=".equals(op)) {
-				if (l.minInt() >= r.maxInt())
-					return AlgebraicSignature.ofConstantBool(true);
-				if (l.maxInt() < r.minInt())
-					return AlgebraicSignature.ofConstantBool(false);
-			} else if ("<".equals(op)) {
-				if (l.maxInt() < r.minInt())
-					return AlgebraicSignature.ofConstantBool(true);
-				if (l.minInt() >= r.maxInt())
-					return AlgebraicSignature.ofConstantBool(false);
-			} else if ("<=".equals(op)) {
-				if (l.maxInt() <= r.minInt())
-					return AlgebraicSignature.ofConstantBool(true);
-				if (l.minInt() > r.maxInt())
-					return AlgebraicSignature.ofConstantBool(false);
-			} else if ("==".equals(op)) {
-				if (l.maxInt() < r.minInt() || l.minInt() > r.maxInt())
-					return AlgebraicSignature.ofConstantBool(false);
-			} else if ("!=".equals(op)) {
-				if (l.maxInt() < r.minInt() || l.minInt() > r.maxInt())
-					return AlgebraicSignature.ofConstantBool(true);
+			// Comparison bounds checking (Zone map evaluation) — strictly for exact
+			// integer bounds; never fold float/double operands using truncated int bounds.
+			CelAstNode leftNode = node.children().get(0);
+			CelAstNode rightNode = node.children().get(1);
+			if (!isFloatOperand(leftNode, l) && !isFloatOperand(rightNode, r)) {
+				if (">".equals(op)) {
+					if (l.minInt() > r.maxInt())
+						return AlgebraicSignature.ofConstantBool(true);
+					if (l.maxInt() <= r.minInt())
+						return AlgebraicSignature.ofConstantBool(false);
+				} else if (">=".equals(op)) {
+					if (l.minInt() >= r.maxInt())
+						return AlgebraicSignature.ofConstantBool(true);
+					if (l.maxInt() < r.minInt())
+						return AlgebraicSignature.ofConstantBool(false);
+				} else if ("<".equals(op)) {
+					if (l.maxInt() < r.minInt())
+						return AlgebraicSignature.ofConstantBool(true);
+					if (l.minInt() >= r.maxInt())
+						return AlgebraicSignature.ofConstantBool(false);
+				} else if ("<=".equals(op)) {
+					if (l.maxInt() <= r.minInt())
+						return AlgebraicSignature.ofConstantBool(true);
+					if (l.minInt() > r.maxInt())
+						return AlgebraicSignature.ofConstantBool(false);
+				} else if ("==".equals(op)) {
+					if (l.maxInt() < r.minInt() || l.minInt() > r.maxInt())
+						return AlgebraicSignature.ofConstantBool(false);
+				} else if ("!=".equals(op)) {
+					if (l.maxInt() < r.minInt() || l.minInt() > r.maxInt())
+						return AlgebraicSignature.ofConstantBool(true);
+				}
 			}
 		}
 
@@ -260,6 +291,24 @@ public final class AlgebraicTypeInferencePass implements CompilerPass {
 		}
 
 		return AlgebraicSignature.defaultGeneral();
+	}
+
+	private static boolean isFloatOperand(CelAstNode node, IntervalBound b) {
+		if (node.kind() == CelAstNode.Kind.LITERAL_FLOAT) {
+			return true;
+		}
+		if (!Double.isFinite(b.minFloat()) || !Double.isFinite(b.maxFloat()) || b.minFloat() != (double) b.minInt()
+				|| b.maxFloat() != (double) b.maxInt()) {
+			return true;
+		}
+		for (CelAstNode child : node.children()) {
+			AlgebraicSignature cs = child.signature();
+			if (child.kind() == CelAstNode.Kind.LITERAL_FLOAT
+					|| (cs != null && cs.interval().isBounded() && isFloatOperand(child, cs.interval()))) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private Monotonicity flipMonotonicity(Monotonicity m) {

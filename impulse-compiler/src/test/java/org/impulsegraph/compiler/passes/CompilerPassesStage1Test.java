@@ -832,9 +832,12 @@ public class CompilerPassesStage1Test {
 
 				assertThat(pruned).isInstanceOf(ScmProgram.class);
 				ScmProgram prog = (ScmProgram) pruned;
-				// Dead branch pruned: only ScmCollect remains
-				assertEquals(1, prog.steps().size());
-				assertThat(prog.steps().get(0)).isInstanceOf(ScmCollect.class);
+				// Constant-false walk is retained with a constant-false marker (never dropped
+				// as a pass-through no-op)
+				assertEquals(2, prog.steps().size());
+				assertThat(prog.steps().get(0)).isInstanceOf(ScmWalk.class);
+				assertEquals(List.of(ScmSymbol.of("constant-false")), ((ScmWalk) prog.steps().get(0)).shaderSteps());
+				assertThat(prog.steps().get(1)).isInstanceOf(ScmCollect.class);
 			}
 		}
 
@@ -934,13 +937,15 @@ public class CompilerPassesStage1Test {
 		}
 
 		@Test
-		@DisplayName("VectorFilter Pruning: Constant true and false filters pruned to null")
+		@DisplayName("VectorFilter Pruning: Constant true stripped to null; constant false preserved")
 		void testVectorFilterPruning() {
 			CompilerContext ctx = createContext(null, null);
 
 			ScmVectorFilter falseFilter = new ScmVectorFilter(ScmSymbol.of("constant-false"));
 			ImpScmNode prunedFalse = ZoneMapPruningPass.INSTANCE.transform(falseFilter, ctx);
-			assertNull(prunedFalse);
+			assertNotNull(prunedFalse);
+			assertThat(prunedFalse).isInstanceOf(ScmVectorFilter.class);
+			assertEquals(ScmSymbol.of("constant-false"), ((ScmVectorFilter) prunedFalse).predicate());
 
 			ScmVectorFilter trueFilter = new ScmVectorFilter(ScmSymbol.of("constant-true"));
 			ImpScmNode prunedTrue = ZoneMapPruningPass.INSTANCE.transform(trueFilter, ctx);
