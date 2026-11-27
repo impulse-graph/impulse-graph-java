@@ -127,15 +127,22 @@ public final class ImpulseDecimal64 {
 		if (Long.compareUnsigned(hi, ud) >= 0) {
 			return IMPULSE_VM_ERR_ARITHMETIC_OVERFLOW;
 		}
-		long rem = hi;
-		long quot = 0L;
-		for (int bit = 63; bit >= 0; bit--) {
-			boolean carry = rem < 0L;
-			long loBit = (lo >>> bit) & 1L;
-			rem = (rem << 1) | loBit;
-			if (carry || Long.compareUnsigned(rem, ud) >= 0) {
-				rem -= ud;
-				quot |= (1L << bit);
+		long quot;
+		long rem;
+		if (hi == 0L) {
+			quot = (lo >= 0L && ud >= 0L) ? (lo / ud) : Long.divideUnsigned(lo, ud);
+			rem = lo - quot * ud;
+		} else {
+			rem = hi;
+			quot = 0L;
+			for (int bit = 63; bit >= 0; bit--) {
+				boolean carry = rem < 0L;
+				long loBit = (lo >>> bit) & 1L;
+				rem = (rem << 1) | loBit;
+				if (carry || Long.compareUnsigned(rem, ud) >= 0) {
+					rem -= ud;
+					quot |= (1L << bit);
+				}
 			}
 		}
 		return roundHalfUpToI64(negRes, quot, rem, ud, ws);
@@ -164,15 +171,20 @@ public final class ImpulseDecimal64 {
 		if (Long.compareUnsigned(hi, ud) >= 0) {
 			return false;
 		}
-		long rem = hi;
-		long quot = 0L;
-		for (int bit = 63; bit >= 0; bit--) {
-			boolean carry = rem < 0L;
-			long loBit = (lo >>> bit) & 1L;
-			rem = (rem << 1) | loBit;
-			if (carry || Long.compareUnsigned(rem, ud) >= 0) {
-				rem -= ud;
-				quot |= (1L << bit);
+		long quot;
+		if (hi == 0L) {
+			quot = (lo >= 0L && ud >= 0L) ? (lo / ud) : Long.divideUnsigned(lo, ud);
+		} else {
+			long rem = hi;
+			quot = 0L;
+			for (int bit = 63; bit >= 0; bit--) {
+				boolean carry = rem < 0L;
+				long loBit = (lo >>> bit) & 1L;
+				rem = (rem << 1) | loBit;
+				if (carry || Long.compareUnsigned(rem, ud) >= 0) {
+					rem -= ud;
+					quot |= (1L << bit);
+				}
 			}
 		}
 		return signedI64OfU64(negRes, quot, ws) == IMPULSE_VM_OK;
