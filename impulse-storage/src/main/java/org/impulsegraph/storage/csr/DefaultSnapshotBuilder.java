@@ -698,9 +698,15 @@ public final class DefaultSnapshotBuilder {
 				int attrCount = attrSegs.size();
 				ByteBuffer attrDescsBuf = ByteBuffer.allocate(attrCount * 44).order(ByteOrder.LITTLE_ENDIAN);
 
+				List<BinarySnapshotLoader.LoadedAttribute> loadedRelAttrs = relSnap != null
+						? relSnap.getLoadedAttributes()
+						: List.of();
 				for (int a = 0; a < attrCount; a++) {
 					String attrName = relSnap.getAttributeName(a);
 					int attrNameOff = getOrAddString.apply(attrName != null ? attrName : ("attr_" + a));
+					BinarySnapshotLoader.LoadedAttribute loadedAttr = (a < loadedRelAttrs.size())
+							? loadedRelAttrs.get(a)
+							: null;
 					byte typeCode = relSnap.getAttributeTypeCode(a);
 					if (typeCode == 0) {
 						typeCode = 0x06; // default float32
@@ -733,11 +739,17 @@ public final class DefaultSnapshotBuilder {
 						attrDataBytes += dataBytes.length;
 					}
 
+					int attrScale = (loadedAttr != null) ? loadedAttr.scale() : 0;
+					int attrPrecision = (loadedAttr != null) ? loadedAttr.precision() : 0;
+					int attrDimension = (loadedAttr != null && loadedAttr.dimension() > 0)
+							? loadedAttr.dimension()
+							: 1;
+
 					attrDescsBuf.putInt(attrNameOff);
 					attrDescsBuf.put(typeCode);
-					attrDescsBuf.put((byte) 0); // reserved1
-					attrDescsBuf.putShort((short) 0); // reserved2
-					attrDescsBuf.putInt(1); // dimension
+					attrDescsBuf.put((byte) attrScale); // reserved1 (scale for DECIMAL64)
+					attrDescsBuf.putShort((short) attrPrecision); // reserved2 (precision for DECIMAL64)
+					attrDescsBuf.putInt(attrDimension); // dimension
 					attrDescsBuf.putLong(attrDataOff);
 					attrDescsBuf.putLong(attrDataBytes);
 					attrDescsBuf.putLong(0L); // offsets_off
