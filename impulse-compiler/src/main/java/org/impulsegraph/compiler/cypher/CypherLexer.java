@@ -53,8 +53,14 @@ public final class CypherLexer {
 			case '|' -> {
 				return new CypherToken(CypherTokenType.PIPE, "|", startPos, startLine, startCol);
 			}
+			case '+' -> {
+				return new CypherToken(CypherTokenType.PLUS, "+", startPos, startLine, startCol);
+			}
 			case '*' -> {
 				return new CypherToken(CypherTokenType.STAR, "*", startPos, startLine, startCol);
+			}
+			case '/' -> {
+				return new CypherToken(CypherTokenType.SLASH, "/", startPos, startLine, startCol);
 			}
 
 			case '-' -> {
@@ -167,17 +173,52 @@ public final class CypherLexer {
 	}
 
 	private CypherToken scanNumber(int startPos, int startLine, int startCol) {
-		while (!isAtEnd() && isDigit(peek())) {
+		// Hex integer literal (e.g. 0x10d): trailing 'd' is a hex digit, NOT a decimal
+		// suffix
+		if (src.charAt(startPos) == '0' && !isAtEnd() && (peek() == 'x' || peek() == 'X')) {
+			advance(); // consume x/X
+			while (!isAtEnd() && (isHexDigit(peek()) || peek() == '_')) {
+				advance();
+			}
+			String lexeme = src.substring(startPos, cursor);
+			return new CypherToken(CypherTokenType.NUMBER_LITERAL, lexeme, startPos, startLine, startCol);
+		}
+		boolean hasExp = false;
+		while (!isAtEnd() && (isDigit(peek()) || peek() == '_')) {
 			advance();
 		}
 		if (!isAtEnd() && peek() == '.' && isDigit(peekNext())) {
 			advance(); // consume .
-			while (!isAtEnd() && isDigit(peek())) {
+			while (!isAtEnd() && (isDigit(peek()) || peek() == '_')) {
 				advance();
 			}
 		}
-		String lexeme = src.substring(startPos, cursor);
+		if (!isAtEnd() && (peek() == 'e' || peek() == 'E')) {
+			hasExp = true;
+			advance(); // consume e/E
+			if (!isAtEnd() && (peek() == '+' || peek() == '-')) {
+				advance();
+			}
+			while (!isAtEnd() && (isDigit(peek()) || peek() == '_')) {
+				advance();
+			}
+		}
+		String lexeme = src.substring(startPos, cursor).replace("_", "");
+		// Exact base-10 DECIMAL literal suffix: 19.99d / 19.99D / 100d
+		if (!isAtEnd() && (peek() == 'd' || peek() == 'D')
+				&& (cursor + 1 >= src.length() || !(isAlphaNumeric(peekNext()) || peekNext() == '_'))) {
+			advance(); // consume d/D
+			if (hasExp) {
+				throw new IllegalArgumentException("Scientific notation is not supported on DECIMAL literal '" + lexeme
+						+ "d' at position " + startPos);
+			}
+			return new CypherToken(CypherTokenType.DECIMAL_LITERAL, lexeme, startPos, startLine, startCol);
+		}
 		return new CypherToken(CypherTokenType.NUMBER_LITERAL, lexeme, startPos, startLine, startCol);
+	}
+
+	private static boolean isHexDigit(char c) {
+		return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 	}
 
 	private CypherToken scanIdentifierOrKeyword(int startPos, int startLine, int startCol) {
@@ -190,7 +231,10 @@ public final class CypherLexer {
 		CypherTokenType type = switch (upper) {
 			case "MATCH" -> CypherTokenType.KW_MATCH;
 			case "WHERE" -> CypherTokenType.KW_WHERE;
+			case "WITH" -> CypherTokenType.KW_WITH;
 			case "RETURN" -> CypherTokenType.KW_RETURN;
+			case "AS" -> CypherTokenType.KW_AS;
+			case "CAST" -> CypherTokenType.KW_CAST;
 			case "AND" -> CypherTokenType.KW_AND;
 			case "OR" -> CypherTokenType.KW_OR;
 			case "NOT" -> CypherTokenType.KW_NOT;

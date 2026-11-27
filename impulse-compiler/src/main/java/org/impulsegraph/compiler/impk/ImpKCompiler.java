@@ -17,12 +17,18 @@ import org.impulsegraph.compiler.ast.ScmReduce;
 import org.impulsegraph.compiler.ast.ScmVectorAnnSearch;
 import org.impulsegraph.compiler.ast.ScmVectorRerankDot;
 import org.impulsegraph.compiler.ast.ScmWalk;
+import org.impulsegraph.compiler.impscm.v11.ImpScmV11Compiler;
+import org.impulsegraph.compiler.impscm.v11.V11ExprLowerer;
 import org.impulsegraph.vm.CompiledQuery;
 
 import java.lang.foreign.Arena;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * ImpK (.impk) Array, Vector & 64-Lane SpMM DSL Compiler lowering GraphBLAS
@@ -32,23 +38,29 @@ import java.util.Objects;
  */
 public final class ImpKCompiler {
 
-	private enum TokenType {
-		IDENT, NUMBER, STRING, EQUALS, PLUS, STAR, LPAREN, RPAREN, LBRACKET, RBRACKET, COMMA, END
+	public enum TokenType {
+		IDENT, PARAM, NUMBER, DECIMAL, STRING, EQUALS, COLON, PLUS, MINUS, STAR, SLASH, LPAREN, RPAREN, LBRACKET, RBRACKET, COMMA, SEMI, END
 	}
 
-	private record Token(TokenType type, String text, double value) {
+	public record Token(TokenType type, String text, double value) {
 	}
 
 	private ImpKCompiler() {
 	}
 
-	private static List<Token> tokenize(String script) {
+	public static List<Token> tokenize(String script) {
+		Objects.requireNonNull(script, "script must not be null");
 		List<Token> tokens = new ArrayList<>();
 		int i = 0;
 		int n = script.length();
 		while (i < n) {
 			char c = script.charAt(i);
-			if (Character.isWhitespace(c) || c == ';') {
+			if (c == ';') {
+				tokens.add(new Token(TokenType.SEMI, ";", 0.0));
+				i++;
+				continue;
+			}
+			if (Character.isWhitespace(c)) {
 				i++;
 				continue;
 			}
@@ -70,6 +82,12 @@ public final class ImpKCompiler {
 					i++;
 				}
 				tokens.add(new Token(TokenType.STRING, s, 0.0));
+			} else if (c == '$') {
+				int start = i++;
+				while (i < n && (Character.isLetterOrDigit(script.charAt(i)) || script.charAt(i) == '_')) {
+					i++;
+				}
+				tokens.add(new Token(TokenType.PARAM, script.substring(start, i), 0.0));
 			} else if (Character.isLetter(c) || c == '_') {
 				int start = i;
 				while (i < n && (Character.isLetterOrDigit(script.charAt(i)) || script.charAt(i) == '_'
@@ -77,25 +95,74 @@ public final class ImpKCompiler {
 					i++;
 				}
 				tokens.add(new Token(TokenType.IDENT, script.substring(start, i), 0.0));
-			} else if (Character.isDigit(c)
-					|| ((c == '-' || c == '.') && i + 1 < n && Character.isDigit(script.charAt(i + 1)))) {
+			} else if (Character.isDigit(c) || (c == '.' && i + 1 < n && Character.isDigit(script.charAt(i + 1)))
+					|| (c == '-' && i + 1 < n && Character.isDigit(script.charAt(i + 1))
+							&& isUnarySignContext(tokens))) {
 				int start = i;
 				if (c == '-') {
 					i++;
 				}
-				while (i < n && (Character.isDigit(script.charAt(i)) || script.charAt(i) == '.')) {
+				// Hex integer literal (e.g. 0x10d): trailing 'd' is a hex digit, NOT decimal
+				if (i + 1 < n && script.charAt(i) == '0'
+						&& (script.charAt(i + 1) == 'x' || script.charAt(i + 1) == 'X')) {
+					i += 2;
+					int hexStart = i;
+					while (i < n && (isHexDigit(script.charAt(i)) || script.charAt(i) == '_')) {
+						i++;
+					}
+					String raw = script.substring(start, i);
+					String hexDigits = script.substring(hexStart, i).replace("_", "");
+					long val = hexDigits.isEmpty() ? 0L : Long.parseUnsignedLong(hexDigits, 16);
+					if (c == '-') {
+						val = -val;
+					}
+					tokens.add(new Token(TokenType.NUMBER, raw, (double) val));
+					continue;
+				}
+				boolean hasExp = false;
+				while (i < n && (Character.isDigit(script.charAt(i)) || script.charAt(i) == '.'
+						|| script.charAt(i) == '_')) {
 					i++;
 				}
-				String num = script.substring(start, i);
-				tokens.add(new Token(TokenType.NUMBER, num, Double.parseDouble(num)));
-			} else if (c == '=' || c == ':') {
+				if (i < n && (script.charAt(i) == 'e' || script.charAt(i) == 'E')) {
+					hasExp = true;
+					i++;
+					if (i < n && (script.charAt(i) == '+' || script.charAt(i) == '-')) {
+						i++;
+					}
+					while (i < n && (Character.isDigit(script.charAt(i)) || script.charAt(i) == '_')) {
+						i++;
+					}
+				}
+				String num = script.substring(start, i).replace("_", "");
+				if (i < n && (script.charAt(i) == 'd' || script.charAt(i) == 'D') && (i + 1 >= n
+						|| !(Character.isLetterOrDigit(script.charAt(i + 1)) || script.charAt(i + 1) == '_'))) {
+					i++;
+					if (hasExp) {
+						throw new IllegalArgumentException(
+								"Scientific notation is not supported on DECIMAL literal '" + num + "d'");
+					}
+					tokens.add(new Token(TokenType.DECIMAL, num, 0.0));
+				} else {
+					tokens.add(new Token(TokenType.NUMBER, num, Double.parseDouble(num)));
+				}
+			} else if (c == '=') {
 				tokens.add(new Token(TokenType.EQUALS, "=", 0.0));
+				i++;
+			} else if (c == ':') {
+				tokens.add(new Token(TokenType.COLON, ":", 0.0));
 				i++;
 			} else if (c == '+') {
 				tokens.add(new Token(TokenType.PLUS, "+", 0.0));
 				i++;
+			} else if (c == '-') {
+				tokens.add(new Token(TokenType.MINUS, "-", 0.0));
+				i++;
 			} else if (c == '*' || c == '@') {
 				tokens.add(new Token(TokenType.STAR, "*", 0.0));
+				i++;
+			} else if (c == '/') {
+				tokens.add(new Token(TokenType.SLASH, "/", 0.0));
 				i++;
 			} else if (c == '(') {
 				tokens.add(new Token(TokenType.LPAREN, "(", 0.0));
@@ -120,6 +187,19 @@ public final class ImpKCompiler {
 		return tokens;
 	}
 
+	private static boolean isUnarySignContext(List<Token> tokens) {
+		if (tokens.isEmpty()) {
+			return true;
+		}
+		TokenType prev = tokens.get(tokens.size() - 1).type();
+		return prev != TokenType.IDENT && prev != TokenType.PARAM && prev != TokenType.NUMBER
+				&& prev != TokenType.DECIMAL && prev != TokenType.RPAREN && prev != TokenType.RBRACKET;
+	}
+
+	private static boolean isHexDigit(char c) {
+		return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+	}
+
 	public static List<ImpKStatement> parse(String script) {
 		Objects.requireNonNull(script, "script must not be null");
 		List<ImpKStatement> statements = new ArrayList<>();
@@ -127,39 +207,313 @@ public final class ImpKCompiler {
 		int[] pos = {0};
 
 		while (pos[0] < tokens.size() && tokens.get(pos[0]).type() != TokenType.END) {
+			if (match(tokens, pos, TokenType.SEMI)) {
+				continue;
+			}
 			if (tokens.get(pos[0]).type() == TokenType.IDENT) {
 				String target = tokens.get(pos[0]).text();
 				pos[0]++;
-				if (match(tokens, pos, TokenType.EQUALS)) {
-					if (pos[0] < tokens.size() && tokens.get(pos[0]).type() == TokenType.IDENT) {
-						String fnOrVar = tokens.get(pos[0]).text();
-						pos[0]++;
-						if (match(tokens, pos, TokenType.STAR)) {
-							if (pos[0] < tokens.size() && tokens.get(pos[0]).type() == TokenType.IDENT) {
-								String rhs = tokens.get(pos[0]).text();
-								pos[0]++;
-								statements.add(ImpKStatement.basic(target, ImpKOpType.MATRIX_VECTOR_MUL, fnOrVar, rhs,
-										"", 0.0, 10));
-							}
-						} else if (match(tokens, pos, TokenType.PLUS)) {
-							if (pos[0] < tokens.size() && tokens.get(pos[0]).type() == TokenType.IDENT) {
-								String rhs = tokens.get(pos[0]).text();
-								pos[0]++;
-								statements.add(
-										ImpKStatement.basic(target, ImpKOpType.VECTOR_ADD, "", fnOrVar, rhs, 0.0, 10));
-							}
-						} else if (match(tokens, pos, TokenType.LPAREN)) {
-							parseFunctionCall(target, fnOrVar, tokens, pos, statements);
-						}
-					} else if (pos[0] < tokens.size() && tokens.get(pos[0]).type() == TokenType.NUMBER) {
-						pos[0]++;
+				String typeAnnotation = "";
+				boolean assigned = false;
+				if (match(tokens, pos, TokenType.COLON)) {
+					// Check for type annotation `x : DECIMAL(10, 2) = ...` vs legacy `z : v + w;`
+					int saved = pos[0];
+					String candidateType = tryConsumeTypeAnnotation(tokens, pos);
+					if (candidateType != null && match(tokens, pos, TokenType.EQUALS)) {
+						typeAnnotation = candidateType;
+						assigned = true;
+					} else {
+						pos[0] = saved;
+						assigned = true;
 					}
+				} else if (match(tokens, pos, TokenType.EQUALS)) {
+					assigned = true;
+				}
+				if (assigned) {
+					parseAssignmentRhs(target, typeAnnotation, tokens, pos, statements);
 				}
 			} else {
 				pos[0]++;
 			}
 		}
 		return statements;
+	}
+
+	private static String tryConsumeTypeAnnotation(List<Token> tokens, int[] pos) {
+		if (pos[0] >= tokens.size() || tokens.get(pos[0]).type() != TokenType.IDENT) {
+			return null;
+		}
+		String typeName = tokens.get(pos[0]).text();
+		String upper = typeName.toUpperCase();
+		if (upper.equals("DECIMAL")) {
+			pos[0]++;
+			if (!match(tokens, pos, TokenType.LPAREN)) {
+				return null;
+			}
+			if (pos[0] >= tokens.size() || tokens.get(pos[0]).type() != TokenType.NUMBER) {
+				return null;
+			}
+			String p = tokens.get(pos[0]++).text();
+			if (!match(tokens, pos, TokenType.COMMA)) {
+				return null;
+			}
+			if (pos[0] >= tokens.size() || tokens.get(pos[0]).type() != TokenType.NUMBER) {
+				return null;
+			}
+			String s = tokens.get(pos[0]++).text();
+			if (!match(tokens, pos, TokenType.RPAREN)) {
+				return null;
+			}
+			return "DECIMAL(" + p + ", " + s + ")";
+		}
+		if (upper.equals("FLOAT64") || upper.equals("F64") || upper.equals("INT64") || upper.equals("I64")) {
+			pos[0]++;
+			return upper;
+		}
+		return null;
+	}
+
+	private static void parseAssignmentRhs(String target, String typeAnnotation, List<Token> tokens, int[] pos,
+			List<ImpKStatement> statements) {
+		if (pos[0] >= tokens.size() || tokens.get(pos[0]).type() == TokenType.END
+				|| tokens.get(pos[0]).type() == TokenType.SEMI) {
+			return;
+		}
+		Token first = tokens.get(pos[0]);
+		// Legacy / built-in function call fast path when IDENT is immediately followed
+		// by LPAREN and no trailing binary op
+		if (first.type() == TokenType.IDENT && pos[0] + 1 < tokens.size()
+				&& tokens.get(pos[0] + 1).type() == TokenType.LPAREN && isLegacyBuiltinFn(first.text())) {
+			String fn = first.text();
+			pos[0] += 2; // consume fn and '('
+			parseFunctionCall(target, fn, tokens, pos, statements);
+			return;
+		}
+		// Decimal/v11 built-in function calls: load/attr, sum, min, max, cast, decimal,
+		// safe_div, log/exp/sqrt/abs
+		if (first.type() == TokenType.IDENT && pos[0] + 1 < tokens.size()
+				&& tokens.get(pos[0] + 1).type() == TokenType.LPAREN && isDecimalV11Fn(first.text())
+				&& !hasBinaryOpAfterMatchingParen(tokens, pos[0] + 1)) {
+			parseDecimalV11Call(target, typeAnnotation, tokens, pos, statements);
+			return;
+		}
+		// Simple legacy binary forms: y = A * x, z = v + w (check no further binary
+		// op)
+		if (first.type() == TokenType.IDENT && pos[0] + 2 < tokens.size()
+				&& (tokens.get(pos[0] + 1).type() == TokenType.STAR || tokens.get(pos[0] + 1).type() == TokenType.PLUS)
+				&& tokens.get(pos[0] + 2).type() == TokenType.IDENT && isStatementBoundary(tokens, pos[0] + 3)
+				&& typeAnnotation.isEmpty()) {
+			String lhs = first.text();
+			TokenType op = tokens.get(pos[0] + 1).type();
+			String rhs = tokens.get(pos[0] + 2).text();
+			pos[0] += 3;
+			if (op == TokenType.STAR) {
+				statements.add(new ImpKStatement(target, ImpKOpType.MATRIX_VECTOR_MUL, lhs, rhs, "", 0.0, 10, 0, 0,
+						false, List.of(), List.of(), lhs + " * " + rhs, ""));
+			} else {
+				statements.add(new ImpKStatement(target, ImpKOpType.VECTOR_ADD, "", lhs, rhs, 0.0, 10, 0, 0, false,
+						List.of(), List.of(), lhs + " + " + rhs, ""));
+			}
+			return;
+		}
+		// Legacy bare number assignment without type annotation (e.g. `n = 42;`)
+		if (first.type() == TokenType.NUMBER && isStatementBoundary(tokens, pos[0] + 1) && typeAnnotation.isEmpty()) {
+			pos[0]++;
+			return;
+		}
+		// Legacy unknown function call `u = unknown_fn(1, "abc", 'def');`
+		if (first.type() == TokenType.IDENT && pos[0] + 1 < tokens.size()
+				&& tokens.get(pos[0] + 1).type() == TokenType.LPAREN && typeAnnotation.isEmpty()
+				&& !isDecimalV11Fn(first.text()) && !hasBinaryOpAfterMatchingParen(tokens, pos[0] + 1)) {
+			pos[0] += 2;
+			int depth = 1;
+			while (pos[0] < tokens.size() && depth > 0 && tokens.get(pos[0]).type() != TokenType.END) {
+				if (tokens.get(pos[0]).type() == TokenType.LPAREN) {
+					depth++;
+				} else if (tokens.get(pos[0]).type() == TokenType.RPAREN) {
+					depth--;
+				}
+				pos[0]++;
+			}
+			return;
+		}
+		// General expression RHS (supports 19.99d, -19.99d, arithmetic +, -, *, /,
+		// cast(...), decimal(...), etc.)
+		String exprText = consumeStatementExprText(tokens, pos);
+		if (!exprText.isEmpty()) {
+			ImpKOpType opType = classifyExprOpType(exprText);
+			statements.add(ImpKStatement.expr(target, opType, exprText, typeAnnotation));
+		}
+	}
+
+	private static boolean isLegacyBuiltinFn(String fn) {
+		return switch (fn.toLowerCase()) {
+			case "pagerank", "afforest", "connected_components", "degree", "topk", "ann_search", "vector_ann_search",
+					"rerank_dot", "vector_rerank_dot", "rerank", "lane_seeds", "lane_init_seeds", "lane_groups",
+					"lane_init_groups", "lane_edge_mask", "lane_set_edge_mask", "lane_spmm", "lane_walk_csr",
+					"lane_spmm_csc", "lane_walk_csc", "lane_prune", "lane_prune_mask", "lane_quorum",
+					"lane_filter_quorum", "lane_reduce_and", "lane_reduce_attr", "lane_set_cover" ->
+				true;
+			default -> false;
+		};
+	}
+
+	private static boolean isDecimalV11Fn(String fn) {
+		return switch (fn.toLowerCase()) {
+			case "load", "attr", "sum", "min", "max", "cast", "decimal", "dec", "safe_div", "log", "exp", "sqrt",
+					"abs" ->
+				true;
+			default -> false;
+		};
+	}
+
+	private static boolean hasBinaryOpAfterMatchingParen(List<Token> tokens, int openIdx) {
+		int depth = 0;
+		for (int i = openIdx; i < tokens.size(); i++) {
+			TokenType t = tokens.get(i).type();
+			if (t == TokenType.LPAREN) {
+				depth++;
+			} else if (t == TokenType.RPAREN) {
+				depth--;
+				if (depth == 0) {
+					int nextIdx = i + 1;
+					if (nextIdx >= tokens.size()) {
+						return false;
+					}
+					TokenType nt = tokens.get(nextIdx).type();
+					return nt == TokenType.PLUS || nt == TokenType.MINUS || nt == TokenType.STAR
+							|| nt == TokenType.SLASH;
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean isStatementBoundary(List<Token> tokens, int idx) {
+		if (idx >= tokens.size()) {
+			return true;
+		}
+		TokenType t = tokens.get(idx).type();
+		if (t == TokenType.END || t == TokenType.SEMI) {
+			return true;
+		}
+		// Next statement starts with `IDENT =` or `IDENT :`
+		if (t == TokenType.IDENT && idx + 1 < tokens.size()) {
+			TokenType nt = tokens.get(idx + 1).type();
+			return nt == TokenType.EQUALS || nt == TokenType.COLON;
+		}
+		return false;
+	}
+
+	private static void parseDecimalV11Call(String target, String typeAnnotation, List<Token> tokens, int[] pos,
+			List<ImpKStatement> out) {
+		String fn = tokens.get(pos[0]).text();
+		String fnLower = fn.toLowerCase();
+		if (fnLower.equals("load") || fnLower.equals("attr")) {
+			pos[0] += 2; // consume fn and '('
+			String dom = consumeIdentOrString(tokens, pos, "Node");
+			match(tokens, pos, TokenType.COMMA);
+			String attrName = consumeIdentOrString(tokens, pos, "value");
+			expect(tokens, pos, TokenType.RPAREN);
+			out.add(new ImpKStatement(target, ImpKOpType.LOAD_ATTR, dom, attrName, "", 0.0, 0, 0, 0, false, List.of(),
+					List.of(), fn + "(\"" + dom + "\", \"" + attrName + "\")", typeAnnotation));
+			return;
+		}
+		if (fnLower.equals("sum") || fnLower.equals("min") || fnLower.equals("max")) {
+			pos[0] += 2;
+			String inner = consumeBalancedParenContent(tokens, pos);
+			ImpKOpType op = switch (fnLower) {
+				case "sum" -> ImpKOpType.REDUCE_SUM;
+				case "min" -> ImpKOpType.REDUCE_MIN;
+				default -> ImpKOpType.REDUCE_MAX;
+			};
+			out.add(new ImpKStatement(target, op, "", inner, "", 0.0, 0, 0, 0, false, List.of(), List.of(), inner,
+					typeAnnotation));
+			return;
+		}
+		String exprText = consumeStatementExprText(tokens, pos);
+		ImpKOpType op = switch (fnLower) {
+			case "cast" -> ImpKOpType.CAST;
+			case "safe_div" -> ImpKOpType.VECTOR_SAFE_DIV;
+			case "log", "exp", "sqrt", "abs" -> ImpKOpType.UNARY_MATH;
+			default -> ImpKOpType.DECIMAL_EXPR;
+		};
+		out.add(ImpKStatement.expr(target, op, exprText, typeAnnotation));
+	}
+
+	private static String consumeBalancedParenContent(List<Token> tokens, int[] pos) {
+		StringBuilder sb = new StringBuilder();
+		int depth = 1;
+		while (pos[0] < tokens.size() && tokens.get(pos[0]).type() != TokenType.END) {
+			Token tok = tokens.get(pos[0]++);
+			if (tok.type() == TokenType.LPAREN) {
+				depth++;
+			} else if (tok.type() == TokenType.RPAREN) {
+				depth--;
+				if (depth == 0) {
+					return sb.toString().trim();
+				}
+			}
+			appendTokenToExpr(sb, tok);
+		}
+		throw new IllegalArgumentException("ImpK parse error: expected RPAREN");
+	}
+
+	private static String consumeStatementExprText(List<Token> tokens, int[] pos) {
+		StringBuilder sb = new StringBuilder();
+		int parenDepth = 0;
+		while (pos[0] < tokens.size()) {
+			Token tok = tokens.get(pos[0]);
+			if (tok.type() == TokenType.END || (parenDepth == 0 && tok.type() == TokenType.SEMI)) {
+				break;
+			}
+			if (parenDepth == 0 && sb.length() > 0 && isStatementBoundary(tokens, pos[0])) {
+				break;
+			}
+			if (tok.type() == TokenType.LPAREN) {
+				parenDepth++;
+			} else if (tok.type() == TokenType.RPAREN) {
+				parenDepth = Math.max(0, parenDepth - 1);
+			}
+			appendTokenToExpr(sb, tok);
+			pos[0]++;
+		}
+		return sb.toString().trim();
+	}
+
+	private static void appendTokenToExpr(StringBuilder sb, Token tok) {
+		if (sb.length() > 0 && tok.type() != TokenType.LPAREN && tok.type() != TokenType.RPAREN
+				&& tok.type() != TokenType.COMMA && sb.charAt(sb.length() - 1) != '(') {
+			sb.append(' ');
+		}
+		switch (tok.type()) {
+			case DECIMAL -> sb.append(tok.text()).append('d');
+			case STRING -> sb.append('"').append(tok.text().replace("\\", "\\\\").replace("\"", "\\\"")).append('"');
+			default -> sb.append(tok.text());
+		}
+	}
+
+	private static ImpKOpType classifyExprOpType(String expr) {
+		String lower = expr.toLowerCase();
+		if (lower.startsWith("cast(")) {
+			return ImpKOpType.CAST;
+		}
+		if (lower.startsWith("safe_div(")) {
+			return ImpKOpType.VECTOR_SAFE_DIV;
+		}
+		if (expr.contains(" - ")) {
+			return ImpKOpType.VECTOR_SUB;
+		}
+		if (expr.contains(" / ")) {
+			return ImpKOpType.VECTOR_DIV;
+		}
+		if (expr.contains(" * ")) {
+			return ImpKOpType.VECTOR_MUL;
+		}
+		if (expr.contains(" + ")) {
+			return ImpKOpType.VECTOR_ADD;
+		}
+		return ImpKOpType.DECIMAL_EXPR;
 	}
 
 	private static void parseFunctionCall(String target, String fn, List<Token> tokens, int[] pos,
@@ -388,6 +742,144 @@ public final class ImpKCompiler {
 		return CompiledQuery.fromV11(prog, snapshot);
 	}
 
+	/**
+	 * Lowers an ImpK script with {@code DECIMAL(P, S)} literals, type annotations,
+	 * casts, arithmetic, and reductions ({@code sum}, {@code min}, {@code max})
+	 * into canonical ImpScheme v0.11 S-expression IR.
+	 */
+	public static String lowerToImpSchemeV11(String script, ImpulseGraphSnapshot snapshot) {
+		return lowerToImpSchemeV11(script, snapshot, Map.of());
+	}
+
+	/**
+	 * Lowers an ImpK script with optional explicit parameter types into canonical
+	 * ImpScheme v0.11 S-expression IR.
+	 */
+	public static String lowerToImpSchemeV11(String script, ImpulseGraphSnapshot snapshot,
+			Map<String, String> explicitParamTypes) {
+		Objects.requireNonNull(script, "script must not be null");
+		List<ImpKStatement> stmts = parse(script);
+		if (stmts.isEmpty()) {
+			throw new IllegalArgumentException("PARSE_ERROR: empty ImpK script");
+		}
+		Map<String, String> paramDecls = new LinkedHashMap<>();
+		if (explicitParamTypes != null) {
+			for (Map.Entry<String, String> e : explicitParamTypes.entrySet()) {
+				String pname = e.getKey().startsWith("$") ? e.getKey() : "$" + e.getKey();
+				paramDecls.put(pname, V11ExprLowerer.normalizeParamType(e.getValue()));
+			}
+		}
+
+		List<String> letBindings = new ArrayList<>();
+		Set<String> vectorVars = new LinkedHashSet<>();
+		String lastTarget = null;
+		boolean lastIsVec = false;
+
+		for (ImpKStatement s : stmts) {
+			String target = s.targetVar();
+			String loweredRhs;
+			boolean isVec;
+
+			switch (s.opType()) {
+				case LOAD_ATTR -> {
+					loweredRhs = "(load-node-attr \"" + s.matrixVar() + "\" \"" + s.vectorVar1() + "\")";
+					isVec = true;
+				}
+				case REDUCE_SUM, REDUCE_MIN, REDUCE_MAX -> {
+					String reduceKw = switch (s.opType()) {
+						case REDUCE_SUM -> ":sum";
+						case REDUCE_MIN -> ":min";
+						default -> ":max";
+					};
+					String inner = V11ExprLowerer.lowerExpr(s.exprText(), id -> id,
+							(v, m) -> "(attr " + v + " \"" + m + "\")");
+					loweredRhs = "(reduce " + reduceKw + " " + inner + ")";
+					isVec = false;
+				}
+				case MATRIX_VECTOR_MUL -> {
+					String expr = !s.exprText().isEmpty() ? s.exprText() : (s.matrixVar() + " * " + s.vectorVar1());
+					loweredRhs = V11ExprLowerer.lowerExpr(expr, id -> id, (v, m) -> "(attr " + v + " \"" + m + "\")");
+					isVec = vectorVars.contains(s.matrixVar()) || vectorVars.contains(s.vectorVar1());
+				}
+				case VECTOR_ADD, VECTOR_SUB, VECTOR_MUL, VECTOR_DIV, VECTOR_SAFE_DIV, DECIMAL_EXPR, CAST,
+						UNARY_MATH -> {
+					String expr = !s.exprText().isEmpty() ? s.exprText() : (s.vectorVar1() + " + " + s.vectorVar2());
+					loweredRhs = V11ExprLowerer.lowerExpr(expr, id -> id, (v, m) -> "(attr " + v + " \"" + m + "\")");
+					isVec = referencesAnyIdent(expr, vectorVars);
+				}
+				default -> throw new IllegalArgumentException(
+						"PARSE_ERROR: ImpK op " + s.opType() + " is not a v0.11 decimal/vector expression");
+			}
+
+			// Apply explicit type annotation (e.g. `x : DECIMAL(18, 2) = ...`) via cast
+			// when not a direct column load
+			if (!s.typeAnnotation().isEmpty() && s.opType() != ImpKOpType.LOAD_ATTR) {
+				String canonType = V11ExprLowerer.normalizeParamType(s.typeAnnotation());
+				if (!loweredRhs.startsWith("(cast ")) {
+					loweredRhs = "(cast " + loweredRhs + " " + canonType + ")";
+				}
+			}
+
+			letBindings.add("[" + target + " " + loweredRhs + "]");
+			if (isVec) {
+				vectorVars.add(target);
+			}
+			lastTarget = target;
+			lastIsVec = isVec;
+		}
+
+		StringBuilder scm = new StringBuilder("(query\n");
+		for (Map.Entry<String, String> p : paramDecls.entrySet()) {
+			scm.append("  (param ").append(p.getKey()).append(' ').append(p.getValue()).append(")\n");
+		}
+		scm.append("  (let (");
+		for (int i = 0; i < letBindings.size(); i++) {
+			if (i > 0) {
+				scm.append("\n        ");
+			}
+			scm.append(letBindings.get(i));
+		}
+		scm.append(")\n    (collect ").append(lastIsVec ? ":vec" : ":scalar").append(" \"").append(lastTarget)
+				.append("\" ").append(lastTarget).append(")))");
+		return scm.toString();
+	}
+
+	/**
+	 * Compiles an ImpK script directly to validated v0.11 bytecode via
+	 * {@link ImpScmV11Compiler}.
+	 */
+	public static ImpScmV11Compiler.CompileResult compileToV11(String script, ImpulseGraphSnapshot snapshot) {
+		return compileToV11(script, snapshot, Map.of());
+	}
+
+	/**
+	 * Compiles an ImpK script with explicit parameter types directly to validated
+	 * v0.11 bytecode via {@link ImpScmV11Compiler}.
+	 */
+	public static ImpScmV11Compiler.CompileResult compileToV11(String script, ImpulseGraphSnapshot snapshot,
+			Map<String, String> paramTypes) {
+		String scm = lowerToImpSchemeV11(script, snapshot, paramTypes);
+		return ImpScmV11Compiler.compile(scm, snapshot, true);
+	}
+
+	private static boolean referencesAnyIdent(String expr, Set<String> idents) {
+		for (String id : idents) {
+			int idx = expr.indexOf(id);
+			while (idx >= 0) {
+				boolean leftOk = idx == 0
+						|| !(Character.isLetterOrDigit(expr.charAt(idx - 1)) || expr.charAt(idx - 1) == '_');
+				int end = idx + id.length();
+				boolean rightOk = end >= expr.length()
+						|| !(Character.isLetterOrDigit(expr.charAt(end)) || expr.charAt(end) == '_');
+				if (leftOk && rightOk) {
+					return true;
+				}
+				idx = expr.indexOf(id, idx + 1);
+			}
+		}
+		return false;
+	}
+
 	public static ScmProgram lowerToProgram(List<ImpKStatement> stmts) {
 		List<ImpScmNode> steps = new ArrayList<>();
 		boolean returnsVector = false;
@@ -395,11 +887,15 @@ public final class ImpKCompiler {
 		for (ImpKStatement s : stmts) {
 			switch (s.opType()) {
 				case MATRIX_VECTOR_MUL -> steps.add(ScmWalk.forward(s.matrixVar().isEmpty() ? "edge" : s.matrixVar()));
-				case VECTOR_ADD, VECTOR_MUL, DEGREE_NORM, PAGERANK_STEP -> {
-					if (!s.matrixVar().isEmpty()) {
+				case VECTOR_ADD, VECTOR_SUB, VECTOR_MUL, VECTOR_DIV, VECTOR_SAFE_DIV, DEGREE_NORM, PAGERANK_STEP,
+						LOAD_ATTR, DECIMAL_EXPR, CAST, UNARY_MATH -> {
+					if (!s.matrixVar().isEmpty() && s.opType() != ImpKOpType.LOAD_ATTR) {
 						steps.add(ScmWalk.forward(s.matrixVar()));
 					}
 				}
+				case REDUCE_SUM -> steps.add(new ScmReduce(ScmReduce.Op.SUM));
+				case REDUCE_MIN -> steps.add(new ScmReduce(ScmReduce.Op.MIN));
+				case REDUCE_MAX -> steps.add(new ScmReduce(ScmReduce.Op.MAX));
 				case CONNECTED_COMPONENTS ->
 					steps.add(ScmWalk.forward(s.matrixVar().isEmpty() ? "edge" : s.matrixVar()));
 				case TOP_K -> {

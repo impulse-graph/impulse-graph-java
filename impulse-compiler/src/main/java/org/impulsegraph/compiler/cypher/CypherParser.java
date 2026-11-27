@@ -41,15 +41,26 @@ public final class CypherParser {
 	}
 
 	public record WherePredicate(String targetVar, String field, String op, String valueOrParam, List<Long> inValues,
-			List<Float> vectorArg, int topK) {
+			List<Float> vectorArg, int topK, String lhsExpr) {
 		public WherePredicate {
 			inValues = inValues != null ? List.copyOf(inValues) : List.of();
 			vectorArg = vectorArg != null ? List.copyOf(vectorArg) : List.of();
 		}
 
-		public WherePredicate(String targetVar, String field, String op, String valueOrParam) {
-			this(targetVar, field, op, valueOrParam, List.of(), List.of(), 0);
+		public WherePredicate(String targetVar, String field, String op, String valueOrParam, List<Long> inValues,
+				List<Float> vectorArg, int topK) {
+			this(targetVar, field, op, valueOrParam, inValues, vectorArg, topK, null);
 		}
+
+		public WherePredicate(String targetVar, String field, String op, String valueOrParam) {
+			this(targetVar, field, op, valueOrParam, List.of(), List.of(), 0, null);
+		}
+	}
+
+	public record WithItem(String expr, String alias) {
+	}
+
+	public record ReturnItem(String expr, String alias, String aggregateFn, String targetVar, String field) {
 	}
 
 	public record ReturnProjection(String variable, boolean isCount) {
@@ -62,9 +73,20 @@ public final class CypherParser {
 	}
 
 	public record CypherQuery(PathPattern path, List<WherePredicate> wherePredicates, ReturnProjection projection,
-			OrderByClause orderBy) {
+			OrderByClause orderBy, List<WithItem> withItems, List<ReturnItem> returnItems) {
+		public CypherQuery {
+			wherePredicates = wherePredicates != null ? List.copyOf(wherePredicates) : List.of();
+			withItems = withItems != null ? List.copyOf(withItems) : List.of();
+			returnItems = returnItems != null ? List.copyOf(returnItems) : List.of();
+		}
+
+		public CypherQuery(PathPattern path, List<WherePredicate> wherePredicates, ReturnProjection projection,
+				OrderByClause orderBy) {
+			this(path, wherePredicates, projection, orderBy, List.of(), List.of());
+		}
+
 		public CypherQuery(PathPattern path, List<WherePredicate> wherePredicates, ReturnProjection projection) {
-			this(path, wherePredicates, projection, null);
+			this(path, wherePredicates, projection, null, List.of(), List.of());
 		}
 	}
 
@@ -89,11 +111,25 @@ public final class CypherParser {
 
 		List<WherePredicate> wherePredicates = new ArrayList<>();
 		if (match(CypherTokenType.KW_WHERE)) {
-			wherePredicates = parseWhereClause();
+			wherePredicates.addAll(parseWhereClause());
+		}
+
+		List<WithItem> withItems = new ArrayList<>();
+		if (match(CypherTokenType.KW_WITH)) {
+			withItems = parseWithClause();
+			if (match(CypherTokenType.KW_WHERE)) {
+				wherePredicates.addAll(parseWhereClause());
+			}
 		}
 
 		consume(CypherTokenType.KW_RETURN, "Expected 'RETURN' clause");
-		ReturnProjection projection = parseReturnClause();
+		List<ReturnItem> returnItems = parseReturnItems();
+		ReturnItem firstRet = returnItems.get(0);
+		ReturnProjection projection = new ReturnProjection(
+				firstRet.targetVar() != null && !firstRet.targetVar().isEmpty()
+						? firstRet.targetVar()
+						: (firstRet.alias() != null ? firstRet.alias() : firstRet.expr()),
+				"COUNT".equalsIgnoreCase(firstRet.aggregateFn()));
 
 		OrderByClause orderBy = null;
 		if (match(CypherTokenType.KW_ORDER)) {
@@ -103,7 +139,7 @@ public final class CypherParser {
 			orderBy = new OrderByClause(projection.variable(), "", List.of(), 0, lim);
 		}
 
-		return new CypherQuery(path, wherePredicates, projection, orderBy);
+		return new CypherQuery(path, wherePredicates, projection, orderBy, withItems, returnItems);
 	}
 
 	private PathPattern parsePathPattern() {
@@ -271,6 +307,14 @@ public final class CypherParser {
 			return predicates;
 		}
 
+		if (curr.type() == CypherTokenType.KW_CAST) {
+			String lhsExpr = parseExprText();
+			String op = consumeComparisonOperator();
+			String rhsExpr = parseExprText();
+			predicates.add(new WherePredicate("", "", op, rhsExpr, List.of(), List.of(), 0, lhsExpr));
+			return predicates;
+		}
+
 		if (curr.type() != CypherTokenType.IDENTIFIER) {
 			throw new IllegalArgumentException("Expected identifier in WHERE clause, got: " + curr.lexeme());
 		}
@@ -308,6 +352,26 @@ public final class CypherParser {
 			return predicates;
 		}
 
+		// Handle function-call LHS (e.g. decimal("19.99") < a.balance or abs(a.balance)
+		// > 10d) or bare alias (e.g. WITH ... AS f WHERE f > 10.0)
+		if (curr.type() == CypherTokenType.LPAREN) {
+			String lhsExpr = parseCallTail(firstIdent);
+			lhsExpr = parseArithmeticTail(lhsExpr);
+			String op = consumeComparisonOperator();
+			String rhsExpr = parseExprText();
+			predicates.add(new WherePredicate("", "", op, rhsExpr, List.of(), List.of(), 0, lhsExpr));
+			return predicates;
+		}
+
+		if (isComparisonOp(curr.type()) || curr.type() == CypherTokenType.PLUS || curr.type() == CypherTokenType.DASH
+				|| curr.type() == CypherTokenType.STAR || curr.type() == CypherTokenType.SLASH) {
+			String lhsExpr = parseArithmeticTail(firstIdent);
+			String op = consumeComparisonOperator();
+			String rhsExpr = parseExprText();
+			predicates.add(new WherePredicate(firstIdent, "", op, rhsExpr, List.of(), List.of(), 0, lhsExpr));
+			return predicates;
+		}
+
 		consume(CypherTokenType.DOT, "Expected '.' after variable in WHERE predicate");
 		if (curr.type() != CypherTokenType.IDENTIFIER) {
 			throw new IllegalArgumentException("Expected property name after '.', got: " + curr.lexeme());
@@ -321,22 +385,21 @@ public final class CypherParser {
 			return predicates;
 		}
 
-		String op = consumeComparisonOperator();
-
-		String valOrParam = curr.lexeme();
-		if (curr.type() == CypherTokenType.PARAM || curr.type() == CypherTokenType.NUMBER_LITERAL
-				|| curr.type() == CypherTokenType.STRING_LITERAL || curr.type() == CypherTokenType.IDENTIFIER) {
-			advance();
-		} else {
-			throw new IllegalArgumentException(
-					"Expected parameter ($param) or literal in WHERE predicate, got: " + curr.lexeme());
+		// Check if LHS has arithmetic continuation (e.g. a.balance + 5 > 20.00d)
+		String lhsExpr = null;
+		if (curr.type() == CypherTokenType.PLUS || curr.type() == CypherTokenType.DASH
+				|| curr.type() == CypherTokenType.STAR || curr.type() == CypherTokenType.SLASH) {
+			lhsExpr = parseArithmeticTail(firstIdent + "." + prop);
 		}
+
+		String op = consumeComparisonOperator();
+		String valOrParam = parseWhereRhsExpr();
 
 		if (prop.equalsIgnoreCase("quorum")) {
 			int k = Integer.parseInt(valOrParam);
 			predicates.add(new WherePredicate(firstIdent, "quorum", op, valOrParam, List.of((long) k), List.of(), k));
 		} else {
-			predicates.add(new WherePredicate(firstIdent, prop, op, valOrParam));
+			predicates.add(new WherePredicate(firstIdent, prop, op, valOrParam, List.of(), List.of(), 0, lhsExpr));
 		}
 		return predicates;
 	}
@@ -387,25 +450,238 @@ public final class CypherParser {
 		return new OrderByClause(targetVar, attrName, queryVec, metric, limit);
 	}
 
-	private ReturnProjection parseReturnClause() {
+	private List<WithItem> parseWithClause() {
+		List<WithItem> items = new ArrayList<>();
+		do {
+			String expr = parseExprText();
+			String alias = null;
+			if (match(CypherTokenType.KW_AS)) {
+				alias = curr.lexeme();
+				consume(CypherTokenType.IDENTIFIER, "Expected alias identifier after 'AS' in WITH clause");
+			} else {
+				alias = expr;
+			}
+			items.add(new WithItem(expr, alias));
+		} while (match(CypherTokenType.COMMA));
+		return items;
+	}
+
+	private List<ReturnItem> parseReturnItems() {
+		List<ReturnItem> items = new ArrayList<>();
+		do {
+			items.add(parseSingleReturnItem());
+		} while (match(CypherTokenType.COMMA));
+		return items;
+	}
+
+	private ReturnItem parseSingleReturnItem() {
 		if (match(CypherTokenType.KW_COUNT)) {
 			consume(CypherTokenType.LPAREN, "Expected '(' after 'count'");
 			String var = curr.lexeme();
 			consume(CypherTokenType.IDENTIFIER, "Expected variable name inside count(...)");
 			consume(CypherTokenType.RPAREN, "Expected ')' after variable inside count(...)");
-			return new ReturnProjection(var, true);
-		}
-
-		if (curr.type() == CypherTokenType.IDENTIFIER) {
-			String var = curr.lexeme();
-			advance();
-			if (match(CypherTokenType.DOT)) {
-				consume(CypherTokenType.IDENTIFIER, "Expected property after '.' in RETURN");
+			String alias = null;
+			if (match(CypherTokenType.KW_AS)) {
+				alias = curr.lexeme();
+				consume(CypherTokenType.IDENTIFIER, "Expected alias after 'AS' in RETURN");
 			}
-			return new ReturnProjection(var, false);
+			return new ReturnItem("count(" + var + ")", alias, "COUNT", var, null);
 		}
 
-		throw new IllegalArgumentException("Expected return target variable or count(var), got: " + curr.lexeme());
+		if (curr.type() == CypherTokenType.EOF || curr.type() == CypherTokenType.KW_ORDER
+				|| curr.type() == CypherTokenType.KW_LIMIT) {
+			throw new IllegalArgumentException("Expected return target variable or count(var), got: " + curr.lexeme());
+		}
+
+		// Check aggregate functions SUM(...), MIN(...), MAX(...), AVG(...)
+		if (curr.type() == CypherTokenType.IDENTIFIER && next.type() == CypherTokenType.LPAREN
+				&& isAggregateFn(curr.lexeme())) {
+			String aggFn = curr.lexeme().toUpperCase();
+			advance(); // consume fn name
+			consume(CypherTokenType.LPAREN, "Expected '(' after " + aggFn);
+			String innerExpr = parseExprText();
+			consume(CypherTokenType.RPAREN, "Expected ')' after " + aggFn + "(...)");
+			String alias = null;
+			if (match(CypherTokenType.KW_AS)) {
+				alias = curr.lexeme();
+				consume(CypherTokenType.IDENTIFIER, "Expected alias after 'AS' in RETURN");
+			}
+			String[] varField = splitSimpleVarField(innerExpr);
+			return new ReturnItem(innerExpr, alias, aggFn, varField[0], varField[1]);
+		}
+
+		String expr = parseExprText();
+		String alias = null;
+		if (match(CypherTokenType.KW_AS)) {
+			alias = curr.lexeme();
+			consume(CypherTokenType.IDENTIFIER, "Expected alias after 'AS' in RETURN");
+		}
+		String[] varField = splitSimpleVarField(expr);
+		return new ReturnItem(expr, alias, null, varField[0], varField[1]);
+	}
+
+	private static boolean isAggregateFn(String name) {
+		String u = name.toUpperCase();
+		return u.equals("SUM") || u.equals("MIN") || u.equals("MAX") || u.equals("AVG");
+	}
+
+	private static String[] splitSimpleVarField(String expr) {
+		String t = expr.trim();
+		if (t.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+			return new String[]{t, null};
+		}
+		int dot = t.indexOf('.');
+		if (dot > 0 && t.indexOf('.', dot + 1) < 0) {
+			String v = t.substring(0, dot);
+			String f = t.substring(dot + 1);
+			if (v.matches("[A-Za-z_][A-Za-z0-9_]*") && f.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+				return new String[]{v, f};
+			}
+		}
+		return new String[]{"", null};
+	}
+
+	private static boolean isComparisonOp(CypherTokenType t) {
+		return t == CypherTokenType.EQ || t == CypherTokenType.EQ_EQ || t == CypherTokenType.NEQ
+				|| t == CypherTokenType.LT || t == CypherTokenType.LTE || t == CypherTokenType.GT
+				|| t == CypherTokenType.GTE;
+	}
+
+	private String parseWhereRhsExpr() {
+		// Fast path for plain string literal in legacy WHERE predicates without
+		// arithmetic
+		if (curr.type() == CypherTokenType.STRING_LITERAL && !isArithOp(next.type())) {
+			String s = curr.lexeme();
+			advance();
+			return s;
+		}
+		return parseExprText();
+	}
+
+	private static boolean isArithOp(CypherTokenType t) {
+		return t == CypherTokenType.PLUS || t == CypherTokenType.DASH || t == CypherTokenType.STAR
+				|| t == CypherTokenType.SLASH;
+	}
+
+	private String parseExprText() {
+		String left = parseMulDivExprText();
+		while (curr.type() == CypherTokenType.PLUS || curr.type() == CypherTokenType.DASH) {
+			String op = curr.lexeme();
+			advance();
+			String right = parseMulDivExprText();
+			left = left + " " + op + " " + right;
+		}
+		return left;
+	}
+
+	private String parseArithmeticTail(String first) {
+		String left = first;
+		while (curr.type() == CypherTokenType.STAR || curr.type() == CypherTokenType.SLASH) {
+			String op = curr.lexeme();
+			advance();
+			String right = parseUnaryExprText();
+			left = left + " " + op + " " + right;
+		}
+		while (curr.type() == CypherTokenType.PLUS || curr.type() == CypherTokenType.DASH) {
+			String op = curr.lexeme();
+			advance();
+			String right = parseMulDivExprText();
+			left = left + " " + op + " " + right;
+		}
+		return left;
+	}
+
+	private String parseMulDivExprText() {
+		String left = parseUnaryExprText();
+		while (curr.type() == CypherTokenType.STAR || curr.type() == CypherTokenType.SLASH) {
+			String op = curr.lexeme();
+			advance();
+			String right = parseUnaryExprText();
+			left = left + " " + op + " " + right;
+		}
+		return left;
+	}
+
+	private String parseUnaryExprText() {
+		if (match(CypherTokenType.DASH)) {
+			return "-" + parseUnaryExprText();
+		}
+		if (match(CypherTokenType.PLUS)) {
+			return parseUnaryExprText();
+		}
+		return parsePrimaryExprText();
+	}
+
+	private String parsePrimaryExprText() {
+		if (match(CypherTokenType.LPAREN)) {
+			String inner = parseExprText();
+			consume(CypherTokenType.RPAREN, "Expected ')' after parenthesized expression");
+			return "(" + inner + ")";
+		}
+		if (match(CypherTokenType.KW_CAST)) {
+			consume(CypherTokenType.LPAREN, "Expected '(' after CAST");
+			String inner = parseExprText();
+			consume(CypherTokenType.KW_AS, "Expected 'AS' inside CAST(...)");
+			String typeName = curr.lexeme();
+			consume(CypherTokenType.IDENTIFIER, "Expected target type name after 'AS' in CAST(...)");
+			StringBuilder typeSpec = new StringBuilder(typeName);
+			if (match(CypherTokenType.LPAREN)) {
+				typeSpec.append('(');
+				typeSpec.append(curr.lexeme());
+				consume(CypherTokenType.NUMBER_LITERAL, "Expected precision integer in CAST type");
+				consume(CypherTokenType.COMMA, "Expected ',' between precision and scale in CAST type");
+				typeSpec.append(", ").append(curr.lexeme());
+				consume(CypherTokenType.NUMBER_LITERAL, "Expected scale integer in CAST type");
+				consume(CypherTokenType.RPAREN, "Expected ')' after DECIMAL(P, S)");
+				typeSpec.append(')');
+			}
+			consume(CypherTokenType.RPAREN, "Expected ')' at end of CAST(...)");
+			return "CAST(" + inner + " AS " + typeSpec + ")";
+		}
+		if (curr.type() == CypherTokenType.DECIMAL_LITERAL) {
+			String lex = curr.lexeme();
+			advance();
+			return lex + "d";
+		}
+		if (curr.type() == CypherTokenType.NUMBER_LITERAL || curr.type() == CypherTokenType.PARAM) {
+			String lex = curr.lexeme();
+			advance();
+			return lex;
+		}
+		if (curr.type() == CypherTokenType.STRING_LITERAL) {
+			String lex = curr.lexeme();
+			advance();
+			return "\"" + lex.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+		}
+		if (curr.type() == CypherTokenType.IDENTIFIER) {
+			String ident = curr.lexeme();
+			advance();
+			if (curr.type() == CypherTokenType.LPAREN) {
+				return parseCallTail(ident);
+			}
+			if (match(CypherTokenType.DOT)) {
+				String prop = curr.lexeme();
+				consume(CypherTokenType.IDENTIFIER, "Expected property name after '.'");
+				return ident + "." + prop;
+			}
+			return ident;
+		}
+		throw new IllegalArgumentException(
+				"Expected parameter ($param) or literal in expression, got: " + curr.lexeme());
+	}
+
+	private String parseCallTail(String fnName) {
+		consume(CypherTokenType.LPAREN, "Expected '(' in function call");
+		StringBuilder sb = new StringBuilder(fnName).append('(');
+		if (curr.type() != CypherTokenType.RPAREN) {
+			sb.append(parseExprText());
+			while (match(CypherTokenType.COMMA)) {
+				sb.append(", ").append(parseExprText());
+			}
+		}
+		consume(CypherTokenType.RPAREN, "Expected ')' after function call arguments");
+		sb.append(')');
+		return sb.toString();
 	}
 
 	private String consumeComparisonOperator() {
