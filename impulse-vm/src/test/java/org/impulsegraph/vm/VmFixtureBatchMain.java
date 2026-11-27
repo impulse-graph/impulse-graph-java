@@ -1,10 +1,14 @@
 package org.impulsegraph.vm;
 
+import org.impulsegraph.storage.csr.BinarySnapshotLoader;
+
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.lang.foreign.Arena;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -27,6 +31,8 @@ import static org.impulsegraph.vm.ImpulseIsaTables.*;
 public final class VmFixtureBatchMain {
 
 	private static boolean useJit = false;
+	private static ImpulseInterpreter.SnapshotBinding preloadedBind = null;
+	private static int preloadedMaxDomCard = 64;
 
 	static void setUseJit(boolean enabled) {
 		useJit = enabled;
@@ -36,30 +42,60 @@ public final class VmFixtureBatchMain {
 	}
 
 	public static void main(String[] args) throws Exception {
-		for (String arg : args) {
+		String snapshotPath = null;
+		for (int i = 0; i < args.length; i++) {
+			String arg = args[i];
 			if ("--jit".equals(arg)) {
 				useJit = true;
+			} else if ("--snapshot".equals(arg) && i + 1 < args.length) {
+				snapshotPath = args[++i];
+			} else if (arg.startsWith("--snapshot=")) {
+				snapshotPath = arg.substring("--snapshot=".length());
 			}
 		}
-		BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
-		BufferedWriter out = new BufferedWriter(new OutputStreamWriter(System.out, StandardCharsets.UTF_8));
-		String line;
-		while ((line = in.readLine()) != null) {
-			if (line.isBlank()) {
-				continue;
+		Arena snapArena = null;
+		try {
+			if (snapshotPath != null && !snapshotPath.isEmpty()) {
+				snapArena = Arena.ofConfined();
+				BinarySnapshotLoader.LoadedSnapshot loaded = BinarySnapshotLoader.loadSnapshot(Path.of(snapshotPath),
+						snapArena);
+				ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(loaded.graph());
+				int[] domCards = new int[view.domainCards.length];
+				int maxC = 64;
+				for (int d = 0; d < view.domainCards.length; d++) {
+					domCards[d] = (int) Math.min(Integer.MAX_VALUE, view.domainCards[d]);
+					if (domCards[d] > maxC)
+						maxC = domCards[d];
+				}
+				preloadedBind = new ImpulseInterpreter.SnapshotBinding(domCards, view);
+				preloadedMaxDomCard = maxC;
 			}
-			int t1 = line.indexOf('\t');
-			int t2 = t1 >= 0 ? line.indexOf('\t', t1 + 1) : -1;
-			String profile = (t1 >= 0) ? line.substring(0, t1) : "P0";
-			String maxStepsStr = (t1 >= 0 && t2 >= 0) ? line.substring(t1 + 1, t2) : "-";
-			String rawJson = (t2 >= 0) ? line.substring(t2 + 1) : line;
-			Long maxStepsOverride = ("-".equals(maxStepsStr) || maxStepsStr.isEmpty())
-					? null
-					: Long.parseLong(maxStepsStr);
-			String resp = runFixtureJson(profile, maxStepsOverride, rawJson);
-			out.write(resp);
-			out.newLine();
-			out.flush();
+			BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+			BufferedWriter out = new BufferedWriter(new OutputStreamWriter(System.out, StandardCharsets.UTF_8));
+			String line;
+			while ((line = in.readLine()) != null) {
+				if (line.isBlank()) {
+					continue;
+				}
+				int t1 = line.indexOf('\t');
+				int t2 = t1 >= 0 ? line.indexOf('\t', t1 + 1) : -1;
+				String profile = (t1 >= 0) ? line.substring(0, t1) : "P0";
+				String maxStepsStr = (t1 >= 0 && t2 >= 0) ? line.substring(t1 + 1, t2) : "-";
+				String rawJson = (t2 >= 0) ? line.substring(t2 + 1) : line;
+				Long maxStepsOverride = ("-".equals(maxStepsStr) || maxStepsStr.isEmpty())
+						? null
+						: Long.parseLong(maxStepsStr);
+				String resp = runFixtureJson(profile, maxStepsOverride, rawJson);
+				out.write(resp);
+				out.newLine();
+				out.flush();
+			}
+		} finally {
+			preloadedBind = null;
+			preloadedMaxDomCard = 64;
+			if (snapArena != null) {
+				snapArena.close();
+			}
 		}
 	}
 
@@ -218,7 +254,10 @@ public final class VmFixtureBatchMain {
 
 		ImpulseInterpreter.SnapshotBinding bind = null;
 		int maxDomCard = 64;
-		if (!domTbl.isEmpty() || !relMeta.isEmpty()) {
+		if (preloadedBind != null) {
+			bind = preloadedBind;
+			maxDomCard = preloadedMaxDomCard;
+		} else if (!domTbl.isEmpty() || !relMeta.isEmpty()) {
 			int maxDom = -1;
 			for (int k : domTbl.keySet()) {
 				if (k > maxDom)
