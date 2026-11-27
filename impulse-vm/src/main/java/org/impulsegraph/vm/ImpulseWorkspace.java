@@ -38,6 +38,8 @@ public final class ImpulseWorkspace {
 	public long userThrowPayload;
 	public long gasRemaining = Long.MAX_VALUE;
 	public final long[] stepsScratch = new long[1];
+	public long decResult;
+	public boolean decNull;
 	public ImpulseGeometry geometry = ImpulseGeometry.P0_DEFAULT;
 
 	// Frontier register bank F0..F15 (F8..F15 = MF0..MF7) + initialized mask

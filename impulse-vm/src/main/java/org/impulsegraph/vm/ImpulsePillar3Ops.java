@@ -1899,6 +1899,9 @@ public final class ImpulsePillar3Ops {
 		long[] vU64;
 		boolean[] vU64Valid;
 		int vU64Len;
+		long[] vI64;
+		boolean[] vI64Valid;
+		int vI64Len;
 
 		void reset() {
 			f = null;
@@ -1913,6 +1916,9 @@ public final class ImpulsePillar3Ops {
 			vU64 = null;
 			vU64Valid = null;
 			vU64Len = 0;
+			vI64 = null;
+			vI64Valid = null;
+			vI64Len = 0;
 		}
 
 		void addMlSparse(ImpulseWorkspace ws, long node, long mask) {
@@ -1953,6 +1959,7 @@ public final class ImpulsePillar3Ops {
 		int[] committedMlDom;
 		boolean[] committedVF64;
 		boolean[] committedVU64;
+		boolean[] committedVI64;
 		boolean[] committedRCnt;
 
 		long[] m0, m1, m2, m3;
@@ -2005,12 +2012,14 @@ public final class ImpulsePillar3Ops {
 			Arrays.fill(committedMlDom, 0, 8, -1);
 			this.committedVF64 = ws.arena.allocBoolZeroed(8);
 			this.committedVU64 = ws.arena.allocBoolZeroed(8);
+			this.committedVI64 = ws.arena.allocBoolZeroed(8);
 			this.committedRCnt = ws.arena.allocBoolZeroed(8);
 
 			boolean[] accumF = ws.arena.allocBoolZeroed(8);
 			boolean[] accumMl = ws.arena.allocBoolZeroed(8);
 			boolean[] accumVF64 = ws.arena.allocBoolZeroed(8);
 			boolean[] accumVU64 = ws.arena.allocBoolZeroed(8);
+			boolean[] accumVI64 = ws.arena.allocBoolZeroed(8);
 			boolean[] accumR = ws.arena.allocBoolZeroed(8);
 
 			for (int p = hdrPc + 1; p < endPc; p++) {
@@ -2047,6 +2056,11 @@ public final class ImpulsePillar3Ops {
 							committedRCnt[cDst] = true;
 							if (cAccum)
 								accumR[cDst] = true;
+						}
+						case 9 -> {
+							committedVI64[cDst] = true;
+							if (cAccum)
+								accumVI64[cDst] = true;
 						}
 						default -> {
 						}
@@ -2117,6 +2131,20 @@ public final class ImpulsePillar3Ops {
 					} else {
 						slot.vU64 = ws.arena.allocLongZeroed(vlen);
 						slot.vU64Valid = ws.arena.allocBoolZeroed(vlen);
+					}
+				}
+				if (committedVI64[d] && vd != null && vd.elemTag == ImpulseVector.TAG_I64) {
+					int vlen = vd.length;
+					slot.vI64Len = vlen;
+					if (accumVI64[d]) {
+						slot.vI64 = ws.arena.allocLong(vlen);
+						System.arraycopy(vd.i64Data, 0, slot.vI64, 0, vlen);
+						slot.vI64Valid = ws.arena.allocBool(vlen);
+						for (int i = 0; i < vlen; i++)
+							slot.vI64Valid[i] = vd.isValidAt(i);
+					} else {
+						slot.vI64 = ws.arena.allocLongZeroed(vlen);
+						slot.vI64Valid = null; // Lazy all-valid (0L) for non-accum scatter_add_chk
 					}
 				}
 				if (committedRCnt[d]) {
@@ -2323,6 +2351,34 @@ public final class ImpulsePillar3Ops {
 							}
 						}
 						ws.vVectors[d] = ws.arena.allocU64(slot.vU64, n, vBits);
+					}
+					if (committedVI64[d] && slot.vI64 != null) {
+						int n = slot.vI64Len;
+						int vw = Math.max(1, (n + 63) >>> 6);
+						long[] vBits = ws.arena.allocLongZeroed(vw);
+						if (slot.vI64Valid == null) {
+							Arrays.fill(vBits, 0, vw, -1L);
+							if ((n & 63) != 0)
+								vBits[vw - 1] = (1L << (n & 63)) - 1L;
+							if (!anyNonEmpty) {
+								long[] arr = slot.vI64;
+								for (int i = 0; i < n; i++) {
+									if (arr[i] != 0L) {
+										anyNonEmpty = true;
+										break;
+									}
+								}
+							}
+						} else {
+							for (int i = 0; i < n; i++) {
+								if (slot.vI64Valid[i]) {
+									vBits[i >>> 6] |= (1L << (i & 63));
+									if (slot.vI64[i] != 0L)
+										anyNonEmpty = true;
+								}
+							}
+						}
+						ws.vVectors[d] = ws.arena.allocI64(slot.vI64, n, vBits);
 					}
 					if (committedRCnt[d]) {
 						if (accRCnt[d] != 0L)
@@ -2977,11 +3033,50 @@ public final class ImpulsePillar3Ops {
 						accRCnt[dst] += commitCnt;
 						ws.pc++;
 					}
+					case 9 -> { // .scatter_add_chk
+						ImpulseVector ids = ws.vVectors[s1];
+						MorselAccSlot slot = acc[dst];
+						long[] dstArr = slot.vI64;
+						ImpulseVector vals = scalar ? null : ws.vVectors[s2];
+						boolean s2Ok = scalar || (vals != null && vals.elemTag == ImpulseVector.TAG_I64);
+						if (ids == null || ids.elemTag != ImpulseVector.TAG_U64 || dstArr == null || !s2Ok) {
+							ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+							return;
+						}
+						boolean[] dstVal = slot.vI64Valid;
+						int dstLen = slot.vI64Len;
+						boolean rValid = scalar && ws.isRValid(s2);
+						long rVal = rValid ? ws.rRegs[s2] : 0L;
+						for (int k = 0; k < commitCnt; k++) {
+							int i = commitIds[k];
+							if (!ids.isValidAt(i))
+								continue;
+							if (scalar ? !rValid : !vals.isValidAt(i))
+								continue;
+							long v = scalar ? rVal : vals.i64Data[i];
+							long tgt64 = ids.i64Data[i];
+							if (tgt64 < 0L || tgt64 >= dstLen) {
+								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+								return;
+							}
+							int ti = (int) tgt64;
+							long prev = (dstVal == null || dstVal[ti]) ? dstArr[ti] : 0L;
+							long sum = prev + v;
+							if (((prev ^ sum) & (v ^ sum)) < 0L) {
+								ws.status = IMPULSE_VM_ERR_ARITHMETIC_OVERFLOW;
+								return;
+							}
+							dstArr[ti] = sum;
+							if (dstVal != null)
+								dstVal[ti] = true;
+						}
+						ws.pc++;
+					}
 					default -> ws.status = IMPULSE_VM_ERR_INVALID_OPCODE;
 				}
 			}
 			case OP_GATHER_VEC, OP_VEC_3VL_OP, OP_VEC_STR_PRED, OP_VEC_MATH_EXP_LOG, OP_VEC_MATH_TRIG_HYP,
-					OP_VEC_MATH_ACT, OP_VEC_INT_BITWISE, OP_VEC_TERNARY, OP_VEC_BLEND -> {
+					OP_VEC_MATH_ACT, OP_VEC_INT_BITWISE, OP_VEC_TERNARY, OP_VEC_BLEND, OP_VEC_DECIMAL_ALU -> {
 				ImpulsePillar4Ops.step(ws, bind, w);
 			}
 			default -> ws.status = IMPULSE_VM_ERR_INVALID_OPCODE;

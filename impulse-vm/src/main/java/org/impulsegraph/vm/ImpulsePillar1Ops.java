@@ -124,6 +124,10 @@ public final class ImpulsePillar1Ops {
 				execScalar3vl(ws, subop, dst, s1, s2);
 				return RESULT_STEPPED;
 			}
+			case OP_SCALAR_DECIMAL_ALU -> {
+				execScalarDecimalAlu(ws, subop, dst, s1, s2, s3, imm16Lo, imm16Hi);
+				return RESULT_STEPPED;
+			}
 			case OP_JMP -> {
 				ws.pc += imm32;
 				return RESULT_STEPPED;
@@ -1190,6 +1194,312 @@ public final class ImpulsePillar1Ops {
 			}
 		} else {
 			ws.status = IMPULSE_VM_ERR_INVALID_OPCODE;
+		}
+	}
+
+	private static void execScalarDecimalAlu(ImpulseWorkspace ws, int subop, int dst, int s1, int s2, int s3,
+			int imm16Lo, int imm16Hi) {
+		boolean aValid = ws.isRValid(s1);
+		long a = ws.rRegs[s1];
+		boolean bValid = ws.isRValid(s2);
+		long b = ws.rRegs[s2];
+		boolean cValid = ws.isRValid(s3);
+		long c = ws.rRegs[s3];
+
+		switch (subop) {
+			case SUBOP_SCALAR_DECIMAL_ALU_ADD_CHK -> {
+				if (!aValid || !bValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.addChk(a, b, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_SUB_CHK -> {
+				if (!aValid || !bValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.subChk(a, b, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_MUL_CHK -> {
+				if (!aValid || !bValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.mulChk(a, b, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_MUL_DIV_ROUND -> {
+				if (!aValid || !bValid || !cValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.mulDivRound(a, b, c, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_DIV_ROUND -> {
+				if (!aValid || !bValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.divRound(a, b, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_RESCALE -> {
+				if (imm16Lo > 18 || (imm16Hi != 0 && imm16Hi != 1)) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
+				if (!aValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.rescale(a, imm16Lo, imm16Hi, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_BOUND_CHK -> {
+				if (imm16Lo < 1 || imm16Lo > 18) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
+				if (!aValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.boundChk(a, imm16Lo, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_ABS_CHK -> {
+				if (!aValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.absChk(a, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_NEG_CHK -> {
+				if (!aValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.negChk(a, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_F64_TO_DEC -> {
+				if (imm16Lo > 18 || imm16Hi < 1 || imm16Hi > 18) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
+				if (!aValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.f64ToDec(Double.longBitsToDouble(a), imm16Lo, imm16Hi, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				if (ws.decNull) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+				} else {
+					ws.writeR(dst, SCALAR_I64, ws.decResult);
+					setScalarFlags(ws, true, ws.decResult);
+				}
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_DEC_TO_F64 -> {
+				if (imm16Lo > 18) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
+				if (!aValid) {
+					writeF64Result(ws, dst, false, 0.0);
+					ws.pc++;
+					return;
+				}
+				double f = ImpulseDecimal64.decToF64(a, imm16Lo);
+				writeF64Result(ws, dst, true, f);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_ROUND_SCALE -> {
+				if (imm16Lo > 18) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
+				if (!aValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.roundScale(a, imm16Lo, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_TRUNC_SCALE -> {
+				if (imm16Lo > 18) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
+				if (!aValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.truncScale(a, imm16Lo, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_FLOOR_SCALE -> {
+				if (imm16Lo > 18) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
+				if (!aValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.floorScale(a, imm16Lo, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_CEIL_SCALE -> {
+				if (imm16Lo > 18) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
+				if (!aValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.ceilScale(a, imm16Lo, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				ws.writeR(dst, SCALAR_I64, ws.decResult);
+				setScalarFlags(ws, true, ws.decResult);
+				ws.pc++;
+			}
+			case SUBOP_SCALAR_DECIMAL_ALU_DIV_SAFE -> {
+				if (!aValid || !bValid) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+					ws.pc++;
+					return;
+				}
+				int st = ImpulseDecimal64.divSafe(a, b, ws);
+				if (st != IMPULSE_VM_OK) {
+					ws.status = st;
+					return;
+				}
+				if (ws.decNull) {
+					ws.writeRNull(dst);
+					setScalarFlags(ws, false, 0L);
+				} else {
+					ws.writeR(dst, SCALAR_I64, ws.decResult);
+					setScalarFlags(ws, true, ws.decResult);
+				}
+				ws.pc++;
+			}
+			default -> ws.status = IMPULSE_VM_ERR_INVALID_OPCODE;
 		}
 	}
 }

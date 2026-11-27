@@ -50,7 +50,7 @@ public final class ImpulseSnapshotView {
 				case 1 -> dataSeg.get(ValueLayout.JAVA_BYTE, idx);
 				case 2 -> dataSeg.get(ValueLayout.JAVA_SHORT_UNALIGNED, (long) idx << 1);
 				case 3 -> dataSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) idx << 2);
-				case 4, 8, 9 -> dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, (long) idx << 3);
+				case 4, 8, 9, 21 -> dataSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, (long) idx << 3);
 				default -> throw new IllegalStateException("Non-integer attribute typeCode: " + base);
 			};
 		}
@@ -78,7 +78,7 @@ public final class ImpulseSnapshotView {
 
 		public int elemTag() {
 			int base = typeCode & 0x7F;
-			if (base >= 1 && base <= 4)
+			if ((base >= 1 && base <= 4) || base == 21)
 				return ImpulseVector.TAG_I64;
 			if (base == 6 || base == 7 || base == 10)
 				return ImpulseVector.TAG_F64;

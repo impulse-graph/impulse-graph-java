@@ -184,6 +184,30 @@ public final class ZeroAllocAllOpcodesTest {
 					enc(OP_MORSEL_END, 0, 0, 0, 0, 0, 0, pack(0, 5)),
 					enc(OP_COLLECT, 0, SUBOP_COLLECT_FRONTIER_IDS, 0, 1, 0, 0, 0), enc(OP_HALT, 0, 0, 0, 0, 0, 0, 0),};
 			assertZeroAllocAfterWarmup("OP_FILTER_MORSEL+OP_GATHER_NODE_ATTR+OP_COLLECT", filterMorsel, bind, ws);
+
+			// 5. DECIMAL64 zero-alloc: 0x15 OP_SCALAR_DECIMAL_ALU + 0x58 OP_VEC_DECIMAL_ALU
+			// + 0x52.sum_i64_chk + 0x37.scatter_add_chk + 0x4D.mul_div_i64_r
+			long[] decimal64Ops = {
+					enc(OP_LOAD_CONST, 0, SUBOP_LOAD_CONST_I32, 0, 0, 0, 0, 10_000), // R0 = 10000
+					enc(OP_LOAD_CONST, 0, SUBOP_LOAD_CONST_I32, 1, 0, 0, 0, 250), // R1 = 250
+					enc(OP_LOAD_CONST, 0, SUBOP_LOAD_CONST_I32, 2, 0, 0, 0, 100), // R2 = 100
+					enc(OP_SCALAR_DECIMAL_ALU, 0, SUBOP_SCALAR_DECIMAL_ALU_MUL_DIV_ROUND, 3, 0, 1, 2, 0),
+					enc(OP_SCALAR_DECIMAL_ALU, 0, SUBOP_SCALAR_DECIMAL_ALU_ADD_CHK, 4, 3, 1, 0, 0),
+					enc(OP_VEC_INIT, 0, SUBOP_VEC_INIT_DOM_I64, 0, 0, 0, 0, pack(0, 0)), // V0 = i64[N] = 0
+					enc(OP_INIT_DOMAIN_SPAN, 0, 0, 0, 0, 0, 0, 0), // F0 = all nodes
+					enc(OP_WALK_MORSEL, 0, SUBOP_WALK_MORSEL_FWD, 0, 0, 0, 0, pack(0, 4)),
+					enc(OP_GATHER_EDGE_ATTR, 0, SUBOP_GATHER_EDGE_ATTR_VEC, 12, 10, 0, 0, pack(0, 0)), // M4 = edge i64
+					enc(OP_VEC_DECIMAL_ALU, FLAG_SCALAR_RHS, SUBOP_VEC_DECIMAL_ALU_MUL_DIV_R, 13, 12, 1, 2, 0),
+					enc(OP_MORSEL_COMMIT, 0, SUBOP_MORSEL_COMMIT_SCATTER_ADD_CHK, 0, 9, 13, 0, 0),
+					enc(OP_MORSEL_END, 0, 0, 0, 0, 0, 0, pack(0, 4)),
+					enc(OP_VEC_TERNARY, FLAG_SCALAR_RHS, SUBOP_VEC_TERNARY_MUL_DIV_I64_R, 1, 0, 1, 2, 0),
+					enc(OP_VEC_REDUCE, 0, SUBOP_VEC_REDUCE_SUM_I64_CHK, 5, 1, 0, 0, 0),
+					enc(OP_COLLECT, 0, SUBOP_COLLECT_SCALAR, 0, 5, 0, 0, 0),
+					enc(OP_COLLECT, 0, SUBOP_COLLECT_VEC, 0, 1, 0, 0, 1),
+					enc(OP_HALT, 0, 0, 0, 0, 0, 0, 0),
+			};
+			assertZeroAllocAfterWarmup("DECIMAL64(0x15+0x58+0x52.sum_i64_chk+0x37.scatter_add_chk+0x4D.mul_div_i64_r)",
+					decimal64Ops, bind, ws);
 		}
 	}
 

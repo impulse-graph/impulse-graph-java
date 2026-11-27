@@ -22,7 +22,7 @@ public final class ImpulsePillar4Ops {
 
 	public static int step(ImpulseWorkspace ws, ImpulseInterpreter.SnapshotBinding bind, long w) {
 		int op = (int) (w & 0xFFL);
-		if (op >= OP_VEC_MATH_ARITH && op <= OP_VEC_TERNARY) {
+		if ((op >= OP_VEC_MATH_ARITH && op <= OP_VEC_TERNARY) || op == OP_VEC_DECIMAL_ALU) {
 			return ImpulsePillar4MathOps.step(ws, w);
 		}
 
@@ -2011,6 +2011,43 @@ public final class ImpulsePillar4Ops {
 					ws.nf = false;
 				}
 				ws.pc++;
+			}
+			case SUBOP_VEC_REDUCE_SUM_I64_CHK -> {
+				if (v.elemTag != ImpulseVector.TAG_I64) {
+					ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+					return;
+				}
+				long hi = 0L;
+				long lo = 0L;
+				int cnt = 0;
+				long[] data = v.i64Data;
+				for (int i = 0; i < n; i++) {
+					if (!ImpulsePillar4MathOps.laneActive(mask, i) || !v.isValidAt(i))
+						continue;
+					long x = data[i];
+					long xHi = (x < 0L) ? -1L : 0L;
+					long newLo = lo + x;
+					long carry = (Long.compareUnsigned(newLo, lo) < 0) ? 1L : 0L;
+					hi = hi + xHi + carry;
+					lo = newLo;
+					cnt++;
+				}
+				if (cnt == 0) {
+					ws.writeRNull(dst);
+					ws.zf = true;
+					ws.nf = true;
+					ws.pc++;
+				} else {
+					boolean fits = (lo >= 0L && hi == 0L) || (lo < 0L && hi == -1L);
+					if (!fits) {
+						ws.status = IMPULSE_VM_ERR_ARITHMETIC_OVERFLOW;
+					} else {
+						ws.writeR(dst, SCALAR_I64, lo);
+						ws.zf = (lo == 0L);
+						ws.nf = false;
+						ws.pc++;
+					}
+				}
 			}
 			default -> {
 				if (v.elemTag != ImpulseVector.TAG_F64 && v.elemTag != ImpulseVector.TAG_I64
