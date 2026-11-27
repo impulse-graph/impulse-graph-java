@@ -265,7 +265,8 @@ public final class ImpulseMethodHandleCompiler {
 			case 1 -> MethodHandles.insertArguments(MH_LEAF_P1, 0, bind, program, w);
 			case 2 -> MethodHandles.insertArguments(MH_LEAF_P2, 0, bind, w);
 			case 3 -> MethodHandles.insertArguments(MH_LEAF_P3, 0, bind, program, w);
-			case 4 -> (op >= ImpulseIsaTables.OP_VEC_MATH_ARITH && op <= ImpulseIsaTables.OP_VEC_TERNARY)
+			case 4 -> ((op >= ImpulseIsaTables.OP_VEC_MATH_ARITH && op <= ImpulseIsaTables.OP_VEC_TERNARY)
+					|| op == ImpulseIsaTables.OP_VEC_DECIMAL_ALU)
 					? MethodHandles.insertArguments(MH_LEAF_P4_MATH, 0, w)
 					: MethodHandles.insertArguments(MH_LEAF_P4, 0, bind, w);
 			case 5 -> MethodHandles.insertArguments(MH_LEAF_P5, 0, bind, w);

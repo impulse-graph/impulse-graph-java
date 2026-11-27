@@ -1,23 +1,19 @@
 package org.impulsegraph.vm;
 
-import java.math.BigInteger;
-
 import static org.impulsegraph.vm.ImpulseIsaTables.*;
 
 /**
- * Pillar 4 Math & Bitwise Operations for ImpulseVM v0.11.0
- * ({@code 0x48}–{@code 0x4D}): {@code OP_VEC_MATH_ARITH},
+ * Pillar 4 Math, Bitwise, Ternary &amp; Decimal Operations for ImpulseVM
+ * v0.11.0 ({@code 0x48}–{@code 0x4D}, {@code 0x58}): {@code OP_VEC_MATH_ARITH},
  * {@code OP_VEC_MATH_EXP_LOG}, {@code OP_VEC_MATH_TRIG_HYP},
- * {@code OP_VEC_MATH_ACT}, {@code OP_VEC_INT_BITWISE}, and
- * {@code OP_VEC_TERNARY}.
+ * {@code OP_VEC_MATH_ACT}, {@code OP_VEC_INT_BITWISE}, {@code OP_VEC_TERNARY},
+ * and {@code OP_VEC_DECIMAL_ALU}.
  */
 public final class ImpulsePillar4MathOps {
 
 	public static final int RESULT_NOT_HANDLED = 0;
 	public static final int RESULT_STEPPED = 1;
 
-	private static final BigInteger I64_MIN_BIG = BigInteger.valueOf(Long.MIN_VALUE);
-	private static final BigInteger I64_MAX_BIG = BigInteger.valueOf(Long.MAX_VALUE);
 	private static final double SQRT_2 = Math.sqrt(2.0);
 	private static final double LN_2 = Math.log(2.0);
 
@@ -32,6 +28,9 @@ public final class ImpulsePillar4MathOps {
 		int dst = (int) ((w >>> 20) & 0xFL);
 		int s3 = (int) ((w >>> 24) & 0xFL);
 		int s2 = (int) ((w >>> 28) & 0xFL);
+		int imm32 = (int) (w >>> 32);
+		int imm16Lo = imm32 & 0xFFFF;
+		int imm16Hi = (imm32 >>> 16) & 0xFFFF;
 
 		return switch (op) {
 			case OP_VEC_MATH_ARITH -> {
@@ -56,6 +55,10 @@ public final class ImpulsePillar4MathOps {
 			}
 			case OP_VEC_TERNARY -> {
 				execTernary(ws, subop, flags, dst, s1, s2, s3);
+				yield RESULT_STEPPED;
+			}
+			case OP_VEC_DECIMAL_ALU -> {
+				execDecimalAlu(ws, subop, flags, dst, s1, s2, s3, imm16Lo, imm16Hi);
 				yield RESULT_STEPPED;
 			}
 			default -> RESULT_NOT_HANDLED;
@@ -650,16 +653,14 @@ public final class ImpulsePillar4MathOps {
 			boolean dValid = ws.isRValid(s3);
 			long d = ws.rRegs[s3];
 			if (dValid && d != 0L) {
-				BigInteger dBig = BigInteger.valueOf(d);
 				for (int i = 0; i < n; i++) {
 					if (!va.isValidAt(i))
 						continue;
 					if (scalarB ? !bScalarValid : !vb.isValidAt(i))
 						continue;
 					long bVal = scalarB ? bScalar : vb.i64Data[i];
-					BigInteger q = BigInteger.valueOf(va.i64Data[i]).multiply(BigInteger.valueOf(bVal)).divide(dBig);
-					if (q.compareTo(I64_MIN_BIG) >= 0 && q.compareTo(I64_MAX_BIG) <= 0) {
-						out[i] = q.longValue();
+					if (ImpulseDecimal64.mulDivTrunc(va.i64Data[i], bVal, d, ws)) {
+						out[i] = ws.decResult;
 						outValid[i >>> 6] |= (1L << (i & 63));
 					}
 				}
@@ -760,5 +761,252 @@ public final class ImpulsePillar4MathOps {
 		}
 		ws.vVectors[dst] = ws.arena.allocF64(out, n, outValid);
 		ws.pc++;
+	}
+
+	// --- 0x58 OP_VEC_DECIMAL_ALU ---
+
+	private static void execDecimalAlu(ImpulseWorkspace ws, int subop, int flags, int dst, int s1, int s2, int s3,
+			int imm16Lo, int imm16Hi) {
+		switch (subop) {
+			case SUBOP_VEC_DECIMAL_ALU_ADD_CHK, SUBOP_VEC_DECIMAL_ALU_SUB_CHK, SUBOP_VEC_DECIMAL_ALU_MUL_CHK,
+					SUBOP_VEC_DECIMAL_ALU_DIV_ROUND, SUBOP_VEC_DECIMAL_ALU_DIV_SAFE -> {
+				ImpulseFrontier mask = getMaskFrontier(ws, flags, s3);
+				if (ws.status != IMPULSE_VM_OK)
+					return;
+				ImpulseVector va = ws.vVectors[s1];
+				if (va == null || va.elemTag != ImpulseVector.TAG_I64) {
+					ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+					return;
+				}
+				int n = va.length;
+				boolean scalarRhs = (flags & FLAG_SCALAR_RHS) != 0;
+				ImpulseVector vb = null;
+				if (!scalarRhs) {
+					vb = ws.vVectors[s2];
+					if (vb == null || vb.elemTag != ImpulseVector.TAG_I64) {
+						ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+						return;
+					}
+					if (vb.length != n) {
+						ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+						return;
+					}
+				}
+				boolean sValid = scalarRhs && ws.isRValid(s2);
+				long sVal = sValid ? ws.rRegs[s2] : 0L;
+				int words = Math.max(1, (n + 63) >>> 6);
+				long[] out = ws.arena.allocLongZeroed(n);
+				long[] outValid = ws.arena.allocLongZeroed(words);
+				for (int i = 0; i < n; i++) {
+					if (!laneActive(mask, i) || !va.isValidAt(i))
+						continue;
+					if (scalarRhs ? !sValid : !vb.isValidAt(i))
+						continue;
+					long a = va.i64Data[i];
+					long b = scalarRhs ? sVal : vb.i64Data[i];
+					int st;
+					boolean isNull = false;
+					switch (subop) {
+						case SUBOP_VEC_DECIMAL_ALU_ADD_CHK -> st = ImpulseDecimal64.addChk(a, b, ws);
+						case SUBOP_VEC_DECIMAL_ALU_SUB_CHK -> st = ImpulseDecimal64.subChk(a, b, ws);
+						case SUBOP_VEC_DECIMAL_ALU_MUL_CHK -> st = ImpulseDecimal64.mulChk(a, b, ws);
+						case SUBOP_VEC_DECIMAL_ALU_DIV_ROUND -> st = ImpulseDecimal64.divRound(a, b, ws);
+						case SUBOP_VEC_DECIMAL_ALU_DIV_SAFE -> {
+							st = ImpulseDecimal64.divSafe(a, b, ws);
+							isNull = ws.decNull;
+						}
+						default -> st = IMPULSE_VM_ERR_INVALID_OPCODE;
+					}
+					if (st != IMPULSE_VM_OK) {
+						ws.status = st;
+						return;
+					}
+					if (!isNull) {
+						out[i] = ws.decResult;
+						outValid[i >>> 6] |= (1L << (i & 63));
+					}
+				}
+				ws.vVectors[dst] = ws.arena.allocI64(out, n, outValid);
+				ws.pc++;
+			}
+			case SUBOP_VEC_DECIMAL_ALU_MUL_DIV_R, SUBOP_VEC_DECIMAL_ALU_MUL_DIV_V,
+					SUBOP_VEC_DECIMAL_ALU_MUL_DIV_SAFE_R -> {
+				ImpulseVector va = ws.vVectors[s1];
+				if (va == null || va.elemTag != ImpulseVector.TAG_I64) {
+					ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+					return;
+				}
+				int n = va.length;
+				boolean scalarRhs = (flags & FLAG_SCALAR_RHS) != 0;
+				ImpulseVector vb = null;
+				if (!scalarRhs) {
+					vb = ws.vVectors[s2];
+					if (vb == null || vb.elemTag != ImpulseVector.TAG_I64) {
+						ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+						return;
+					}
+					if (vb.length != n) {
+						ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+						return;
+					}
+				}
+				boolean divIsVec = (subop == SUBOP_VEC_DECIMAL_ALU_MUL_DIV_V);
+				ImpulseVector vd = null;
+				if (divIsVec) {
+					vd = ws.vVectors[s3];
+					if (vd == null || vd.elemTag != ImpulseVector.TAG_I64) {
+						ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+						return;
+					}
+					if (vd.length != n) {
+						ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+						return;
+					}
+				}
+				boolean bSValid = scalarRhs && ws.isRValid(s2);
+				long bSVal = bSValid ? ws.rRegs[s2] : 0L;
+				boolean dSValid = !divIsVec && ws.isRValid(s3);
+				long dSVal = dSValid ? ws.rRegs[s3] : 0L;
+				boolean isSafe = (subop == SUBOP_VEC_DECIMAL_ALU_MUL_DIV_SAFE_R);
+
+				int words = Math.max(1, (n + 63) >>> 6);
+				long[] out = ws.arena.allocLongZeroed(n);
+				long[] outValid = ws.arena.allocLongZeroed(words);
+				for (int i = 0; i < n; i++) {
+					if (!va.isValidAt(i))
+						continue;
+					if (scalarRhs ? !bSValid : !vb.isValidAt(i))
+						continue;
+					if (divIsVec ? !vd.isValidAt(i) : !dSValid)
+						continue;
+					long a = va.i64Data[i];
+					long b = scalarRhs ? bSVal : vb.i64Data[i];
+					long d = divIsVec ? vd.i64Data[i] : dSVal;
+					int st = ImpulseDecimal64.mulDivRound(a, b, d, ws);
+					if (st != IMPULSE_VM_OK) {
+						if (isSafe) {
+							continue;
+						}
+						ws.status = st;
+						return;
+					}
+					out[i] = ws.decResult;
+					outValid[i >>> 6] |= (1L << (i & 63));
+				}
+				ws.vVectors[dst] = ws.arena.allocI64(out, n, outValid);
+				ws.pc++;
+			}
+			case SUBOP_VEC_DECIMAL_ALU_F64_TO_DEC -> {
+				if (imm16Lo > 18 || imm16Hi < 1 || imm16Hi > 18) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
+				ImpulseFrontier mask = getMaskFrontier(ws, flags, s3);
+				if (ws.status != IMPULSE_VM_OK)
+					return;
+				ImpulseVector va = ws.vVectors[s1];
+				if (va == null || va.elemTag != ImpulseVector.TAG_F64) {
+					ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+					return;
+				}
+				int n = va.length;
+				int words = Math.max(1, (n + 63) >>> 6);
+				long[] out = ws.arena.allocLongZeroed(n);
+				long[] outValid = ws.arena.allocLongZeroed(words);
+				for (int i = 0; i < n; i++) {
+					if (!laneActive(mask, i) || !va.isValidAt(i))
+						continue;
+					int st = ImpulseDecimal64.f64ToDec(va.f64Data[i], imm16Lo, imm16Hi, ws);
+					if (st != IMPULSE_VM_OK) {
+						ws.status = st;
+						return;
+					}
+					if (!ws.decNull) {
+						out[i] = ws.decResult;
+						outValid[i >>> 6] |= (1L << (i & 63));
+					}
+				}
+				ws.vVectors[dst] = ws.arena.allocI64(out, n, outValid);
+				ws.pc++;
+			}
+			case SUBOP_VEC_DECIMAL_ALU_DEC_TO_F64 -> {
+				if (imm16Lo > 18) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
+				ImpulseFrontier mask = getMaskFrontier(ws, flags, s3);
+				if (ws.status != IMPULSE_VM_OK)
+					return;
+				ImpulseVector va = ws.vVectors[s1];
+				if (va == null || va.elemTag != ImpulseVector.TAG_I64) {
+					ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+					return;
+				}
+				int n = va.length;
+				int words = Math.max(1, (n + 63) >>> 6);
+				double[] out = ws.arena.allocDoubleZeroed(n);
+				long[] outValid = ws.arena.allocLongZeroed(words);
+				for (int i = 0; i < n; i++) {
+					if (!laneActive(mask, i) || !va.isValidAt(i))
+						continue;
+					double f = ImpulseDecimal64.decToF64(va.i64Data[i], imm16Lo);
+					if (!Double.isNaN(f)) {
+						out[i] = f;
+						outValid[i >>> 6] |= (1L << (i & 63));
+					}
+				}
+				ws.vVectors[dst] = ws.arena.allocF64(out, n, outValid);
+				ws.pc++;
+			}
+			case SUBOP_VEC_DECIMAL_ALU_RESCALE, SUBOP_VEC_DECIMAL_ALU_BOUND_CHK, SUBOP_VEC_DECIMAL_ALU_ABS_CHK,
+					SUBOP_VEC_DECIMAL_ALU_NEG_CHK, SUBOP_VEC_DECIMAL_ALU_ROUND_SCALE,
+					SUBOP_VEC_DECIMAL_ALU_TRUNC_SCALE -> {
+				boolean immOk = switch (subop) {
+					case SUBOP_VEC_DECIMAL_ALU_RESCALE -> imm16Lo <= 18 && (imm16Hi == 0 || imm16Hi == 1);
+					case SUBOP_VEC_DECIMAL_ALU_BOUND_CHK -> imm16Lo >= 1 && imm16Lo <= 18;
+					case SUBOP_VEC_DECIMAL_ALU_ROUND_SCALE, SUBOP_VEC_DECIMAL_ALU_TRUNC_SCALE -> imm16Lo <= 18;
+					default -> true;
+				};
+				if (!immOk) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
+				ImpulseFrontier mask = getMaskFrontier(ws, flags, s3);
+				if (ws.status != IMPULSE_VM_OK)
+					return;
+				ImpulseVector va = ws.vVectors[s1];
+				if (va == null || va.elemTag != ImpulseVector.TAG_I64) {
+					ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+					return;
+				}
+				int n = va.length;
+				int words = Math.max(1, (n + 63) >>> 6);
+				long[] out = ws.arena.allocLongZeroed(n);
+				long[] outValid = ws.arena.allocLongZeroed(words);
+				for (int i = 0; i < n; i++) {
+					if (!laneActive(mask, i) || !va.isValidAt(i))
+						continue;
+					long a = va.i64Data[i];
+					int st = switch (subop) {
+						case SUBOP_VEC_DECIMAL_ALU_RESCALE -> ImpulseDecimal64.rescale(a, imm16Lo, imm16Hi, ws);
+						case SUBOP_VEC_DECIMAL_ALU_BOUND_CHK -> ImpulseDecimal64.boundChk(a, imm16Lo, ws);
+						case SUBOP_VEC_DECIMAL_ALU_ABS_CHK -> ImpulseDecimal64.absChk(a, ws);
+						case SUBOP_VEC_DECIMAL_ALU_NEG_CHK -> ImpulseDecimal64.negChk(a, ws);
+						case SUBOP_VEC_DECIMAL_ALU_ROUND_SCALE -> ImpulseDecimal64.roundScale(a, imm16Lo, ws);
+						case SUBOP_VEC_DECIMAL_ALU_TRUNC_SCALE -> ImpulseDecimal64.truncScale(a, imm16Lo, ws);
+						default -> IMPULSE_VM_ERR_INVALID_OPCODE;
+					};
+					if (st != IMPULSE_VM_OK) {
+						ws.status = st;
+						return;
+					}
+					out[i] = ws.decResult;
+					outValid[i >>> 6] |= (1L << (i & 63));
+				}
+				ws.vVectors[dst] = ws.arena.allocI64(out, n, outValid);
+				ws.pc++;
+			}
+			default -> ws.status = IMPULSE_VM_ERR_INVALID_OPCODE;
+		}
 	}
 }

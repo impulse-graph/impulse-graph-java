@@ -56,6 +56,9 @@ public final class ImpulseMemoryPlanner {
 					};
 				} else if (op >= 0x20 && op <= 0x3B) {
 					frontierOps++;
+					if (op == ImpulseIsaTables.OP_MORSEL_COMMIT && ((subop >= 2 && subop <= 7) || subop == 9)) {
+						vectorOps++;
+					}
 				} else if (op >= 0x40 && op <= 0x6F) {
 					vectorOps++;
 				}
