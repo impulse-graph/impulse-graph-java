@@ -1,6 +1,13 @@
 package org.impulsegraph.scala
 
-import org.impulsegraph.api.{ArgType, ImpulseGraphQuery, ImpulseGraphSnapshot, ImpulseQueryBuilder, ReturnType}
+import org.impulsegraph.api.{
+  ArgType,
+  Decimal64,
+  ImpulseGraphQuery,
+  ImpulseGraphSnapshot,
+  ImpulseQueryBuilder,
+  ReturnType
+}
 import org.impulsegraph.api.bitset.ImpulseBitSet
 import org.impulsegraph.compiler.ast.ImpScmNode
 import scala.annotation.targetName
@@ -144,6 +151,25 @@ class ImpulseQueryDsl[R](private val builder: ImpulseQueryBuilder[R] = new Impul
     builder.walkEdgeFilteredAttribute(relationName.value, attributeName, op, value)
     this
 
+  @targetName("walkEdgeFilteredAttributeDec")
+  def walkEdgeFilteredAttribute(
+      relationName: String,
+      attributeName: String,
+      op: String,
+      value: Decimal64
+  ): ImpulseQueryDsl[R] =
+    builder.walkEdgeWithCel(relationName, s"edge.$attributeName $op ${value.toDecimalString}")
+    this
+
+  @targetName("walkEdgeFilteredAttributeRelDec")
+  def walkEdgeFilteredAttribute(
+      relationName: RelationName,
+      attributeName: String,
+      op: String,
+      value: Decimal64
+  ): ImpulseQueryDsl[R] =
+    walkEdgeFilteredAttribute(relationName.value, attributeName, op, value)
+
   infix def walkTarget(relationName: String): ImpulseQueryDsl[R] =
     builder.walkTarget(relationName)
     this
@@ -155,6 +181,11 @@ class ImpulseQueryDsl[R](private val builder: ImpulseQueryBuilder[R] = new Impul
 
   def filterNodeAttribute(attributeName: String, op: String, value: Double): ImpulseQueryDsl[R] =
     builder.filterNodeAttribute(attributeName, op, value)
+    this
+
+  @targetName("filterNodeAttributeDec")
+  def filterNodeAttribute(attributeName: String, op: String, value: Decimal64): ImpulseQueryDsl[R] =
+    builder.filterWithCel(s"node.$attributeName $op ${value.toDecimalString}")
     this
 
   def projectExpression(nodeAttribute: String, operator: String, edgeAttribute: String): ImpulseQueryDsl[R] =
@@ -326,7 +357,29 @@ def walkEdgeFilteredAttribute(
 )(using dsl: ImpulseQueryDsl[?]): Unit =
   dsl.walkEdgeFilteredAttribute(relationName, attributeName, op, value)
 
+@targetName("walkEdgeFilteredAttributeDec")
+def walkEdgeFilteredAttribute(
+    relationName: String,
+    attributeName: String,
+    op: String,
+    value: Decimal64
+)(using dsl: ImpulseQueryDsl[?]): Unit =
+  dsl.walkEdgeFilteredAttribute(relationName, attributeName, op, value)
+
+@targetName("walkEdgeFilteredAttributeRelDec")
+def walkEdgeFilteredAttribute(
+    relationName: RelationName,
+    attributeName: String,
+    op: String,
+    value: Decimal64
+)(using dsl: ImpulseQueryDsl[?]): Unit =
+  dsl.walkEdgeFilteredAttribute(relationName, attributeName, op, value)
+
 def filterNodeAttribute(attributeName: String, op: String, value: Double)(using dsl: ImpulseQueryDsl[?]): Unit =
+  dsl.filterNodeAttribute(attributeName, op, value)
+
+@targetName("filterNodeAttributeDec")
+def filterNodeAttribute(attributeName: String, op: String, value: Decimal64)(using dsl: ImpulseQueryDsl[?]): Unit =
   dsl.filterNodeAttribute(attributeName, op, value)
 
 def projectExpression(nodeAttribute: String, operator: String, edgeAttribute: String)(using

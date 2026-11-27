@@ -37,9 +37,22 @@ public class SchemaCodeGenerator {
 	}
 
 	private String generateEntityClass(GraphSchema schema, GraphSchema.EntityDef entity, String className) {
+		boolean usesDecimal64 = false;
+		if (entity.attributes() != null) {
+			for (String attrType : entity.attributes().values()) {
+				if (isDecimal64Type(attrType)) {
+					usesDecimal64 = true;
+					break;
+				}
+			}
+		}
+
 		StringBuilder sb = new StringBuilder();
 		sb.append("package ").append(packageName).append(";\n\n");
 		sb.append("import org.impulsegraph.api.ArgType;\n");
+		if (usesDecimal64) {
+			sb.append("import org.impulsegraph.api.Decimal64;\n");
+		}
 		sb.append("import org.impulsegraph.api.ImpulseQueryBuilder;\n");
 		sb.append("import org.impulsegraph.api.schema.TypedQueryBuilder;\n\n");
 		sb.append("/**\n");
@@ -81,17 +94,18 @@ public class SchemaCodeGenerator {
 			for (Map.Entry<String, String> attr : entity.attributes().entrySet()) {
 				String attrName = attr.getKey();
 				String attrType = attr.getValue();
-				String javaType = switch (attrType.toUpperCase()) {
-					case "DOUBLE", "FLOAT64" -> "double";
-					case "FLOAT", "FLOAT32" -> "float";
-					case "INT", "INT32" -> "int";
-					case "LONG", "INT64" -> "long";
-					default -> "Object";
-				};
+				boolean isDecimal = isDecimal64Type(attrType);
+				String javaType = resolveJavaType(attrType);
 				String filterMethod = "filter" + capitalize(attrName);
 				sb.append("    public ").append(className).append("<R> ").append(filterMethod).append("(String op, ")
 						.append(javaType).append(" val) {\n");
-				sb.append("        this.builder.filter(\"node.").append(attrName).append(" \" + op + \" \" + val);\n");
+				if (isDecimal) {
+					sb.append("        this.builder.filter(\"node.").append(attrName)
+							.append(" \" + op + \" \" + val.toDecimalString());\n");
+				} else {
+					sb.append("        this.builder.filter(\"node.").append(attrName)
+							.append(" \" + op + \" \" + val);\n");
+				}
 				sb.append("        return this;\n");
 				sb.append("    }\n\n");
 			}
@@ -99,6 +113,31 @@ public class SchemaCodeGenerator {
 
 		sb.append("}\n");
 		return sb.toString();
+	}
+
+	private static boolean isDecimal64Type(String attrType) {
+		if (attrType == null) {
+			return false;
+		}
+		String upper = attrType.trim().toUpperCase();
+		return upper.equals("DECIMAL") || upper.equals("DECIMAL64") || upper.startsWith("DECIMAL(")
+				|| upper.startsWith("DECIMAL64(") || upper.equals("0X15") || upper.equals("0X95");
+	}
+
+	private static String resolveJavaType(String attrType) {
+		if (attrType == null) {
+			return "Object";
+		}
+		if (isDecimal64Type(attrType)) {
+			return "Decimal64";
+		}
+		return switch (attrType.trim().toUpperCase()) {
+			case "DOUBLE", "FLOAT64" -> "double";
+			case "FLOAT", "FLOAT32" -> "float";
+			case "INT", "INT32" -> "int";
+			case "LONG", "INT64" -> "long";
+			default -> "Object";
+		};
 	}
 
 	private static String capitalize(String str) {
