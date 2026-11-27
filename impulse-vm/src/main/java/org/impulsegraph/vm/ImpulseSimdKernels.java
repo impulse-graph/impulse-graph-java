@@ -436,17 +436,6 @@ final class ImpulseSimdKernels {
 		}
 	}
 
-	private static VectorMask<Double> cmpConst(int subop, DoubleVector va, DoubleVector vy) {
-		return switch (subop) {
-			case 0 -> va.compare(VectorOperators.EQ, vy);
-			case 1 -> va.compare(VectorOperators.NE, vy);
-			case 2 -> va.compare(VectorOperators.LT, vy);
-			case 3 -> va.compare(VectorOperators.LE, vy);
-			case 4 -> va.compare(VectorOperators.GT, vy);
-			default -> va.compare(VectorOperators.GE, vy);
-		};
-	}
-
 	private static void f64CmpScalarWords(int subop, double[] a, double bSc, long[] aValid, long[] outValid,
 			long[] outData, int n, int vwords) {
 		DoubleVector vbs = DoubleVector.broadcast(F64, bSc);
@@ -466,12 +455,55 @@ final class ImpulseSimdKernels {
 			long dm = 0L;
 			int j = 0;
 			int vEnd = cnt & ~(LANES - 1);
-			for (; j < vEnd; j += LANES) {
-				DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
-				VectorMask<Double> ok = va.eq(va);
-				VectorMask<Double> res = cmpConst(subop, va, vbs).and(ok);
-				vm |= (ok.toLong() << j);
-				dm |= (res.toLong() << j);
+			switch (subop) {
+				case 0 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						VectorMask<Double> ok = va.eq(va);
+						vm |= (ok.toLong() << j);
+						dm |= (va.compare(VectorOperators.EQ, vbs).and(ok).toLong() << j);
+					}
+				}
+				case 1 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						VectorMask<Double> ok = va.eq(va);
+						vm |= (ok.toLong() << j);
+						dm |= (va.compare(VectorOperators.NE, vbs).and(ok).toLong() << j);
+					}
+				}
+				case 2 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						VectorMask<Double> ok = va.eq(va);
+						vm |= (ok.toLong() << j);
+						dm |= (va.compare(VectorOperators.LT, vbs).and(ok).toLong() << j);
+					}
+				}
+				case 3 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						VectorMask<Double> ok = va.eq(va);
+						vm |= (ok.toLong() << j);
+						dm |= (va.compare(VectorOperators.LE, vbs).and(ok).toLong() << j);
+					}
+				}
+				case 4 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						VectorMask<Double> ok = va.eq(va);
+						vm |= (ok.toLong() << j);
+						dm |= (va.compare(VectorOperators.GT, vbs).and(ok).toLong() << j);
+					}
+				}
+				default -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						VectorMask<Double> ok = va.eq(va);
+						vm |= (ok.toLong() << j);
+						dm |= (va.compare(VectorOperators.GE, vbs).and(ok).toLong() << j);
+					}
+				}
 			}
 			for (; j < cnt; j++) {
 				double x = a[base + j];
@@ -514,13 +546,61 @@ final class ImpulseSimdKernels {
 			long dm = 0L;
 			int j = 0;
 			int vEnd = cnt & ~(LANES - 1);
-			for (; j < vEnd; j += LANES) {
-				DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
-				DoubleVector vy = DoubleVector.fromArray(F64, b, base + j);
-				VectorMask<Double> ok = va.eq(va).and(vy.eq(vy));
-				VectorMask<Double> res = cmpConst(subop, va, vy).and(ok);
-				vm |= (ok.toLong() << j);
-				dm |= (res.toLong() << j);
+			switch (subop) {
+				case 0 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						DoubleVector vy = DoubleVector.fromArray(F64, b, base + j);
+						VectorMask<Double> ok = va.eq(va).and(vy.eq(vy));
+						vm |= (ok.toLong() << j);
+						dm |= (va.compare(VectorOperators.EQ, vy).and(ok).toLong() << j);
+					}
+				}
+				case 1 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						DoubleVector vy = DoubleVector.fromArray(F64, b, base + j);
+						VectorMask<Double> ok = va.eq(va).and(vy.eq(vy));
+						vm |= (ok.toLong() << j);
+						dm |= (va.compare(VectorOperators.NE, vy).and(ok).toLong() << j);
+					}
+				}
+				case 2 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						DoubleVector vy = DoubleVector.fromArray(F64, b, base + j);
+						VectorMask<Double> ok = va.eq(va).and(vy.eq(vy));
+						vm |= (ok.toLong() << j);
+						dm |= (va.compare(VectorOperators.LT, vy).and(ok).toLong() << j);
+					}
+				}
+				case 3 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						DoubleVector vy = DoubleVector.fromArray(F64, b, base + j);
+						VectorMask<Double> ok = va.eq(va).and(vy.eq(vy));
+						vm |= (ok.toLong() << j);
+						dm |= (va.compare(VectorOperators.LE, vy).and(ok).toLong() << j);
+					}
+				}
+				case 4 -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						DoubleVector vy = DoubleVector.fromArray(F64, b, base + j);
+						VectorMask<Double> ok = va.eq(va).and(vy.eq(vy));
+						vm |= (ok.toLong() << j);
+						dm |= (va.compare(VectorOperators.GT, vy).and(ok).toLong() << j);
+					}
+				}
+				default -> {
+					for (; j < vEnd; j += LANES) {
+						DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+						DoubleVector vy = DoubleVector.fromArray(F64, b, base + j);
+						VectorMask<Double> ok = va.eq(va).and(vy.eq(vy));
+						vm |= (ok.toLong() << j);
+						dm |= (va.compare(VectorOperators.GE, vy).and(ok).toLong() << j);
+					}
+				}
 			}
 			for (; j < cnt; j++) {
 				double x = a[base + j];
