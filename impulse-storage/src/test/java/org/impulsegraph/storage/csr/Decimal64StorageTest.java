@@ -95,6 +95,60 @@ class Decimal64StorageTest {
 	}
 
 	@Test
+	@DisplayName("DefaultSnapshotBuilder preserves DECIMAL64 precision, scale, and dimension on relation attributes")
+	void testRelationDecimal64ReserializePreservesPrecisionScale() {
+		try (Arena arena = Arena.ofConfined()) {
+			long[] weights = {1500L, -250L};
+			MemorySegment weightSeg = arena.allocate(weights.length * 8L, 8);
+			ValueLayout.OfLong leLong = ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
+			for (int i = 0; i < weights.length; i++) {
+				weightSeg.set(leLong, i * 8L, weights[i]);
+			}
+			MemorySegment rowSeg = arena.allocate(5 * 4L, 4);
+			rowSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, 0, 0);
+			rowSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, 1, 1);
+			rowSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, 2, 2);
+			rowSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, 3, 2);
+			rowSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, 4, 2);
+			MemorySegment colSeg = arena.allocate(2 * 4L, 4);
+			colSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, 0, 1);
+			colSeg.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, 1, 2);
+
+			RelationSnapshot rel = new RelationSnapshot(arena, 4, 2, rowSeg, colSeg, MemorySegment.NULL,
+					MemorySegment.NULL, java.util.List.of(weightSeg), java.util.List.of(MemorySegment.NULL), (byte) 4,
+					(byte) 4, (byte) 4);
+			rel.setAttributeNames(java.util.List.of("fee"));
+			rel.setAttributeTypeCodes(java.util.List.of(TYPE_DECIMAL64));
+			rel.setLoadedAttributes(
+					java.util.List.of(new BinarySnapshotLoader.LoadedAttribute("fee", TYPE_DECIMAL64, 1, 12, 4, 0, 0, 0,
+							16, 0, 0)),
+					java.util.List.of(MemorySegment.NULL));
+
+			GraphSnapshot graph = new GraphSnapshot(arena, Map.of("TRANSFER", rel));
+			byte[] snap1 = new DefaultSnapshotBuilder().withVersion((short) 11)
+					.withDomain(0, "Account", (byte) 0x03, 4L)
+					.build(new BinarySnapshotLoader.DefaultLoadedSnapshot(0x494D5053, (short) 11, graph, Map.of(),
+							Map.of(), Map.of(), Map.of()));
+
+			BinarySnapshotLoader.LoadedSnapshot loaded1 = BinarySnapshotLoader.loadSnapshot(snap1, arena);
+			BinarySnapshotLoader.LoadedAttribute fee1 = loaded1.getRelation(0).attributes().get(0);
+			assertThat(fee1.typeCode()).isEqualTo(TYPE_DECIMAL64);
+			assertThat(fee1.precision()).isEqualTo(12);
+			assertThat(fee1.scale()).isEqualTo(4);
+			assertThat(fee1.dimension()).isEqualTo(1);
+
+			// Re-serialize loaded1 -> snap2 and confirm metadata still preserved
+			byte[] snap2 = new DefaultSnapshotBuilder().withVersion((short) 11).build(loaded1);
+			BinarySnapshotLoader.LoadedSnapshot loaded2 = BinarySnapshotLoader.loadSnapshot(snap2, arena);
+			BinarySnapshotLoader.LoadedAttribute fee2 = loaded2.getRelation(0).attributes().get(0);
+			assertThat(fee2.typeCode()).isEqualTo(TYPE_DECIMAL64);
+			assertThat(fee2.precision()).isEqualTo(12);
+			assertThat(fee2.scale()).isEqualTo(4);
+			assertThat(fee2.dimension()).isEqualTo(1);
+		}
+	}
+
+	@Test
 	@DisplayName("Reject DECIMAL64 with precision=0 on open")
 	void testRejectPrecisionZero() {
 		assertInvalidDecimal64Rejected(0, 0, 32, false);
