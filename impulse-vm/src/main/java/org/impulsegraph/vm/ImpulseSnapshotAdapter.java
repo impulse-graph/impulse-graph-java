@@ -124,14 +124,15 @@ public final class ImpulseSnapshotAdapter {
 				if (seg == null || seg.equals(MemorySegment.NULL) || seg.byteSize() == 0) {
 					continue;
 				}
+				long domCard = domCardMap.getOrDefault(idx.domainId(), 0L);
 				ImpulseSnapshotView.OffHeapSecondaryIndex offIdx = new ImpulseSnapshotView.OffHeapSecondaryIndex(
 						idx.indexId(), idx.domainId(), idx.attributeIndex(), idx.indexType(), idx.name(), seg,
 						idx.payloadFeatureMask());
 				if (idx.indexType() == ImpulseSnapshotView.INDEX_TYPE_PERMUTATION) {
-					validatePermutationBounds(offIdx);
+					validatePermutationBounds(offIdx, domCard);
 					permutationIndexes.put(key, offIdx);
 				} else if (idx.indexType() == ImpulseSnapshotView.INDEX_TYPE_ZONE_MAP) {
-					validateZoneMapBounds(offIdx);
+					validateZoneMapBounds(offIdx, domCard);
 					zoneMapIndexes.put(key, offIdx);
 				}
 			}
@@ -283,7 +284,7 @@ public final class ImpulseSnapshotAdapter {
 				offHeapKeyResolvers, indexes, zoneMapIndexes, permutationIndexes);
 	}
 
-	private static void validatePermutationBounds(ImpulseSnapshotView.OffHeapSecondaryIndex idx) {
+	private static void validatePermutationBounds(ImpulseSnapshotView.OffHeapSecondaryIndex idx, long domCard) {
 		long bytes = idx.dataSeg().byteSize();
 		if (bytes < 16L) {
 			throw new IllegalArgumentException("Truncated Permutation index header for " + idx.name() + ": " + bytes);
@@ -294,9 +295,13 @@ public final class ImpulseSnapshotAdapter {
 			throw new IllegalArgumentException(
 					"Truncated Permutation index payload for " + idx.name() + ": count=" + count + ", bytes=" + bytes);
 		}
+		if (count < domCard) {
+			throw new IllegalArgumentException("Truncated Permutation index coverage for " + idx.name() + ": count="
+					+ count + " < domainCard=" + domCard);
+		}
 	}
 
-	private static void validateZoneMapBounds(ImpulseSnapshotView.OffHeapSecondaryIndex idx) {
+	private static void validateZoneMapBounds(ImpulseSnapshotView.OffHeapSecondaryIndex idx, long domCard) {
 		long bytes = idx.dataSeg().byteSize();
 		if (bytes < 24L) {
 			throw new IllegalArgumentException("Truncated ZoneMap index header for " + idx.name() + ": " + bytes);
@@ -306,6 +311,10 @@ public final class ImpulseSnapshotAdapter {
 		if (pageSize <= 0 || pageCount < 0 || 24L + (long) pageCount * 16L > bytes) {
 			throw new IllegalArgumentException("Truncated ZoneMap index payload for " + idx.name() + ": pageSize="
 					+ pageSize + ", pageCount=" + pageCount + ", bytes=" + bytes);
+		}
+		if (domCard > 0L && (long) pageCount * (long) pageSize < domCard) {
+			throw new IllegalArgumentException("Truncated ZoneMap index coverage for " + idx.name() + ": pageCount="
+					+ pageCount + " * pageSize=" + pageSize + " < domainCard=" + domCard);
 		}
 	}
 

@@ -94,6 +94,7 @@ public final class ImpulseSnapshotView {
 	public static final byte INDEX_TYPE_PERMUTATION = 0x01;
 	public static final byte INDEX_TYPE_ZONE_MAP = 0x02;
 	public static final long ZONE_MAP_FEAT_EXACT_I64 = 1L;
+	public static final long PERM_FEAT_NULLS_LAST = 1L;
 
 	private static final ValueLayout.OfInt LE_INT = ValueLayout.JAVA_INT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
 	private static final ValueLayout.OfLong LE_LONG = ValueLayout.JAVA_LONG_UNALIGNED
@@ -120,6 +121,10 @@ public final class ImpulseSnapshotView {
 			return dataSeg.get(LE_INT, 16L + ((long) pos << 2));
 		}
 
+		public boolean permIsNullsLast() {
+			return (featureMask & PERM_FEAT_NULLS_LAST) != 0L;
+		}
+
 		public long zmElementCount() {
 			return dataSeg.get(LE_LONG, 0L);
 		}
@@ -137,7 +142,7 @@ public final class ImpulseSnapshotView {
 		}
 
 		public boolean zmIsExactI64() {
-			return (zmTypeCode() & 0x7F) == 0x15 || (featureMask & ZONE_MAP_FEAT_EXACT_I64) != 0L;
+			return (featureMask & ZONE_MAP_FEAT_EXACT_I64) != 0L;
 		}
 
 		public long zmMinI64(int page) {

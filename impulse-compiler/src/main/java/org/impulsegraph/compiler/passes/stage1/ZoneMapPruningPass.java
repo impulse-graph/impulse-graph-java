@@ -133,6 +133,7 @@ public final class ZoneMapPruningPass implements CompilerPass {
 		long zmMin = Long.MAX_VALUE;
 		long zmMax = Long.MIN_VALUE;
 		boolean havePhysicalZm = false;
+		int matchedDomains = 0;
 
 		if (snapshot instanceof GraphSnapshot gs) {
 			for (String domName : gs.getDomainNames()) {
@@ -142,10 +143,20 @@ public final class ZoneMapPruningPass implements CompilerPass {
 				int idx = ld.getAttributeIndex(attrName);
 				if (idx < 0)
 					continue;
+				matchedDomains++;
+				if (matchedDomains > 1) {
+					// Ambiguous attribute name shared across multiple domains without explicit
+					// domain context: never prune.
+					return null;
+				}
 				BinarySnapshotLoader.LoadedAttribute la = ld.getAttribute(idx);
 				if (la != null) {
+					int base = la.typeCode() & 0x7F;
+					if (base != 0x01 && base != 0x02 && base != 0x03 && base != 0x04 && base != 0x15) {
+						return null;
+					}
 					attrNullable = la.isNullable();
-					if ((la.typeCode() & 0x7F) == 0x15) {
+					if (base == 0x15) {
 						isDecimal = true;
 						prec = la.precision();
 						scale = la.scale();
@@ -160,8 +171,7 @@ public final class ZoneMapPruningPass implements CompilerPass {
 							ValueLayout.OfLong leLong = ValueLayout.JAVA_LONG_UNALIGNED
 									.withOrder(ByteOrder.LITTLE_ENDIAN);
 							int pageCount = seg.get(leInt, 12L);
-							byte tc = seg.get(ValueLayout.JAVA_BYTE, 16L);
-							boolean exactI64 = (tc & 0x7F) == 0x15 || (sidx.payloadFeatureMask() & 1L) != 0L;
+							boolean exactI64 = (sidx.payloadFeatureMask() & 1L) != 0L;
 							if (exactI64 && 24L + (long) pageCount * 16L <= seg.byteSize()) {
 								for (int p = 0; p < pageCount; p++) {
 									long pMin = seg.get(leLong, 24L + ((long) p << 4));
@@ -179,7 +189,6 @@ public final class ZoneMapPruningPass implements CompilerPass {
 						break;
 					}
 				}
-				break;
 			}
 		}
 
@@ -196,36 +205,37 @@ public final class ZoneMapPruningPass implements CompilerPass {
 	}
 
 	private static Boolean evaluateExactI64Pruning(DecimalBoundaryFolder.CmpOp op, long val, long min, long max,
-			boolean hasNulls) {
+			boolean hasNulls, boolean underNegation) {
+		boolean canFoldFalse = !underNegation || !hasNulls;
 		if (min > max) {
-			// Empty/all-NULL column: every comparison evaluates to FALSE/UNKNOWN (no rows
-			// match)
-			return Boolean.FALSE;
+			// Empty/all-NULL column: under negation with NULLs, !(UNKNOWN) is UNKNOWN, not
+			// TRUE.
+			return canFoldFalse ? Boolean.FALSE : null;
 		}
 		return switch (op) {
 			case GE -> {
-				if (val > max)
+				if (canFoldFalse && val > max)
 					yield Boolean.FALSE;
 				if (!hasNulls && val <= min)
 					yield Boolean.TRUE;
 				yield null;
 			}
 			case GT -> {
-				if (val >= max)
+				if (canFoldFalse && val >= max)
 					yield Boolean.FALSE;
 				if (!hasNulls && val < min)
 					yield Boolean.TRUE;
 				yield null;
 			}
 			case LE -> {
-				if (val < min)
+				if (canFoldFalse && val < min)
 					yield Boolean.FALSE;
 				if (!hasNulls && val >= max)
 					yield Boolean.TRUE;
 				yield null;
 			}
 			case LT -> {
-				if (val <= min)
+				if (canFoldFalse && val <= min)
 					yield Boolean.FALSE;
 				if (!hasNulls && val > max)
 					yield Boolean.TRUE;
@@ -237,7 +247,7 @@ public final class ZoneMapPruningPass implements CompilerPass {
 				yield null;
 			}
 			case EQ -> {
-				if (val < min || val > max)
+				if (canFoldFalse && (val < min || val > max))
 					yield Boolean.FALSE;
 				yield null;
 			}
@@ -287,7 +297,7 @@ public final class ZoneMapPruningPass implements CompilerPass {
 				return applyFoldedDecimalPruning(fc, bounds);
 			}
 			Boolean folded = evaluateExactI64Pruning(cmpOp, intLit.value(), bounds.min(), bounds.max(),
-					bounds.hasNulls());
+					bounds.hasNulls(), false);
 			return folded != null ? ScmLiteral.ofBool(folded) : null;
 		}
 
@@ -319,7 +329,7 @@ public final class ZoneMapPruningPass implements CompilerPass {
 			return bounds.hasNulls() ? null : ScmLiteral.ofBool(true);
 		}
 		Boolean folded = evaluateExactI64Pruning(fc.op(), fc.thresholdUnscaled(), bounds.min(), bounds.max(),
-				bounds.hasNulls());
+				bounds.hasNulls(), false);
 		return folded != null ? ScmLiteral.ofBool(folded) : null;
 	}
 
@@ -335,10 +345,15 @@ public final class ZoneMapPruningPass implements CompilerPass {
 	}
 
 	public CelAstNode pruneCel(CelAstNode node) {
-		return pruneCel(node, null, null);
+		return pruneCel(node, null, null, false);
 	}
 
 	public CelAstNode pruneCel(CelAstNode node, GraphStatistics stats, ImpulseGraphSnapshot snapshot) {
+		return pruneCel(node, stats, snapshot, false);
+	}
+
+	private CelAstNode pruneCel(CelAstNode node, GraphStatistics stats, ImpulseGraphSnapshot snapshot,
+			boolean underNegation) {
 		if (node == null)
 			return null;
 
@@ -349,9 +364,10 @@ public final class ZoneMapPruningPass implements CompilerPass {
 			return CelAstNode.makeBool(sig.constantBoolVal());
 		}
 
+		boolean childNeg = underNegation ^ (node.kind() == CelAstNode.Kind.UNARY_OP && "!".equals(node.text()));
 		List<CelAstNode> children = new ArrayList<>();
 		for (CelAstNode child : node.children()) {
-			children.add(pruneCel(child, stats, snapshot));
+			children.add(pruneCel(child, stats, snapshot, childNeg));
 		}
 
 		CelAstNode result = node.withChildren(children);
@@ -360,7 +376,7 @@ public final class ZoneMapPruningPass implements CompilerPass {
 		// loss)
 		if (result.kind() == CelAstNode.Kind.BINARY_OP && children.size() >= 2 && (stats != null || snapshot != null)) {
 			Boolean decFolded = tryPruneCelDecimalComparison(result.text(), children.get(0), children.get(1), stats,
-					snapshot);
+					snapshot, underNegation);
 			if (decFolded != null) {
 				return CelAstNode.makeBool(decFolded);
 			}
@@ -395,7 +411,7 @@ public final class ZoneMapPruningPass implements CompilerPass {
 	}
 
 	private static Boolean tryPruneCelDecimalComparison(String op, CelAstNode left, CelAstNode right,
-			GraphStatistics stats, ImpulseGraphSnapshot snapshot) {
+			GraphStatistics stats, ImpulseGraphSnapshot snapshot, boolean underNegation) {
 		DecimalBoundaryFolder.CmpOp cmpOp = switch (op) {
 			case "==" -> DecimalBoundaryFolder.CmpOp.EQ;
 			case "!=" -> DecimalBoundaryFolder.CmpOp.NE;
@@ -443,12 +459,13 @@ public final class ZoneMapPruningPass implements CompilerPass {
 		DecimalBoundaryFolder.FoldedComparison fc = DecimalBoundaryFolder.foldComparison(cmpOp, colP, colS, litUnscaled,
 				ps[1]);
 		if (fc.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_FALSE) {
-			return Boolean.FALSE;
+			return (underNegation && bounds.hasNulls()) ? null : Boolean.FALSE;
 		}
 		if (fc.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_TRUE) {
 			return bounds.hasNulls() ? null : Boolean.TRUE;
 		}
-		return evaluateExactI64Pruning(fc.op(), fc.thresholdUnscaled(), bounds.min(), bounds.max(), bounds.hasNulls());
+		return evaluateExactI64Pruning(fc.op(), fc.thresholdUnscaled(), bounds.min(), bounds.max(), bounds.hasNulls(),
+				underNegation);
 	}
 
 	private static String extractCelAttrName(CelAstNode node) {

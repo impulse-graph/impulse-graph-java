@@ -290,4 +290,97 @@ public final class Decimal64IndexScanTest {
 			assertZeroAllocSteadyState(progNullEq, permBind, N);
 		}
 	}
+
+	@Test
+	void cppDoubleFormatZoneMapCompatAndNullablePermFallbackAndTruncatedCoverage(@TempDir Path tempDir)
+			throws Exception {
+		// 4 accounts: [-20.00, 19.99, 20.00, 250.50] (DECIMAL(10, 2))
+		long[] bals = {-2_000L, 1_999L, 2_000L, 25_050L};
+		final int N = bals.length;
+
+		// Build a C++-compatible double-format ZoneMap (featureMask = 0, type_code =
+		// 0x15):
+		// Page 0 (u=0..1): min=-2000.0, max=1999.0
+		// Page 1 (u=2..3): min=2000.0, max=25050.0
+		ByteBuffer cppZm = ByteBuffer.allocate(24 + 2 * 16).order(ByteOrder.LITTLE_ENDIAN);
+		cppZm.putLong(N);
+		cppZm.putInt(2); // pageSize
+		cppZm.putInt(2); // pageCount
+		cppZm.put(TYPE_DECIMAL64);
+		cppZm.put(new byte[7]);
+		cppZm.putDouble(-2_000.0);
+		cppZm.putDouble(1_999.0);
+		cppZm.putDouble(2_000.0);
+		cppZm.putDouble(25_050.0);
+
+		// Also build a foreign/legacy nullable Permutation with featureMask = 0 (no
+		// PERM_FEAT_NULLS_LAST) where NULL row 1 sits in the middle of the perm array.
+		long[] nullBals = {1_000L, 2_000L, 2_000L, 3_000L};
+		boolean[] nullValid = {true, false, true, true};
+		ByteBuffer legacyPerm = ByteBuffer.allocate(16 + N * 4).order(ByteOrder.LITTLE_ENDIAN);
+		legacyPerm.putLong(N);
+		legacyPerm.put(TYPE_DECIMAL64_NULLABLE);
+		legacyPerm.put(new byte[7]);
+		legacyPerm.putInt(0);
+		legacyPerm.putInt(1); // NULL in middle (violates nulls-last)
+		legacyPerm.putInt(2);
+		legacyPerm.putInt(3);
+
+		try (Arena arena = Arena.ofConfined()) {
+			GraphSnapshot emptyGraph = new GraphSnapshot(arena, Map.of());
+			BinarySnapshotLoader.LoadedSnapshot emptyLoaded = new BinarySnapshotLoader.DefaultLoadedSnapshot(0x494D5053,
+					(short) 11, emptyGraph, Map.of(), Map.of(), Map.of(), Map.of());
+
+			byte[] bytes = new DefaultSnapshotBuilder().withVersion((short) 11).withDomain(0, "Account", (byte) 0x03, N)
+					.withDomainAttribute(0, "balance", TYPE_DECIMAL64, 1, 10, 2, packLongs(bals), null, null)
+					.withDomainAttribute(0, "optBal", TYPE_DECIMAL64_NULLABLE, 1, 10, 2, packLongs(nullBals), null,
+							packValidity(nullValid))
+					.withDomainSecondaryIndex(0, 0, DefaultSnapshotBuilder.INDEX_TYPE_ZONE_MAP, "idx_cpp_zm",
+							cppZm.array(), 0L)
+					.withDomainSecondaryIndex(0, 1, DefaultSnapshotBuilder.INDEX_TYPE_PERMUTATION, "idx_legacy_perm",
+							legacyPerm.array(), 0L)
+					.build(emptyLoaded);
+			Path p = tempDir.resolve("cpp_compat.imps");
+			Files.write(p, bytes);
+			GraphSnapshot snap = BinarySnapshotLoader.loadSnapshot(p, arena).graph();
+			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
+
+			// 1. CRITICAL #1: featureMask == 0 on 0x15 MUST NOT be treated as exact-i64
+			assertNotNull(view.getZoneMapIndex(0, 0));
+			assertFalse(view.getZoneMapIndex(0, 0).zmIsExactI64(),
+					"ZoneMap with featureMask=0 on 0x15 must use double blocks (C++ compat)");
+
+			ImpulseInterpreter.SnapshotBinding bind = new ImpulseInterpreter.SnapshotBinding(new int[]{N}, view);
+			long[] progGe = buildIndexScanProgram(SUBOP_INDEX_SCAN_GE, 0, 0, 2_000L, 0L, false, false);
+			assertInterpAndJitParity(progGe, bind, N, new int[]{2, 3});
+
+			// 2. HIGH #7: nullable 0x95 Permutation without PERM_FEAT_NULLS_LAST must fall
+			// back cleanly and return exact Kleene 3VL results (excluding NULL row 1)
+			assertNotNull(view.getPermutationIndex(0, 1));
+			assertFalse(view.getPermutationIndex(0, 1).permIsNullsLast());
+			long[] progNullEq = buildIndexScanProgram(SUBOP_INDEX_SCAN_EQ, 0, 1, 2_000L, 0L, false, false);
+			assertInterpAndJitParity(progNullEq, bind, N, new int[]{2});
+
+			// 3. HIGH #2: Truncated ZoneMap coverage (pageCount*pageSize < N) must fail
+			// fast in ImpulseSnapshotAdapter
+			ByteBuffer truncZm = ByteBuffer.allocate(24 + 16).order(ByteOrder.LITTLE_ENDIAN);
+			truncZm.putLong(N);
+			truncZm.putInt(2); // pageSize
+			truncZm.putInt(1); // pageCount=1 => covers only 2 < N=4!
+			truncZm.put(TYPE_DECIMAL64);
+			truncZm.put(new byte[7]);
+			truncZm.putLong(-2_000L);
+			truncZm.putLong(1_999L);
+			byte[] badBytes = new DefaultSnapshotBuilder().withVersion((short) 11)
+					.withDomain(0, "Account", (byte) 0x03, N)
+					.withDomainAttribute(0, "balance", TYPE_DECIMAL64, 1, 10, 2, packLongs(bals), null, null)
+					.withDomainSecondaryIndex(0, 0, DefaultSnapshotBuilder.INDEX_TYPE_ZONE_MAP, "idx_trunc_zm",
+							truncZm.array(), DefaultSnapshotBuilder.ZONE_MAP_FEAT_EXACT_I64)
+					.build(emptyLoaded);
+			Path badPath = tempDir.resolve("trunc_zm.imps");
+			Files.write(badPath, badBytes);
+			GraphSnapshot badSnap = BinarySnapshotLoader.loadSnapshot(badPath, arena).graph();
+			assertThrows(IllegalArgumentException.class, () -> ImpulseSnapshotAdapter.from(badSnap));
+		}
+	}
 }
