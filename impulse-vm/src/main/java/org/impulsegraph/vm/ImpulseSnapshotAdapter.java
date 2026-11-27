@@ -267,7 +267,7 @@ public final class ImpulseSnapshotAdapter {
 			case 1 -> 1L;
 			case 2, 5 -> 2L;
 			case 3, 6 -> 4L;
-			case 4, 7, 8, 9 -> 8L;
+			case 4, 7, 8, 9, 21 -> 8L;
 			default -> 0L;
 		};
 		if (elemBytes > 0 && dataSeg.byteSize() < (long) count * elemBytes) {

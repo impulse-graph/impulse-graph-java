@@ -89,6 +89,15 @@ public final class ImpulseValidator {
 				}
 			}
 			case OP_VEC_TERNARY -> subop != 8 || !scalar;
+			case OP_VEC_DECIMAL_ALU -> {
+				if (subop == 3 || subop == 4 || subop == 15) {
+					yield !mask;
+				} else if (subop >= 7 && subop <= 14) {
+					yield !scalar && (mask || s3 == 0);
+				} else {
+					yield mask || s3 == 0;
+				}
+			}
 			case OP_VEC_INIT -> s1 == 0;
 			case OP_LANE_WALK -> (subop != 8 || s2 == 0) && (mask || s3 == 0);
 			case OP_LANE_STATE_WALK -> {
@@ -479,12 +488,15 @@ public final class ImpulseValidator {
 					|| ((subop <= 2 || (subop >= 4 && subop <= 9)) && !scalar && checkUninitMask(s2, wm));
 			case OP_VEC_TERNARY -> checkUninitMask(s1, wm) || (!scalar && checkUninitMask(s2, wm))
 					|| ((subop == 0 || subop == 2 || subop == 4 || subop == 6) && checkUninitMask(s3, wm));
+			case OP_VEC_DECIMAL_ALU -> checkUninitMask(s1, wm)
+					|| ((subop <= 6 || subop == 15) && !scalar && checkUninitMask(s2, wm))
+					|| (subop == 4 && checkUninitMask(s3, wm));
 			case OP_VEC_BLEND -> checkUninitMask(s1, wm) || (!scalar && checkUninitMask(s2, wm))
 					|| ((subop == 0 || subop == 2) && checkUninitMask(s3, wm));
 			case OP_VECTOR_RERANK -> subop >= 4 && (checkUninitMask(s1, wm) || checkUninitMask(s2, wm));
 			case OP_VEC_POINT -> subop == 2 && checkUninitMask(s1, wm);
-			case OP_MORSEL_COMMIT -> (subop <= 7 && checkUninitMask(s1, wm))
-					|| (subop >= 1 && subop <= 7 && !scalar && checkUninitMask(s2, wm));
+			case OP_MORSEL_COMMIT -> ((subop <= 7 || subop == 9) && checkUninitMask(s1, wm))
+					|| (((subop >= 1 && subop <= 7) || subop == 9) && !scalar && checkUninitMask(s2, wm));
 			default -> false;
 		};
 	}
@@ -538,7 +550,7 @@ public final class ImpulseValidator {
 			case OP_VEC_3VL_OP -> (subop == 11) ? WRITE_NONE : WRITE_V;
 			case OP_GATHER_VEC, OP_VEC_CMP, OP_VEC_STR_PRED, OP_VEC_MATH_ARITH, OP_VEC_MATH_EXP_LOG,
 					OP_VEC_MATH_TRIG_HYP, OP_VEC_MATH_ACT, OP_VEC_INT_BITWISE, OP_VEC_TERNARY, OP_VEC_BLEND,
-					OP_COALESCE, OP_VEC_POINT, OP_VECTOR_RERANK ->
+					OP_COALESCE, OP_VEC_POINT, OP_VECTOR_RERANK, OP_VEC_DECIMAL_ALU ->
 				WRITE_V;
 			default -> WRITE_NONE;
 		};
