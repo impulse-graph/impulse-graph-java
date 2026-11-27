@@ -371,6 +371,8 @@ public final class BinarySnapshotLoader {
 		private final byte typeCode;
 		private final boolean isNullable;
 		private final int dimension;
+		private final int precision;
+		private final int scale;
 		private final long validityOffset;
 		private final long validityBytes;
 		private final long dataOffset;
@@ -380,10 +382,18 @@ public final class BinarySnapshotLoader {
 
 		public LoadedAttribute(String name, byte typeCode, int dimension, long validityOffset, long validityBytes,
 				long dataOffset, long dataBytes, long offsetsOffset, long offsetsBytes) {
+			this(name, typeCode, dimension, 0, 0, validityOffset, validityBytes, dataOffset, dataBytes, offsetsOffset,
+					offsetsBytes);
+		}
+
+		public LoadedAttribute(String name, byte typeCode, int dimension, int precision, int scale, long validityOffset,
+				long validityBytes, long dataOffset, long dataBytes, long offsetsOffset, long offsetsBytes) {
 			this.name = name;
 			this.typeCode = (byte) (typeCode & 0x7F);
 			this.isNullable = (typeCode & 0x80) != 0;
 			this.dimension = dimension;
+			this.precision = precision;
+			this.scale = scale;
 			this.validityOffset = validityOffset;
 			this.validityBytes = validityBytes;
 			this.dataOffset = dataOffset;
@@ -403,6 +413,12 @@ public final class BinarySnapshotLoader {
 		}
 		public int dimension() {
 			return dimension;
+		}
+		public int precision() {
+			return precision;
+		}
+		public int scale() {
+			return scale;
 		}
 		public long validityOffset() {
 			return validityOffset;
@@ -962,8 +978,8 @@ public final class BinarySnapshotLoader {
 						}
 						int attrNameOff = dirBuf.getInt();
 						byte typeCode = dirBuf.get();
-						dirBuf.get(); // reserved1
-						dirBuf.getShort(); // reserved2
+						int attrScale = Byte.toUnsignedInt(dirBuf.get()); // reserved1 (scale for DECIMAL64)
+						int attrPrecision = Short.toUnsignedInt(dirBuf.getShort()); // reserved2 (precision for DECIMAL64)
 						int dimension = dirBuf.getInt();
 						long dataOff = dirBuf.getLong();
 						long dataBytes = dirBuf.getLong();
@@ -1020,11 +1036,12 @@ public final class BinarySnapshotLoader {
 								? segment.asSlice(offsOff, offsBytes)
 								: MemorySegment.NULL;
 						validateAttributePayload("Domain " + domId + " attribute " + attrEntryIdx, typeCode, dimension,
-								nodeCount, dataOff, dataBytes, offsOff, offsBytes, offsSeg, true);
+								attrPrecision, attrScale, nodeCount, dataOff, dataBytes, offsOff, offsBytes, offsSeg,
+								true);
 
 						String attrName = getString.apply(attrNameOff, "");
-						domAttributes.add(new LoadedAttribute(attrName, typeCode, dimension, validityOff, validityBytes,
-								dataOff, dataBytes, offsOff, offsBytes));
+						domAttributes.add(new LoadedAttribute(attrName, typeCode, dimension, attrPrecision, attrScale,
+								validityOff, validityBytes, dataOff, dataBytes, offsOff, offsBytes));
 
 						domAttrSegs.add((dataOff > 0 && dataBytes > 0)
 								? segment.asSlice(dataOff, dataBytes)
@@ -1262,8 +1279,8 @@ public final class BinarySnapshotLoader {
 					}
 					int attrNameOff = dirBuf.getInt();
 					byte typeCode = dirBuf.get();
-					dirBuf.get(); // reserved1
-					dirBuf.getShort(); // reserved2
+					int attrScale = Byte.toUnsignedInt(dirBuf.get()); // reserved1 (scale for DECIMAL64)
+					int attrPrecision = Short.toUnsignedInt(dirBuf.getShort()); // reserved2 (precision for DECIMAL64)
 					int dimension = dirBuf.getInt();
 					long dataOff = dirBuf.getLong();
 					long dataBytes = dirBuf.getLong();
@@ -1314,11 +1331,12 @@ public final class BinarySnapshotLoader {
 
 					MemorySegment offsSeg = (offsOff > 0) ? segment.asSlice(offsOff, offsBytes) : MemorySegment.NULL;
 					validateAttributePayload("Relation " + relId + " attribute " + attrEntryIdx, typeCode, dimension,
-							expectedRows, dataOff, dataBytes, offsOff, offsBytes, offsSeg, isV010Plus);
+							attrPrecision, attrScale, expectedRows, dataOff, dataBytes, offsOff, offsBytes, offsSeg,
+							isV010Plus);
 
 					String attrName = getString.apply(attrNameOff, "");
-					attributes.add(new LoadedAttribute(attrName, typeCode, dimension, validityOff, validityBytes,
-							dataOff, dataBytes, offsOff, offsBytes));
+					attributes.add(new LoadedAttribute(attrName, typeCode, dimension, attrPrecision, attrScale,
+							validityOff, validityBytes, dataOff, dataBytes, offsOff, offsBytes));
 				}
 
 				String relName = getString.apply(relNameOff, "rel_" + srcDomId + "_" + tgtDomId);
@@ -1785,9 +1803,36 @@ public final class BinarySnapshotLoader {
 		}
 	}
 
-	private static void validateAttributePayload(String context, byte rawTypeCode, int dimension, long rowCount,
-			long dataOff, long dataBytes, long offsOff, long offsBytes, MemorySegment offsSeg, boolean isV010) {
+	private static void validateAttributePayload(String context, byte rawTypeCode, int dimension, int precision,
+			int scale, long rowCount, long dataOff, long dataBytes, long offsOff, long offsBytes, MemorySegment offsSeg,
+			boolean isV010) {
 		byte baseCode = (byte) (rawTypeCode & 0x7F);
+		if (baseCode == 0x15) {
+			if (precision < 1 || precision > 18 || scale < 0 || scale > precision) {
+				ImpulseAssert.checkWellFormed(false, () -> context + " DECIMAL64 invalid precision/scale: precision="
+						+ precision + ", scale=" + scale);
+				throw new IllegalArgumentException(
+						context + " DECIMAL64 invalid precision/scale: precision=" + precision + ", scale=" + scale);
+			}
+		}
+		if (baseCode == 0x0F) {
+			if (dimension < 1) {
+				ImpulseAssert.checkWellFormed(false,
+						() -> context + " BOOL attribute has invalid dimension: " + dimension);
+				throw new IllegalArgumentException(context + " BOOL attribute has invalid dimension: " + dimension);
+			}
+			if (rowCount > 0) {
+				long totalBits = checkedMultiply(rowCount, dimension, context + " BOOL totalBits");
+				long reqDataBytes = checkedAdd(totalBits, 7L, context + " BOOL reqDataBytes") / 8L;
+				if (dataOff <= 0 || dataBytes < reqDataBytes) {
+					ImpulseAssert.checkWellFormed(false, () -> context + " BOOL payload undersized: dataBytes="
+							+ dataBytes + ", required>=" + reqDataBytes);
+					throw new IllegalArgumentException(context + " BOOL payload undersized: dataBytes=" + dataBytes
+							+ ", required>=" + reqDataBytes);
+				}
+			}
+			return;
+		}
 		boolean fixedUuid128 = (baseCode == 0x0C && dimension == 16 && offsOff == 0 && offsBytes == 0);
 		boolean isVarLength = !fixedUuid128
 				&& (baseCode == 0x0B || baseCode == 0x0C || (baseCode == 0x09 && (offsOff > 0 || offsBytes > 0)));
@@ -1840,7 +1885,7 @@ public final class BinarySnapshotLoader {
 			case 0x02, 0x12, 0x05 -> 2;
 			case 0x03, 0x13, 0x06 -> 4;
 			case 0x07 -> isV010 ? 8 : 4;
-			case 0x04, 0x14, 0x08, 0x09, 0x0D -> 8;
+			case 0x04, 0x14, 0x08, 0x09, 0x0D, 0x15 -> 8;
 			case 0x0C -> 1; // fixedUuid128 (dimension == 16)
 			case 0x0E -> 16;
 			default -> -1;
