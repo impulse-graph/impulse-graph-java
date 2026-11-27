@@ -5,7 +5,7 @@ package org.impulsegraph.compiler.cypher;
  */
 public enum CypherTokenType {
 	// Keywords
-	KW_MATCH, KW_WHERE, KW_RETURN, KW_AND, KW_OR, KW_NOT, KW_COUNT, KW_IN, KW_ORDER, KW_BY, KW_DESC, KW_ASC, KW_LIMIT,
+	KW_MATCH, KW_WHERE, KW_WITH, KW_RETURN, KW_AS, KW_CAST, KW_AND, KW_OR, KW_NOT, KW_COUNT, KW_IN, KW_ORDER, KW_BY, KW_DESC, KW_ASC, KW_LIMIT,
 
 	// Punctuation & Brackets
 	LPAREN, // (
@@ -16,10 +16,12 @@ public enum CypherTokenType {
 	COMMA, // ,
 	DOT, // .
 	PIPE, // |
+	PLUS, // +
 	DASH, // -
 	ARROW_RIGHT, // ->
 	ARROW_LEFT, // <-
 	STAR, // *
+	SLASH, // /
 
 	// Operators
 	EQ, // =
@@ -32,7 +34,7 @@ public enum CypherTokenType {
 
 	// Literals & Identifiers
 	IDENTIFIER, PARAM, // $paramName
-	STRING_LITERAL, NUMBER_LITERAL,
+	STRING_LITERAL, NUMBER_LITERAL, DECIMAL_LITERAL,
 
 	EOF, ERROR
 }

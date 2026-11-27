@@ -1050,8 +1050,13 @@ public final class ImpScmV11Compiler {
 			DecimalBoundaryFolder.FoldedComparison fc = DecimalBoundaryFolder.foldComparison(op, vecDec.precision,
 					vecDec.scale, constLit.constVal, constLit.scale);
 			if (fc.kind() == DecimalBoundaryFolder.FoldKind.COMPARE) {
-				int rThresh = allocR();
-				b.emitLoadConstI64(rThresh, fc.thresholdUnscaled());
+				int rThresh;
+				if (constLit.reg >= 0 && fc.thresholdUnscaled() == constLit.constVal) {
+					rThresh = constLit.reg;
+				} else {
+					rThresh = allocR();
+					b.emitLoadConstI64(rThresh, fc.thresholdUnscaled());
+				}
 				int dst = allocV();
 				b.emit(ImpulseIsaTables.OP_VEC_CMP, cmpOpToVecCmpSubop(fc.op()), ImpulseIsaTables.FLAG_SCALAR_RHS, dst,
 						vecDec.reg, rThresh, 0, 0);
@@ -1335,7 +1340,10 @@ public final class ImpScmV11Compiler {
 						if (pred.bank != ValBank.VEC_BOOL) {
 							throw new IllegalArgumentException("TYPE_MISMATCH: where requires bool vector predicate");
 						}
-						this.morsel.predReg = pred.reg;
+						// Convert 3VL bool vector into morsel frontier register F9 for FLAG_MASKED_S3
+						b.emit(ImpulseIsaTables.OP_SET_CONVERT, ImpulseIsaTables.SUBOP_SET_CONVERT_B2F, 0, 9, pred.reg,
+								0, 0, 0);
+						this.morsel.predReg = 9;
 					} else if ("scatter-add".equals(sh)) {
 						// (scatter-add out_vec tgt val_expr)
 						TypedVal outVec = eval(stmt.elems.get(1));
