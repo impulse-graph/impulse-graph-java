@@ -150,16 +150,27 @@ public final class CypherCompiler {
 		String curFrontier = "f0";
 		boolean filtered = false;
 
+		int startPredIdx = 0;
 		if (seedIdExpr != null) {
 			letBindings.add("[f0 (seed \"" + startDom + "\" " + seedIdExpr + ")]");
+			filtered = true;
+		} else if (!startPreds.isEmpty() && canUseIndexScan(startPreds.get(0), startDom, snapshot)) {
+			CypherParser.WherePredicate first = startPreds.get(0);
+			String normOp = "==".equals(first.op()) ? "=" : first.op();
+			String loweredRhs = V11ExprLowerer.lowerExpr(formatWhereRhs(first), id -> id,
+					(v, m) -> "(attr " + v + " \"" + m + "\")");
+			letBindings.add("[f0 (index-scan \"" + startDom + "\" \"" + first.field() + "\" " + normOp + " "
+					+ loweredRhs + ")]");
+			startPredIdx = 1;
 			filtered = true;
 		} else {
 			letBindings.add("[f0 (domain-all \"" + startDom + "\")]");
 		}
 
-		// Apply start-node WHERE predicates via node-filter
+		// Apply remaining start-node WHERE predicates via node-filter
 		int filterIdx = 0;
-		for (CypherParser.WherePredicate pred : startPreds) {
+		for (int pi = startPredIdx; pi < startPreds.size(); pi++) {
+			CypherParser.WherePredicate pred = startPreds.get(pi);
 			String nextF = "f" + (++filterIdx);
 			String lhsRaw = pred.lhsExpr() != null ? pred.lhsExpr() : (pred.targetVar() + "." + pred.field());
 			String fullCmp = lhsRaw + " " + pred.op() + " " + formatWhereRhs(pred);
@@ -414,6 +425,27 @@ public final class CypherCompiler {
 
 	private static final java.util.regex.Pattern PARAM_IDENT_PATTERN = java.util.regex.Pattern
 			.compile("\\$[A-Za-z_][A-Za-z0-9_]*");
+
+	private static boolean canUseIndexScan(CypherParser.WherePredicate pred, String startDom,
+			ImpulseGraphSnapshot snapshot) {
+		if (pred == null || pred.lhsExpr() != null || pred.field() == null || pred.field().isEmpty()) {
+			return false;
+		}
+		String op = pred.op();
+		if (!"=".equals(op) && !"==".equals(op) && !"<".equals(op) && !"<=".equals(op) && !">".equals(op)
+				&& !">=".equals(op)) {
+			return false;
+		}
+		if (!(snapshot instanceof GraphSnapshot gs)) {
+			return false;
+		}
+		BinarySnapshotLoader.LoadedDomain ld = gs.getDomain(startDom);
+		if (ld == null) {
+			return false;
+		}
+		int attrIdx = ld.getAttributeIndex(pred.field());
+		return attrIdx >= 0 && gs.hasSecondaryIndex(ld.domainId(), attrIdx);
+	}
 
 	private static String formatWhereRhs(CypherParser.WherePredicate pred) {
 		if (pred.isStringLiteral()) {

@@ -42,6 +42,8 @@ public final class ImpulseSnapshotAdapter {
 		Map<Long, ImpulseSnapshotView.OffHeapAttrColumn> offHeapNodeAttrs = new HashMap<>();
 		Map<Integer, ImpulseSnapshotView.KeyResolver> offHeapKeyResolvers = new HashMap<>();
 		Map<Long, String> indexes = new HashMap<>();
+		Map<Long, ImpulseSnapshotView.OffHeapSecondaryIndex> zoneMapIndexes = new HashMap<>();
+		Map<Long, ImpulseSnapshotView.OffHeapSecondaryIndex> permutationIndexes = new HashMap<>();
 
 		int maxDomId = -1;
 		Map<Integer, Long> domCardMap = new HashMap<>();
@@ -108,6 +110,29 @@ public final class ImpulseSnapshotAdapter {
 							return ld.resolveKey(denseId);
 						}
 					});
+				}
+			}
+
+			// Bind node-domain secondary indexes (0x01 Permutation, 0x02 ZoneMap) zero-copy
+			for (BinarySnapshotLoader.LoadedIndex idx : gs.getSecondaryIndices()) {
+				if (idx.relationId() != 0xFFFF) {
+					continue;
+				}
+				long key = ImpulseSnapshotView.domAttrKey(idx.domainId(), idx.attributeIndex());
+				indexes.putIfAbsent(key, idx.name());
+				MemorySegment seg = idx.dataSegment();
+				if (seg == null || seg.equals(MemorySegment.NULL) || seg.byteSize() == 0) {
+					continue;
+				}
+				ImpulseSnapshotView.OffHeapSecondaryIndex offIdx = new ImpulseSnapshotView.OffHeapSecondaryIndex(
+						idx.indexId(), idx.domainId(), idx.attributeIndex(), idx.indexType(), idx.name(), seg,
+						idx.payloadFeatureMask());
+				if (idx.indexType() == ImpulseSnapshotView.INDEX_TYPE_PERMUTATION) {
+					validatePermutationBounds(offIdx);
+					permutationIndexes.put(key, offIdx);
+				} else if (idx.indexType() == ImpulseSnapshotView.INDEX_TYPE_ZONE_MAP) {
+					validateZoneMapBounds(offIdx);
+					zoneMapIndexes.put(key, offIdx);
 				}
 			}
 		}
@@ -255,7 +280,33 @@ public final class ImpulseSnapshotAdapter {
 		}
 
 		return new ImpulseSnapshotView(domainCards, relViews, nodeEmbAttrs, offHeapNodeAttrs, Map.of(),
-				offHeapKeyResolvers, indexes);
+				offHeapKeyResolvers, indexes, zoneMapIndexes, permutationIndexes);
+	}
+
+	private static void validatePermutationBounds(ImpulseSnapshotView.OffHeapSecondaryIndex idx) {
+		long bytes = idx.dataSeg().byteSize();
+		if (bytes < 16L) {
+			throw new IllegalArgumentException("Truncated Permutation index header for " + idx.name() + ": " + bytes);
+		}
+		long count = idx.dataSeg()
+				.get(java.lang.foreign.ValueLayout.JAVA_LONG_UNALIGNED.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN), 0L);
+		if (count < 0 || count > Integer.MAX_VALUE || 16L + count * 4L > bytes) {
+			throw new IllegalArgumentException(
+					"Truncated Permutation index payload for " + idx.name() + ": count=" + count + ", bytes=" + bytes);
+		}
+	}
+
+	private static void validateZoneMapBounds(ImpulseSnapshotView.OffHeapSecondaryIndex idx) {
+		long bytes = idx.dataSeg().byteSize();
+		if (bytes < 24L) {
+			throw new IllegalArgumentException("Truncated ZoneMap index header for " + idx.name() + ": " + bytes);
+		}
+		int pageSize = idx.zmPageSize();
+		int pageCount = idx.zmPageCount();
+		if (pageSize <= 0 || pageCount < 0 || 24L + (long) pageCount * 16L > bytes) {
+			throw new IllegalArgumentException("Truncated ZoneMap index payload for " + idx.name() + ": pageSize="
+					+ pageSize + ", pageCount=" + pageCount + ", bytes=" + bytes);
+		}
 	}
 
 	private static void validateAttrBounds(byte attrType, int count, MemorySegment dataSeg, MemorySegment offSeg,

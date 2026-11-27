@@ -450,9 +450,16 @@ public final class BinarySnapshotLoader {
 		private final long dataOffset;
 		private final long dataBytes;
 		private final long payloadFeatureMask;
+		private final MemorySegment dataSegment;
 
 		public LoadedIndex(int indexId, int domainId, int relationId, int attributeIndex, byte indexType, String name,
 				long dataOffset, long dataBytes, long payloadFeatureMask) {
+			this(indexId, domainId, relationId, attributeIndex, indexType, name, dataOffset, dataBytes,
+					payloadFeatureMask, MemorySegment.NULL);
+		}
+
+		public LoadedIndex(int indexId, int domainId, int relationId, int attributeIndex, byte indexType, String name,
+				long dataOffset, long dataBytes, long payloadFeatureMask, MemorySegment dataSegment) {
 			this.indexId = indexId;
 			this.domainId = domainId;
 			this.relationId = relationId;
@@ -462,6 +469,7 @@ public final class BinarySnapshotLoader {
 			this.dataOffset = dataOffset;
 			this.dataBytes = dataBytes;
 			this.payloadFeatureMask = payloadFeatureMask;
+			this.dataSegment = dataSegment != null ? dataSegment : MemorySegment.NULL;
 		}
 
 		public int indexId() {
@@ -490,6 +498,9 @@ public final class BinarySnapshotLoader {
 		}
 		public long payloadFeatureMask() {
 			return payloadFeatureMask;
+		}
+		public MemorySegment dataSegment() {
+			return dataSegment;
 		}
 	}
 
@@ -1594,9 +1605,10 @@ public final class BinarySnapshotLoader {
 					}
 
 					validateSectionBounds("Index data", dataOff, dataBytes, segSize);
+					MemorySegment idxSeg = dataBytes > 0 ? segment.asSlice(dataOff, dataBytes) : MemorySegment.NULL;
 					String idxName = getString.apply(idxNameOff, "idx_" + idxId);
 					loadedIndices.add(new LoadedIndex(idxId, domId, relId, attrIdx, idxType, idxName, dataOff,
-							dataBytes, featureMask));
+							dataBytes, featureMask, idxSeg));
 				}
 			}
 
@@ -1605,7 +1617,8 @@ public final class BinarySnapshotLoader {
 				metadata.put("domain." + dom.name() + ".id", String.valueOf(dom.domainId()));
 				metadata.put("domain." + dom.domainId() + ".name", dom.name());
 			}
-			GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata, relationAliases, domainsByName);
+			GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata, relationAliases, domainsByName,
+					loadedIndices);
 
 			for (Map.Entry<Integer, RelationSnapshot> entry : relIdToSnapshot.entrySet()) {
 				String json = metadata.get("impulse.stats.relation." + entry.getKey() + ".out_degree");
