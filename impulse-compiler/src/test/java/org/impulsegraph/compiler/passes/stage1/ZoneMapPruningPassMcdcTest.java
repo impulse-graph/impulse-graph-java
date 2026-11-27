@@ -131,30 +131,37 @@ class ZoneMapPruningPassMcdcTest {
 				CelAstNode.makeBinary(">", CelAstNode.makeIdent("x"), CelAstNode.makeInt(0)));
 		assertInstanceOf(ScmCelExpr.class, ZoneMapPruningPass.INSTANCE.transform(nonConst, c));
 
-		// ScmVectorFilter: #f -> null, #t -> null, non-const -> kept
-		assertNull(ZoneMapPruningPass.INSTANCE.transform(new ScmVectorFilter(ScmSymbol.of("#f")), c));
+		// ScmVectorFilter: #t -> null (stripped), #f -> kept as constant-false marker
+		// (never dropped as no-op), non-const -> kept
+		ImpScmNode falseSymVf = ZoneMapPruningPass.INSTANCE.transform(new ScmVectorFilter(ScmSymbol.of("#f")), c);
+		assertInstanceOf(ScmVectorFilter.class, falseSymVf);
+		assertEquals(ScmSymbol.of("#f"), ((ScmVectorFilter) falseSymVf).predicate());
 		assertNull(ZoneMapPruningPass.INSTANCE.transform(new ScmVectorFilter(ScmSymbol.of("#t")), c));
-		assertNull(ZoneMapPruningPass.INSTANCE.transform(new ScmVectorFilter(ScmLiteral.ofBool(false)), c));
+		ImpScmNode falseLitVf = ZoneMapPruningPass.INSTANCE.transform(new ScmVectorFilter(ScmLiteral.ofBool(false)), c);
+		assertInstanceOf(ScmVectorFilter.class, falseLitVf);
+		assertEquals(ScmLiteral.ofBool(false), ((ScmVectorFilter) falseLitVf).predicate());
 		assertNull(ZoneMapPruningPass.INSTANCE.transform(new ScmVectorFilter(ScmLiteral.ofBool(true)), c));
 		ImpScmNode keptVf = ZoneMapPruningPass.INSTANCE.transform(new ScmVectorFilter(nonConst), c);
 		assertInstanceOf(ScmVectorFilter.class, keptVf);
 
-		// ScmWalk: empty filter -> unchanged; #f filter -> null; #t filter -> stripped
-		// + subSteps pruned
+		// ScmWalk: empty filter -> unchanged; #f filter -> kept with false marker
+		// (never dropped as no-op); #t filter -> stripped + subSteps pruned
 		ScmWalk emptyWalk = ScmWalk.forward("sensors");
 		assertSame(emptyWalk, ZoneMapPruningPass.INSTANCE.transform(emptyWalk, c));
 
 		ScmWalk deadWalk = ScmWalk.forward("sensors", ScmSymbol.of("#f"));
-		assertNull(ZoneMapPruningPass.INSTANCE.transform(deadWalk, c));
+		ImpScmNode prunedDeadWalk = ZoneMapPruningPass.INSTANCE.transform(deadWalk, c);
+		assertInstanceOf(ScmWalk.class, prunedDeadWalk);
+		assertEquals(List.of(ScmSymbol.of("#f")), ((ScmWalk) prunedDeadWalk).shaderSteps());
 
 		ScmWalk walkWithSub = new ScmWalk("sensors", 0, ScmWalk.Direction.FORWARD_CSR,
 				List.of(ScmSymbol.of("#t"), nonConst),
 				List.of(new ScmVectorFilter(ScmSymbol.of("constant-false")), ScmCollect.bitset()));
 		ScmProgram prog = (ScmProgram) ZoneMapPruningPass.INSTANCE.transform(ScmProgram.of(walkWithSub, deadWalk), c);
-		assertEquals(1, prog.steps().size());
+		assertEquals(2, prog.steps().size());
 		ScmWalk prunedWalk = (ScmWalk) prog.steps().get(0);
 		assertEquals(1, prunedWalk.shaderSteps().size());
-		assertEquals(1, prunedWalk.subSteps().size());
+		assertEquals(2, prunedWalk.subSteps().size());
 	}
 
 	@Test

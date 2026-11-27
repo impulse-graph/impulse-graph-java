@@ -2,13 +2,7 @@ package org.impulsegraph.vm;
 
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
 
 import static org.impulsegraph.vm.ImpulseIsaTables.*;
 
@@ -143,20 +137,59 @@ public final class ImpulsePillar3Ops {
 		return (a > b) ? a : b;
 	}
 
-	private static int[] toSortedInts(Set<Integer> s) {
-		int[] arr = new int[s.size()];
-		int i = 0;
-		for (int v : s)
-			arr[i++] = v;
-		Arrays.sort(arr);
-		return arr;
+	private static void mlSiftDown(long[] nodes, long[] masks, int start, int end) {
+		int root = start;
+		while ((root << 1) + 1 < end) {
+			int child = (root << 1) + 1;
+			int swap = root;
+			if (nodes[swap] < nodes[child])
+				swap = child;
+			if (child + 1 < end && nodes[swap] < nodes[child + 1])
+				swap = child + 1;
+			if (swap == root)
+				return;
+			long tn = nodes[root];
+			nodes[root] = nodes[swap];
+			nodes[swap] = tn;
+			long tm = masks[root];
+			masks[root] = masks[swap];
+			masks[swap] = tm;
+			root = swap;
+		}
 	}
 
-	private static Set<Integer> toIntSet(ImpulseFrontier f) {
-		Set<Integer> s = new TreeSet<>();
-		for (int u : f.toSortedArray())
-			s.add(u);
-		return s;
+	private static int mlSortAndCoalesce(long[] nodes, long[] masks, int count) {
+		if (count <= 0)
+			return 0;
+		for (int i = (count - 2) >>> 1; i >= 0; i--) {
+			mlSiftDown(nodes, masks, i, count);
+		}
+		for (int end = count - 1; end > 0; end--) {
+			long tn = nodes[end];
+			nodes[end] = nodes[0];
+			nodes[0] = tn;
+			long tm = masks[end];
+			masks[end] = masks[0];
+			masks[0] = tm;
+			mlSiftDown(nodes, masks, 0, end);
+		}
+		int w = 0;
+		int i = 0;
+		while (i < count) {
+			long u = nodes[i];
+			long m = masks[i];
+			i++;
+			while (i < count && nodes[i] == u) {
+				m |= masks[i];
+				i++;
+			}
+			if (m != 0L) {
+				nodes[w] = u;
+				masks[w] = m;
+				w++;
+			}
+		}
+		return w;
 	}
 
 	// --- 0x30 OP_WALK ---
@@ -657,67 +690,82 @@ public final class ImpulsePillar3Ops {
 			return;
 		}
 
-		Set<Integer> sExcl = Set.of();
+		ImpulseFrontier fe = null;
 		if ((flags & FLAG_MASKED_S3) != 0) {
-			ImpulseFrontier fe = getF1Bit(ws, s3);
+			fe = getF1Bit(ws, s3);
 			if (fe == null)
 				return;
 			if (fe.domainId != outDom) {
 				ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
 				return;
 			}
-			sExcl = toIntSet(fe);
 		}
-		Set<Integer> sAccum = Set.of();
+		ImpulseFrontier fd = null;
 		if ((flags & FLAG_ACCUM) != 0) {
-			ImpulseFrontier fd = getF1Bit(ws, dst);
+			fd = getF1Bit(ws, dst);
 			if (fd == null)
 				return;
 			if (fd.domainId != outDom) {
 				ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
 				return;
 			}
-			sAccum = toIntSet(fd);
+		}
+		if (!isRev && !rel.hasCsrSegments()) {
+			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+			return;
+		}
+		if (isRev && !rel.hasCscSegments()) {
+			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+			return;
 		}
 
 		boolean rhsValid = (cmpOp <= 5) && ws.isRValid(s2);
 		long rhsBits = rhsValid ? ws.rRegs[s2] : 0L;
 		int rhsTy = rhsValid ? ws.readRType(s2) : SCALAR_NULL_UNSET;
 
-		Set<Integer> out = new TreeSet<>();
+		int outCard = (int) view.domainCards[outDom];
+		int outWords = Math.max(1, (outCard + 63) >>> 6);
+		long[] outBits = ws.arena.allocLongZeroed(outWords);
+		if (fd != null && !fd.isEmpty()) {
+			int ac = fd.cardinality();
+			int[] aids = ws.arena.allocInt(Math.max(1, ac));
+			int an = fd.toSortedArrayInto(aids);
+			for (int i = 0; i < an; i++) {
+				int u = aids[i];
+				outBits[u >>> 6] |= (1L << u);
+			}
+		}
 		if (!(cmpOp <= 5 && !rhsValid)) {
-			int[] srcIds = fSrc.toSortedArray();
+			int srcCard = fSrc.cardinality();
+			int[] srcIds = ws.arena.allocInt(Math.max(1, srcCard));
+			int srcLen = fSrc.toSortedArrayInto(srcIds);
 			if (!isRev) {
-				if (!rel.hasCsrSegments()) {
-					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
-					return;
-				}
 				int csrRows = rel.csrRowCount();
-				for (int u : srcIds) {
+				for (int si = 0; si < srcLen; si++) {
+					int u = srcIds[si];
 					if (u >= 0 && u < csrRows) {
 						int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
 						for (int e = s; e < end; e++) {
 							int v = rel.csrColTarget(e);
-							if (!sExcl.contains(v) && evalEdgePred(col, e, cmpOp, rhsValid, rhsBits, rhsTy)) {
-								out.add(v);
+							if ((fe == null || !fe.contains(v))
+									&& evalEdgePred(col, e, cmpOp, rhsValid, rhsBits, rhsTy)) {
+								outBits[v >>> 6] |= (1L << v);
 							}
 						}
 					}
 				}
 			} else {
-				if (!rel.hasCscSegments()) {
-					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
-					return;
-				}
 				int cscRows = rel.cscRowCount();
-				for (int v : srcIds) {
+				for (int si = 0; si < srcLen; si++) {
+					int v = srcIds[si];
 					if (v >= 0 && v < cscRows) {
 						int s = rel.cscRowOffset(v), end = rel.cscRowOffset(v + 1);
 						for (int p = s; p < end; p++) {
 							int u = rel.cscColSource(p);
 							int e = rel.cscEdgeId(p);
-							if (!sExcl.contains(u) && evalEdgePred(col, e, cmpOp, rhsValid, rhsBits, rhsTy)) {
-								out.add(u);
+							if ((fe == null || !fe.contains(u))
+									&& evalEdgePred(col, e, cmpOp, rhsValid, rhsBits, rhsTy)) {
+								outBits[u >>> 6] |= (1L << u);
 							}
 						}
 					}
@@ -725,12 +773,12 @@ public final class ImpulsePillar3Ops {
 			}
 		}
 
-		Set<Integer> finalS = new TreeSet<>(sAccum);
-		finalS.addAll(out);
-		int outCard = (int) view.domainCards[outDom];
-		ws.fRegs[dst].initFromValidatedIds(outDom, outCard, toSortedInts(finalS), ws.geometry, false);
+		int card = 0;
+		for (int w = 0; w < outWords; w++)
+			card += Long.bitCount(outBits[w]);
+		ws.fRegs[dst].initFromDenseBits(outDom, outCard, outBits, outWords, card, ws.geometry, false);
 		ws.setFInitialized(dst, true);
-		ws.zf = finalS.isEmpty();
+		ws.zf = (card == 0);
 		ws.pc++;
 	}
 
@@ -916,7 +964,7 @@ public final class ImpulsePillar3Ops {
 			return;
 		}
 
-		Set<Integer> tgtMask = null;
+		ImpulseFrontier tgtMask = null;
 		if ((flags & FLAG_MASKED_S3) != 0) {
 			ImpulseFrontier fm = getF1Bit(ws, s3);
 			if (fm == null)
@@ -925,7 +973,7 @@ public final class ImpulsePillar3Ops {
 				ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
 				return;
 			}
-			tgtMask = toIntSet(fm);
+			tgtMask = fm;
 		}
 
 		ImpulseVector weightCol = null;
@@ -944,138 +992,146 @@ public final class ImpulsePillar3Ops {
 			}
 		}
 
+		if (!isRev && !rel.hasCsrSegments()) {
+			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+			return;
+		}
+		if (isRev && !rel.hasCscSegments()) {
+			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+			return;
+		}
+
 		int nIn = (int) view.domainCards[inDom];
 		int nOut = (int) view.domainCards[outDom];
+		int srcCard = fSrc.cardinality();
+		int[] srcIds = ws.arena.allocInt(Math.max(1, srcCard));
+		int srcLen = fSrc.toSortedArrayInto(srcIds);
+		int outWords = Math.max(1, (nOut + 63) >>> 6);
 
-		// Zero-alloc fast path for forward SpMV (subop 0=plus_times, 2=min_plus,
-		// 4=max_plus, 5=max_times, 6=min_max, 7=first_src, 8=argmin_plus)
-		if (!isRev && (flags & FLAG_MASKED_S3) == 0) {
-			if (!rel.hasCsrSegments()) {
-				ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
-				return;
-			}
-			int srcCard = fSrc.cardinality();
-			int[] srcIds = ws.arena.allocInt(srcCard);
-			int srcLen = fSrc.toSortedArrayInto(srcIds);
-			int outWords = Math.max(1, (nOut + 63) >>> 6);
-
-			if (subop == 7) { // .fwd_first_src
-				long[] out = ws.arena.allocLong(nOut);
-				long[] valid = ws.arena.allocLongZeroed(outWords);
-				int hits = 0;
-				for (int si = 0; si < srcLen; si++) {
-					int u = srcIds[si];
-					long u64 = u & 0xFFFFFFFFL;
-					int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
-					for (int e = s; e < end; e++) {
-						int v = rel.csrColTarget(e);
-						boolean has = ((valid[v >>> 6] >>> (v & 63)) & 1L) != 0L;
-						if (!has) {
-							out[v] = u64;
-							valid[v >>> 6] |= (1L << (v & 63));
-							hits++;
-						} else if (Long.compareUnsigned(u64, out[v]) < 0) {
-							out[v] = u64;
-						}
-					}
-				}
-				ws.vVectors[dst] = ws.arena.allocU64(out, nOut, valid);
-				ws.zf = (hits == 0);
-				ws.pc++;
-				return;
-			}
-
-			boolean scalarRhs = (flags & FLAG_SCALAR_RHS) != 0;
-			boolean scalarValid = scalarRhs && ws.isRValid(s2);
-			double scalarVal = scalarValid ? Double.longBitsToDouble(ws.rRegs[s2]) : Double.NaN;
-			double[] rhsSnap = null;
-			boolean[] rhsSnapValid = null;
-			if (!scalarRhs) {
-				ImpulseVector rv = ws.vVectors[s2];
-				if (rv == null || (rv.elemTag != ImpulseVector.TAG_F64 && rv.elemTag != ImpulseVector.TAG_I64
-						&& rv.elemTag != ImpulseVector.TAG_U64)) {
-					ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
-					return;
-				}
-				if (rv.length < nIn) {
-					ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-					return;
-				}
-				rhsSnap = ws.arena.allocDouble(nIn);
-				rhsSnapValid = ws.arena.allocBool(nIn);
-				for (int i = 0; i < nIn; i++) {
-					boolean ok = rv.isValidAt(i);
-					rhsSnapValid[i] = ok;
-					if (ok)
-						rhsSnap[i] = (rv.elemTag == ImpulseVector.TAG_F64) ? rv.f64Data[i] : (double) rv.i64Data[i];
-				}
-			}
-
-			if (subop == 8) { // .fwd_argmin_plus
-				double[] bestCost = ws.arena.allocDouble(nOut);
-				long[] bestSrc = ws.arena.allocLong(nOut);
-				long[] valid = ws.arena.allocLongZeroed(outWords);
-				int hits = 0;
-				for (int si = 0; si < srcLen; si++) {
-					int u = srcIds[si];
-					if (scalarRhs ? !scalarValid : !rhsSnapValid[u])
+		if (subop == 7) { // .fwd_first_src
+			long[] out = ws.arena.allocLongZeroed(nOut);
+			long[] valid = ws.arena.allocLongZeroed(outWords);
+			int hits = 0;
+			for (int si = 0; si < srcLen; si++) {
+				int u = srcIds[si];
+				long u64 = u & 0xFFFFFFFFL;
+				int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+				for (int e = s; e < end; e++) {
+					int v = rel.csrColTarget(e);
+					if (tgtMask != null && !tgtMask.contains(v))
 						continue;
-					double du = scalarRhs ? scalarVal : rhsSnap[u];
-					long u64 = u & 0xFFFFFFFFL;
-					int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
-					for (int e = s; e < end; e++) {
-						int v = rel.csrColTarget(e);
-						if (weightCol != null && !weightCol.isValidAt(e))
-							continue;
-						double w = (weightCol == null)
-								? 1.0
-								: (weightCol.elemTag == ImpulseVector.TAG_F64
-										? weightCol.f64Data[e]
-										: (double) weightCol.i64Data[e]);
-						double c = du + w;
-						if (Double.isNaN(c))
-							continue;
-						boolean has = ((valid[v >>> 6] >>> (v & 63)) & 1L) != 0L;
-						if (!has) {
-							bestCost[v] = c;
-							bestSrc[v] = u64;
-							valid[v >>> 6] |= (1L << (v & 63));
-							hits++;
-						} else if (c < bestCost[v] || (c == bestCost[v] && Long.compareUnsigned(u64, bestSrc[v]) < 0)) {
-							bestCost[v] = c;
-							bestSrc[v] = u64;
-						}
+					boolean has = ((valid[v >>> 6] >>> (v & 63)) & 1L) != 0L;
+					if (!has) {
+						out[v] = u64;
+						valid[v >>> 6] |= (1L << (v & 63));
+						hits++;
+					} else if (Long.compareUnsigned(u64, out[v]) < 0) {
+						out[v] = u64;
 					}
 				}
-				ws.vVectors[dst] = ws.arena.allocU64(bestSrc, nOut, valid);
-				ws.zf = (hits == 0);
-				ws.pc++;
+			}
+			ws.vVectors[dst] = ws.arena.allocU64(out, nOut, valid);
+			ws.zf = (hits == 0);
+			ws.pc++;
+			return;
+		}
+
+		// RHS snapshot (Jacobi-safe when dst == s2)
+		boolean scalarRhs = (flags & FLAG_SCALAR_RHS) != 0;
+		boolean scalarValid = scalarRhs && ws.isRValid(s2);
+		double scalarVal = scalarValid ? Double.longBitsToDouble(ws.rRegs[s2]) : Double.NaN;
+		double[] rhsSnap = null;
+		boolean[] rhsSnapValid = null;
+		if (!scalarRhs) {
+			ImpulseVector rv = ws.vVectors[s2];
+			if (rv == null || (rv.elemTag != ImpulseVector.TAG_F64 && rv.elemTag != ImpulseVector.TAG_I64
+					&& rv.elemTag != ImpulseVector.TAG_U64)) {
+				ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
 				return;
 			}
+			if (rv.length < nIn) {
+				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+				return;
+			}
+			rhsSnap = ws.arena.allocDouble(nIn);
+			rhsSnapValid = ws.arena.allocBool(nIn);
+			for (int i = 0; i < nIn; i++) {
+				boolean ok = rv.isValidAt(i);
+				rhsSnapValid[i] = ok;
+				if (ok)
+					rhsSnap[i] = (rv.elemTag == ImpulseVector.TAG_F64) ? rv.f64Data[i] : (double) rv.i64Data[i];
+			}
+		}
 
-			boolean isPlusTimes = (subop == 0);
-			double[] out = ws.arena.allocDoubleZeroed(nOut);
-			long[] outValid = ws.arena.allocLongZeroed(outWords);
-			if ((flags & FLAG_ACCUM) != 0) {
-				ImpulseVector dv = ws.vVectors[dst];
-				if (dv == null) {
-					ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
-					return;
+		if (subop == 8) { // .fwd_argmin_plus
+			double[] bestCost = ws.arena.allocDouble(nOut);
+			long[] bestSrc = ws.arena.allocLongZeroed(nOut);
+			long[] valid = ws.arena.allocLongZeroed(outWords);
+			int hits = 0;
+			for (int si = 0; si < srcLen; si++) {
+				int u = srcIds[si];
+				if (scalarRhs ? !scalarValid : !rhsSnapValid[u])
+					continue;
+				double du = scalarRhs ? scalarVal : rhsSnap[u];
+				long u64 = u & 0xFFFFFFFFL;
+				int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+				for (int e = s; e < end; e++) {
+					int v = rel.csrColTarget(e);
+					if (tgtMask != null && !tgtMask.contains(v))
+						continue;
+					if (weightCol != null && !weightCol.isValidAt(e))
+						continue;
+					double w = (weightCol == null)
+							? 1.0
+							: (weightCol.elemTag == ImpulseVector.TAG_F64
+									? weightCol.f64Data[e]
+									: (double) weightCol.i64Data[e]);
+					double c = du + w;
+					if (Double.isNaN(c))
+						continue;
+					boolean has = ((valid[v >>> 6] >>> (v & 63)) & 1L) != 0L;
+					if (!has) {
+						bestCost[v] = c;
+						bestSrc[v] = u64;
+						valid[v >>> 6] |= (1L << (v & 63));
+						hits++;
+					} else if (c < bestCost[v] || (c == bestCost[v] && Long.compareUnsigned(u64, bestSrc[v]) < 0)) {
+						bestCost[v] = c;
+						bestSrc[v] = u64;
+					}
 				}
-				if (dv.elemTag != ImpulseVector.TAG_F64 || dv.length != nOut) {
-					ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-					return;
-				}
-				System.arraycopy(dv.f64Data, 0, out, 0, nOut);
-				for (int i = 0; i < nOut; i++)
-					if (dv.isValidAt(i))
-						outValid[i >>> 6] |= (1L << (i & 63));
-			} else if (isPlusTimes) {
-				for (int i = 0; i < nOut; i++)
+			}
+			ws.vVectors[dst] = ws.arena.allocU64(bestSrc, nOut, valid);
+			ws.zf = (hits == 0);
+			ws.pc++;
+			return;
+		}
+
+		boolean isPlusTimes = (subop == 0 || subop == 1);
+		double[] out = ws.arena.allocDoubleZeroed(nOut);
+		long[] outValid = ws.arena.allocLongZeroed(outWords);
+		if ((flags & FLAG_ACCUM) != 0) {
+			ImpulseVector dv = ws.vVectors[dst];
+			if (dv == null) {
+				ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
+				return;
+			}
+			if (dv.elemTag != ImpulseVector.TAG_F64 || dv.length != nOut) {
+				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+				return;
+			}
+			System.arraycopy(dv.f64Data, 0, out, 0, nOut);
+			for (int i = 0; i < nOut; i++) {
+				if (dv.isValidAt(i))
 					outValid[i >>> 6] |= (1L << (i & 63));
 			}
+		} else if (isPlusTimes) {
+			for (int i = 0; i < nOut; i++)
+				outValid[i >>> 6] |= (1L << (i & 63));
+		}
 
-			int hits = 0;
+		int hits = 0;
+		if (!isRev) {
 			for (int si = 0; si < srcLen; si++) {
 				int u = srcIds[si];
 				if (scalarRhs ? !scalarValid : !rhsSnapValid[u])
@@ -1084,6 +1140,8 @@ public final class ImpulsePillar3Ops {
 				int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
 				for (int e = s; e < end; e++) {
 					int v = rel.csrColTarget(e);
+					if (tgtMask != null && !tgtMask.contains(v))
+						continue;
 					if (weightCol != null && !weightCol.isValidAt(e))
 						continue;
 					double w = (weightCol == null)
@@ -1125,225 +1183,48 @@ public final class ImpulsePillar3Ops {
 					}
 				}
 			}
-			ws.vVectors[dst] = ws.arena.allocF64(out, nOut, outValid);
-			ws.zf = (hits == 0);
-			ws.pc++;
-			return;
-		}
-
-		List<int[]> edges = new ArrayList<>();
-		int[] srcIds = fSrc.toSortedArray();
-		if (!isRev) {
-			if (!rel.hasCsrSegments()) {
-				ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
-				return;
-			}
-			for (int u : srcIds) {
-				int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
-				for (int e = s; e < end; e++) {
-					int v = rel.csrColTarget(e);
-					if (tgtMask == null || tgtMask.contains(v)) {
-						edges.add(new int[]{u, v, e});
-					}
-				}
-			}
-		} else if (weightCol != null && rel.cscEdgeIdsSeg == null && rel.hasCsrSegments()) {
-			int nSrc = rel.csrRowCount();
-			for (int u = 0; u < nSrc; u++) {
-				if (tgtMask != null && !tgtMask.contains(u))
-					continue;
-				int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
-				for (int e = s; e < end; e++) {
-					int v = rel.csrColTarget(e);
-					if (fSrc.contains(v)) {
-						edges.add(new int[]{v, u, e});
-					}
-				}
-			}
-			edges.sort((a, b) -> {
-				int c = Integer.compare(a[0], b[0]);
-				if (c != 0)
-					return c;
-				c = Integer.compare(a[1], b[1]);
-				return (c != 0) ? c : Integer.compare(a[2], b[2]);
-			});
 		} else {
-			if (!rel.hasCscSegments()) {
-				ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
-				return;
-			}
-			for (int v : srcIds) {
+			for (int si = 0; si < srcLen; si++) {
+				int v = srcIds[si];
+				if (scalarRhs ? !scalarValid : !rhsSnapValid[v])
+					continue;
+				double rv = scalarRhs ? scalarVal : rhsSnap[v];
 				int s = rel.cscRowOffset(v), end = rel.cscRowOffset(v + 1);
 				for (int p = s; p < end; p++) {
 					int u = rel.cscColSource(p);
+					if (tgtMask != null && !tgtMask.contains(u))
+						continue;
 					int e = rel.cscEdgeId(p);
-					if (tgtMask == null || tgtMask.contains(u)) {
-						edges.add(new int[]{v, u, e});
-					}
-				}
-			}
-		}
-
-		if (subop == 7) { // .fwd_first_src
-			long[] out = new long[nOut];
-			long[] valid = new long[Math.max(1, (nOut + 63) >>> 6)];
-			int hits = 0;
-			for (int[] ed : edges) {
-				int u = ed[0], v = ed[1];
-				long u64 = u & 0xFFFFFFFFL;
-				boolean has = ((valid[v >>> 6] >>> (v & 63)) & 1L) != 0L;
-				if (!has) {
-					out[v] = u64;
-					valid[v >>> 6] |= (1L << (v & 63));
+					if (weightCol != null && !weightCol.isValidAt(e))
+						continue;
+					double w = (weightCol == null)
+							? 1.0
+							: (weightCol.elemTag == ImpulseVector.TAG_F64
+									? weightCol.f64Data[e]
+									: (double) weightCol.i64Data[e]);
+					double contrib = (subop == 1) ? (rv * w) : (rv + w);
+					if (Double.isNaN(contrib))
+						continue;
 					hits++;
-				} else if (Long.compareUnsigned(u64, out[v]) < 0) {
-					out[v] = u64;
-				}
-			}
-			ws.vVectors[dst] = ImpulseVector.ofU64(out, valid);
-			ws.zf = (hits == 0);
-			ws.pc++;
-			return;
-		}
-
-		// RHS snapshot (Jacobi-safe when dst == s2)
-		boolean scalarRhs = (flags & FLAG_SCALAR_RHS) != 0;
-		boolean scalarValid = scalarRhs && ws.isRValid(s2);
-		double scalarVal = scalarValid ? Double.longBitsToDouble(ws.rRegs[s2]) : Double.NaN;
-		double[] rhsSnap = null;
-		boolean[] rhsSnapValid = null;
-		if (!scalarRhs) {
-			ImpulseVector rv = ws.vVectors[s2];
-			if (rv == null || (rv.elemTag != ImpulseVector.TAG_F64 && rv.elemTag != ImpulseVector.TAG_I64
-					&& rv.elemTag != ImpulseVector.TAG_U64)) {
-				ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
-				return;
-			}
-			if (rv.length < nIn) {
-				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-				return;
-			}
-			rhsSnap = new double[rv.length];
-			rhsSnapValid = new boolean[rv.length];
-			for (int i = 0; i < rv.length; i++) {
-				if (rv.isValidAt(i)) {
-					rhsSnapValid[i] = true;
-					rhsSnap[i] = (rv.elemTag == ImpulseVector.TAG_F64) ? rv.f64Data[i] : (double) rv.i64Data[i];
-				}
-			}
-		}
-
-		if (subop == 8) { // .fwd_argmin_plus
-			double[] bestCost = new double[nOut];
-			long[] bestSrc = new long[nOut];
-			long[] valid = new long[Math.max(1, (nOut + 63) >>> 6)];
-			int hits = 0;
-			for (int[] ed : edges) {
-				int u = ed[0], v = ed[1], e = ed[2];
-				if (scalarRhs ? !scalarValid : !rhsSnapValid[u])
-					continue;
-				double du = scalarRhs ? scalarVal : rhsSnap[u];
-				if (weightCol != null && !weightCol.isValidAt(e))
-					continue;
-				double w = (weightCol == null)
-						? 1.0
-						: (weightCol.elemTag == ImpulseVector.TAG_F64
-								? weightCol.f64Data[e]
-								: (double) weightCol.i64Data[e]);
-				double c = du + w;
-				if (Double.isNaN(c))
-					continue;
-				long u64 = u & 0xFFFFFFFFL;
-				boolean has = ((valid[v >>> 6] >>> (v & 63)) & 1L) != 0L;
-				if (!has) {
-					bestCost[v] = c;
-					bestSrc[v] = u64;
-					valid[v >>> 6] |= (1L << (v & 63));
-					hits++;
-				} else if (c < bestCost[v] || (c == bestCost[v] && Long.compareUnsigned(u64, bestSrc[v]) < 0)) {
-					bestCost[v] = c;
-					bestSrc[v] = u64;
-				}
-			}
-			ws.vVectors[dst] = ImpulseVector.ofU64(bestSrc, valid);
-			ws.zf = (hits == 0);
-			ws.pc++;
-			return;
-		}
-
-		boolean isPlusTimes = (subop == 0 || subop == 1);
-		double[] out = new double[nOut];
-		long[] outValid = new long[Math.max(1, (nOut + 63) >>> 6)];
-		if ((flags & FLAG_ACCUM) != 0) {
-			ImpulseVector dv = ws.vVectors[dst];
-			if (dv == null) {
-				ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
-				return;
-			}
-			if (dv.elemTag != ImpulseVector.TAG_F64 || dv.length != nOut) {
-				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-				return;
-			}
-			System.arraycopy(dv.f64Data, 0, out, 0, nOut);
-			for (int i = 0; i < nOut; i++) {
-				if (dv.isValidAt(i))
-					outValid[i >>> 6] |= (1L << (i & 63));
-			}
-		} else if (isPlusTimes) {
-			for (int i = 0; i < nOut; i++) {
-				out[i] = 0.0;
-				outValid[i >>> 6] |= (1L << (i & 63));
-			}
-		}
-
-		int hits = 0;
-		for (int[] ed : edges) {
-			int u = ed[0], v = ed[1], e = ed[2];
-			if (scalarRhs ? !scalarValid : !rhsSnapValid[u])
-				continue;
-			double ru = scalarRhs ? scalarVal : rhsSnap[u];
-			if (weightCol != null && !weightCol.isValidAt(e))
-				continue;
-			double w = (weightCol == null)
-					? 1.0
-					: (weightCol.elemTag == ImpulseVector.TAG_F64
-							? weightCol.f64Data[e]
-							: (double) weightCol.i64Data[e]);
-			double contrib = switch (subop) {
-				case 0, 1, 5 -> ru * w;
-				case 2, 3, 4 -> ru + w;
-				case 6 -> ieeeMaxF64(ru, w);
-				default -> ru;
-			};
-			if (Double.isNaN(contrib))
-				continue;
-			hits++;
-			boolean has = ((outValid[v >>> 6] >>> (v & 63)) & 1L) != 0L;
-			switch (subop) {
-				case 0, 1 -> {
-					double prev = has ? out[v] : 0.0;
-					double sum = prev + contrib;
-					if (Double.isNaN(sum)) {
-						outValid[v >>> 6] &= ~(1L << (v & 63));
+					boolean has = ((outValid[u >>> 6] >>> (u & 63)) & 1L) != 0L;
+					if (subop == 1) {
+						double prev = has ? out[u] : 0.0;
+						double sum = prev + contrib;
+						if (Double.isNaN(sum))
+							outValid[u >>> 6] &= ~(1L << (u & 63));
+						else {
+							out[u] = sum;
+							outValid[u >>> 6] |= (1L << (u & 63));
+						}
 					} else {
-						out[v] = sum;
-						outValid[v >>> 6] |= (1L << (v & 63));
+						out[u] = has ? ieeeMinF64(out[u], contrib) : contrib;
+						outValid[u >>> 6] |= (1L << (u & 63));
 					}
-				}
-				case 2, 3, 6 -> {
-					out[v] = has ? ieeeMinF64(out[v], contrib) : contrib;
-					outValid[v >>> 6] |= (1L << (v & 63));
-				}
-				case 4, 5 -> {
-					out[v] = has ? ieeeMaxF64(out[v], contrib) : contrib;
-					outValid[v >>> 6] |= (1L << (v & 63));
-				}
-				default -> {
 				}
 			}
 		}
 
-		ws.vVectors[dst] = ImpulseVector.ofF64(out, outValid);
+		ws.vVectors[dst] = ws.arena.allocF64(out, nOut, outValid);
 		ws.zf = (hits == 0);
 		ws.pc++;
 	}
@@ -1366,6 +1247,14 @@ public final class ImpulsePillar3Ops {
 		boolean isCoo = (subop == 2 || subop == 3);
 		boolean isRev = (subop == 1 || subop == 3);
 		if (isCoo && !rel.hasCooSegments()) {
+			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+			return;
+		}
+		if (!isCoo && !isRev && !rel.hasCsrSegments()) {
+			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+			return;
+		}
+		if (!isCoo && isRev && !rel.hasCscSegments()) {
 			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
 			return;
 		}
@@ -1393,8 +1282,8 @@ public final class ImpulsePillar3Ops {
 			exclFrontier = fe;
 		}
 
-		MorselStreamSession sess = new MorselStreamSession(ws, bind, view, program, hdrPc, endPc, outDom, false,
-				stepsRef, maxSteps);
+		MorselStreamSession sess = acquireMorselSession(ws, bind, view, program, hdrPc, endPc, outDom, false, stepsRef,
+				maxSteps);
 		if (isCoo) {
 			if (!rel.hasCooSegments()) {
 				ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
@@ -1977,7 +1866,7 @@ public final class ImpulsePillar3Ops {
 
 		int[] srcIds = ws.arena.allocInt(fSrc.cardinality());
 		int srcCnt = fSrc.toSortedArrayInto(srcIds);
-		MorselStreamSession sess = new MorselStreamSession(ws, bind, view, program, hdrPc, endPc, fSrc.domainId, true,
+		MorselStreamSession sess = acquireMorselSession(ws, bind, view, program, hdrPc, endPc, fSrc.domainId, true,
 				stepsRef, maxSteps);
 		for (int k = 0; k < srcCnt && ws.status == IMPULSE_VM_OK; k++) {
 			sess.push(srcIds[k] & 0xFFFFFFFFL, 0L, 0L, 1L);
@@ -1985,52 +1874,112 @@ public final class ImpulsePillar3Ops {
 		sess.finish();
 	}
 
+	private static MorselStreamSession acquireMorselSession(ImpulseWorkspace ws,
+			ImpulseInterpreter.SnapshotBinding bind, ImpulseSnapshotView view, long[] program, int hdrPc, int endPc,
+			int defaultDom, boolean isFilter, long[] stepsRef, long maxSteps) {
+		MorselStreamSession sess = (MorselStreamSession) ws.reusableMorselSession;
+		if (sess == null) {
+			sess = new MorselStreamSession(); // INVARIANT_ALLOW: one-time per-workspace lazy init
+			ws.reusableMorselSession = sess;
+		}
+		sess.init(ws, bind, view, program, hdrPc, endPc, defaultDom, isFilter, stepsRef, maxSteps);
+		return sess;
+	}
+
+	private static final class MorselAccSlot {
+		ImpulseFrontier f;
+		long[] mlDense;
+		long[] mlNodes;
+		long[] mlMasks;
+		int mlCount;
+		int mlCap;
+		double[] vF64;
+		boolean[] vF64Valid;
+		int vF64Len;
+		long[] vU64;
+		boolean[] vU64Valid;
+		int vU64Len;
+
+		void reset() {
+			f = null;
+			mlDense = null;
+			mlNodes = null;
+			mlMasks = null;
+			mlCount = 0;
+			mlCap = 0;
+			vF64 = null;
+			vF64Valid = null;
+			vF64Len = 0;
+			vU64 = null;
+			vU64Valid = null;
+			vU64Len = 0;
+		}
+
+		void addMlSparse(ImpulseWorkspace ws, long node, long mask) {
+			if (mlCount >= mlCap) {
+				int ncap = Math.max(64, mlCap * 2);
+				long[] nn = ws.arena.allocLong(ncap);
+				long[] nm = ws.arena.allocLong(ncap);
+				if (mlCount > 0) {
+					System.arraycopy(mlNodes, 0, nn, 0, mlCount);
+					System.arraycopy(mlMasks, 0, nm, 0, mlCount);
+				}
+				mlNodes = nn;
+				mlMasks = nm;
+				mlCap = ncap;
+			}
+			mlNodes[mlCount] = node;
+			mlMasks[mlCount] = mask;
+			mlCount++;
+		}
+	}
+
 	private static final class MorselStreamSession {
-		final ImpulseWorkspace ws;
-		final ImpulseInterpreter.SnapshotBinding bind;
-		final ImpulseSnapshotView view;
-		final long[] program;
-		final int hdrPc;
-		final int endPc;
-		final boolean isFilter;
-		final long[] stepsRef;
-		final long maxSteps;
-		final int mMax;
-		final int mWords;
+		ImpulseWorkspace ws;
+		ImpulseInterpreter.SnapshotBinding bind;
+		ImpulseSnapshotView view;
+		long[] program;
+		int hdrPc;
+		int endPc;
+		boolean isFilter;
+		long[] stepsRef;
+		long maxSteps;
+		int mMax;
+		int mWords;
 
-		final Set<Integer>[] accF;
-		final TreeMap<Long, Long>[] accMl;
-		final long[][] accMlDense;
-		final double[][] accVF64;
-		final boolean[][] accVF64Valid;
-		final long[][] accVU64;
-		final boolean[][] accVU64Valid;
-		final long[] accRCnt;
-		final int[] committedFDom;
-		final int[] committedMlDom;
-		final boolean[] committedVF64;
-		final boolean[] committedVU64;
-		final boolean[] committedRCnt;
+		final MorselAccSlot[] acc;
+		long[] accRCnt;
+		int[] committedFDom;
+		int[] committedMlDom;
+		boolean[] committedVF64;
+		boolean[] committedVU64;
+		boolean[] committedRCnt;
 
-		final long[] m0, m1, m2, m3;
-		final int[] mf0Ids;
-		final long[] allValid;
-		final ImpulseVector vM0, vM1, vM2, vM3;
+		long[] m0, m1, m2, m3;
+		int[] mf0Ids;
+		long[] allValid;
+		ImpulseVector vM0, vM1, vM2, vM3;
 		final ImpulseVector[] morselSpills;
-		final int[] maskScratch;
-		final long[] tmpVBits;
-		final double[][] scratchF64;
-		final long[][] scratchI64;
-		final long[][] scratchVBits;
-		final long[][] scratchBBits;
+		int[] maskScratch;
+		long[] tmpVBits;
 		final ImpulseVector[] scratchVecF64;
 		final ImpulseVector[] scratchVecI64;
 		final ImpulseVector[] scratchVecU64;
 		final ImpulseVector[] scratchVecBool;
 		int chunkLen = 0;
 
-		@SuppressWarnings("unchecked")
-		MorselStreamSession(ImpulseWorkspace ws, ImpulseInterpreter.SnapshotBinding bind, ImpulseSnapshotView view,
+		MorselStreamSession() {
+			this.acc = new MorselAccSlot[8]; // INVARIANT_ALLOW: one-time per-workspace init
+			for (int d = 0; d < 8; d++)
+				this.acc[d] = new MorselAccSlot(); // INVARIANT_ALLOW: one-time per-workspace init
+			this.morselSpills = new ImpulseVector[16]; // INVARIANT_ALLOW: one-time per-workspace init
+			this.scratchVecF64 = new ImpulseVector[8]; // INVARIANT_ALLOW: one-time per-workspace init
+			this.scratchVecI64 = new ImpulseVector[8]; // INVARIANT_ALLOW: one-time per-workspace init
+			this.scratchVecU64 = new ImpulseVector[8]; // INVARIANT_ALLOW: one-time per-workspace init
+			this.scratchVecBool = new ImpulseVector[8]; // INVARIANT_ALLOW: one-time per-workspace init
+		}
+
+		void init(ImpulseWorkspace ws, ImpulseInterpreter.SnapshotBinding bind, ImpulseSnapshotView view,
 				long[] program, int hdrPc, int endPc, int defaultDom, boolean isFilter, long[] stepsRef,
 				long maxSteps) {
 			this.ws = ws;
@@ -2044,28 +1993,25 @@ public final class ImpulsePillar3Ops {
 			this.maxSteps = maxSteps;
 			this.mMax = Math.max(1, ws.geometry.morselMax());
 			this.mWords = Math.max(1, (mMax + 63) >>> 6);
+			this.chunkLen = 0;
 
-			this.accF = new Set[8];
-			this.accMl = new TreeMap[8];
-			this.accMlDense = new long[8][];
-			this.accVF64 = new double[8][];
-			this.accVF64Valid = new boolean[8][];
-			this.accVU64 = new long[8][];
-			this.accVU64Valid = new boolean[8][];
-			this.accRCnt = new long[8];
-			this.committedFDom = new int[8];
-			this.committedMlDom = new int[8];
-			Arrays.fill(committedFDom, -1);
-			Arrays.fill(committedMlDom, -1);
-			this.committedVF64 = new boolean[8];
-			this.committedVU64 = new boolean[8];
-			this.committedRCnt = new boolean[8];
+			for (int d = 0; d < 8; d++)
+				this.acc[d].reset();
+			Arrays.fill(this.morselSpills, null);
+			this.accRCnt = ws.arena.allocLongZeroed(8);
+			this.committedFDom = ws.arena.allocInt(8);
+			this.committedMlDom = ws.arena.allocInt(8);
+			Arrays.fill(committedFDom, 0, 8, -1);
+			Arrays.fill(committedMlDom, 0, 8, -1);
+			this.committedVF64 = ws.arena.allocBoolZeroed(8);
+			this.committedVU64 = ws.arena.allocBoolZeroed(8);
+			this.committedRCnt = ws.arena.allocBoolZeroed(8);
 
-			boolean[] accumF = new boolean[8];
-			boolean[] accumMl = new boolean[8];
-			boolean[] accumVF64 = new boolean[8];
-			boolean[] accumVU64 = new boolean[8];
-			boolean[] accumR = new boolean[8];
+			boolean[] accumF = ws.arena.allocBoolZeroed(8);
+			boolean[] accumMl = ws.arena.allocBoolZeroed(8);
+			boolean[] accumVF64 = ws.arena.allocBoolZeroed(8);
+			boolean[] accumVU64 = ws.arena.allocBoolZeroed(8);
+			boolean[] accumR = ws.arena.allocBoolZeroed(8);
 
 			for (int p = hdrPc + 1; p < endPc; p++) {
 				long cw = program[p];
@@ -2109,51 +2055,68 @@ public final class ImpulsePillar3Ops {
 			}
 
 			for (int d = 0; d < 8; d++) {
+				MorselAccSlot slot = acc[d];
 				if (committedFDom[d] >= 0) {
-					accF[d] = (accumF[d] && ws.isFInitialized(d) && !ws.fRegs[d].multiLane)
-							? toIntSet(ws.fRegs[d])
-							: new TreeSet<>();
+					int fdom = committedFDom[d];
+					int fdcard = (fdom >= 0 && fdom < view.domainCards.length) ? (int) view.domainCards[fdom] : 64;
+					ImpulseFrontier af = ws.arena.allocFrontier(Math.max(fdcard, 64));
+					if (accumF[d] && ws.isFInitialized(d) && !ws.fRegs[d].multiLane) {
+						af.copyFrom(ws.fRegs[d]);
+					} else {
+						af.resetEmpty(fdom, fdcard);
+					}
+					slot.f = af;
 				}
 				if (committedMlDom[d] >= 0) {
 					int mdom = committedMlDom[d];
 					int mdcard = (mdom >= 0 && mdom < view.domainCards.length) ? (int) view.domainCards[mdom] : 0;
 					if (mdcard > 0 && mdcard <= (1 << 22)) {
-						accMlDense[d] = ws.arena.allocLongZeroed(mdcard);
+						slot.mlDense = ws.arena.allocLongZeroed(mdcard);
 					}
-					accMl[d] = new TreeMap<>();
 					if (accumMl[d] && ws.isFInitialized(d) && ws.fRegs[d].multiLane) {
-						long[] ns = ws.fRegs[d].mlSortedNodes();
-						long[] ms = ws.fRegs[d].mlSortedMasks();
-						long[] dense = accMlDense[d];
-						for (int k = 0; k < ns.length; k++) {
-							long u = ns[k];
-							if (dense != null && u >= 0L && u < dense.length) {
-								dense[(int) u] |= ms[k];
+						ImpulseFrontier fd = ws.fRegs[d];
+						long[] dense = slot.mlDense;
+						for (int k = 0; k < fd.mlCount; k++) {
+							long u = fd.mlNodes[k];
+							long lm = fd.mlMasks[k];
+							if (lm == 0L)
+								continue;
+							if (dense != null && u >= 0L && u < mdcard) {
+								dense[(int) u] |= lm;
 							} else {
-								accMl[d].put(u, ms[k]);
+								slot.addMlSparse(ws, u, lm);
 							}
 						}
 					}
 				}
 				ImpulseVector vd = ws.vVectors[d];
 				if (committedVF64[d] && vd != null && vd.elemTag == ImpulseVector.TAG_F64) {
+					int vlen = vd.length;
+					slot.vF64Len = vlen;
 					if (accumVF64[d]) {
-						accVF64[d] = Arrays.copyOf(vd.f64Data, vd.length);
-						accVF64Valid[d] = new boolean[vd.length];
-						for (int i = 0; i < vd.length; i++)
-							accVF64Valid[d][i] = vd.isValidAt(i);
+						slot.vF64 = ws.arena.allocDouble(vlen);
+						System.arraycopy(vd.f64Data, 0, slot.vF64, 0, vlen);
+						slot.vF64Valid = ws.arena.allocBool(vlen);
+						for (int i = 0; i < vlen; i++)
+							slot.vF64Valid[i] = vd.isValidAt(i);
 					} else {
-						accVF64[d] = new double[vd.length];
-						accVF64Valid[d] = null; // Lazy all-valid for non-accum scatter_add
+						slot.vF64 = ws.arena.allocDoubleZeroed(vlen);
+						slot.vF64Valid = null; // Lazy all-valid for non-accum scatter_add
 					}
 				}
 				if (committedVU64[d] && vd != null
 						&& (vd.elemTag == ImpulseVector.TAG_U64 || vd.elemTag == ImpulseVector.TAG_I64)) {
-					accVU64[d] = accumVU64[d] ? Arrays.copyOf(vd.i64Data, vd.length) : new long[vd.length];
-					accVU64Valid[d] = new boolean[vd.length];
+					int vlen = vd.length;
+					slot.vU64Len = vlen;
 					if (accumVU64[d]) {
-						for (int i = 0; i < vd.length; i++)
-							accVU64Valid[d][i] = vd.isValidAt(i);
+						slot.vU64 = ws.arena.allocLong(vlen);
+						System.arraycopy(vd.i64Data, 0, slot.vU64, 0, vlen);
+						slot.vU64Valid = ws.arena.allocBool(vlen);
+						for (int i = 0; i < vlen; i++)
+							slot.vU64Valid[i] = vd.isValidAt(i);
+					} else {
+						slot.vU64 = ws.arena.allocLongZeroed(vlen);
+						slot.vU64Valid = ws.arena.allocBoolZeroed(vlen);
 					}
 				}
 				if (committedRCnt[d]) {
@@ -2162,7 +2125,7 @@ public final class ImpulsePillar3Ops {
 			}
 
 			// Non-accum subops 3,4 (min/max) start invalid; subop 2 (scatter_add) keeps
-			// accVF64Valid==null
+			// vF64Valid==null
 			for (int p = hdrPc + 1; p < endPc; p++) {
 				long cw = program[p];
 				if ((int) (cw & 0xFFL) == OP_MORSEL_COMMIT) {
@@ -2170,8 +2133,9 @@ public final class ImpulsePillar3Ops {
 					int cFlags = (int) ((cw >>> 12) & 0xFL);
 					int cDst = (int) ((cw >>> 20) & 0xFL);
 					boolean cAccum = (cFlags & FLAG_ACCUM) != 0;
-					if ((cSub == 3 || cSub == 4) && !cAccum && accVF64[cDst] != null && accVF64Valid[cDst] == null) {
-						accVF64Valid[cDst] = new boolean[accVF64[cDst].length];
+					MorselAccSlot slot = acc[cDst];
+					if ((cSub == 3 || cSub == 4) && !cAccum && slot.vF64 != null && slot.vF64Valid == null) {
+						slot.vF64Valid = ws.arena.allocBoolZeroed(slot.vF64Len);
 					}
 				}
 			}
@@ -2188,22 +2152,17 @@ public final class ImpulsePillar3Ops {
 			this.vM1 = ws.arena.allocU64(m1, 0, allValid);
 			this.vM2 = ws.arena.allocU64(m2, 0, allValid);
 			this.vM3 = ws.arena.allocU64(m3, 0, allValid);
-			this.morselSpills = new ImpulseVector[16];
 			this.maskScratch = ws.arena.allocInt(mMax);
-			this.tmpVBits = new long[mWords];
-			this.scratchF64 = new double[8][mMax];
-			this.scratchI64 = new long[8][mMax];
-			this.scratchVBits = new long[8][mWords];
-			this.scratchBBits = new long[8][mWords];
-			this.scratchVecF64 = new ImpulseVector[8];
-			this.scratchVecI64 = new ImpulseVector[8];
-			this.scratchVecU64 = new ImpulseVector[8];
-			this.scratchVecBool = new ImpulseVector[8];
+			this.tmpVBits = ws.arena.allocLong(mWords);
 			for (int r = 0; r < 8; r++) {
-				scratchVecF64[r] = ImpulseVector.ofF64(scratchF64[r], scratchVBits[r]);
-				scratchVecI64[r] = ImpulseVector.ofI64(scratchI64[r], scratchVBits[r]);
-				scratchVecU64[r] = ImpulseVector.ofU64(scratchI64[r], scratchVBits[r]);
-				scratchVecBool[r] = ImpulseVector.ofBool3vl(mMax, scratchVBits[r], scratchBBits[r]);
+				double[] sf = ws.arena.allocDouble(mMax);
+				long[] si = ws.arena.allocLong(mMax);
+				long[] sv = ws.arena.allocLong(mWords);
+				long[] sb = ws.arena.allocLong(mWords);
+				scratchVecF64[r] = ws.arena.allocF64(sf, mMax, sv);
+				scratchVecI64[r] = ws.arena.allocI64(si, mMax, sv);
+				scratchVecU64[r] = ws.arena.allocU64(si, mMax, sv);
+				scratchVecBool[r] = ws.arena.allocBool3vl(mMax, sv, sb);
 			}
 		}
 
@@ -2272,19 +2231,24 @@ public final class ImpulsePillar3Ops {
 				}
 				boolean anyNonEmpty = false;
 				for (int d = 0; d < 8; d++) {
+					MorselAccSlot slot = acc[d];
 					if (committedFDom[d] >= 0) {
 						int dom = committedFDom[d];
 						int dcard = (int) view.domainCards[dom];
-						if (!accF[d].isEmpty())
+						ImpulseFrontier af = slot.f;
+						int card = af.cardinality();
+						if (card > 0)
 							anyNonEmpty = true;
-						ws.fRegs[d].initFromValidatedIds(dom, dcard, toSortedInts(accF[d]), ws.geometry, false);
+						int[] ids = ws.arena.allocInt(Math.max(1, card));
+						int nIds = af.toSortedArrayInto(ids);
+						ws.fRegs[d].initFromValidatedIds(dom, dcard, ids, nIds, ws.geometry, false);
 						ws.setFInitialized(d, true);
 					}
 					if (committedMlDom[d] >= 0) {
 						int dom = committedMlDom[d];
 						int dcard = (int) view.domainCards[dom];
-						long[] dense = accMlDense[d];
-						if (dense != null && accMl[d].isEmpty()) {
+						long[] dense = slot.mlDense;
+						if (dense != null && slot.mlCount == 0) {
 							int cnt = 0;
 							for (int i = 0; i < dcard; i++) {
 								if (dense[i] != 0L)
@@ -2309,35 +2273,27 @@ public final class ImpulsePillar3Ops {
 							if (dense != null) {
 								for (int i = 0; i < dcard; i++) {
 									if (dense[i] != 0L) {
-										long prev = accMl[d].getOrDefault((long) i, 0L);
-										accMl[d].put((long) i, prev | dense[i]);
+										slot.addMlSparse(ws, i, dense[i]);
 									}
 								}
 							}
-							if (!accMl[d].isEmpty())
+							int cnt = mlSortAndCoalesce(slot.mlNodes, slot.mlMasks, slot.mlCount);
+							if (cnt > 0)
 								anyNonEmpty = true;
-							long[] ns = new long[accMl[d].size()];
-							long[] ms = new long[accMl[d].size()];
-							int idx = 0;
-							for (var e : accMl[d].entrySet()) {
-								ns[idx] = e.getKey();
-								ms[idx] = e.getValue();
-								idx++;
-							}
-							ws.fRegs[d].initMultiLane(dom, dcard, 64, 64, ns, ms, ws.geometry);
+							ws.fRegs[d].initMultiLane(dom, dcard, 64, 64, slot.mlNodes, slot.mlMasks, cnt, ws.geometry);
 							ws.setFInitialized(d, true);
 						}
 					}
-					if (committedVF64[d] && accVF64[d] != null) {
-						int n = accVF64[d].length;
+					if (committedVF64[d] && slot.vF64 != null) {
+						int n = slot.vF64Len;
 						int vw = Math.max(1, (n + 63) >>> 6);
-						long[] vBits = new long[vw];
-						if (accVF64Valid[d] == null) {
-							Arrays.fill(vBits, -1L);
+						long[] vBits = ws.arena.allocLongZeroed(vw);
+						if (slot.vF64Valid == null) {
+							Arrays.fill(vBits, 0, vw, -1L);
 							if ((n & 63) != 0)
 								vBits[vw - 1] = (1L << (n & 63)) - 1L;
 							if (!anyNonEmpty) {
-								double[] arr = accVF64[d];
+								double[] arr = slot.vF64;
 								for (int i = 0; i < n; i++) {
 									if (arr[i] != 0.0) {
 										anyNonEmpty = true;
@@ -2347,25 +2303,26 @@ public final class ImpulsePillar3Ops {
 							}
 						} else {
 							for (int i = 0; i < n; i++) {
-								if (accVF64Valid[d][i]) {
+								if (slot.vF64Valid[i]) {
 									vBits[i >>> 6] |= (1L << (i & 63));
-									if (accVF64[d][i] != 0.0)
+									if (slot.vF64[i] != 0.0)
 										anyNonEmpty = true;
 								}
 							}
 						}
-						ws.vVectors[d] = ImpulseVector.ofF64(accVF64[d], vBits);
+						ws.vVectors[d] = ws.arena.allocF64(slot.vF64, n, vBits);
 					}
-					if (committedVU64[d] && accVU64[d] != null) {
-						int n = accVU64[d].length;
-						long[] vBits = new long[Math.max(1, (n + 63) >>> 6)];
+					if (committedVU64[d] && slot.vU64 != null) {
+						int n = slot.vU64Len;
+						int vw = Math.max(1, (n + 63) >>> 6);
+						long[] vBits = ws.arena.allocLongZeroed(vw);
 						for (int i = 0; i < n; i++) {
-							if (accVU64Valid[d][i]) {
+							if (slot.vU64Valid[i]) {
 								vBits[i >>> 6] |= (1L << (i & 63));
 								anyNonEmpty = true;
 							}
 						}
-						ws.vVectors[d] = ImpulseVector.ofU64(accVU64[d], vBits);
+						ws.vVectors[d] = ws.arena.allocU64(slot.vU64, n, vBits);
 					}
 					if (committedRCnt[d]) {
 						if (accRCnt[d] != 0L)
@@ -2382,19 +2339,20 @@ public final class ImpulsePillar3Ops {
 	private static void execMorselScatterF64(ImpulseWorkspace ws, MorselStreamSession sess, int subop, int dst, int s1,
 			int s2, boolean scalar, int[] commitIds, int commitCnt) {
 		ImpulseVector ids = ws.vVectors[s1];
-		double[] dstArr = sess.accVF64[dst];
+		MorselAccSlot slot = sess.acc[dst];
+		double[] dstArr = slot.vF64;
 		if (ids == null || ids.elemTag != ImpulseVector.TAG_U64 || dstArr == null) {
 			ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
 			return;
 		}
 		ImpulseVector vals = scalar ? null : ws.vVectors[s2];
-		boolean[] dstVal = sess.accVF64Valid[dst];
+		boolean[] dstVal = slot.vF64Valid;
+		int dstLen = slot.vF64Len;
 		if (subop == 2 && !scalar && dstVal == null && vals != null && vals.elemTag == ImpulseVector.TAG_F64
 				&& ids.validBits == sess.allValid) {
 			long[] idArr = ids.i64Data;
 			double[] valArr = vals.f64Data;
 			long[] valBits = vals.validBits;
-			int dstLen = dstArr.length;
 			for (int k = 0; k < commitCnt; k++) {
 				int i = commitIds[k];
 				if (valBits != null && ((valBits[i >>> 6] >>> (i & 63)) & 1L) == 0L)
@@ -2412,9 +2370,9 @@ public final class ImpulsePillar3Ops {
 				if (sum == sum) {
 					dstArr[ti] = sum;
 				} else {
-					dstVal = new boolean[dstLen];
-					Arrays.fill(dstVal, true);
-					sess.accVF64Valid[dst] = dstVal;
+					dstVal = ws.arena.allocBool(dstLen);
+					Arrays.fill(dstVal, 0, dstLen, true);
+					slot.vF64Valid = dstVal;
 					dstVal[ti] = false;
 					for (int k2 = k + 1; k2 < commitCnt; k2++) {
 						int i2 = commitIds[k2];
@@ -2445,9 +2403,9 @@ public final class ImpulsePillar3Ops {
 			return;
 		}
 		if (dstVal == null) {
-			dstVal = new boolean[dstArr.length];
-			Arrays.fill(dstVal, true);
-			sess.accVF64Valid[dst] = dstVal;
+			dstVal = ws.arena.allocBool(dstLen);
+			Arrays.fill(dstVal, 0, dstLen, true);
+			slot.vF64Valid = dstVal;
 		}
 		boolean rOk = scalar && ws.isRValid(s2);
 		double rVal = rOk ? Double.longBitsToDouble(ws.rRegs[s2]) : Double.NaN;
@@ -2463,7 +2421,7 @@ public final class ImpulsePillar3Ops {
 			double v = scalar ? rVal : vals.f64Data[i];
 			long tgt64 = ids.i64Data[i];
 			int ti = (int) tgt64;
-			if (tgt64 < 0L || ti < 0 || ti >= dstArr.length) {
+			if (tgt64 < 0L || ti < 0 || ti >= dstLen) {
 				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
 				return;
 			}
@@ -2491,12 +2449,7 @@ public final class ImpulsePillar3Ops {
 		ImpulseWorkspace ws = sess.ws;
 		ImpulseInterpreter.SnapshotBinding bind = sess.bind;
 		ImpulseSnapshotView view = sess.view;
-		Set<Integer>[] accF = sess.accF;
-		TreeMap<Long, Long>[] accMl = sess.accMl;
-		double[][] accVF64 = sess.accVF64;
-		boolean[][] accVF64Valid = sess.accVF64Valid;
-		long[][] accVU64 = sess.accVU64;
-		boolean[][] accVU64Valid = sess.accVU64Valid;
+		MorselAccSlot[] acc = sess.acc;
 		long[] accRCnt = sess.accRCnt;
 		ImpulseVector[] morselSpills = sess.morselSpills;
 		int[] maskScratch = sess.maskScratch;
@@ -2602,33 +2555,35 @@ public final class ImpulsePillar3Ops {
 				ImpulseFrontier fb = getF1Bit(ws, s2);
 				if (fa == null || fb == null)
 					return;
-				Set<Integer> sa = toIntSet(fa), sb = toIntSet(fb), res = new TreeSet<>();
-				switch (subop) {
-					case 0 -> {
-						res.addAll(sa);
-						res.addAll(sb);
-					}
-					case 1 -> {
-						res.addAll(sa);
-						res.retainAll(sb);
-					}
-					case 2 -> {
-						res.addAll(sa);
-						res.removeAll(sb);
-					}
-					case 3 -> {
-						for (int x : sa)
-							if (!sb.contains(x))
-								res.add(x);
-						for (int x : sb)
-							if (!sa.contains(x))
-								res.add(x);
-					}
-					default -> {
-					}
+				int words = Math.max(1, (morselLen + 63) >>> 6);
+				long[] ba = ws.arena.allocLongZeroed(words);
+				long[] bb = ws.arena.allocLongZeroed(words);
+				long[] out = ws.arena.allocLongZeroed(words);
+				int na = fa.toSortedArrayInto(maskScratch);
+				for (int i = 0; i < na; i++) {
+					int u = maskScratch[i];
+					if (u >= 0 && u < morselLen)
+						ba[u >>> 6] |= (1L << u);
 				}
-				ws.fRegs[dst].initFromValidatedIds(0xFFFF, morselLen, toSortedInts(res), ImpulseGeometry.P0_DEFAULT,
-						true);
+				int nb = fb.toSortedArrayInto(maskScratch);
+				for (int i = 0; i < nb; i++) {
+					int u = maskScratch[i];
+					if (u >= 0 && u < morselLen)
+						bb[u >>> 6] |= (1L << u);
+				}
+				int card = 0;
+				for (int wi = 0; wi < words; wi++) {
+					long v = switch (subop) {
+						case 0 -> ba[wi] | bb[wi];
+						case 1 -> ba[wi] & bb[wi];
+						case 2 -> ba[wi] & ~bb[wi];
+						case 3 -> ba[wi] ^ bb[wi];
+						default -> 0L;
+					};
+					out[wi] = v;
+					card += Long.bitCount(v);
+				}
+				ws.fRegs[dst].initFromDenseBits(0xFFFF, morselLen, out, words, card, ImpulseGeometry.P0_DEFAULT, true);
 				ws.setFInitialized(dst, true);
 				ws.pc++;
 			}
@@ -2636,18 +2591,32 @@ public final class ImpulsePillar3Ops {
 				ImpulseFrontier fa = getF1Bit(ws, s1);
 				if (fa == null)
 					return;
-				Set<Integer> sa = toIntSet(fa), res = new TreeSet<>();
-				for (int i = 0; i < morselLen; i++)
-					if (!sa.contains(i))
-						res.add(i);
-				ws.fRegs[dst].initFromValidatedIds(0xFFFF, morselLen, toSortedInts(res), ImpulseGeometry.P0_DEFAULT,
-						true);
+				int words = Math.max(1, (morselLen + 63) >>> 6);
+				long[] ba = ws.arena.allocLongZeroed(words);
+				int na = fa.toSortedArrayInto(maskScratch);
+				for (int i = 0; i < na; i++) {
+					int u = maskScratch[i];
+					if (u >= 0 && u < morselLen)
+						ba[u >>> 6] |= (1L << u);
+				}
+				int card = 0;
+				for (int wi = 0; wi < words; wi++) {
+					long v = ~ba[wi];
+					if (wi == words - 1 && (morselLen & 63) != 0) {
+						v &= (1L << (morselLen & 63)) - 1L;
+					} else if (morselLen == 0) {
+						v = 0L;
+					}
+					ba[wi] = v;
+					card += Long.bitCount(v);
+				}
+				ws.fRegs[dst].initFromDenseBits(0xFFFF, morselLen, ba, words, card, ImpulseGeometry.P0_DEFAULT, true);
 				ws.setFInitialized(dst, true);
 				ws.pc++;
 			}
 			case OP_GATHER_NODE_ATTR, OP_GATHER_EDGE_ATTR -> {
-				execMorselGatherAttr(ws, view, sess, op, dst, s1, imm16Lo, imm16Hi, morselLen, useMask, maskScratch,
-						maskCnt);
+				execMorselGatherAttr(ws, bind, view, sess, op, dst, s1, imm16Lo, imm16Hi, morselLen, useMask,
+						maskScratch, maskCnt, w);
 			}
 			case OP_COALESCE -> {
 				ImpulseVector lhs = ws.vVectors[s1];
@@ -2656,10 +2625,10 @@ public final class ImpulsePillar3Ops {
 					return;
 				}
 				int words = Math.max(1, (morselLen + 63) >>> 6);
-				long[] vBits = new long[words];
+				long[] vBits = ws.arena.allocLongZeroed(words);
 				int iterCnt = useMask ? maskCnt : morselLen;
 				if (lhs.elemTag == ImpulseVector.TAG_F64) {
-					double[] out = new double[morselLen];
+					double[] out = ws.arena.allocDoubleZeroed(morselLen);
 					ImpulseVector rv = scalar ? null : ws.vVectors[s2];
 					boolean rScOk = scalar && ws.isRValid(s2) && !Double.isNaN(Double.longBitsToDouble(ws.rRegs[s2]));
 					double rSc = rScOk ? Double.longBitsToDouble(ws.rRegs[s2]) : 0.0;
@@ -2681,10 +2650,10 @@ public final class ImpulsePillar3Ops {
 							vBits[i >>> 6] |= (1L << (i & 63));
 						}
 					}
-					ws.vVectors[dst] = ImpulseVector.ofF64(out, vBits);
+					ws.vVectors[dst] = ws.arena.allocF64(out, morselLen, vBits);
 					ws.pc++;
 				} else if (lhs.elemTag == ImpulseVector.TAG_I64 || lhs.elemTag == ImpulseVector.TAG_U64) {
-					long[] out = new long[morselLen];
+					long[] out = ws.arena.allocLongZeroed(morselLen);
 					ImpulseVector rv = scalar ? null : ws.vVectors[s2];
 					for (int k = 0; k < iterCnt; k++) {
 						int i = useMask ? maskScratch[k] : k;
@@ -2704,8 +2673,8 @@ public final class ImpulsePillar3Ops {
 						}
 					}
 					ws.vVectors[dst] = (lhs.elemTag == ImpulseVector.TAG_I64)
-							? ImpulseVector.ofI64(out, vBits)
-							: ImpulseVector.ofU64(out, vBits);
+							? ws.arena.allocI64(out, morselLen, vBits)
+							: ws.arena.allocU64(out, morselLen, vBits);
 					ws.pc++;
 				} else {
 					ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
@@ -2719,7 +2688,7 @@ public final class ImpulsePillar3Ops {
 				}
 				int words = Math.max(1, (morselLen + 63) >>> 6);
 				boolean reuseDst = (dst >= 8 && dst < 16);
-				double[] out = reuseDst ? sess.scratchF64[dst - 8] : new double[morselLen];
+				double[] out = reuseDst ? sess.scratchVecF64[dst - 8].f64Data : ws.arena.allocDoubleZeroed(morselLen);
 				long[] vBits = sess.tmpVBits;
 				ImpulseVector rv = scalar ? null : ws.vVectors[s2];
 				boolean rScOk = scalar && ws.isRValid(s2) && !Double.isNaN(Double.longBitsToDouble(ws.rRegs[s2]));
@@ -2782,12 +2751,14 @@ public final class ImpulsePillar3Ops {
 					}
 				}
 				if (reuseDst) {
-					System.arraycopy(vBits, 0, sess.scratchVBits[dst - 8], 0, words);
 					ImpulseVector sv = sess.scratchVecF64[dst - 8];
+					System.arraycopy(vBits, 0, sv.validBits, 0, words);
 					sv.length = morselLen;
 					ws.vVectors[dst] = sv;
 				} else {
-					ws.vVectors[dst] = ImpulseVector.ofF64(out, Arrays.copyOf(vBits, words));
+					long[] vb = ws.arena.allocLong(words);
+					System.arraycopy(vBits, 0, vb, 0, words);
+					ws.vVectors[dst] = ws.arena.allocF64(out, morselLen, vb);
 				}
 				ws.pc++;
 			}
@@ -2804,7 +2775,7 @@ public final class ImpulsePillar3Ops {
 				int words = Math.max(1, (morselLen + 63) >>> 6);
 				boolean reuseDst = (dst >= 8 && dst < 16);
 				long[] valid = sess.tmpVBits;
-				long[] data = reuseDst ? sess.scratchBBits[dst - 8] : new long[words];
+				long[] data = reuseDst ? sess.scratchVecBool[dst - 8].boolDataBits : ws.arena.allocLongZeroed(words);
 				ImpulseVector rv = scalar ? null : ws.vVectors[s2];
 				boolean rScOk = scalar && ws.isRValid(s2);
 				double rSc = rScOk ? Double.longBitsToDouble(ws.rRegs[s2]) : Double.NaN;
@@ -2846,12 +2817,14 @@ public final class ImpulsePillar3Ops {
 					}
 				}
 				if (reuseDst) {
-					System.arraycopy(valid, 0, sess.scratchVBits[dst - 8], 0, words);
 					ImpulseVector sv = sess.scratchVecBool[dst - 8];
+					System.arraycopy(valid, 0, sv.validBits, 0, words);
 					sv.length = morselLen;
 					ws.vVectors[dst] = sv;
 				} else {
-					ws.vVectors[dst] = ImpulseVector.ofBool3vl(morselLen, Arrays.copyOf(valid, words), data);
+					long[] vb = ws.arena.allocLong(words);
+					System.arraycopy(valid, 0, vb, 0, words);
+					ws.vVectors[dst] = ws.arena.allocBool3vl(morselLen, vb, data);
 				}
 				ws.pc++;
 			}
@@ -2896,10 +2869,11 @@ public final class ImpulsePillar3Ops {
 							ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
 							return;
 						}
+						ImpulseFrontier af = acc[dst].f;
 						for (int k = 0; k < commitCnt; k++) {
 							int i = commitIds[k];
 							if (ids.isValidAt(i))
-								accF[dst].add((int) ids.i64Data[i]);
+								af.add((int) ids.i64Data[i]);
 						}
 						ws.pc++;
 					}
@@ -2913,7 +2887,8 @@ public final class ImpulsePillar3Ops {
 						}
 						boolean rOk = scalar && ws.isRValid(s2);
 						long rVal = rOk ? ws.rRegs[s2] : 0L;
-						long[] dense = sess.accMlDense[dst];
+						MorselAccSlot slot = acc[dst];
+						long[] dense = slot.mlDense;
 						int mdom = sess.committedMlDom[dst];
 						int dlen = (dense != null && mdom >= 0 && mdom < view.domainCards.length)
 								? (int) view.domainCards[mdom]
@@ -2929,8 +2904,7 @@ public final class ImpulsePillar3Ops {
 									if (tgt >= 0L && tgt < dlen) {
 										dense[(int) tgt] |= lm;
 									} else {
-										long prev = accMl[dst].getOrDefault(tgt, 0L);
-										accMl[dst].put(tgt, prev | lm);
+										slot.addMlSparse(ws, tgt, lm);
 									}
 								}
 							}
@@ -2948,8 +2922,7 @@ public final class ImpulsePillar3Ops {
 									if (dense != null && tgt >= 0L && tgt < dlen) {
 										dense[(int) tgt] |= lm;
 									} else {
-										long prev = accMl[dst].getOrDefault(tgt, 0L);
-										accMl[dst].put(tgt, prev | lm);
+										slot.addMlSparse(ws, tgt, lm);
 									}
 								}
 							}
@@ -2961,13 +2934,15 @@ public final class ImpulsePillar3Ops {
 					}
 					case 5, 6, 7 -> { // .scatter_min_src / argmin / argmax
 						ImpulseVector ids = ws.vVectors[s1];
-						if (ids == null || ids.elemTag != ImpulseVector.TAG_U64 || accVU64[dst] == null) {
+						MorselAccSlot slot = acc[dst];
+						if (ids == null || ids.elemTag != ImpulseVector.TAG_U64 || slot.vU64 == null) {
 							ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
 							return;
 						}
 						ImpulseVector vals = scalar ? null : ws.vVectors[s2];
-						long[] dstArr = accVU64[dst];
-						boolean[] dstVal = accVU64Valid[dst];
+						long[] dstArr = slot.vU64;
+						boolean[] dstVal = slot.vU64Valid;
+						int dstLen = slot.vU64Len;
 						for (int k = 0; k < commitCnt; k++) {
 							int i = commitIds[k];
 							if (!ids.isValidAt(i))
@@ -2981,7 +2956,7 @@ public final class ImpulsePillar3Ops {
 							long v = scalar ? ws.rRegs[s2] : vals.i64Data[i];
 							long tgt64 = ids.i64Data[i];
 							int ti = (int) tgt64;
-							if (tgt64 < 0L || ti < 0 || ti >= dstArr.length) {
+							if (tgt64 < 0L || ti < 0 || ti >= dstLen) {
 								ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
 								return;
 							}
@@ -3174,9 +3149,9 @@ public final class ImpulsePillar3Ops {
 		ws.vVectors[dst] = vGather;
 	}
 
-	private static void execMorselGatherAttr(ImpulseWorkspace ws, ImpulseSnapshotView view, MorselStreamSession sess,
-			int op, int dst, int s1, int imm16Lo, int imm16Hi, int morselLen, boolean useMask, int[] maskScratch,
-			int maskCnt) {
+	private static void execMorselGatherAttr(ImpulseWorkspace ws, ImpulseInterpreter.SnapshotBinding bind,
+			ImpulseSnapshotView view, MorselStreamSession sess, int op, int dst, int s1, int imm16Lo, int imm16Hi,
+			int morselLen, boolean useMask, int[] maskScratch, int maskCnt, long w) {
 		ImpulseVector idxVec = ws.vVectors[s1];
 		if (idxVec == null || idxVec.elemTag != ImpulseVector.TAG_U64) {
 			ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
@@ -3215,8 +3190,8 @@ public final class ImpulsePillar3Ops {
 			long[] idxs = idxVec.i64Data;
 			MemorySegment seg = offCol.dataSeg();
 			if (base == 6 || base == 7 || base == 10) {
-				double[] out = reuseDst ? sess.scratchF64[dst - 8] : new double[morselLen];
-				long[] vBits = reuseDst ? sess.scratchVBits[dst - 8] : new long[words];
+				double[] out = reuseDst ? sess.scratchVecF64[dst - 8].f64Data : ws.arena.allocDoubleZeroed(morselLen);
+				long[] vBits = reuseDst ? sess.scratchVecF64[dst - 8].validBits : ws.arena.allocLong(words);
 				Arrays.fill(vBits, 0, words, -1L);
 				if ((morselLen & 63) != 0)
 					vBits[words - 1] = (1L << (morselLen & 63)) - 1L;
@@ -3256,13 +3231,13 @@ public final class ImpulsePillar3Ops {
 					sv.length = morselLen;
 					ws.vVectors[dst] = sv;
 				} else {
-					ws.vVectors[dst] = ImpulseVector.ofF64(out, vBits);
+					ws.vVectors[dst] = ws.arena.allocF64(out, morselLen, vBits);
 				}
 				ws.pc++;
 				return;
 			} else if ((base >= 1 && base <= 4) || base == 8 || base == 9) {
-				long[] out = reuseDst ? sess.scratchI64[dst - 8] : new long[morselLen];
-				long[] vBits = reuseDst ? sess.scratchVBits[dst - 8] : new long[words];
+				long[] out = reuseDst ? sess.scratchVecI64[dst - 8].i64Data : ws.arena.allocLongZeroed(morselLen);
+				long[] vBits = reuseDst ? sess.scratchVecI64[dst - 8].validBits : ws.arena.allocLong(words);
 				Arrays.fill(vBits, 0, words, -1L);
 				if ((morselLen & 63) != 0)
 					vBits[words - 1] = (1L << (morselLen & 63)) - 1L;
@@ -3313,7 +3288,9 @@ public final class ImpulsePillar3Ops {
 					sv.length = morselLen;
 					ws.vVectors[dst] = sv;
 				} else {
-					ws.vVectors[dst] = (base <= 4) ? ImpulseVector.ofI64(out, vBits) : ImpulseVector.ofU64(out, vBits);
+					ws.vVectors[dst] = (base <= 4)
+							? ws.arena.allocI64(out, morselLen, vBits)
+							: ws.arena.allocU64(out, morselLen, vBits);
 				}
 				ws.pc++;
 				return;
@@ -3342,13 +3319,13 @@ public final class ImpulsePillar3Ops {
 				}
 			}
 		}
-		long[] vBits = reuseDst ? sess.scratchVBits[dst - 8] : new long[words];
+		long[] vBits = reuseDst ? sess.scratchVecF64[dst - 8].validBits : ws.arena.allocLongZeroed(words);
 		if (reuseDst)
 			Arrays.fill(vBits, 0, words, 0L);
 		if (offCol != null) {
 			int base = offCol.typeCode() & 0x7F;
 			if (base == 6 || base == 7 || base == 10) {
-				double[] out = reuseDst ? sess.scratchF64[dst - 8] : new double[morselLen];
+				double[] out = reuseDst ? sess.scratchVecF64[dst - 8].f64Data : ws.arena.allocDoubleZeroed(morselLen);
 				if (useMask) {
 					for (int k = 0; k < maskCnt; k++) {
 						int i = maskScratch[k];
@@ -3376,10 +3353,10 @@ public final class ImpulsePillar3Ops {
 					sv.length = morselLen;
 					ws.vVectors[dst] = sv;
 				} else {
-					ws.vVectors[dst] = ImpulseVector.ofF64(out, vBits);
+					ws.vVectors[dst] = ws.arena.allocF64(out, morselLen, vBits);
 				}
 			} else if ((base >= 1 && base <= 4) || base == 8 || base == 9) {
-				long[] out = reuseDst ? sess.scratchI64[dst - 8] : new long[morselLen];
+				long[] out = reuseDst ? sess.scratchVecI64[dst - 8].i64Data : ws.arena.allocLongZeroed(morselLen);
 				if (useMask) {
 					for (int k = 0; k < maskCnt; k++) {
 						int i = maskScratch[k];
@@ -3407,39 +3384,19 @@ public final class ImpulsePillar3Ops {
 					sv.length = morselLen;
 					ws.vVectors[dst] = sv;
 				} else {
-					ws.vVectors[dst] = (base <= 4) ? ImpulseVector.ofI64(out, vBits) : ImpulseVector.ofU64(out, vBits);
+					ws.vVectors[dst] = (base <= 4)
+							? ws.arena.allocI64(out, morselLen, vBits)
+							: ws.arena.allocU64(out, morselLen, vBits);
 				}
 			} else if (base == 11) {
-				String[] out = new String[morselLen];
-				if (useMask) {
-					for (int k = 0; k < maskCnt; k++) {
-						int i = maskScratch[k];
-						if (i < morselLen && idxVec.isValidAt(i)) {
-							int id = (int) idxVec.i64Data[i];
-							if (offCol.isValidAt(id)) {
-								out[i] = offCol.readString(id);
-								vBits[i >>> 6] |= (1L << (i & 63));
-							}
-						}
-					}
-				} else {
-					for (int i = 0; i < morselLen; i++) {
-						if (idxVec.isValidAt(i)) {
-							int id = (int) idxVec.i64Data[i];
-							if (offCol.isValidAt(id)) {
-								out[i] = offCol.readString(id);
-								vBits[i >>> 6] |= (1L << (i & 63));
-							}
-						}
-					}
-				}
-				ws.vVectors[dst] = ImpulseVector.ofStr(out);
+				ImpulsePillar4Ops.step(ws, bind, w);
+				return;
 			} else {
 				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
 				return;
 			}
 		} else if (col.elemTag == ImpulseVector.TAG_F64) {
-			double[] out = reuseDst ? sess.scratchF64[dst - 8] : new double[morselLen];
+			double[] out = reuseDst ? sess.scratchVecF64[dst - 8].f64Data : ws.arena.allocDoubleZeroed(morselLen);
 			if (useMask) {
 				for (int k = 0; k < maskCnt; k++) {
 					int i = maskScratch[k];
@@ -3467,10 +3424,10 @@ public final class ImpulsePillar3Ops {
 				sv.length = morselLen;
 				ws.vVectors[dst] = sv;
 			} else {
-				ws.vVectors[dst] = ImpulseVector.ofF64(out, vBits);
+				ws.vVectors[dst] = ws.arena.allocF64(out, morselLen, vBits);
 			}
 		} else if (col.elemTag == ImpulseVector.TAG_I64 || col.elemTag == ImpulseVector.TAG_U64) {
-			long[] out = reuseDst ? sess.scratchI64[dst - 8] : new long[morselLen];
+			long[] out = reuseDst ? sess.scratchVecI64[dst - 8].i64Data : ws.arena.allocLongZeroed(morselLen);
 			if (useMask) {
 				for (int k = 0; k < maskCnt; k++) {
 					int i = maskScratch[k];
@@ -3501,34 +3458,12 @@ public final class ImpulsePillar3Ops {
 				ws.vVectors[dst] = sv;
 			} else {
 				ws.vVectors[dst] = (col.elemTag == ImpulseVector.TAG_I64)
-						? ImpulseVector.ofI64(out, vBits)
-						: ImpulseVector.ofU64(out, vBits);
+						? ws.arena.allocI64(out, morselLen, vBits)
+						: ws.arena.allocU64(out, morselLen, vBits);
 			}
 		} else if (col.elemTag == ImpulseVector.TAG_STR) {
-			String[] out = new String[morselLen];
-			if (useMask) {
-				for (int k = 0; k < maskCnt; k++) {
-					int i = maskScratch[k];
-					if (i < morselLen && idxVec.isValidAt(i)) {
-						int id = (int) idxVec.i64Data[i];
-						if (col.isValidAt(id)) {
-							out[i] = col.strData[id];
-							vBits[i >>> 6] |= (1L << (i & 63));
-						}
-					}
-				}
-			} else {
-				for (int i = 0; i < morselLen; i++) {
-					if (idxVec.isValidAt(i)) {
-						int id = (int) idxVec.i64Data[i];
-						if (col.isValidAt(id)) {
-							out[i] = col.strData[id];
-							vBits[i >>> 6] |= (1L << (i & 63));
-						}
-					}
-				}
-			}
-			ws.vVectors[dst] = ImpulseVector.ofStr(out);
+			ImpulsePillar4Ops.step(ws, bind, w);
+			return;
 		} else {
 			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
 			return;
@@ -3572,28 +3507,67 @@ public final class ImpulsePillar3Ops {
 					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
 					return;
 				}
-				Set<Integer> out = new TreeSet<>();
-				for (int u : fSrc.toSortedArray()) {
+				int tgtCard = (int) view.domainCards[rel.tgtDom];
+				int tgtWords = Math.max(1, (tgtCard + 63) >>> 6);
+				long[] outBits = ws.arena.allocLongZeroed(tgtWords);
+				int srcCard = fSrc.cardinality();
+				int[] srcIds = ws.arena.allocInt(Math.max(1, srcCard));
+				int srcLen = fSrc.toSortedArrayInto(srcIds);
+				// Epoch-stamped open-addressed hash table for Floyd's algorithm without HashSet
+				int htCap = 16;
+				while (htCap < k * 2)
+					htCap <<= 1;
+				int htMask = htCap - 1;
+				int[] htKeys = ws.arena.allocInt(htCap);
+				int[] htEpoch = ws.arena.allocIntZeroed(htCap);
+				int curEpoch = 0;
+				for (int si = 0; si < srcLen; si++) {
+					int u = srcIds[si];
 					int lo = rel.csrRowOffset(u), hi = rel.csrRowOffset(u + 1);
 					int deg = hi - lo;
 					if (deg <= k) {
-						for (int e = lo; e < hi; e++)
-							out.add(rel.csrColTarget(e));
+						for (int e = lo; e < hi; e++) {
+							int v = rel.csrColTarget(e);
+							outBits[v >>> 6] |= (1L << v);
+						}
 					} else {
-						Set<Integer> chosen = new HashSet<>(k * 2);
+						curEpoch++;
+						if (curEpoch == 0) {
+							Arrays.fill(htEpoch, 0, htCap, 0);
+							curEpoch = 1;
+						}
 						for (int t = deg - k; t < deg; t++) {
 							long r = splitMixSample(seed, u & 0xFFFFFFFFL, t);
 							int p = (int) Long.remainderUnsigned(r, t + 1L);
-							int pick = chosen.contains(p) ? t : p;
-							chosen.add(pick);
-							out.add(rel.csrColTarget(lo + pick));
+							int idx = (p * 0x9E3779B9) & htMask;
+							boolean found = false;
+							while (htEpoch[idx] == curEpoch) {
+								if (htKeys[idx] == p) {
+									found = true;
+									break;
+								}
+								idx = (idx + 1) & htMask;
+							}
+							int pick = found ? t : p;
+							int ins = (pick * 0x9E3779B9) & htMask;
+							while (htEpoch[ins] == curEpoch) {
+								if (htKeys[ins] == pick)
+									break;
+								ins = (ins + 1) & htMask;
+							}
+							htEpoch[ins] = curEpoch;
+							htKeys[ins] = pick;
+							int v = rel.csrColTarget(lo + pick);
+							outBits[v >>> 6] |= (1L << v);
 						}
 					}
 				}
-				int tgtCard = (int) view.domainCards[rel.tgtDom];
-				ws.fRegs[dst].initFromValidatedIds(rel.tgtDom, tgtCard, toSortedInts(out), ws.geometry, false);
+				int card = 0;
+				for (int wi = 0; wi < tgtWords; wi++)
+					card += Long.bitCount(outBits[wi]);
+				ws.fRegs[dst].initFromDenseBits(rel.tgtDom, tgtCard, outBits, tgtWords, card, ws.geometry, false);
 				ws.setFInitialized(dst, true);
-				ws.zf = out.isEmpty();
+				ws.zf = (card == 0);
 				ws.pc++;
 			}
 			case 1 -> { // .vec_wr
@@ -3607,9 +3581,14 @@ public final class ImpulsePillar3Ops {
 					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
 					return;
 				}
+				if (!rel.hasCsrSegments()) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
 				int n = seeds.length;
-				long[] out = new long[n * k];
-				long[] valid = new long[Math.max(1, (n * k + 63) >>> 6)];
+				int total = n * k;
+				long[] out = ws.arena.allocLongZeroed(total);
+				long[] valid = ws.arena.allocLongZeroed(Math.max(1, (total + 63) >>> 6));
 				boolean anyValid = false;
 				long dcard = view.domainCards[rel.srcDom];
 				for (int i = 0; i < n; i++) {
@@ -3634,7 +3613,7 @@ public final class ImpulsePillar3Ops {
 						}
 					}
 				}
-				ws.vVectors[dst] = ImpulseVector.ofU64(out, valid);
+				ws.vVectors[dst] = ws.arena.allocU64(out, total, valid);
 				ws.zf = !anyValid;
 				ws.pc++;
 			}
@@ -3645,10 +3624,14 @@ public final class ImpulsePillar3Ops {
 					ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
 					return;
 				}
+				if (!rel.hasCsrSegments()) {
+					ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
+					return;
+				}
 				boolean stay = (subop == 3);
 				int n = walkers.length;
-				long[] out = new long[n];
-				long[] valid = new long[Math.max(1, (n + 63) >>> 6)];
+				long[] out = ws.arena.allocLongZeroed(n);
+				long[] valid = ws.arena.allocLongZeroed(Math.max(1, (n + 63) >>> 6));
 				boolean anyValid = false;
 				long dcard = view.domainCards[rel.srcDom];
 				for (int i = 0; i < n; i++) {
@@ -3676,7 +3659,7 @@ public final class ImpulsePillar3Ops {
 						anyValid = true;
 					}
 				}
-				ws.vVectors[dst] = ImpulseVector.ofU64(out, valid);
+				ws.vVectors[dst] = ws.arena.allocU64(out, n, valid);
 				ws.zf = !anyValid;
 				ws.pc++;
 			}
@@ -3740,7 +3723,6 @@ public final class ImpulsePillar3Ops {
 		return x;
 	}
 
-	@SuppressWarnings("unchecked")
 	private static void execGraphKernel(ImpulseWorkspace ws, ImpulseInterpreter.SnapshotBinding bind, int subop,
 			int flags, int dst, int s3, int relId, int imm16Hi) {
 		ImpulseSnapshotView.RelView rel = getRel(bind, ws, relId);
@@ -3754,7 +3736,7 @@ public final class ImpulsePillar3Ops {
 		int dom = rel.srcDom;
 		int n = (int) view.domainCards[dom];
 
-		Set<Integer> maskSet = null;
+		ImpulseFrontier maskFrontier = null;
 		if ((flags & FLAG_MASKED_S3) != 0) {
 			ImpulseFrontier fm = getF1Bit(ws, s3);
 			if (fm == null)
@@ -3763,38 +3745,75 @@ public final class ImpulsePillar3Ops {
 				ws.status = IMPULSE_VM_ERR_DOMAIN_MISMATCH;
 				return;
 			}
-			maskSet = toIntSet(fm);
+			maskFrontier = fm;
 		}
 
 		if (!rel.hasCsrSegments()) {
 			ws.status = IMPULSE_VM_ERR_INVALID_OPERAND;
 			return;
 		}
-		Set<Integer>[] adj = new Set[n];
-		for (int u = 0; u < n; u++)
-			adj[u] = new TreeSet<>();
+
+		// Build deduplicated simple undirected adjacency in flat arena arrays (zero
+		// heap collections)
+		int[] adjOff = ws.arena.allocIntZeroed(n + 1);
 		for (int u = 0; u < n; u++) {
-			if (maskSet != null && !maskSet.contains(u))
+			if (maskFrontier != null && !maskFrontier.contains(u))
 				continue;
 			int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
 			for (int e = s; e < end; e++) {
 				int v = rel.csrColTarget(e);
-				if (v != u && v >= 0 && v < n && (maskSet == null || maskSet.contains(v))) {
-					adj[u].add(v);
-					adj[v].add(u);
+				if (v != u && v >= 0 && v < n && (maskFrontier == null || maskFrontier.contains(v))) {
+					adjOff[u + 1]++;
+					adjOff[v + 1]++;
 				}
 			}
 		}
+		for (int u = 0; u < n; u++) {
+			adjOff[u + 1] += adjOff[u];
+		}
+		int totalAdj = adjOff[n];
+		int[] adjNbrs = ws.arena.allocInt(Math.max(1, totalAdj));
+		int[] writePos = ws.arena.allocInt(Math.max(1, n));
+		System.arraycopy(adjOff, 0, writePos, 0, n);
+		for (int u = 0; u < n; u++) {
+			if (maskFrontier != null && !maskFrontier.contains(u))
+				continue;
+			int s = rel.csrRowOffset(u), end = rel.csrRowOffset(u + 1);
+			for (int e = s; e < end; e++) {
+				int v = rel.csrColTarget(e);
+				if (v != u && v >= 0 && v < n && (maskFrontier == null || maskFrontier.contains(v))) {
+					adjNbrs[writePos[u]++] = v;
+					adjNbrs[writePos[v]++] = u;
+				}
+			}
+		}
+		int[] adjEnd = ws.arena.allocInt(Math.max(1, n));
+		for (int u = 0; u < n; u++) {
+			int lo = adjOff[u], hi = adjOff[u + 1];
+			if (hi - lo > 1) {
+				Arrays.sort(adjNbrs, lo, hi);
+				int w = lo + 1;
+				for (int i = lo + 1; i < hi; i++) {
+					if (adjNbrs[i] != adjNbrs[w - 1])
+						adjNbrs[w++] = adjNbrs[i];
+				}
+				adjEnd[u] = w;
+			} else {
+				adjEnd[u] = hi;
+			}
+		}
 
+		int words = Math.max(1, (n + 63) >>> 6);
 		switch (subop) {
 			case 0 -> { // .cc_afforest
-				int[] parent = new int[n];
+				int[] parent = ws.arena.allocInt(Math.max(1, n));
 				for (int i = 0; i < n; i++)
 					parent[i] = i;
 				for (int u = 0; u < n; u++) {
-					if (maskSet != null && !maskSet.contains(u))
+					if (maskFrontier != null && !maskFrontier.contains(u))
 						continue;
-					for (int v : adj[u]) {
+					for (int i = adjOff[u]; i < adjEnd[u]; i++) {
+						int v = adjNbrs[i];
 						int ra = ufFind(parent, u);
 						int rb = ufFind(parent, v);
 						if (ra != rb) {
@@ -3805,31 +3824,31 @@ public final class ImpulsePillar3Ops {
 						}
 					}
 				}
-				long[] out = new long[n];
-				long[] valid = new long[Math.max(1, (n + 63) >>> 6)];
+				long[] out = ws.arena.allocLongZeroed(n);
+				long[] valid = ws.arena.allocLongZeroed(words);
 				boolean any = false;
 				for (int u = 0; u < n; u++) {
-					if (maskSet == null || maskSet.contains(u)) {
+					if (maskFrontier == null || maskFrontier.contains(u)) {
 						out[u] = ufFind(parent, u);
 						valid[u >>> 6] |= (1L << (u & 63));
 						any = true;
 					}
 				}
-				ws.vVectors[dst] = ImpulseVector.ofU64(out, valid);
+				ws.vVectors[dst] = ws.arena.allocU64(out, n, valid);
 				ws.zf = !any;
 				ws.pc++;
 			}
 			case 1, 2 -> { // .kcore_nums / .kcore_frontier
-				int[] deg = new int[n];
-				int[] core = new int[n];
-				boolean[] removed = new boolean[n];
+				int[] deg = ws.arena.allocInt(Math.max(1, n));
+				int[] core = ws.arena.allocIntZeroed(Math.max(1, n));
+				boolean[] removed = ws.arena.allocBoolZeroed(Math.max(1, n));
 				int remaining = 0;
 				for (int u = 0; u < n; u++) {
-					if (maskSet != null && !maskSet.contains(u)) {
+					if (maskFrontier != null && !maskFrontier.contains(u)) {
 						deg[u] = -1;
 						removed[u] = true;
 					} else {
-						deg[u] = adj[u].size();
+						deg[u] = adjEnd[u] - adjOff[u];
 						remaining++;
 					}
 				}
@@ -3847,51 +3866,56 @@ public final class ImpulsePillar3Ops {
 					removed[minU] = true;
 					core[minU] = curK;
 					remaining--;
-					for (int v : adj[minU]) {
+					for (int i = adjOff[minU]; i < adjEnd[minU]; i++) {
+						int v = adjNbrs[i];
 						if (!removed[v] && deg[v] > curK)
 							deg[v]--;
 					}
 				}
 				if (subop == 1) {
-					long[] out = new long[n];
-					long[] valid = new long[Math.max(1, (n + 63) >>> 6)];
+					long[] out = ws.arena.allocLongZeroed(n);
+					long[] valid = ws.arena.allocLongZeroed(words);
 					boolean anyPos = false;
 					for (int u = 0; u < n; u++) {
-						if (maskSet == null || maskSet.contains(u)) {
+						if (maskFrontier == null || maskFrontier.contains(u)) {
 							out[u] = core[u];
 							valid[u >>> 6] |= (1L << (u & 63));
 							if (core[u] > 0)
 								anyPos = true;
 						}
 					}
-					ws.vVectors[dst] = ImpulseVector.ofU64(out, valid);
+					ws.vVectors[dst] = ws.arena.allocU64(out, n, valid);
 					ws.zf = !anyPos;
 					ws.pc++;
 				} else {
 					int k = imm16Hi;
-					int[] buf = new int[n];
+					int[] buf = ws.arena.allocInt(Math.max(1, n));
 					int cnt = 0;
 					for (int u = 0; u < n; u++) {
-						if ((maskSet == null || maskSet.contains(u)) && core[u] >= k) {
+						if ((maskFrontier == null || maskFrontier.contains(u)) && core[u] >= k) {
 							buf[cnt++] = u;
 						}
 					}
-					ws.fRegs[dst].initFromValidatedIds(dom, n, Arrays.copyOf(buf, cnt), ws.geometry, true);
+					ws.fRegs[dst].initFromValidatedIds(dom, n, buf, cnt, ws.geometry, true);
 					ws.setFInitialized(dst, true);
 					ws.zf = (cnt == 0);
 					ws.pc++;
 				}
 			}
 			case 3, 4 -> { // .tri_count_total / .tri_count_vec
-				long[] triU = new long[n];
+				long[] triU = ws.arena.allocLongZeroed(n);
 				long totalTri = 0L;
 				for (int u = 0; u < n; u++) {
-					if (maskSet != null && !maskSet.contains(u))
+					if (maskFrontier != null && !maskFrontier.contains(u))
 						continue;
-					for (int v : adj[u]) {
+					int uLo = adjOff[u], uHi = adjEnd[u];
+					for (int iv = uLo; iv < uHi; iv++) {
+						int v = adjNbrs[iv];
 						if (v > u) {
-							for (int w : adj[u]) {
-								if (w > v && adj[v].contains(w)) {
+							int vLo = adjOff[v], vHi = adjEnd[v];
+							for (int iw = iv + 1; iw < uHi; iw++) {
+								int w = adjNbrs[iw];
+								if (Arrays.binarySearch(adjNbrs, vLo, vHi, w) >= 0) {
 									totalTri++;
 									triU[u]++;
 									triU[v]++;
@@ -3906,15 +3930,15 @@ public final class ImpulsePillar3Ops {
 					setScalarFlags(ws, true, totalTri);
 					ws.pc++;
 				} else {
-					long[] out = new long[n];
-					long[] valid = new long[Math.max(1, (n + 63) >>> 6)];
+					long[] out = ws.arena.allocLongZeroed(n);
+					long[] valid = ws.arena.allocLongZeroed(words);
 					for (int u = 0; u < n; u++) {
-						if (maskSet == null || maskSet.contains(u)) {
+						if (maskFrontier == null || maskFrontier.contains(u)) {
 							out[u] = triU[u];
 							valid[u >>> 6] |= (1L << (u & 63));
 						}
 					}
-					ws.vVectors[dst] = ImpulseVector.ofU64(out, valid);
+					ws.vVectors[dst] = ws.arena.allocU64(out, n, valid);
 					ws.zf = (totalTri == 0L);
 					ws.pc++;
 				}

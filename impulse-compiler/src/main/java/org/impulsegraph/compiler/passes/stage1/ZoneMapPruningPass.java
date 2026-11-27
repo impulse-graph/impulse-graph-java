@@ -81,8 +81,10 @@ public final class ZoneMapPruningPass implements CompilerPass {
 				List<ImpScmNode> prunedFilter = new ArrayList<>();
 				for (ImpScmNode f : filter) {
 					ImpScmNode p = pruneScm(f, stats);
-					if (isConstantFalse(p))
-						return null;
+					if (isConstantFalse(p)) {
+						prunedFilter = List.of(p);
+						break;
+					}
 					if (!isConstantTrue(p) && p != null)
 						prunedFilter.add(p);
 				}
@@ -100,7 +102,7 @@ public final class ZoneMapPruningPass implements CompilerPass {
 		if (node instanceof ScmVectorFilter vf) {
 			ImpScmNode pruned = pruneScm(vf.predicate(), stats);
 			if (isConstantFalse(pruned)) {
-				return null; // Whole filter step pruned
+				return new ScmVectorFilter(pruned);
 			}
 			if (isConstantTrue(pruned)) {
 				return null; // Stripped completely
@@ -176,10 +178,9 @@ public final class ZoneMapPruningPass implements CompilerPass {
 			return null;
 
 		// Top-level constant fold (only for boolean/predicate expressions, never
-		// numeric/string literals)
+		// numeric/string literals or arithmetic expressions)
 		AlgebraicSignature sig = node.signature();
-		if (sig != null && sig.isConstantKnown() && node.kind() != CelAstNode.Kind.LITERAL_INT
-				&& node.kind() != CelAstNode.Kind.LITERAL_FLOAT && node.kind() != CelAstNode.Kind.LITERAL_STRING) {
+		if (sig != null && sig.isConstantKnown() && isBooleanExpr(node, sig)) {
 			return CelAstNode.makeBool(sig.constantBoolVal());
 		}
 
@@ -216,6 +217,19 @@ public final class ZoneMapPruningPass implements CompilerPass {
 		}
 
 		return result;
+	}
+
+	private boolean isBooleanExpr(CelAstNode node, AlgebraicSignature sig) {
+		return switch (node.kind()) {
+			case LITERAL_BOOL -> true;
+			case UNARY_OP -> "!".equals(node.text());
+			case BINARY_OP -> switch (node.text()) {
+				case "&&", "||", "==", "!=", "<", "<=", ">", ">=" -> true;
+				default -> false;
+			};
+			case LITERAL_INT, LITERAL_FLOAT, LITERAL_STRING, LIST_LITERAL -> false;
+			default -> sig.interval() == null || !sig.interval().isBounded();
+		};
 	}
 
 	private boolean isTrue(CelAstNode node) {

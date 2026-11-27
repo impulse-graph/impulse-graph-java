@@ -59,16 +59,9 @@ public final class VirtualRelationDecompositionPass implements CompilerPass {
 				for (String cName : constituents) {
 					RelationSnapshot rel = snapshot.getRelationSnapshot(cName);
 					if (rel != null) {
-						RelationStatistics stats = rel.getStatistics();
-						ScmWalk.Direction dir = ScmWalk.Direction.FORWARD_CSR;
-
-						// Check if CSC transpose should be selected
-						if (rel.hasCsc() && stats != null && stats.getAvgInDegree() < stats.getAvgDegree()) {
-							dir = ScmWalk.Direction.REVERSE_CSC;
-						}
-
-						// Build specialized constituent walk
-						constituentWalks.add(new ScmWalk(cName, -1, dir, walk.shaderSteps(), List.of()));
+						// Preserve walk.direction(): FORWARD_CSR (R) and REVERSE_CSC (R^T)
+						// traverse different edge directions and must never be flipped.
+						constituentWalks.add(new ScmWalk(cName, -1, walk.direction(), walk.shaderSteps(), List.of()));
 					}
 				}
 

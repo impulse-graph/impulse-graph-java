@@ -1,7 +1,6 @@
 package org.impulsegraph.vm;
 
 import java.util.Arrays;
-import java.util.TreeMap;
 
 import static org.impulsegraph.vm.ImpulseIsaTables.*;
 
@@ -289,32 +288,30 @@ public final class ImpulsePillar1Ops {
 		return bind.domainCards[domId];
 	}
 
-	private static int[] validateAndDedupeIds(long[] ids, int domCard) {
+	private static int validateAndDedupeIdsInto(long[] ids, int domCard, int[] tmp) {
 		if (ids == null || ids.length == 0) {
-			return new int[0];
+			return 0;
 		}
-		int[] tmp = new int[ids.length];
 		for (int i = 0; i < ids.length; i++) {
 			long u = ids[i];
 			if (u < 0L || Long.compareUnsigned(u, domCard) >= 0) {
-				return null;
+				return -1;
 			}
 			tmp[i] = (int) u;
 		}
-		Arrays.sort(tmp);
+		Arrays.sort(tmp, 0, ids.length);
 		int uniq = 1;
-		for (int i = 1; i < tmp.length; i++) {
+		for (int i = 1; i < ids.length; i++) {
 			if (tmp[i] != tmp[uniq - 1]) {
 				tmp[uniq++] = tmp[i];
 			}
 		}
-		return uniq == tmp.length ? tmp : Arrays.copyOf(tmp, uniq);
+		return uniq;
 	}
 
-	private static int[] mergeSortedUnique(int[] a, int[] b) {
-		int[] out = new int[a.length + b.length];
+	private static int mergeSortedUniqueInto(int[] a, int aLen, int[] b, int bLen, int[] out) {
 		int i = 0, j = 0, k = 0;
-		while (i < a.length && j < b.length) {
+		while (i < aLen && j < bLen) {
 			if (a[i] < b[j]) {
 				out[k++] = a[i++];
 			} else if (b[j] < a[i]) {
@@ -324,11 +321,49 @@ public final class ImpulsePillar1Ops {
 				j++;
 			}
 		}
-		while (i < a.length)
+		while (i < aLen)
 			out[k++] = a[i++];
-		while (j < b.length)
+		while (j < bLen)
 			out[k++] = b[j++];
-		return k == out.length ? out : Arrays.copyOf(out, k);
+		return k;
+	}
+
+	private static void sortMultiLaneIndices(int[] order, int len, long[] nodes) {
+		for (int i = (len >>> 1) - 1; i >= 0; i--) {
+			siftDownMultiLane(order, i, len, nodes);
+		}
+		for (int end = len - 1; end > 0; end--) {
+			int tmp = order[0];
+			order[0] = order[end];
+			order[end] = tmp;
+			siftDownMultiLane(order, 0, end, nodes);
+		}
+	}
+
+	private static void siftDownMultiLane(int[] order, int root, int len, long[] nodes) {
+		while (true) {
+			int left = (root << 1) + 1;
+			if (left >= len)
+				return;
+			int best = left;
+			int right = left + 1;
+			if (right < len && compareMultiLaneIdx(order[right], order[left], nodes) > 0) {
+				best = right;
+			}
+			if (compareMultiLaneIdx(order[best], order[root], nodes) > 0) {
+				int tmp = order[root];
+				order[root] = order[best];
+				order[best] = tmp;
+				root = best;
+			} else {
+				return;
+			}
+		}
+	}
+
+	private static int compareMultiLaneIdx(int idxA, int idxB, long[] nodes) {
+		int cmp = Long.compare(nodes[idxA], nodes[idxB]);
+		return cmp != 0 ? cmp : Integer.compare(idxA, idxB);
 	}
 
 	private static void loadFrontierIds(ImpulseWorkspace ws, ImpulseInterpreter.SnapshotBinding bind, int dst,
@@ -338,12 +373,15 @@ public final class ImpulsePillar1Ops {
 			ws.status = -domCard;
 			return;
 		}
-		int[] incoming = validateAndDedupeIds(ids, domCard);
-		if (incoming == null) {
+		int incomingCap = (ids != null) ? ids.length : 0;
+		int[] incoming = ws.arena.allocInt(incomingCap);
+		int incomingLen = validateAndDedupeIdsInto(ids, domCard, incoming);
+		if (incomingLen < 0) {
 			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
 			return;
 		}
 		int[] merged;
+		int mergedLen;
 		if (accum) {
 			if (!ws.isFInitialized(dst)) {
 				ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
@@ -358,13 +396,18 @@ public final class ImpulsePillar1Ops {
 				ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
 				return;
 			}
-			merged = mergeSortedUnique(existing.toSortedArray(), incoming);
+			int exCard = existing.cardinality();
+			int[] exIds = ws.arena.allocInt(exCard);
+			int exLen = existing.toSortedArrayInto(exIds);
+			merged = ws.arena.allocInt(exLen + incomingLen);
+			mergedLen = mergeSortedUniqueInto(exIds, exLen, incoming, incomingLen, merged);
 		} else {
 			merged = incoming;
+			mergedLen = incomingLen;
 		}
-		ws.fRegs[dst].initFromValidatedIds(domId, domCard, merged, ws.geometry, true);
+		ws.fRegs[dst].initFromValidatedIds(domId, domCard, merged, mergedLen, ws.geometry, true);
 		ws.setFInitialized(dst, true);
-		ws.zf = (merged.length == 0);
+		ws.zf = (mergedLen == 0);
 		ws.pc++;
 	}
 
@@ -479,9 +522,10 @@ public final class ImpulsePillar1Ops {
 						if (domCard < 0) {
 							ws.status = -domCard;
 						} else {
-							TreeMap<Long, Long> map = new TreeMap<>();
 							long[] nodes = ml.nodes();
 							long[] masks = ml.masks();
+							int[] order = ws.arena.allocInt(nodes.length);
+							int nz = 0;
 							for (int i = 0; i < nodes.length; i++) {
 								long u = nodes[i];
 								long m = masks[i];
@@ -490,21 +534,29 @@ public final class ImpulsePillar1Ops {
 									return;
 								}
 								if (m != 0L) {
-									map.put(u, m);
+									order[nz++] = i;
 								}
 							}
-							long[] sNodes = new long[map.size()];
-							long[] sMasks = new long[map.size()];
-							int idx = 0;
-							for (var e : map.entrySet()) {
-								sNodes[idx] = e.getKey();
-								sMasks[idx] = e.getValue();
-								idx++;
+							sortMultiLaneIndices(order, nz, nodes);
+							long[] sNodes = ws.arena.allocLong(nz);
+							long[] sMasks = ws.arena.allocLong(nz);
+							int uniq = 0;
+							for (int i = 0; i < nz; i++) {
+								int orig = order[i];
+								long u = nodes[orig];
+								long m = masks[orig];
+								if (uniq > 0 && sNodes[uniq - 1] == u) {
+									sMasks[uniq - 1] = m;
+								} else {
+									sNodes[uniq] = u;
+									sMasks[uniq] = m;
+									uniq++;
+								}
 							}
 							ws.fRegs[dst].initMultiLane(hi, domCard, ml.allocWidth(), ml.activeLaneCount(), sNodes,
-									sMasks, ws.geometry);
+									sMasks, uniq, ws.geometry);
 							ws.setFInitialized(dst, true);
-							ws.zf = (sNodes.length == 0);
+							ws.zf = (uniq == 0);
 							ws.pc++;
 						}
 					}

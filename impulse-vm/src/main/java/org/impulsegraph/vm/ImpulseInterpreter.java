@@ -69,7 +69,9 @@ public final class ImpulseInterpreter {
 
 		public SnapshotBinding(int[] domainCards, ImpulseSnapshotView view) {
 			this.rels = new RelationSnapshot[0];
-			this.domainCards = domainCards != null ? domainCards.clone() : new int[0];
+			this.domainCards = domainCards != null ? domainCards.clone() : new int[0]; // INVARIANT_ALLOW: one-time
+																						// SnapshotBinding bind-time
+																						// init
 			int maxCard = 64;
 			for (int c : this.domainCards) {
 				if (c > maxCard)
@@ -90,7 +92,7 @@ public final class ImpulseInterpreter {
 				}
 			}
 			this.rels = new RelationSnapshot[maxRelId + 1];
-			this.domainCards = new int[maxDomId + 1];
+			this.domainCards = new int[maxDomId + 1]; // INVARIANT_ALLOW: one-time SnapshotBinding bind-time init
 			int maxCard = 64;
 			for (RelationSnapshot r : snap.getAllRelationSnapshots().values()) {
 				if (r != null && r.getRelationId() >= 0) {
