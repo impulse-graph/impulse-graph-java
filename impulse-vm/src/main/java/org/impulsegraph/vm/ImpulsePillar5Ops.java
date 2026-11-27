@@ -1068,6 +1068,12 @@ public final class ImpulsePillar5Ops {
 		if (!scalarW && attrId != 0xFFFF) {
 			weightCol = rel.edgeAttrs.get(attrId);
 			if (weightCol == null) {
+				ImpulseSnapshotView.OffHeapAttrColumn off = rel.offHeapEdgeAttrs.get(attrId);
+				if (off != null) {
+					weightCol = ImpulsePillar4Ops.materializeOffHeapColumn(ws, off);
+				}
+			}
+			if (weightCol == null) {
 				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
 				return;
 			}
@@ -1137,6 +1143,31 @@ public final class ImpulsePillar5Ops {
 					hits += relaxLaneEdgeFlat(u, uBase, v, v * k, e, k, semi, mask, scalarW, scalarWValid, scalarWVal,
 							weightCol, snapIn, snapInValid, outVals, outValid, outWit, outWitValid);
 				}
+			}
+		} else if (weightCol != null && rel.cscEdgeIdsSeg == null && rel.hasCsrSegments()) {
+			int nSrc = rel.csrRowCount();
+			List<int[]> revEdges = new ArrayList<>();
+			for (int u = 0; u < nSrc; u++) {
+				int s = rel.csrRowOffset(u);
+				int eEnd = rel.csrRowOffset(u + 1);
+				for (int e = s; e < eEnd; e++) {
+					int v = rel.csrColTarget(e);
+					if (v >= 0 && v < ls.length) {
+						revEdges.add(new int[]{v, u, e});
+					}
+				}
+			}
+			revEdges.sort((a, b) -> {
+				int c = Integer.compare(a[0], b[0]);
+				if (c != 0)
+					return c;
+				c = Integer.compare(a[1], b[1]);
+				return (c != 0) ? c : Integer.compare(a[2], b[2]);
+			});
+			for (int[] ed : revEdges) {
+				int v = ed[0], u = ed[1], e = ed[2];
+				hits += relaxLaneEdgeFlat(v, v * k, u, u * k, e, k, semi, mask, scalarW, scalarWValid, scalarWVal,
+						weightCol, snapIn, snapInValid, outVals, outValid, outWit, outWitValid);
 			}
 		} else {
 			if (!rel.hasCscSegments()) {
