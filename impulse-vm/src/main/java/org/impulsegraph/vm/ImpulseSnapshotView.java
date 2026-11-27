@@ -306,11 +306,11 @@ public final class ImpulseSnapshotView {
 		}
 
 		public int cscColSource(int e) {
-			return switch (nodeIdWidth) {
+			return switch (cooSrcWidth) {
 				case 4 -> cscColSourcesSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) e << 2);
 				case 2 -> Short.toUnsignedInt(cscColSourcesSeg.get(ValueLayout.JAVA_SHORT_UNALIGNED, (long) e << 1));
 				case 8 -> Math.toIntExact(cscColSourcesSeg.get(ValueLayout.JAVA_LONG_UNALIGNED, (long) e << 3));
-				default -> throw new IllegalStateException("Unsupported nodeIdWidth=" + nodeIdWidth);
+				default -> throw new IllegalStateException("Unsupported cooSrcWidth=" + cooSrcWidth);
 			};
 		}
 
