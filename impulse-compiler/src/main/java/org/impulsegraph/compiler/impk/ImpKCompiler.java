@@ -72,15 +72,17 @@ public final class ImpKCompiler {
 			}
 			if (c == '"' || c == '\'') {
 				char quote = c;
+				int startQuote = i;
 				i++;
 				int start = i;
 				while (i < n && script.charAt(i) != quote) {
 					i++;
 				}
-				String s = script.substring(start, i);
-				if (i < n) {
-					i++;
+				if (i >= n) {
+					throw new IllegalArgumentException("Unterminated string literal at position " + startQuote);
 				}
+				String s = script.substring(start, i);
+				i++; // consume closing quote
 				tokens.add(new Token(TokenType.STRING, s, 0.0));
 			} else if (c == '$') {
 				int start = i++;
@@ -201,6 +203,10 @@ public final class ImpKCompiler {
 	}
 
 	public static List<ImpKStatement> parse(String script) {
+		return parseInternal(script, false);
+	}
+
+	private static List<ImpKStatement> parseInternal(String script, boolean keepScalarNumbers) {
 		Objects.requireNonNull(script, "script must not be null");
 		List<ImpKStatement> statements = new ArrayList<>();
 		List<Token> tokens = tokenize(script);
@@ -230,7 +236,7 @@ public final class ImpKCompiler {
 					assigned = true;
 				}
 				if (assigned) {
-					parseAssignmentRhs(target, typeAnnotation, tokens, pos, statements);
+					parseAssignmentRhs(target, typeAnnotation, tokens, pos, statements, keepScalarNumbers);
 				}
 			} else {
 				pos[0]++;
@@ -274,7 +280,7 @@ public final class ImpKCompiler {
 	}
 
 	private static void parseAssignmentRhs(String target, String typeAnnotation, List<Token> tokens, int[] pos,
-			List<ImpKStatement> statements) {
+			List<ImpKStatement> statements, boolean keepScalarNumbers) {
 		if (pos[0] >= tokens.size() || tokens.get(pos[0]).type() == TokenType.END
 				|| tokens.get(pos[0]).type() == TokenType.SEMI) {
 			return;
@@ -316,8 +322,10 @@ public final class ImpKCompiler {
 			}
 			return;
 		}
-		// Legacy bare number assignment without type annotation (e.g. `n = 42;`)
-		if (first.type() == TokenType.NUMBER && isStatementBoundary(tokens, pos[0] + 1) && typeAnnotation.isEmpty()) {
+		// Legacy bare number assignment without type annotation (e.g. `n = 42;` in
+		// legacy ScmProgram parse; preserved as scalar let-binding in v0.11 lowering)
+		if (first.type() == TokenType.NUMBER && isStatementBoundary(tokens, pos[0] + 1) && typeAnnotation.isEmpty()
+				&& !keepScalarNumbers) {
 			pos[0]++;
 			return;
 		}
@@ -758,7 +766,7 @@ public final class ImpKCompiler {
 	public static String lowerToImpSchemeV11(String script, ImpulseGraphSnapshot snapshot,
 			Map<String, String> explicitParamTypes) {
 		Objects.requireNonNull(script, "script must not be null");
-		List<ImpKStatement> stmts = parse(script);
+		List<ImpKStatement> stmts = parseInternal(script, true);
 		if (stmts.isEmpty()) {
 			throw new IllegalArgumentException("PARSE_ERROR: empty ImpK script");
 		}
@@ -812,10 +820,27 @@ public final class ImpKCompiler {
 			}
 
 			// Apply explicit type annotation (e.g. `x : DECIMAL(18, 2) = ...`) via cast
-			// when not a direct column load
-			if (!s.typeAnnotation().isEmpty() && s.opType() != ImpKOpType.LOAD_ATTR) {
+			// unless the expression already has the exact target type
+			if (!s.typeAnnotation().isEmpty()) {
 				String canonType = V11ExprLowerer.normalizeParamType(s.typeAnnotation());
-				if (!loweredRhs.startsWith("(cast ")) {
+				boolean alreadyExactType = false;
+				if (s.opType() == ImpKOpType.LOAD_ATTR
+						&& snapshot instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
+					var ld = gs.getDomain(s.matrixVar());
+					if (ld != null) {
+						int idx = ld.getAttributeIndex(s.vectorVar1());
+						if (idx >= 0) {
+							var la = ld.getAttribute(idx);
+							if ((la.typeCode() == 0x15 || la.typeCode() == (byte) 0x95)
+									&& canonType.equals("(decimal " + la.precision() + " " + la.scale() + ")")) {
+								alreadyExactType = true;
+							}
+						}
+					}
+				} else if (loweredRhs.startsWith("(cast ") && loweredRhs.endsWith(" " + canonType + ")")) {
+					alreadyExactType = true;
+				}
+				if (!alreadyExactType) {
 					loweredRhs = "(cast " + loweredRhs + " " + canonType + ")";
 				}
 			}

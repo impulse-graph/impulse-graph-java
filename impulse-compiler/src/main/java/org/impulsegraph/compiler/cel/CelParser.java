@@ -159,7 +159,9 @@ public final class CelParser {
 								args.add(parseExpression(depth + 1));
 							}
 						}
-						match(CelTokenType.RPAREN);
+						if (!match(CelTokenType.RPAREN)) {
+							throw new IllegalArgumentException("Expected ')' after member call arguments");
+						}
 						left = CelAstNode.makeCall(field, args);
 					} else {
 						left = CelAstNode.makeMember(left, field);
@@ -174,7 +176,9 @@ public final class CelParser {
 						args.add(parseExpression(depth + 1));
 					}
 				}
-				match(CelTokenType.RPAREN);
+				if (!match(CelTokenType.RPAREN)) {
+					throw new IllegalArgumentException("Expected ')' after function call arguments");
+				}
 				if (left.kind() == CelAstNode.Kind.IDENTIFIER) {
 					left = CelAstNode.makeCall(left.text(), args);
 				}

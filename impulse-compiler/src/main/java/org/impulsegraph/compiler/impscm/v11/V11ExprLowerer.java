@@ -47,6 +47,7 @@ public final class V11ExprLowerer {
 		Objects.requireNonNull(rawExpr, "rawExpr must not be null");
 		String normalized = CelCompiler.normalizeSqlCast(rawExpr.trim());
 		normalized = normalizeFunctionalCast(normalized);
+		normalized = normalizeLogicalKeywords(normalized);
 		normalized = normalizeComparisonOps(normalized);
 		return CelParser.parse(normalized);
 	}
@@ -114,6 +115,9 @@ public final class V11ExprLowerer {
 						yield s;
 					}
 					yield "(neg " + toV11ImpScheme(child, identResolver, memberResolver) + ")";
+				}
+				if ("!".equals(op)) {
+					yield "(not " + toV11ImpScheme(child, identResolver, memberResolver) + ")";
 				}
 				if ("+".equals(op)) {
 					yield toV11ImpScheme(child, identResolver, memberResolver);
@@ -290,6 +294,46 @@ public final class V11ExprLowerer {
 						}
 					}
 				}
+			}
+			out.append(c);
+			i++;
+		}
+		return out.toString();
+	}
+
+	/**
+	 * Normalizes case-insensitive word-bounded {@code AND}, {@code OR}, and
+	 * {@code NOT} keywords outside quoted strings to {@code &&}, {@code ||}, and
+	 * {@code !} for {@link CelParser}.
+	 */
+	static String normalizeLogicalKeywords(String source) {
+		StringBuilder out = new StringBuilder(source.length() + 4);
+		int n = source.length();
+		int i = 0;
+		while (i < n) {
+			char c = source.charAt(i);
+			if (c == '"' || c == '\'') {
+				i = skipString(source, i, out);
+				continue;
+			}
+			boolean boundaryBefore = (i == 0 || !isIdentPart(source.charAt(i - 1)));
+			if (boundaryBefore && i + 3 <= n && source.regionMatches(true, i, "AND", 0, 3)
+					&& (i + 3 == n || !isIdentPart(source.charAt(i + 3)))) {
+				out.append("&&");
+				i += 3;
+				continue;
+			}
+			if (boundaryBefore && i + 2 <= n && source.regionMatches(true, i, "OR", 0, 2)
+					&& (i + 2 == n || !isIdentPart(source.charAt(i + 2)))) {
+				out.append("||");
+				i += 2;
+				continue;
+			}
+			if (boundaryBefore && i + 3 <= n && source.regionMatches(true, i, "NOT", 0, 3)
+					&& (i + 3 == n || !isIdentPart(source.charAt(i + 3)))) {
+				out.append('!');
+				i += 3;
+				continue;
 			}
 			out.append(c);
 			i++;

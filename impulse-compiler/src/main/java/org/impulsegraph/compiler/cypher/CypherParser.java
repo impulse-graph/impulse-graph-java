@@ -41,19 +41,24 @@ public final class CypherParser {
 	}
 
 	public record WherePredicate(String targetVar, String field, String op, String valueOrParam, List<Long> inValues,
-			List<Float> vectorArg, int topK, String lhsExpr) {
+			List<Float> vectorArg, int topK, String lhsExpr, boolean isStringLiteral) {
 		public WherePredicate {
 			inValues = inValues != null ? List.copyOf(inValues) : List.of();
 			vectorArg = vectorArg != null ? List.copyOf(vectorArg) : List.of();
 		}
 
 		public WherePredicate(String targetVar, String field, String op, String valueOrParam, List<Long> inValues,
+				List<Float> vectorArg, int topK, String lhsExpr) {
+			this(targetVar, field, op, valueOrParam, inValues, vectorArg, topK, lhsExpr, false);
+		}
+
+		public WherePredicate(String targetVar, String field, String op, String valueOrParam, List<Long> inValues,
 				List<Float> vectorArg, int topK) {
-			this(targetVar, field, op, valueOrParam, inValues, vectorArg, topK, null);
+			this(targetVar, field, op, valueOrParam, inValues, vectorArg, topK, null, false);
 		}
 
 		public WherePredicate(String targetVar, String field, String op, String valueOrParam) {
-			this(targetVar, field, op, valueOrParam, List.of(), List.of(), 0, null);
+			this(targetVar, field, op, valueOrParam, List.of(), List.of(), 0, null, false);
 		}
 	}
 
@@ -73,31 +78,48 @@ public final class CypherParser {
 	}
 
 	public record CypherQuery(PathPattern path, List<WherePredicate> wherePredicates, ReturnProjection projection,
-			OrderByClause orderBy, List<WithItem> withItems, List<ReturnItem> returnItems) {
+			OrderByClause orderBy, List<WithItem> withItems, List<ReturnItem> returnItems,
+			List<WherePredicate> postWithPredicates) {
 		public CypherQuery {
 			wherePredicates = wherePredicates != null ? List.copyOf(wherePredicates) : List.of();
 			withItems = withItems != null ? List.copyOf(withItems) : List.of();
 			returnItems = returnItems != null ? List.copyOf(returnItems) : List.of();
+			postWithPredicates = postWithPredicates != null ? List.copyOf(postWithPredicates) : List.of();
+		}
+
+		public CypherQuery(PathPattern path, List<WherePredicate> wherePredicates, ReturnProjection projection,
+				OrderByClause orderBy, List<WithItem> withItems, List<ReturnItem> returnItems) {
+			this(path, wherePredicates, projection, orderBy, withItems, returnItems, List.of());
 		}
 
 		public CypherQuery(PathPattern path, List<WherePredicate> wherePredicates, ReturnProjection projection,
 				OrderByClause orderBy) {
-			this(path, wherePredicates, projection, orderBy, List.of(), List.of());
+			this(path, wherePredicates, projection, orderBy, List.of(), List.of(), List.of());
 		}
 
 		public CypherQuery(PathPattern path, List<WherePredicate> wherePredicates, ReturnProjection projection) {
-			this(path, wherePredicates, projection, null, List.of(), List.of());
+			this(path, wherePredicates, projection, null, List.of(), List.of(), List.of());
 		}
 	}
 
-	private final CypherLexer lexer;
+	private final List<CypherToken> tokens;
+	private int pos = 0;
 	private CypherToken curr;
 	private CypherToken next;
 
 	public CypherParser(String query) {
-		this.lexer = new CypherLexer(Objects.requireNonNull(query, "query must not be null"));
-		this.curr = lexer.nextToken();
-		this.next = lexer.nextToken();
+		CypherLexer lexer = new CypherLexer(Objects.requireNonNull(query, "query must not be null"));
+		List<CypherToken> all = new ArrayList<>();
+		while (true) {
+			CypherToken tok = lexer.nextToken();
+			all.add(tok);
+			if (tok.type() == CypherTokenType.EOF) {
+				break;
+			}
+		}
+		this.tokens = all;
+		this.curr = tokens.get(0);
+		this.next = tokens.size() > 1 ? tokens.get(1) : this.curr;
 	}
 
 	public static CypherQuery parse(String query) {
@@ -115,10 +137,11 @@ public final class CypherParser {
 		}
 
 		List<WithItem> withItems = new ArrayList<>();
+		List<WherePredicate> postWithPredicates = new ArrayList<>();
 		if (match(CypherTokenType.KW_WITH)) {
 			withItems = parseWithClause();
 			if (match(CypherTokenType.KW_WHERE)) {
-				wherePredicates.addAll(parseWhereClause());
+				postWithPredicates.addAll(parseWhereClause());
 			}
 		}
 
@@ -139,7 +162,7 @@ public final class CypherParser {
 			orderBy = new OrderByClause(projection.variable(), "", List.of(), 0, lim);
 		}
 
-		return new CypherQuery(path, wherePredicates, projection, orderBy, withItems, returnItems);
+		return new CypherQuery(path, wherePredicates, projection, orderBy, withItems, returnItems, postWithPredicates);
 	}
 
 	private PathPattern parsePathPattern() {
@@ -286,7 +309,15 @@ public final class CypherParser {
 		if (depth > MAX_PARSE_DEPTH) {
 			throw new IllegalArgumentException("Cypher WHERE max nesting depth (256) exceeded");
 		}
-		if (match(CypherTokenType.LPAREN)) {
+		if (curr.type() == CypherTokenType.LPAREN) {
+			if (isParenthesizedArithLhs()) {
+				String lhsExpr = parseExprText();
+				String op = consumeComparisonOperator();
+				boolean isStr = curr.type() == CypherTokenType.STRING_LITERAL && !isArithOp(next.type());
+				String rhsExpr = parseWhereRhsExpr();
+				return List.of(new WherePredicate("", "", op, rhsExpr, List.of(), List.of(), 0, lhsExpr, isStr));
+			}
+			advance(); // consume '('
 			List<WherePredicate> inner = new ArrayList<>();
 			do {
 				inner.addAll(parseWhereExpr(depth + 1));
@@ -296,6 +327,15 @@ public final class CypherParser {
 		}
 
 		List<WherePredicate> predicates = new ArrayList<>();
+		if (curr.type() == CypherTokenType.DECIMAL_LITERAL || curr.type() == CypherTokenType.NUMBER_LITERAL
+				|| curr.type() == CypherTokenType.DASH || curr.type() == CypherTokenType.PARAM) {
+			String lhsExpr = parseExprText();
+			String op = consumeComparisonOperator();
+			boolean isStr = curr.type() == CypherTokenType.STRING_LITERAL && !isArithOp(next.type());
+			String rhsExpr = parseWhereRhsExpr();
+			predicates.add(new WherePredicate("", "", op, rhsExpr, List.of(), List.of(), 0, lhsExpr, isStr));
+			return predicates;
+		}
 		if (match(CypherTokenType.KW_COUNT)) {
 			consume(CypherTokenType.LPAREN, "Expected '(' after count");
 			String var = curr.lexeme();
@@ -393,13 +433,15 @@ public final class CypherParser {
 		}
 
 		String op = consumeComparisonOperator();
+		boolean isStrLit = curr.type() == CypherTokenType.STRING_LITERAL && !isArithOp(next.type());
 		String valOrParam = parseWhereRhsExpr();
 
 		if (prop.equalsIgnoreCase("quorum")) {
 			int k = Integer.parseInt(valOrParam);
 			predicates.add(new WherePredicate(firstIdent, "quorum", op, valOrParam, List.of((long) k), List.of(), k));
 		} else {
-			predicates.add(new WherePredicate(firstIdent, prop, op, valOrParam, List.of(), List.of(), 0, lhsExpr));
+			predicates.add(
+					new WherePredicate(firstIdent, prop, op, valOrParam, List.of(), List.of(), 0, lhsExpr, isStrLit));
 		}
 		return predicates;
 	}
@@ -732,13 +774,38 @@ public final class CypherParser {
 		return values;
 	}
 
+	private boolean isParenthesizedArithLhs() {
+		int depth = 0;
+		for (int i = pos; i < tokens.size(); i++) {
+			CypherTokenType t = tokens.get(i).type();
+			if (t == CypherTokenType.LPAREN) {
+				depth++;
+			} else if (t == CypherTokenType.RPAREN) {
+				depth--;
+				if (depth == 0) {
+					if (i + 1 >= tokens.size()) {
+						return false;
+					}
+					CypherTokenType after = tokens.get(i + 1).type();
+					return isComparisonOp(after) || isArithOp(after);
+				}
+			} else if (t == CypherTokenType.EOF) {
+				return false;
+			}
+		}
+		return false;
+	}
+
 	private boolean peekNextTokenIsColon() {
 		return next != null && next.type() == CypherTokenType.COLON;
 	}
 
 	private void advance() {
-		curr = next;
-		next = lexer.nextToken();
+		if (pos + 1 < tokens.size()) {
+			pos++;
+			curr = tokens.get(pos);
+			next = (pos + 1 < tokens.size()) ? tokens.get(pos + 1) : curr;
+		}
 	}
 
 	private boolean match(CypherTokenType type) {
