@@ -2,6 +2,7 @@ package org.impulsegraph.kotlin
 
 import org.impulsegraph.api.ArgType
 import org.impulsegraph.api.bitset.ImpulseBitSet
+import org.impulsegraph.compiler.cel.CelCompiler
 import org.impulsegraph.storage.csr.BinarySnapshotLoader
 import org.impulsegraph.storage.csr.DefaultSnapshotBuilder
 import org.impulsegraph.storage.csr.GraphSnapshot
@@ -9,6 +10,7 @@ import org.impulsegraph.storage.csr.RelationSnapshot
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -21,6 +23,7 @@ import java.nio.file.Files
 
 class ImpulseKotlinDecimal64Test {
     companion object {
+        private const val TYPE_INT64: Byte = 0x04
         private const val TYPE_DECIMAL64: Byte = 0x15
         private const val TYPE_DECIMAL64_NULLABLE: Byte = (0x15 or 0x80).toByte()
     }
@@ -68,7 +71,6 @@ class ImpulseKotlinDecimal64Test {
 
     @Test
     fun testDecimal18Scale2Above2Pow53ExactPrecision() {
-        // 2^53 = 9_007_199_254_740_992; 9_007_199_254_740_993 loses precision in IEEE-754 double
         val above53 = "90071992547409.93".toDecimal64(18, 2)
         assertEquals(9_007_199_254_740_993L, above53.unscaled())
         assertEquals("90071992547409.93", above53.toDecimalString())
@@ -85,7 +87,7 @@ class ImpulseKotlinDecimal64Test {
     }
 
     @Test
-    fun testSnapshotBuilderNullable0x95AndQueryRoundtrip() {
+    fun testSnapshotBuilderNullable0x95CelCompileAndQueryRoundtrip() {
         val tmp = Files.createTempFile("kotlin-decimal64-test", ".imps")
         try {
             val balances =
@@ -102,9 +104,13 @@ class ImpulseKotlinDecimal64Test {
                     "-90071992547409.93".toDecimal64(18, 2),
                     "9999999999999999.99".toDecimal64(18, 2),
                 )
+            val tiers = longArrayOf(1L, 2L, 3L, 4L)
 
             val balBuf = ByteBuffer.allocate(balances.size * 8).order(ByteOrder.LITTLE_ENDIAN)
             balances.forEach { balBuf.putLong(it.unscaled()) }
+
+            val tierBuf = ByteBuffer.allocate(tiers.size * 8).order(ByteOrder.LITTLE_ENDIAN)
+            tiers.forEach { tierBuf.putLong(it) }
 
             val notBuf = ByteBuffer.allocate(notionals.size * 8).order(ByteOrder.LITTLE_ENDIAN)
             val notValidity = ByteArray(128)
@@ -138,6 +144,7 @@ class ImpulseKotlinDecimal64Test {
                             null,
                             notValidity,
                         )
+                        .withDomainAttribute(0, "tier", TYPE_INT64, 1, 0, 0, tierBuf.array(), null, null)
 
                 val bytes =
                     builder.build(
@@ -169,10 +176,10 @@ class ImpulseKotlinDecimal64Test {
                 assertEquals(18, notAttr.precision())
                 assertEquals(2, notAttr.scale())
                 val validityByte = dom.getValiditySegment("notional").get(ValueLayout.JAVA_BYTE, 0L).toInt()
-                assertEquals(0b1101, validityByte and 0xFF)
+                assertEquals(0x0D, validityByte and 0xFF)
             }
 
-            // Query DSL + ImpulseSnapshots roundtrip
+            // Query DSL + CEL compiler verification (exact decimal("...", P, S))
             val minBalance = "100.00".toDecimal64(10, 2)
             val minNotional = "90071992547409.93".toDecimal64(18, 2)
 
@@ -186,8 +193,13 @@ class ImpulseKotlinDecimal64Test {
 
             assertEquals(minNotional, filterQuery.parameters["@minNotional"])
             val ast = filterQuery.exportAst()
-            assertTrue(ast.contains("node.balance >= 100.00"))
-            assertTrue(ast.contains("edge.fee <= 1.25"))
+            assertTrue(ast.contains("node.balance >= decimal(\"100.00\", 10, 2)"))
+            assertTrue(ast.contains("edge.fee <= decimal(\"1.25\", 10, 2)"))
+
+            val compiledNodeCel = CelCompiler.compileToImpScheme("node.balance >= decimal(\"100.00\", 10, 2)")
+            assertTrue(compiledNodeCel.contains("(dec \"100.00\" 10 2)"))
+            val compiledEdgeCel = CelCompiler.compileToImpScheme("edge.fee <= decimal(\"1.25\", 10, 2)")
+            assertTrue(compiledEdgeCel.contains("(dec \"1.25\" 10 2)"))
 
             val walkQuery =
                 impulseQuery<ImpulseBitSet> {
@@ -196,10 +208,37 @@ class ImpulseKotlinDecimal64Test {
                 }.collectBitSet()
 
             ImpulseSnapshots.withSnapshot(tmp) { snap ->
-                assertEquals(balances[0], snap.getDomainDecimal64("Account", "balance", 0L, 10, 2))
+                // Exact non-null & nullable reads (including auto-metadata and explicit-metadata overloads)
+                assertEquals(balances[0], snap.getDomainDecimal64("Account", "balance", 0L))
                 assertEquals(balances[3], snap.getDomainDecimal64("Account", "balance", 3L, 10, 2))
-                assertEquals(notionals[0], snap.getDomainDecimal64("Account", "notional", 0L, 18, 2))
+                assertEquals(notionals[0], snap.getDomainDecimal64("Account", "notional", 0L))
+                assertNull(snap.getDomainDecimal64("Account", "notional", 1L))
+                assertNull(snap.getDomainDecimal64("Account", "notional", 1L, 18, 2))
                 assertEquals(notionals[3], snap.getDomainDecimal64("Account", "notional", 3L, 18, 2))
+
+                // Bounds, type, and precision/scale mismatch validation
+                assertThrows(IllegalArgumentException::class.java) {
+                    snap.getDomainDecimal64("Account", "balance", -1L)
+                }
+                assertThrows(IllegalArgumentException::class.java) {
+                    snap.getDomainDecimal64("Account", "balance", 4L)
+                }
+                assertThrows(IllegalArgumentException::class.java) {
+                    snap.getDomainDecimal64("Account", "tier", 0L)
+                }
+                assertThrows(IllegalArgumentException::class.java) {
+                    snap.getDomainDecimal64("Account", "balance", 0L, 10, 4)
+                }
+                assertThrows(IllegalArgumentException::class.java) {
+                    snap.getDomainDecimal64("Account", "notional", 1L, 10, 2)
+                }
+
+                // Statement bindDecimal64 preserves typed Decimal64
+                snap.useStatement("FROM Account -> transfer") { stmt ->
+                    stmt.bindNode("id", 0L).bindDecimal64("minNotional", minNotional)
+                    assertEquals(setOf(1), stmt.executeBitSet().toSet())
+                }
+
                 assertEquals(setOf(1), snap(walkQuery, 0L).toSet())
             }
         } finally {

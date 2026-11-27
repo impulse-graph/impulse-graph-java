@@ -1,13 +1,7 @@
 package org.impulsegraph.scala
 
 import org.impulsegraph.api.{Decimal64, ImpulseGraphSnapshot}
-import org.impulsegraph.api.statement.{ImpulseStatement, RowReader}
-
-import java.lang.foreign.ValueLayout
-import java.nio.ByteOrder
-
-private[scala] val LeLongLayout: ValueLayout.OfLong =
-  ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN)
+import org.impulsegraph.api.statement.RowReader
 
 given Ordering[Decimal64] with
   override def compare(x: Decimal64, y: Decimal64): Int =
@@ -56,10 +50,6 @@ extension (d: Decimal64)
   def >(other: Decimal64): Boolean = d.toBigDecimal.compareTo(other.toBigDecimal) > 0
   def >=(other: Decimal64): Boolean = d.toBigDecimal.compareTo(other.toBigDecimal) >= 0
 
-extension (stmt: ImpulseStatement)
-  def bindDecimal64(param: String, value: Decimal64): ImpulseStatement =
-    stmt.bindLong(param, value.unscaled)
-
 extension (row: RowReader)
   def getDecimal64(columnIndex: Int, precision: Int, scale: Int): Decimal64 =
     new Decimal64(row.getLong(columnIndex), precision, scale)
@@ -68,10 +58,14 @@ extension (row: RowReader)
     new Decimal64(row.getLong(columnName), precision, scale)
 
 extension (snapshot: ImpulseGraphSnapshot)
-  def domainDecimal64(domainName: String, attributeName: String, nodeId: Long, precision: Int, scale: Int): Decimal64 =
-    val seg = snapshot.getDomainAttributeSegment(domainName, attributeName)
-    require(
-      seg.address() != 0L && seg.byteSize() >= (nodeId + 1L) * 8L,
-      s"Domain '$domainName' attribute '$attributeName' segment unavailable for node $nodeId"
-    )
-    new Decimal64(seg.get(LeLongLayout, nodeId * 8L), precision, scale)
+  def domainDecimal64(domainName: String, attributeName: String, nodeId: Long): Option[Decimal64] =
+    Option(snapshot.getDomainAttributeDecimal64(domainName, attributeName, nodeId))
+
+  def domainDecimal64(
+      domainName: String,
+      attributeName: String,
+      nodeId: Long,
+      precision: Int,
+      scale: Int
+  ): Option[Decimal64] =
+    Option(snapshot.getDomainAttributeDecimal64(domainName, attributeName, nodeId, precision, scale))

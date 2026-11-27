@@ -158,7 +158,10 @@ class ImpulseQueryDsl[R](private val builder: ImpulseQueryBuilder[R] = new Impul
       op: String,
       value: Decimal64
   ): ImpulseQueryDsl[R] =
-    builder.walkEdgeWithCel(relationName, s"edge.$attributeName $op ${value.toDecimalString}")
+    builder.walkEdgeWithCel(
+      relationName,
+      s"""edge.$attributeName $op decimal("${value.toDecimalString}", ${value.precision}, ${value.scale})"""
+    )
     this
 
   @targetName("walkEdgeFilteredAttributeRelDec")
@@ -185,7 +188,9 @@ class ImpulseQueryDsl[R](private val builder: ImpulseQueryBuilder[R] = new Impul
 
   @targetName("filterNodeAttributeDec")
   def filterNodeAttribute(attributeName: String, op: String, value: Decimal64): ImpulseQueryDsl[R] =
-    builder.filterWithCel(s"node.$attributeName $op ${value.toDecimalString}")
+    builder.filterWithCel(
+      s"""node.$attributeName $op decimal("${value.toDecimalString}", ${value.precision}, ${value.scale})"""
+    )
     this
 
   def projectExpression(nodeAttribute: String, operator: String, edgeAttribute: String): ImpulseQueryDsl[R] =

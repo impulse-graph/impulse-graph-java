@@ -172,6 +172,28 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
 	}
 
 	/**
+	 * Reads a {@code DECIMAL64} ({@code 0x15} non-null or {@code 0x95} nullable)
+	 * domain attribute value for {@code nodeId}, validating domain existence,
+	 * {@code nodeId} bounds, attribute type, and nullable validity bitmap.
+	 *
+	 * @return the exact {@link Decimal64} with stored {@code (precision, scale)},
+	 *         or {@code null} if nullable and NULL
+	 */
+	default Decimal64 getDomainAttributeDecimal64(String domainName, String attributeName, long nodeId) {
+		throw new UnsupportedOperationException("getDomainAttributeDecimal64 not implemented by this snapshot");
+	}
+
+	/**
+	 * Reads a {@code DECIMAL64} domain attribute value for {@code nodeId},
+	 * additionally verifying that the snapshot's stored {@code (precision, scale)}
+	 * matches {@code (expectedPrecision, expectedScale)}.
+	 */
+	default Decimal64 getDomainAttributeDecimal64(String domainName, String attributeName, long nodeId,
+			int expectedPrecision, int expectedScale) {
+		throw new UnsupportedOperationException("getDomainAttributeDecimal64 not implemented by this snapshot");
+	}
+
+	/**
 	 * Returns the 0-indexed attribute index holding the primary key column for the
 	 * given domain, or 0xFFFF if none.
 	 */

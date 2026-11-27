@@ -9,9 +9,8 @@
            [org.impulsegraph.compiler.ast ImpScmNode]
            [java.io File]
            [java.lang AutoCloseable]
-           [java.lang.foreign Arena ValueLayout]
-           [java.math BigDecimal]
-           [java.nio ByteOrder]
+           [java.lang.foreign Arena]
+           [java.math BigDecimal BigInteger]
            [java.nio.file Path]
            [java.util Collection Map]
            [java.util.function Function]))
@@ -436,7 +435,7 @@
     (fn [^ImpulseStatement s k v]
       (let [pname (key->str k)]
         (cond
-          (instance? Decimal64 v) (.bindLong s pname (.unscaled ^Decimal64 v))
+          (instance? Decimal64 v) (.bindDecimal64 s pname ^Decimal64 v)
           (or (instance? Long v) (instance? Integer v)) (.bindLong s pname (long v))
           (or (instance? Double v) (instance? Float v)) (.bindDouble s pname (double v))
           (instance? Boolean v) (.bindBoolean s pname (boolean v))
@@ -450,8 +449,12 @@
 ;; DECIMAL64 Fixed-Point Ergonomics
 ;; ----------------------------------------------------------------------------
 
-(def ^:private le-long-layout
-  (.withOrder ValueLayout/JAVA_LONG_UNALIGNED ByteOrder/LITTLE_ENDIAN))
+(defn- exact-long
+  ^long [v]
+  (cond
+    (instance? clojure.lang.BigInt v) (.longValueExact ^BigInteger (biginteger v))
+    (instance? BigInteger v) (.longValueExact ^BigInteger v)
+    :else (long v)))
 
 (defn decimal64?
   "Returns true if `x` is an instance of `org.impulsegraph.api.Decimal64`."
@@ -470,7 +473,7 @@
      (instance? BigDecimal value) (let [plain (.toPlainString ^BigDecimal value)
                                         ps (Decimal64/inferPrecisionScale plain)]
                                     (Decimal64/fromBigDecimal ^BigDecimal value (aget ps 0) (aget ps 1)))
-     (integer? value) (Decimal64. (long value) 18 0)
+     (integer? value) (Decimal64. (exact-long value) 18 0)
      :else (throw (IllegalArgumentException.
                     (str "Cannot convert to Decimal64: " (type value))))))
   (^Decimal64 [value precision scale]
@@ -481,7 +484,7 @@
        (instance? Decimal64 value) (Decimal64/fromBigDecimal (.toBigDecimal ^Decimal64 value) p s)
        (string? value) (Decimal64/parse ^String value p s)
        (instance? BigDecimal value) (Decimal64/fromBigDecimal ^BigDecimal value p s)
-       (integer? value) (Decimal64. (Math/multiplyExact (long value) (aget Decimal64/POW10 s)) p s)
+       (integer? value) (Decimal64. (Math/multiplyExact (exact-long value) (aget Decimal64/POW10 s)) p s)
        :else (throw (IllegalArgumentException.
                       (str "Cannot convert to Decimal64: " (type value))))))))
 
@@ -495,7 +498,7 @@
 (defn unscaled->decimal64
   "Wraps an already-unscaled 64-bit integer as a `Decimal64` with explicit `(precision, scale)`."
   ^Decimal64 [unscaled precision scale]
-  (Decimal64. (long unscaled) (int precision) (int scale)))
+  (Decimal64. (exact-long unscaled) (int precision) (int scale)))
 
 (defn ->bigdec
   "Converts a `Decimal64` (or existing `BigDecimal`) into an exact `java.math.BigDecimal`."
@@ -514,19 +517,26 @@
 (defn filter-decimal
   "Appends an in-domain CEL candidate filter comparing a `DECIMAL64` node attribute against an exact `Decimal64`."
   [traversal attr-name op ^Decimal64 value]
-  (filter-nodes traversal (str "node." (key->str attr-name) " " (key->str op) " " (.toDecimalString value))))
+  (filter-nodes traversal
+                (str "node." (key->str attr-name) " " (key->str op)
+                     " decimal(\"" (.toDecimalString value) "\", " (.precision value) ", " (.scale value) ")")))
 
 (defn domain-decimal64
-  "Reads a non-nullable `Decimal64` domain attribute directly from the snapshot's off-heap attribute segment."
-  ^Decimal64 [snapshot domain-name attr-name node-id precision scale]
-  (let [raw (unwrap-snapshot snapshot)
-        seg (.getDomainAttributeSegment raw (key->str domain-name) (key->str attr-name))
-        idx (long node-id)]
-    (when (or (= 0 (.address seg)) (< (.byteSize seg) (* (inc idx) 8)))
-      (throw (IllegalArgumentException.
-               (str "Domain '" (key->str domain-name) "' attribute '" (key->str attr-name)
-                    "' segment unavailable for node " idx))))
-    (Decimal64. (.get seg le-long-layout (* idx 8)) (int precision) (int scale))))
+  "Reads a `DECIMAL64` (`0x15` non-null or `0x95` nullable) domain attribute value for `node-id`.
+  Returns `nil` when nullable and NULL. When `precision` and `scale` are provided, validates that
+  the snapshot's stored metadata matches."
+  (^Decimal64 [snapshot domain-name attr-name node-id]
+   (.getDomainAttributeDecimal64 (unwrap-snapshot snapshot)
+                                 (key->str domain-name)
+                                 (key->str attr-name)
+                                 (exact-long node-id)))
+  (^Decimal64 [snapshot domain-name attr-name node-id precision scale]
+   (.getDomainAttributeDecimal64 (unwrap-snapshot snapshot)
+                                 (key->str domain-name)
+                                 (key->str attr-name)
+                                 (exact-long node-id)
+                                 (int precision)
+                                 (int scale))))
 
 (defmacro with-statement
   "Executes body with a prepared ImpulseStatement bound to `binding-form`, closing it on exit."
