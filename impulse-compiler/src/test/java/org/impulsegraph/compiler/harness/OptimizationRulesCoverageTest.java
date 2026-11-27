@@ -68,9 +68,13 @@ public class OptimizationRulesCoverageTest {
 				assertNotNull(step2);
 				assertInstanceOf(ScmProgram.class, step2);
 				ScmProgram prog = (ScmProgram) step2;
-				// Dead traversal branch pruned: only terminal collect remains
-				assertEquals(1, prog.steps().size());
-				assertInstanceOf(ScmCollect.class, prog.steps().get(0));
+				// Constant-FALSE walk retains its constant-false shader marker (never silently
+				// dropped)
+				assertEquals(2, prog.steps().size());
+				assertInstanceOf(ScmWalk.class, prog.steps().get(0));
+				assertTrue(ZoneMapPruningPass.INSTANCE
+						.isConstantFalse(((ScmWalk) prog.steps().get(0)).shaderSteps().get(0)));
+				assertInstanceOf(ScmCollect.class, prog.steps().get(1));
 
 				System.out.println(tracer.generateTraceReport());
 			}
@@ -102,8 +106,11 @@ public class OptimizationRulesCoverageTest {
 				assertNotNull(step2);
 				assertInstanceOf(ScmProgram.class, step2);
 				ScmProgram prog = (ScmProgram) step2;
-				assertEquals(1, prog.steps().size());
-				assertInstanceOf(ScmCollect.class, prog.steps().get(0));
+				assertEquals(2, prog.steps().size());
+				assertInstanceOf(ScmWalk.class, prog.steps().get(0));
+				assertTrue(ZoneMapPruningPass.INSTANCE
+						.isConstantFalse(((ScmWalk) prog.steps().get(0)).shaderSteps().get(0)));
+				assertInstanceOf(ScmCollect.class, prog.steps().get(1));
 			}
 		}
 

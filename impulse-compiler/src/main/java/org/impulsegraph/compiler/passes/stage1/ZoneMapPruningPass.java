@@ -240,7 +240,7 @@ public final class ZoneMapPruningPass implements CompilerPass {
 		return node.kind() == CelAstNode.Kind.LITERAL_BOOL && !node.boolVal();
 	}
 
-	private boolean isConstantFalse(ImpScmNode node) {
+	public boolean isConstantFalse(ImpScmNode node) {
 		if (node instanceof ScmSymbol s)
 			return "constant-false".equals(s.name()) || "#f".equals(s.name());
 		if (node instanceof ScmLiteral.ScmBool b)

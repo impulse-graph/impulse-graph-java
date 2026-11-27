@@ -192,7 +192,7 @@ public final class ImpulsePillar5Ops {
 	private static int mlSortAndCoalesce(long[] nodes, long[] masks, int count) {
 		if (count <= 0)
 			return 0;
-		for (int i = (count - 2) >>> 1; i >= 0; i--) {
+		for (int i = (count >>> 1) - 1; i >= 0; i--) {
 			mlSiftDown(nodes, masks, i, count);
 		}
 		for (int end = count - 1; end > 0; end--) {
@@ -1149,17 +1149,19 @@ public final class ImpulsePillar5Ops {
 				scoredCnt++;
 			}
 		}
-		for (int i = (scoredCnt - 2) >>> 1; i >= 0; i--) {
-			annSiftDown(scores, ids, i, scoredCnt);
-		}
-		for (int end = scoredCnt - 1; end > 0; end--) {
-			double ts = scores[end];
-			scores[end] = scores[0];
-			scores[0] = ts;
-			int ti = ids[end];
-			ids[end] = ids[0];
-			ids[0] = ti;
-			annSiftDown(scores, ids, 0, end);
+		if (scoredCnt > 1) {
+			for (int i = (scoredCnt >>> 1) - 1; i >= 0; i--) {
+				annSiftDown(scores, ids, i, scoredCnt);
+			}
+			for (int end = scoredCnt - 1; end > 0; end--) {
+				double ts = scores[end];
+				scores[end] = scores[0];
+				scores[0] = ts;
+				int ti = ids[end];
+				ids[end] = ids[0];
+				ids[0] = ti;
+				annSiftDown(scores, ids, 0, end);
+			}
 		}
 
 		int outCnt;
