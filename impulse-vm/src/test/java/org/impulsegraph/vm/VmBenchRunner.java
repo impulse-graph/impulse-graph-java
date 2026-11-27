@@ -89,7 +89,8 @@ public final class VmBenchRunner {
 			bf.emit(ImpulseIsaTables.OP_HALT, 0, 0, 0, 0, 0, 0, 0);
 			long[] wf = bf.toWordArray();
 
-			// 3. Morsel 2-Hop (WALK 1-hop + WALK_MORSEL.fwd + MORSEL_COMMIT.yield_frontier + CARD)
+			// 3. Morsel 2-Hop (WALK 1-hop + WALK_MORSEL.fwd + MORSEL_COMMIT.yield_frontier
+			// + CARD)
 			V11ProgramBuilder bm = new V11ProgramBuilder();
 			bm.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
 			bm.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 0, 0);
@@ -103,9 +104,11 @@ public final class VmBenchRunner {
 			bm.emit(ImpulseIsaTables.OP_HALT, 0, 0, 0, 0, 0, 0, 0);
 			long[] wm = bm.toWordArray();
 
-			// 4. Morsel Edge Count (WALK 1-hop + WALK_MORSEL.fwd + MORSEL_COMMIT.count_add_r)
+			// 4. Morsel Edge Count (WALK 1-hop + WALK_MORSEL.fwd +
+			// MORSEL_COMMIT.count_add_r)
 			V11ProgramBuilder bmc = new V11ProgramBuilder();
-			bmc.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
+			bmc.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0,
+					0);
 			bmc.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 0, 0);
 			bmc.emit(ImpulseIsaTables.OP_LOAD_CONST, ImpulseIsaTables.SUBOP_LOAD_CONST_I32, 0, 0, 0, 0, 0, 0);
 			bmc.emitU16(ImpulseIsaTables.OP_WALK_MORSEL, ImpulseIsaTables.SUBOP_WALK_MORSEL_FWD, 0, 0, 1, 0, 0, 0, 2);

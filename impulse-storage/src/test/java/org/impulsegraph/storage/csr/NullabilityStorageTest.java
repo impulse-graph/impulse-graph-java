@@ -31,9 +31,14 @@ class NullabilityStorageTest {
 			MemorySegment validityBitmap = buildArena.allocate(768L);
 			validityBitmap.set(ValueLayout.JAVA_LONG_UNALIGNED, 0, 0xFFFFFFFFFFFFFFFFL);
 
-			RelationSnapshot busRel = new RelationSnapshot(buildArena, 1354, 5000, MemorySegment.NULL,
-					MemorySegment.NULL, MemorySegment.NULL, MemorySegment.NULL, List.of(voltageData),
-					List.of(validityBitmap), (byte) 4, (byte) 4);
+			MemorySegment rowOffsets = buildArena.allocate(1355L * Integer.BYTES);
+			for (int i = 1; i <= 1354; i++) {
+				rowOffsets.setAtIndex(ValueLayout.JAVA_INT_UNALIGNED, i, 5000);
+			}
+			MemorySegment colIndices = buildArena.allocate(5000L * Integer.BYTES);
+			RelationSnapshot busRel = new RelationSnapshot(buildArena, 1354, 5000, rowOffsets, colIndices,
+					MemorySegment.NULL, MemorySegment.NULL, List.of(voltageData), List.of(validityBitmap), (byte) 4,
+					(byte) 4);
 			busRel.setAttributeNames(List.of("voltage"));
 			busRel.setAttributeTypeCodes(List.of((byte) 0x86));
 

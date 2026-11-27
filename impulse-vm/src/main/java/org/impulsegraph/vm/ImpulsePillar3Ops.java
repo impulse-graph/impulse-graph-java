@@ -1610,7 +1610,9 @@ public final class ImpulsePillar3Ops {
 		MemorySegment roSeg = fast32 ? rel.csrRowOffsetsSeg : null;
 		MemorySegment ctSeg = fast32 ? rel.csrColTargetsSeg : null;
 		int edgePos = (srcLen > 0)
-				? (fast32 ? roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) srcIds[0] << 2) : rel.csrRowOffset(srcIds[0]))
+				? (fast32
+						? roSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) srcIds[0] << 2)
+						: rel.csrRowOffset(srcIds[0]))
 				: 0;
 
 		while (ws.status == IMPULSE_VM_OK) {

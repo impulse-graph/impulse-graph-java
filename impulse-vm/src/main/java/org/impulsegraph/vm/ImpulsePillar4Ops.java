@@ -397,7 +397,8 @@ public final class ImpulsePillar4Ops {
 				if (base == 6) {
 					for (int i = 0; i < n; i++) {
 						long bIdx = i >>> 3;
-						if (bIdx < vSize && (validSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE, bIdx) & (1 << (i & 7))) != 0) {
+						if (bIdx < vSize && (validSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE, bIdx)
+								& (1 << (i & 7))) != 0) {
 							float f = dataSeg.get(java.lang.foreign.ValueLayout.JAVA_FLOAT_UNALIGNED, (long) i << 2);
 							if (!Float.isNaN(f)) {
 								out[i] = f;
@@ -408,7 +409,8 @@ public final class ImpulsePillar4Ops {
 				} else {
 					for (int i = 0; i < n; i++) {
 						long bIdx = i >>> 3;
-						if (bIdx < vSize && (validSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE, bIdx) & (1 << (i & 7))) != 0) {
+						if (bIdx < vSize && (validSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE, bIdx)
+								& (1 << (i & 7))) != 0) {
 							double d = dataSeg.get(java.lang.foreign.ValueLayout.JAVA_DOUBLE_UNALIGNED, (long) i << 3);
 							if (!Double.isNaN(d)) {
 								out[i] = d;
@@ -449,7 +451,8 @@ public final class ImpulsePillar4Ops {
 				long vSize = validSeg.byteSize();
 				for (int i = 0; i < n; i++) {
 					long bIdx = i >>> 3;
-					if (bIdx < vSize && (validSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE, bIdx) & (1 << (i & 7))) != 0) {
+					if (bIdx < vSize
+							&& (validSeg.get(java.lang.foreign.ValueLayout.JAVA_BYTE, bIdx) & (1 << (i & 7))) != 0) {
 						out[i] = off.readI64(i);
 						valid[i >>> 6] |= (1L << (i & 63));
 					}
