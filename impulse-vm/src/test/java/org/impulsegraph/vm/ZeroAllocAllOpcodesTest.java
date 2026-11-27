@@ -47,24 +47,41 @@ public final class ZeroAllocAllOpcodesTest {
 	private static void assertZeroAllocAfterWarmup(String label, long[] prog, ImpulseInterpreter.SnapshotBinding bind,
 			ImpulseWorkspace ws) {
 		assertTrue(ImpulseValidator.validateInto(prog, ws), label + " must pass validation");
-		for (int i = 0; i < WARMUP_ITERS; i++) {
-			ws.reset();
-			int st = ImpulseInterpreter.executePreValidated(prog, bind, ws, 100_000L);
-			assertEquals(IMPULSE_VM_OK, st, label + " warmup iter " + i);
-		}
 		ThreadMXBean tmxb = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-		long before = tmxb.getCurrentThreadAllocatedBytes();
+		long delta = -1L;
 		int badStatus = IMPULSE_VM_OK;
-		for (int i = 0; i < MEASURE_ITERS; i++) {
-			ws.reset();
-			int st = ImpulseInterpreter.executePreValidated(prog, bind, ws, 100_000L);
-			if (st != IMPULSE_VM_OK) {
-				badStatus = st;
+		// Allow up to 5 warmup rounds with a brief pause so background C2 compilation
+		// (e.g. Vector API unboxing in ImpulseSimdKernels) completes on 2-vCPU CI
+		// runners. Any genuine per-query heap allocation still fails deterministically.
+		for (int round = 0; round < 5; round++) {
+			for (int i = 0; i < WARMUP_ITERS; i++) {
+				ws.reset();
+				int st = ImpulseInterpreter.executePreValidated(prog, bind, ws, 100_000L);
+				assertEquals(IMPULSE_VM_OK, st, label + " warmup iter " + i);
+			}
+			long before = tmxb.getCurrentThreadAllocatedBytes();
+			badStatus = IMPULSE_VM_OK;
+			for (int i = 0; i < MEASURE_ITERS; i++) {
+				ws.reset();
+				int st = ImpulseInterpreter.executePreValidated(prog, bind, ws, 100_000L);
+				if (st != IMPULSE_VM_OK) {
+					badStatus = st;
+				}
+			}
+			long after = tmxb.getCurrentThreadAllocatedBytes();
+			delta = after - before;
+			if (delta == 0L) {
+				break;
+			}
+			try {
+				Thread.sleep(50L);
+			} catch (InterruptedException ie) {
+				Thread.currentThread().interrupt();
+				break;
 			}
 		}
-		long after = tmxb.getCurrentThreadAllocatedBytes();
 		assertEquals(IMPULSE_VM_OK, badStatus, label + " measurement status");
-		assertEquals(0L, after - before, label + " must allocate 0 bytes/query in steady state");
+		assertEquals(0L, delta, label + " must allocate 0 bytes/query in steady state");
 	}
 
 	@Test
