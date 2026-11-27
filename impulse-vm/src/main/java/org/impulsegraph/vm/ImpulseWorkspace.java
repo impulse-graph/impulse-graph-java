@@ -222,11 +222,9 @@ public final class ImpulseWorkspace {
 			this.opMinNs = null;
 			this.opMaxNs = null;
 		}
-		for (int i = 0; i < 8; i++) {
-			fRegs[i] = new ImpulseFrontier(this.maxDomainCard);
-		}
-		for (int i = 8; i < 16; i++) {
-			fRegs[i] = new ImpulseFrontier(MORSEL_MAX);
+		int fullFrontierCap = Math.max(this.maxDomainCard, MORSEL_MAX);
+		for (int i = 0; i < 16; i++) {
+			fRegs[i] = new ImpulseFrontier(fullFrontierCap);
 		}
 	}
 
