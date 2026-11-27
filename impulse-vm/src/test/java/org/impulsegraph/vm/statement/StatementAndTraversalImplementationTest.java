@@ -66,16 +66,22 @@ public class StatementAndTraversalImplementationTest {
 					}
 				}
 			}
-			java.lang.foreign.MemorySegment roSeg = arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_INT, offsets);
-			java.lang.foreign.MemorySegment ctSeg = arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_INT, targets);
-			java.lang.foreign.MemorySegment cscRoSeg = arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_INT,
-					cscOff);
-			java.lang.foreign.MemorySegment cscCtSeg = arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_INT,
-					cscSrc);
+			java.lang.foreign.MemorySegment roSeg = allocInts(arena, offsets);
+			java.lang.foreign.MemorySegment ctSeg = allocInts(arena, targets);
+			java.lang.foreign.MemorySegment cscRoSeg = allocInts(arena, cscOff);
+			java.lang.foreign.MemorySegment cscCtSeg = allocInts(arena, cscSrc);
 			RelationSnapshot rel = new RelationSnapshot(arena, nodeCount, edgeCount, roSeg, ctSeg, cscRoSeg, cscCtSeg);
 			relMap.put(entry.getKey(), rel);
 		}
 		return new GraphSnapshot(arena, relMap, metadata != null ? metadata : Map.of());
+	}
+
+	private static java.lang.foreign.MemorySegment allocInts(Arena arena, int[] arr) {
+		java.lang.foreign.MemorySegment seg = arena.allocate(Math.max(4L, (long) arr.length * Integer.BYTES));
+		for (int i = 0; i < arr.length; i++) {
+			seg.setAtIndex(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, i, arr[i]);
+		}
+		return seg;
 	}
 
 	// =========================================================================
