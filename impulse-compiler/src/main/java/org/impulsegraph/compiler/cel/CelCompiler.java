@@ -17,12 +17,11 @@ public final class CelCompiler {
 	private static final Logger LOG = Logger.getLogger(CelCompiler.class.getName());
 	public static final boolean DEBUG_MODE = Boolean.getBoolean("impulse.compiler.debug");
 
-	private static final Pattern SQL_CAST_DECIMAL = Pattern
-			.compile("(?i)\\bCAST\\s*\\(([^()]+?)\\s+AS\\s+DECIMAL\\s*\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*\\)\\s*\\)");
-	private static final Pattern SQL_CAST_FLOAT = Pattern
-			.compile("(?i)\\bCAST\\s*\\(([^()]+?)\\s+AS\\s+(?:FLOAT64|DOUBLE|F64|FLOAT32|F32)\\s*\\)");
-	private static final Pattern SQL_CAST_INT = Pattern
-			.compile("(?i)\\bCAST\\s*\\(([^()]+?)\\s+AS\\s+(?:INT64|BIGINT|I64|INT32|INT|I32)\\s*\\)");
+	private static final Pattern CAST_AS_DECIMAL_TAIL = Pattern
+			.compile("(?is)^AS\\s+DECIMAL\\s*\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*\\)$");
+	private static final Pattern CAST_AS_FLOAT_TAIL = Pattern
+			.compile("(?is)^AS\\s+(?:FLOAT64|DOUBLE|F64|FLOAT32|F32)$");
+	private static final Pattern CAST_AS_INT_TAIL = Pattern.compile("(?is)^AS\\s+(?:INT64|BIGINT|I64|INT32|INT|I32)$");
 
 	private CelCompiler() {
 	}
@@ -30,34 +29,144 @@ public final class CelCompiler {
 	/**
 	 * Normalizes SQL/Cypher-style {@code CAST(expr AS DECIMAL(P, S))},
 	 * {@code CAST(expr AS FLOAT64)}, and {@code CAST(expr AS INT64)} forms into
-	 * canonical CEL function calls prior to parsing.
+	 * canonical CEL function calls using a balanced-parenthesis and
+	 * string-literal-aware scanner (handles nested parentheses such as
+	 * {@code CAST((a + b) AS DECIMAL(10, 2))} and never mutates quoted string
+	 * literals).
 	 */
 	public static String normalizeSqlCast(String source) {
 		if (source == null || source.isBlank()) {
 			return source;
 		}
-		String cur = source;
-		boolean changed = true;
-		while (changed) {
-			changed = false;
-			Matcher mDec = SQL_CAST_DECIMAL.matcher(cur);
-			if (mDec.find()) {
-				cur = mDec.replaceAll(mr -> Matcher.quoteReplacement(
-						"cast_decimal(" + mr.group(1).trim() + ", " + mr.group(2) + ", " + mr.group(3) + ")"));
-				changed = true;
+		StringBuilder out = new StringBuilder(source.length());
+		int n = source.length();
+		int i = 0;
+		while (i < n) {
+			char c = source.charAt(i);
+			// Skip quoted strings verbatim
+			if (c == '"' || c == '\'') {
+				char quote = c;
+				out.append(c);
+				i++;
+				while (i < n) {
+					char sc = source.charAt(i);
+					out.append(sc);
+					i++;
+					if (sc == '\\' && i < n) {
+						out.append(source.charAt(i));
+						i++;
+					} else if (sc == quote) {
+						break;
+					}
+				}
+				continue;
 			}
-			Matcher mFlt = SQL_CAST_FLOAT.matcher(cur);
-			if (mFlt.find()) {
-				cur = mFlt.replaceAll(mr -> Matcher.quoteReplacement("cast_f64(" + mr.group(1).trim() + ")"));
-				changed = true;
+			// Match word-bounded CAST(...)
+			if ((c == 'c' || c == 'C') && i + 4 <= n && source.regionMatches(true, i, "CAST", 0, 4)
+					&& (i == 0 || !isIdentPart(source.charAt(i - 1)))) {
+				int j = i + 4;
+				while (j < n && Character.isWhitespace(source.charAt(j))) {
+					j++;
+				}
+				if (j < n && source.charAt(j) == '(') {
+					int closeIdx = findMatchingParen(source, j);
+					if (closeIdx > j) {
+						String inner = source.substring(j + 1, closeIdx);
+						int asPos = findTopLevelAsKeyword(inner);
+						if (asPos >= 0) {
+							String exprPart = normalizeSqlCast(inner.substring(0, asPos).trim());
+							String tail = inner.substring(asPos).trim();
+							Matcher mDec = CAST_AS_DECIMAL_TAIL.matcher(tail);
+							if (mDec.matches()) {
+								out.append("cast_decimal(").append(exprPart).append(", ").append(mDec.group(1))
+										.append(", ").append(mDec.group(2)).append(')');
+								i = closeIdx + 1;
+								continue;
+							}
+							if (CAST_AS_FLOAT_TAIL.matcher(tail).matches()) {
+								out.append("cast_f64(").append(exprPart).append(')');
+								i = closeIdx + 1;
+								continue;
+							}
+							if (CAST_AS_INT_TAIL.matcher(tail).matches()) {
+								out.append("cast_i64(").append(exprPart).append(')');
+								i = closeIdx + 1;
+								continue;
+							}
+						}
+					}
+				}
 			}
-			Matcher mInt = SQL_CAST_INT.matcher(cur);
-			if (mInt.find()) {
-				cur = mInt.replaceAll(mr -> Matcher.quoteReplacement("cast_i64(" + mr.group(1).trim() + ")"));
-				changed = true;
+			out.append(c);
+			i++;
+		}
+		return out.toString();
+	}
+
+	private static boolean isIdentPart(char c) {
+		return Character.isLetterOrDigit(c) || c == '_';
+	}
+
+	private static int findMatchingParen(String s, int openIdx) {
+		int depth = 0;
+		int n = s.length();
+		for (int i = openIdx; i < n; i++) {
+			char c = s.charAt(i);
+			if (c == '"' || c == '\'') {
+				char q = c;
+				i++;
+				while (i < n) {
+					char sc = s.charAt(i);
+					if (sc == '\\' && i + 1 < n) {
+						i += 2;
+						continue;
+					}
+					if (sc == q) {
+						break;
+					}
+					i++;
+				}
+			} else if (c == '(') {
+				depth++;
+			} else if (c == ')') {
+				depth--;
+				if (depth == 0) {
+					return i;
+				}
 			}
 		}
-		return cur;
+		return -1;
+	}
+
+	private static int findTopLevelAsKeyword(String s) {
+		int depth = 0;
+		int n = s.length();
+		for (int i = 0; i < n; i++) {
+			char c = s.charAt(i);
+			if (c == '"' || c == '\'') {
+				char q = c;
+				i++;
+				while (i < n) {
+					char sc = s.charAt(i);
+					if (sc == '\\' && i + 1 < n) {
+						i += 2;
+						continue;
+					}
+					if (sc == q) {
+						break;
+					}
+					i++;
+				}
+			} else if (c == '(') {
+				depth++;
+			} else if (c == ')') {
+				depth--;
+			} else if (depth == 0 && (c == 'a' || c == 'A') && i + 2 <= n && s.regionMatches(true, i, "AS", 0, 2)
+					&& (i == 0 || !isIdentPart(s.charAt(i - 1))) && (i + 2 == n || !isIdentPart(s.charAt(i + 2)))) {
+				return i;
+			}
+		}
+		return -1;
 	}
 
 	/**
@@ -174,8 +283,14 @@ public final class CelCompiler {
 							throw new IllegalArgumentException(
 									"PARSE_ERROR: decimal(x, P, S) requires integer P and S");
 						}
-						int p = (int) pNode.intVal();
-						int s = (int) sNode.intVal();
+						long pRaw = pNode.intVal();
+						long sRaw = sNode.intVal();
+						if (pRaw < 1L || pRaw > 18L || sRaw < 0L || sRaw > pRaw) {
+							throw new IllegalArgumentException(
+									"PARSE_ERROR: invalid DECIMAL(" + pRaw + ", " + sRaw + ")");
+						}
+						int p = (int) pRaw;
+						int s = (int) sRaw;
 						if (arg0.kind() == CelAstNode.Kind.LITERAL_STRING) {
 							Decimal64.parseUnscaledExact(arg0.strVal(), p, s);
 							yield "(dec \"" + arg0.strVal() + "\" " + p + " " + s + ")";
@@ -183,6 +298,8 @@ public final class CelCompiler {
 						Decimal64.validatePrecisionScale(p, s);
 						yield "(cast " + toImpScheme(arg0, streamMode) + " (decimal " + p + " " + s + "))";
 					}
+					throw new IllegalArgumentException(
+							"PARSE_ERROR: decimal() expects 1 or 3 arguments, got " + node.children().size());
 				}
 				if (("cast_decimal".equalsIgnoreCase(rawFn) || "to_decimal".equalsIgnoreCase(rawFn))
 						&& node.children().size() == 3) {
@@ -192,8 +309,13 @@ public final class CelCompiler {
 						throw new IllegalArgumentException(
 								"PARSE_ERROR: cast_decimal(expr, P, S) requires integer P and S");
 					}
-					int p = (int) pNode.intVal();
-					int s = (int) sNode.intVal();
+					long pRaw = pNode.intVal();
+					long sRaw = sNode.intVal();
+					if (pRaw < 1L || pRaw > 18L || sRaw < 0L || sRaw > pRaw) {
+						throw new IllegalArgumentException("PARSE_ERROR: invalid DECIMAL(" + pRaw + ", " + sRaw + ")");
+					}
+					int p = (int) pRaw;
+					int s = (int) sRaw;
 					Decimal64.validatePrecisionScale(p, s);
 					yield "(cast " + toImpScheme(node.children().get(0), streamMode) + " (decimal " + p + " " + s
 							+ "))";
