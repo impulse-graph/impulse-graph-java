@@ -207,4 +207,53 @@ class ImpKDecimalTest {
 							.toBigDecimal()));
 		}
 	}
+
+	@Test
+	void auditRegressionsScalarBindingsTypeAnnotationsAndUnterminatedStrings(@TempDir Path tempDir) throws Exception {
+		// [LOW #13] Unterminated string literal must throw
+		assertThrows(IllegalArgumentException.class, () -> ImpKCompiler.tokenize("s = \"unterminated"));
+
+		try (Arena arena = Arena.ofConfined()) {
+			GraphSnapshot snap = buildAccountSnapshot(tempDir, arena);
+			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
+			ImpulseInterpreter.SnapshotBinding bind = new ImpulseInterpreter.SnapshotBinding(new int[]{4}, view);
+
+			// [HIGH #5] Untyped scalar int/hex assignments (k = 4; h = 0x10d;) preserved as
+			// let bindings
+			String scalarBindScript = """
+					k = 4;
+					bal = load("Account", "balance");
+					q = bal / k;
+					""";
+			var crScalarBind = ImpKCompiler.compileToV11(scalarBindScript, snap);
+			ImpulseWorkspace wsSb = executeBothAndVerifyParity(crScalarBind, bind);
+			OutputColumnMeta sbMeta = crScalarBind.outputSchema().get(0);
+			BigDecimal expSb0 = new BigDecimal("100.00").divide(new BigDecimal("4"), sbMeta.scale(),
+					RoundingMode.HALF_UP);
+			assertEquals(0, expSb0.compareTo(
+					new Decimal64(wsSb.outputs.get(0).i64Data[0], sbMeta.precision(), sbMeta.scale()).toBigDecimal()));
+
+			// [MEDIUM #10] Explicit type annotation on load(...) or nested cast(...)
+			// applies cast when type differs
+			String castLoadScript = """
+					bal_s4 : DECIMAL(14, 4) = load("Account", "balance");
+					total = sum(bal_s4);
+					""";
+			var crCastLoad = ImpKCompiler.compileToV11(castLoadScript, snap);
+			assertEquals(OutputColumnMeta.decimal("total", 18, 4), crCastLoad.outputSchema().get(0));
+			ImpulseWorkspace wsCl = executeBothAndVerifyParity(crCastLoad, bind);
+			BigDecimal expSum = new BigDecimal("100.00").add(new BigDecimal("250.50")).add(new BigDecimal("75.25"))
+					.add(new BigDecimal("10.00"));
+			assertEquals(0, expSum.compareTo(new Decimal64(wsCl.outputs.get(0).i64Data[0], 18, 4).toBigDecimal()));
+
+			// Nested cast annotation: x : DECIMAL(18, 2) = cast(bal, decimal(18, 4)) ->
+			// must cast to (decimal 18 2)!
+			String nestedCastScript = """
+					bal = load("Account", "balance");
+					x : DECIMAL(18, 2) = cast(bal, decimal(18, 4));
+					""";
+			var crNested = ImpKCompiler.compileToV11(nestedCastScript, snap);
+			assertEquals(OutputColumnMeta.decimal("x", 18, 2), crNested.outputSchema().get(0));
+		}
+	}
 }
