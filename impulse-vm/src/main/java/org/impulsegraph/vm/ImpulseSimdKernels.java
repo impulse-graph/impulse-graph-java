@@ -415,39 +415,49 @@ final class ImpulseSimdKernels {
 
 	/**
 	 * Unmasked f64 comparison (subop: 0=eq, 1=neq, 2=lt, 3=le, 4=gt, 5=ge), vector
-	 * or scalar RHS.
+	 * or scalar RHS. Uses compile-time constant {@link VectorOperators.Comparison}
+	 * and non-null {@link DoubleVector} locals so HotSpot C2 (JDK 21 & 25) keeps
+	 * all vector/mask values unboxed (0 bytes/query).
 	 */
 	static void f64CmpWords(int subop, double[] a, double[] b, boolean scalar, double bSc, boolean bScOk, long[] aValid,
 			long[] bValid, long[] outValid, long[] outData, int n) {
 		int vwords = (n + 63) >>> 6;
-		if (scalar && (!bScOk || Double.isNaN(bSc))) {
+		if ((scalar && (!bScOk || Double.isNaN(bSc))) || subop < 0 || subop > 5) {
 			for (int w = 0; w < vwords; w++) {
 				outValid[w] = 0L;
 				outData[w] = 0L;
 			}
 			return;
 		}
-		VectorOperators.Comparison cmpOp = switch (subop) {
-			case 0 -> VectorOperators.EQ;
-			case 1 -> VectorOperators.NE;
-			case 2 -> VectorOperators.LT;
-			case 3 -> VectorOperators.LE;
-			case 4 -> VectorOperators.GT;
-			case 5 -> VectorOperators.GE;
-			default -> null;
+		if (scalar) {
+			f64CmpScalarWords(subop, a, bSc, aValid, outValid, outData, n, vwords);
+		} else {
+			f64CmpVecWords(subop, a, b, aValid, bValid, outValid, outData, n, vwords);
+		}
+	}
+
+	private static VectorMask<Double> cmpConst(int subop, DoubleVector va, DoubleVector vy) {
+		return switch (subop) {
+			case 0 -> va.compare(VectorOperators.EQ, vy);
+			case 1 -> va.compare(VectorOperators.NE, vy);
+			case 2 -> va.compare(VectorOperators.LT, vy);
+			case 3 -> va.compare(VectorOperators.LE, vy);
+			case 4 -> va.compare(VectorOperators.GT, vy);
+			default -> va.compare(VectorOperators.GE, vy);
 		};
-		DoubleVector vbs = scalar ? DoubleVector.broadcast(F64, bSc) : null;
+	}
+
+	private static void f64CmpScalarWords(int subop, double[] a, double bSc, long[] aValid, long[] outValid,
+			long[] outData, int n, int vwords) {
+		DoubleVector vbs = DoubleVector.broadcast(F64, bSc);
 		for (int w = 0; w < vwords; w++) {
 			long inM = (aValid != null) ? aValid[w] : -1L;
-			if (!scalar) {
-				inM &= (bValid != null) ? bValid[w] : -1L;
-			}
 			int base = w << 6;
 			int cnt = Math.min(64, n - base);
 			if (cnt < 64) {
 				inM &= (1L << cnt) - 1L;
 			}
-			if (inM == 0L || cmpOp == null) {
+			if (inM == 0L) {
 				outValid[w] = 0L;
 				outData[w] = 0L;
 				continue;
@@ -458,15 +468,63 @@ final class ImpulseSimdKernels {
 			int vEnd = cnt & ~(LANES - 1);
 			for (; j < vEnd; j += LANES) {
 				DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
-				DoubleVector vy = scalar ? vbs : DoubleVector.fromArray(F64, b, base + j);
-				VectorMask<Double> ok = scalar ? va.eq(va) : va.eq(va).and(vy.eq(vy));
-				VectorMask<Double> res = va.compare(cmpOp, vy).and(ok);
+				VectorMask<Double> ok = va.eq(va);
+				VectorMask<Double> res = cmpConst(subop, va, vbs).and(ok);
 				vm |= (ok.toLong() << j);
 				dm |= (res.toLong() << j);
 			}
 			for (; j < cnt; j++) {
 				double x = a[base + j];
-				double y = scalar ? bSc : b[base + j];
+				if (x == x) {
+					vm |= (1L << j);
+					boolean r = switch (subop) {
+						case 0 -> x == bSc;
+						case 1 -> x != bSc;
+						case 2 -> x < bSc;
+						case 3 -> x <= bSc;
+						case 4 -> x > bSc;
+						case 5 -> x >= bSc;
+						default -> false;
+					};
+					if (r)
+						dm |= (1L << j);
+				}
+			}
+			outValid[w] = inM & vm;
+			outData[w] = inM & dm;
+		}
+	}
+
+	private static void f64CmpVecWords(int subop, double[] a, double[] b, long[] aValid, long[] bValid, long[] outValid,
+			long[] outData, int n, int vwords) {
+		for (int w = 0; w < vwords; w++) {
+			long inM = (aValid != null) ? aValid[w] : -1L;
+			inM &= (bValid != null) ? bValid[w] : -1L;
+			int base = w << 6;
+			int cnt = Math.min(64, n - base);
+			if (cnt < 64) {
+				inM &= (1L << cnt) - 1L;
+			}
+			if (inM == 0L) {
+				outValid[w] = 0L;
+				outData[w] = 0L;
+				continue;
+			}
+			long vm = 0L;
+			long dm = 0L;
+			int j = 0;
+			int vEnd = cnt & ~(LANES - 1);
+			for (; j < vEnd; j += LANES) {
+				DoubleVector va = DoubleVector.fromArray(F64, a, base + j);
+				DoubleVector vy = DoubleVector.fromArray(F64, b, base + j);
+				VectorMask<Double> ok = va.eq(va).and(vy.eq(vy));
+				VectorMask<Double> res = cmpConst(subop, va, vy).and(ok);
+				vm |= (ok.toLong() << j);
+				dm |= (res.toLong() << j);
+			}
+			for (; j < cnt; j++) {
+				double x = a[base + j];
+				double y = b[base + j];
 				if (x == x && y == y) {
 					vm |= (1L << j);
 					boolean r = switch (subop) {
