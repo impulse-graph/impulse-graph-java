@@ -138,6 +138,7 @@ public final class DefaultSnapshotBuilder {
 	public static final byte INDEX_TYPE_ZONE_MAP = 0x02;
 	public static final int DEFAULT_ZONE_MAP_PAGE_SIZE = 1024;
 	public static final long ZONE_MAP_FEAT_EXACT_I64 = 1L;
+	public static final long PERM_FEAT_NULLS_LAST = 1L;
 
 	public record SecondaryIndexEntry(int domainId, int relationId, int attributeIndex, byte indexType, String name,
 			byte[] payload, long featureMask) {
@@ -271,7 +272,7 @@ public final class DefaultSnapshotBuilder {
 		int n = Math.toIntExact(dom.nodeCount());
 		byte[] payload = buildPermutationPayload(attr.typeCode(), n, attr.data(), attr.validity());
 		return withDomainSecondaryIndex(domainId, attrIdx, INDEX_TYPE_PERMUTATION,
-				"idx_perm_" + dom.name() + "_" + attrName, payload, 0L);
+				"idx_perm_" + dom.name() + "_" + attrName, payload, PERM_FEAT_NULLS_LAST);
 	}
 
 	private static boolean isBitValid(byte[] validity, boolean nullable, int idx) {
@@ -298,6 +299,12 @@ public final class DefaultSnapshotBuilder {
 		out.putInt(pageCount);
 		out.put(typeCode);
 		out.put(new byte[7]);
+		if (n == 0) {
+			return out.array();
+		}
+		if (data == null) {
+			throw new IllegalArgumentException("Attribute data cannot be null for non-empty domain (n=" + n + ")");
+		}
 
 		ByteBuffer src = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
 		boolean exactI64 = (baseType == 0x03 || baseType == 0x04 || baseType == 0x15);
@@ -348,6 +355,16 @@ public final class DefaultSnapshotBuilder {
 		if (baseType != 0x03 && baseType != 0x04 && baseType != 0x06 && baseType != 0x07 && baseType != 0x15) {
 			throw new IllegalArgumentException(
 					"Permutation unsupported for attribute base type 0x" + Integer.toHexString(baseType));
+		}
+		if (n == 0) {
+			ByteBuffer out = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
+			out.putLong(0L);
+			out.put(typeCode);
+			out.put(new byte[7]);
+			return out.array();
+		}
+		if (data == null) {
+			throw new IllegalArgumentException("Attribute data cannot be null for non-empty domain (n=" + n + ")");
 		}
 		Integer[] perm = new Integer[n];
 		for (int i = 0; i < n; i++) {

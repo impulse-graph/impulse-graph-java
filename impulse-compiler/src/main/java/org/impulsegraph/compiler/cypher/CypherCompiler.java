@@ -154,7 +154,7 @@ public final class CypherCompiler {
 		if (seedIdExpr != null) {
 			letBindings.add("[f0 (seed \"" + startDom + "\" " + seedIdExpr + ")]");
 			filtered = true;
-		} else if (!startPreds.isEmpty() && canUseIndexScan(startPreds.get(0), startDom, snapshot)) {
+		} else if (!startPreds.isEmpty() && canUseIndexScan(startPreds.get(0), startVar, startDom, snapshot)) {
 			CypherParser.WherePredicate first = startPreds.get(0);
 			String normOp = "==".equals(first.op()) ? "=" : first.op();
 			String loweredRhs = V11ExprLowerer.lowerExpr(formatWhereRhs(first), id -> id,
@@ -426,14 +426,20 @@ public final class CypherCompiler {
 	private static final java.util.regex.Pattern PARAM_IDENT_PATTERN = java.util.regex.Pattern
 			.compile("\\$[A-Za-z_][A-Za-z0-9_]*");
 
-	private static boolean canUseIndexScan(CypherParser.WherePredicate pred, String startDom,
+	private static boolean canUseIndexScan(CypherParser.WherePredicate pred, String startVar, String startDom,
 			ImpulseGraphSnapshot snapshot) {
 		if (pred == null || pred.lhsExpr() != null || pred.field() == null || pred.field().isEmpty()) {
+			return false;
+		}
+		if (startVar == null || !startVar.equals(pred.targetVar())) {
 			return false;
 		}
 		String op = pred.op();
 		if (!"=".equals(op) && !"==".equals(op) && !"<".equals(op) && !"<=".equals(op) && !">".equals(op)
 				&& !">=".equals(op)) {
+			return false;
+		}
+		if (!isConstantScalarLiteral(pred.valueOrParam())) {
 			return false;
 		}
 		if (!(snapshot instanceof GraphSnapshot gs)) {
@@ -445,6 +451,57 @@ public final class CypherCompiler {
 		}
 		int attrIdx = ld.getAttributeIndex(pred.field());
 		return attrIdx >= 0 && gs.hasSecondaryIndex(ld.domainId(), attrIdx);
+	}
+
+	private static boolean isConstantScalarLiteral(String raw) {
+		if (raw == null) {
+			return false;
+		}
+		String s = raw.trim();
+		if (s.isEmpty()) {
+			return false;
+		}
+		if (s.startsWith("$")) {
+			return true;
+		}
+		if ("true".equalsIgnoreCase(s) || "false".equalsIgnoreCase(s)) {
+			return true;
+		}
+		if ((s.startsWith("'") && s.endsWith("'") && s.length() >= 2)
+				|| (s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2)) {
+			return true;
+		}
+		if (s.startsWith("decimal(") && s.endsWith(")")) {
+			return true;
+		}
+		// Numeric literal (int, float, or decimal with trailing d/D)
+		int i = 0;
+		if (s.charAt(0) == '+' || s.charAt(0) == '-') {
+			i = 1;
+			if (i >= s.length()) {
+				return false;
+			}
+		}
+		int end = s.length();
+		if (s.charAt(end - 1) == 'd' || s.charAt(end - 1) == 'D') {
+			end--;
+			if (i >= end) {
+				return false;
+			}
+		}
+		boolean seenDigit = false;
+		boolean seenDot = false;
+		for (; i < end; i++) {
+			char c = s.charAt(i);
+			if (c >= '0' && c <= '9') {
+				seenDigit = true;
+			} else if (c == '.' && !seenDot) {
+				seenDot = true;
+			} else {
+				return false;
+			}
+		}
+		return seenDigit;
 	}
 
 	private static String formatWhereRhs(CypherParser.WherePredicate pred) {

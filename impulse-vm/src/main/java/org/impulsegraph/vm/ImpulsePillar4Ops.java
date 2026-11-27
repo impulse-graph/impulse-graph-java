@@ -2377,9 +2377,10 @@ public final class ImpulsePillar4Ops {
 			}
 
 			// Path 1: Physical Permutation Index (0x01) — O(log N + K) exact i64 binary
-			// search
+			// search. For nullable columns (0x80), require PERM_FEAT_NULLS_LAST so
+			// binary search never assumes NULL ordering on legacy/foreign indexes.
 			ImpulseSnapshotView.OffHeapSecondaryIndex perm = view.getPermutationIndex(domId, attrId);
-			if (perm != null) {
+			if (perm != null && (!off.nullable() || perm.permIsNullsLast())) {
 				int pCount = Math.min(perm.permCount(), n);
 				int startPos;
 				int endPos;
@@ -2469,8 +2470,12 @@ public final class ImpulsePillar4Ops {
 					if (!eligible) {
 						continue;
 					}
-					int start = p * pageSize;
-					int end = Math.min(start + pageSize, n);
+					long startL = (long) p * (long) pageSize;
+					if (startL >= n) {
+						break;
+					}
+					int start = (int) startL;
+					int end = (int) Math.min(startL + pageSize, n);
 					for (int u = start; u < end; u++) {
 						if (!off.isValidAt(u)) {
 							continue;

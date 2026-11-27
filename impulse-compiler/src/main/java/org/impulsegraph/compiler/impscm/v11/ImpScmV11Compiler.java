@@ -524,10 +524,10 @@ public final class ImpScmV11Compiler {
 			}
 			int base = ai.typeCode & 0x7F;
 			return switch (base) {
-				case 0x05, 0x06 -> ValBank.VEC_F64; // F32, F64
+				case 0x05, 0x06, 0x07 -> ValBank.VEC_F64; // F16, F32, F64
 				case 0x09 -> ValBank.VEC_BOOL; // BOOL
-				case 0x0A -> ValBank.VEC_STR; // STRING
-				case 0x07, 0x08 -> ValBank.VEC_U64; // U32, U64
+				case 0x0A, 0x0B -> ValBank.VEC_STR; // STRING / VAR_STRING
+				case 0x08, 0x11, 0x12, 0x13, 0x14 -> ValBank.VEC_U64; // UINT*
 				default -> ValBank.VEC_I64;
 			};
 		}
@@ -1417,8 +1417,20 @@ public final class ImpScmV11Compiler {
 					pinnedRMask = savedPin;
 				}
 				if (ai.isDecimal() || loVal.bank.isDecimal() || hiVal.bank.isDecimal()) {
-					int colPrec = ai.isDecimal() ? ai.precision : 18;
-					int colScale = ai.isDecimal() ? ai.scale : 0;
+					int colPrec;
+					int colScale;
+					if (ai.isDecimal()) {
+						colPrec = ai.precision;
+						colScale = ai.scale;
+					} else {
+						ValBank colBank = attrTypeToVecBank(ai);
+						if (!colBank.isInt()) {
+							throw new IllegalArgumentException("TYPE_MISMATCH: cannot index-scan non-decimal column '"
+									+ attrName + "' (" + colBank + ") with DECIMAL; use (cast ...)");
+						}
+						colPrec = 18;
+						colScale = 0;
+					}
 					TypedVal decLo = ensureDecimal(loVal, opStr);
 					TypedVal decHi = ensureDecimal(hiVal, opStr);
 					int rLo;
@@ -1431,7 +1443,7 @@ public final class ImpScmV11Compiler {
 							return TypedVal.frontier(dstF, domId);
 						}
 						long loThresh = (fcLo.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_TRUE)
-								? -(Decimal64.POW10[colPrec] - 1L)
+								? (ai.isDecimal() ? -(Decimal64.POW10[colPrec] - 1L) : Long.MIN_VALUE)
 								: fcLo.thresholdUnscaled();
 						if (decLo.reg >= 0 && loThresh == decLo.constVal) {
 							rLo = decLo.reg;
@@ -1466,7 +1478,7 @@ public final class ImpScmV11Compiler {
 							}
 							long hiThresh;
 							if (fcHi.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_TRUE) {
-								hiThresh = Decimal64.POW10[colPrec] - 1L;
+								hiThresh = ai.isDecimal() ? (Decimal64.POW10[colPrec] - 1L) : Long.MAX_VALUE;
 								subop = ImpulseIsaTables.SUBOP_INDEX_SCAN_BETWEEN_CC;
 							} else {
 								hiThresh = fcHi.thresholdUnscaled();
@@ -1492,6 +1504,12 @@ public final class ImpScmV11Compiler {
 					}
 					b.emitU16(ImpulseIsaTables.OP_INDEX_SCAN, subop, 0, dstF, 0, rLo, rHi, domId, ai.attrId);
 					return TypedVal.frontier(dstF, domId);
+				}
+				ValBank colBank = attrTypeToVecBank(ai);
+				if ((colBank.isInt() && (loVal.bank.isFloat() || hiVal.bank.isFloat()))
+						|| (colBank.isFloat() && (loVal.bank.isInt() || hiVal.bank.isInt()))) {
+					throw new IllegalArgumentException(
+							"TYPE_MISMATCH: implicit int/float index-scan comparison forbidden; use (cast ...)");
 				}
 				int subop = isBetweenCC
 						? ImpulseIsaTables.SUBOP_INDEX_SCAN_BETWEEN_CC

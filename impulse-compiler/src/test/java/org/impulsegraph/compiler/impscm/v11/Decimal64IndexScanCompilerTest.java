@@ -215,6 +215,101 @@ class Decimal64IndexScanCompilerTest {
 			ImpScmNode optNotTrue = ZoneMapPruningPass.INSTANCE.transform(new ScmCelExpr("cel", optGeMin), ctx);
 			assertNotEquals(ScmSymbol.of("constant-true"), optNotTrue,
 					"Nullable DECIMAL64 column must never prune to constant-true");
+
+			// 4. HIGH #5: Negated comparison on nullable 0x95 — !(a.optBal == 999.00d) MUST
+			// NOT fold inner == to false (which would turn !(UNKNOWN) into TRUE!)
+			CelAstNode negOptEq = CelParser.parse("!(a.optBal == 999.00d)");
+			ImpScmNode negPruned = ZoneMapPruningPass.INSTANCE.transform(new ScmCelExpr("cel", negOptEq), ctx);
+			assertNotEquals(ScmSymbol.of("constant-true"), negPruned,
+					"Negated nullable DECIMAL64 comparison must not fold to constant-true");
+			assertFalse(ZoneMapPruningPass.INSTANCE.isConstantFalse(negPruned));
+			assertInstanceOf(ScmCelExpr.class, negPruned);
+			CelAstNode innerCel = (CelAstNode) ((ScmCelExpr) negPruned).celAst();
+			assertEquals(CelAstNode.Kind.UNARY_OP, innerCel.kind());
+			assertEquals(CelAstNode.Kind.BINARY_OP, innerCel.children().get(0).kind(),
+					"Inner == under ! on nullable column must remain unpruned");
+		}
+	}
+
+	@Test
+	void auditRegressionsCypherFallbackMultiDomainAmbiguityAndBetweenTypeMismatch(@TempDir Path tempDir)
+			throws Exception {
+		long[] bals = {-2_000L, 1_999L, 2_000L, 25_050L};
+		long[] limits = {1_000L, 2_000L, 1_500L, 30_000L};
+		ByteBuffer floats = ByteBuffer.allocate(4 * 8).order(ByteOrder.LITTLE_ENDIAN);
+		for (double d : new double[]{1.0, 2.0, 3.0, 4.0}) {
+			floats.putDouble(d);
+		}
+		final int N = 4;
+
+		try (Arena arena = Arena.ofConfined()) {
+			GraphSnapshot emptyGraph = new GraphSnapshot(arena, Map.of());
+			BinarySnapshotLoader.LoadedSnapshot emptyLoaded = new BinarySnapshotLoader.DefaultLoadedSnapshot(0x494D5053,
+					(short) 11, emptyGraph, Map.of(), Map.of(), Map.of(), Map.of());
+
+			byte[] bytes = new DefaultSnapshotBuilder().withVersion((short) 11).withDomain(0, "Account", (byte) 0x03, N)
+					.withDomainAttribute(0, "balance", TYPE_DECIMAL64, 1, 10, 2, packLongs(bals), null, null)
+					.withDomainAttribute(0, "cap", TYPE_DECIMAL64, 1, 10, 2, packLongs(limits), null, null)
+					.withDomainAttribute(0, "score", (byte) 0x07, 1, 0, 0, floats.array(), null, null)
+					.withDomainZoneMapIndex(0, "balance", 2).withDomainZoneMapIndex(0, "score", 2)
+					.withDomain(1, "Ledger", (byte) 0x03, N)
+					.withDomainAttribute(1, "balance", TYPE_DECIMAL64, 1, 10, 2, packLongs(limits), null, null)
+					.withDomainZoneMapIndex(1, "balance", 2).build(emptyLoaded);
+			Path p = tempDir.resolve("audit_regressions.imps");
+			Files.write(p, bytes);
+			GraphSnapshot snap = BinarySnapshotLoader.loadSnapshot(p, arena).graph();
+			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
+			ImpulseInterpreter.SnapshotBinding bind = new ImpulseInterpreter.SnapshotBinding(new int[]{N, N}, view);
+
+			// 1. HIGH #3: Cypher with non-scalar RHS (a.balance > a.cap) must fall back
+			// to node-filter, NOT OP_INDEX_SCAN
+			ImpScmV11Compiler.CompileResult crAttrRhs = CypherCompiler
+					.compileToV11("MATCH (a:Account) WHERE a.balance > a.cap RETURN COUNT(a) AS cnt", snap);
+			assertFalse(containsOpcode(crAttrRhs.codeWords(), OP_INDEX_SCAN, SUBOP_INDEX_SCAN_GT),
+					"Attribute-to-attribute WHERE must fall back to node-filter, not OP_INDEX_SCAN");
+			ImpulseWorkspace wsAttrRhs = executeBothAndVerifyParity(crAttrRhs, bind);
+			// u=2: 2000 > 1500 -> count = 1
+			assertEquals(1L, wsAttrRhs.outputs.get(0).i64Data[0]);
+
+			// 2. HIGH #3: Cypher predicate referencing another variable (b.balance >
+			// 100.0d)
+			// must NOT trigger index-scan on startVar 'a'
+			org.impulsegraph.storage.csr.RelationSnapshot rel = new org.impulsegraph.storage.csr.RelationSnapshot(arena,
+					N, 1, arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, 0, 1, 1, 1, 1),
+					arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED, 3),
+					java.lang.foreign.MemorySegment.NULL, java.lang.foreign.MemorySegment.NULL, List.of(), List.of(),
+					(byte) 4, (byte) 4, (byte) 4);
+			GraphSnapshot relGraph = new GraphSnapshot(arena, Map.of("TRANSFER", rel));
+			byte[] bytesWithRel = new DefaultSnapshotBuilder().withVersion((short) 11)
+					.withDomain(0, "Account", (byte) 0x03, N)
+					.withDomainAttribute(0, "balance", TYPE_DECIMAL64, 1, 10, 2, packLongs(bals), null, null)
+					.withDomainZoneMapIndex(0, "balance", 2).build(new BinarySnapshotLoader.DefaultLoadedSnapshot(
+							0x494D5053, (short) 11, relGraph, Map.of(), Map.of(), Map.of(), Map.of()));
+			Path pRel = tempDir.resolve("audit_rel.imps");
+			Files.write(pRel, bytesWithRel);
+			GraphSnapshot snapRel = BinarySnapshotLoader.loadSnapshot(pRel, arena).graph();
+			assertThrows(IllegalArgumentException.class, () -> CypherCompiler.compileToV11(
+					"MATCH (a:Account)-[r:TRANSFER]->(b:Account) WHERE b.balance > 100.00d RETURN COUNT(b) AS cnt",
+					snapRel), "Predicate on target alias 'b' must not silently compile to OP_INDEX_SCAN on 'a'");
+
+			// 3. HIGH #6: Multi-domain shared attribute name ("balance" on both Account and
+			// Ledger) must NOT prune in ZoneMapPruningPass
+			CompilerContext ctx = new CompilerContext(snap, CompilerOptions.builder().build(), null);
+			CelAstNode ambigCel = CelParser.parse("a.balance > 999999.00d");
+			ImpScmNode ambigRes = ZoneMapPruningPass.INSTANCE.transform(new ScmCelExpr("cel", ambigCel), ctx);
+			assertFalse(ZoneMapPruningPass.INSTANCE.isConstantFalse(ambigRes),
+					"Multi-domain ambiguous attribute 'balance' must not be pruned without domain context");
+
+			// 4. HIGH #4: ImpScmV11Compiler rejecting `between` with DECIMAL bounds on
+			// FLOAT64 column
+			String badBetween = """
+					(query
+					  (let ([f0 (index-scan "Account" "score" between (dec "1.0" 2 1) (dec "3.0" 2 1))])
+					    (collect :scalar "cnt" (cardinality f0))))
+					""";
+			IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+					() -> ImpScmV11Compiler.compile(badBetween, snap, true));
+			assertTrue(ex.getMessage().startsWith("TYPE_MISMATCH"), ex.getMessage());
 		}
 	}
 }
