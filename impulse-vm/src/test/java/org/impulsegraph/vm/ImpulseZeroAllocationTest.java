@@ -111,8 +111,9 @@ public final class ImpulseZeroAllocationTest {
 
 		for (int w = 0; w < progs.length; w++) {
 			boolean needSeed = (w == 4);
-			// Warmup workspace arena + C2 Tier-4 Vector API intrinsification
-			for (int i = 0; i < 2500; i++) {
+			// Warmup workspace arena + C2 Tier-4 Vector API intrinsification (10k for
+			// slower CI runners)
+			for (int i = 0; i < 10_000; i++) {
 				ws.reset();
 				if (needSeed)
 					ws.vVectors[0] = seedVec;
