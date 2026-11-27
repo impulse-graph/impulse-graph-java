@@ -69,7 +69,7 @@ class ImpScmV11CompilerTest {
 	}
 
 	private static MemorySegment allocInts(Arena arena, int... vals) {
-		MemorySegment seg = arena.allocate(ValueLayout.JAVA_INT, vals.length);
+		MemorySegment seg = arena.allocate((long) vals.length * Integer.BYTES);
 		for (int i = 0; i < vals.length; i++)
 			seg.setAtIndex(ValueLayout.JAVA_INT, i, vals[i]);
 		return seg;

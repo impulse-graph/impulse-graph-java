@@ -31,12 +31,12 @@ class V11EmitterEndToEndTest {
 	 */
 	private static GraphSnapshot buildChainSnapshot(Arena arena) {
 		// Offsets: [0, 1, 2, 3, 4, 4] (5 nodes, 4 edges)
-		MemorySegment off = arena.allocate(ValueLayout.JAVA_INT, 6);
+		MemorySegment off = arena.allocate(6L * Integer.BYTES);
 		int[] offsets = {0, 1, 2, 3, 4, 4};
 		for (int i = 0; i < offsets.length; i++)
 			off.setAtIndex(ValueLayout.JAVA_INT, i, offsets[i]);
 
-		MemorySegment tgt = arena.allocate(ValueLayout.JAVA_INT, 4);
+		MemorySegment tgt = arena.allocate(4L * Integer.BYTES);
 		int[] targets = {1, 2, 3, 4};
 		for (int i = 0; i < targets.length; i++)
 			tgt.setAtIndex(ValueLayout.JAVA_INT, i, targets[i]);
@@ -103,11 +103,11 @@ class V11EmitterEndToEndTest {
 	void testMultiLaneQuorumEndToEndOnV11() {
 		try (Arena arena = Arena.ofConfined()) {
 			// 4-node graph: 0->2, 1->2, 1->3
-			MemorySegment off = arena.allocate(ValueLayout.JAVA_INT, 5);
+			MemorySegment off = arena.allocate(5L * Integer.BYTES);
 			int[] offsets = {0, 1, 3, 3, 3};
 			for (int i = 0; i < offsets.length; i++)
 				off.setAtIndex(ValueLayout.JAVA_INT, i, offsets[i]);
-			MemorySegment tgt = arena.allocate(ValueLayout.JAVA_INT, 3);
+			MemorySegment tgt = arena.allocate(3L * Integer.BYTES);
 			int[] targets = {2, 2, 3};
 			for (int i = 0; i < targets.length; i++)
 				tgt.setAtIndex(ValueLayout.JAVA_INT, i, targets[i]);
