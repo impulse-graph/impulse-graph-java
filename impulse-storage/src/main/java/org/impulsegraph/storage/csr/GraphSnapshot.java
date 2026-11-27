@@ -2,6 +2,7 @@ package org.impulsegraph.storage.csr;
 
 import java.lang.foreign.Arena;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,6 +27,7 @@ public class GraphSnapshot
 	private final Map<String, String> metadata = new ConcurrentHashMap<>();
 	private final Map<String, BinarySnapshotLoader.LoadedDomain> domainMap;
 	private final Map<Integer, BinarySnapshotLoader.LoadedDomain> domainIdMap;
+	private final List<BinarySnapshotLoader.LoadedIndex> secondaryIndices;
 
 	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots) {
 		this(arena, snapshots, Map.of(), Map.of());
@@ -42,7 +44,16 @@ public class GraphSnapshot
 
 	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots, Map<String, String> metadata,
 			Map<String, RelationSnapshot> aliases, Map<String, BinarySnapshotLoader.LoadedDomain> domains) {
+		this(arena, snapshots, metadata, aliases, domains, List.of());
+	}
+
+	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots, Map<String, String> metadata,
+			Map<String, RelationSnapshot> aliases, Map<String, BinarySnapshotLoader.LoadedDomain> domains,
+			List<BinarySnapshotLoader.LoadedIndex> secondaryIndices) {
 		this.arena = Objects.requireNonNull(arena, "Arena must not be null");
+		this.secondaryIndices = (secondaryIndices != null && !secondaryIndices.isEmpty())
+				? List.copyOf(secondaryIndices)
+				: List.of();
 		this.aliasMap = (aliases != null && !aliases.isEmpty())
 				? Collections.unmodifiableMap(new java.util.LinkedHashMap<>(aliases))
 				: Map.of();
@@ -115,6 +126,19 @@ public class GraphSnapshot
 		if (metadata != null) {
 			this.metadata.putAll(metadata);
 		}
+	}
+
+	public List<BinarySnapshotLoader.LoadedIndex> getSecondaryIndices() {
+		return secondaryIndices;
+	}
+
+	public boolean hasSecondaryIndex(int domainId, int attributeIndex) {
+		for (BinarySnapshotLoader.LoadedIndex idx : secondaryIndices) {
+			if (idx.relationId() == 0xFFFF && idx.domainId() == domainId && idx.attributeIndex() == attributeIndex) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static int parseNonNegativeSlot(String s) {

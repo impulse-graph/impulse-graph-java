@@ -1026,6 +1026,17 @@ public final class ImpScmV11Compiler {
 			};
 		}
 
+		private static int cmpOpToIndexScanSubop(DecimalBoundaryFolder.CmpOp op) {
+			return switch (op) {
+				case EQ -> ImpulseIsaTables.SUBOP_INDEX_SCAN_EQ;
+				case LT -> ImpulseIsaTables.SUBOP_INDEX_SCAN_LT;
+				case LE -> ImpulseIsaTables.SUBOP_INDEX_SCAN_LE;
+				case GT -> ImpulseIsaTables.SUBOP_INDEX_SCAN_GT;
+				case GE -> ImpulseIsaTables.SUBOP_INDEX_SCAN_GE;
+				case NE -> throw new IllegalArgumentException("OP_INDEX_SCAN does not support != operator");
+			};
+		}
+
 		private static int cmpOpToVecCmpSubop(DecimalBoundaryFolder.CmpOp op) {
 			return switch (op) {
 				case EQ -> ImpulseIsaTables.SUBOP_VEC_CMP_EQ;
@@ -1378,6 +1389,185 @@ public final class ImpScmV11Compiler {
 			b.emitU16(ImpulseIsaTables.OP_NODE_FILTER, cmpOpToNodeFilterSubop(cmpOp), ImpulseIsaTables.FLAG_SCALAR_RHS,
 					dstF, srcF.reg, rhsVal.reg, 0, srcF.domId, ai.attrId);
 			return TypedVal.frontier(dstF, srcF.domId);
+		}
+
+		private TypedVal evalIndexScan(SExpr e) {
+			// (index-scan "Domain" "attr" op lo [hi])
+			if (e.elems.size() < 5 || e.elems.size() > 6) {
+				throw new IllegalArgumentException("PARSE_ERROR: (index-scan \"Domain\" \"attr\" op lo [hi]) expected");
+			}
+			int domId = resolveDomain(e.elems.get(1).text);
+			String attrName = e.elems.get(2).text;
+			AttrInfo ai = resolveNodeAttr(domId, attrName);
+			String opStr = e.elems.get(3).text;
+			boolean isBetweenCC = "between".equals(opStr) || "between_cc".equals(opStr);
+			boolean isBetweenCO = "between-co".equals(opStr) || "between_co".equals(opStr);
+			int dstF = allocF();
+
+			if (isBetweenCC || isBetweenCO) {
+				if (e.elems.size() != 6) {
+					throw new IllegalArgumentException("PARSE_ERROR: index-scan " + opStr + " requires lo and hi");
+				}
+				TypedVal loVal = eval(e.elems.get(4));
+				int savedPin = pinR(loVal);
+				TypedVal hiVal;
+				try {
+					hiVal = eval(e.elems.get(5));
+				} finally {
+					pinnedRMask = savedPin;
+				}
+				if (ai.isDecimal() || loVal.bank.isDecimal() || hiVal.bank.isDecimal()) {
+					int colPrec = ai.isDecimal() ? ai.precision : 18;
+					int colScale = ai.isDecimal() ? ai.scale : 0;
+					TypedVal decLo = ensureDecimal(loVal, opStr);
+					TypedVal decHi = ensureDecimal(hiVal, opStr);
+					int rLo;
+					if (decLo.isConst) {
+						DecimalBoundaryFolder.FoldedComparison fcLo = DecimalBoundaryFolder.foldComparison(
+								DecimalBoundaryFolder.CmpOp.GE, colPrec, colScale, decLo.constVal, decLo.scale);
+						if (fcLo.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_FALSE) {
+							b.emitU16(ImpulseIsaTables.OP_FSEED, ImpulseIsaTables.SUBOP_FSEED_EMPTY, 0, dstF, 0, 0, 0,
+									domId, 0);
+							return TypedVal.frontier(dstF, domId);
+						}
+						long loThresh = (fcLo.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_TRUE)
+								? -(Decimal64.POW10[colPrec] - 1L)
+								: fcLo.thresholdUnscaled();
+						if (decLo.reg >= 0 && loThresh == decLo.constVal) {
+							rLo = decLo.reg;
+						} else {
+							rLo = allocR();
+							b.emitLoadConstI64(rLo, loThresh);
+						}
+					} else {
+						if (decLo.scale > colScale) {
+							throw new IllegalArgumentException("TYPE_MISMATCH: dynamic index-scan lo scale ("
+									+ decLo.scale + ") exceeds column scale (" + colScale + ")");
+						}
+						rLo = (decLo.scale < colScale) ? rescaleDecimalUp(decLo, colScale).reg : decLo.reg;
+					}
+					int savedPinLo = pinnedRMask;
+					pinnedRMask |= (1 << rLo);
+					int rHi;
+					int subop = isBetweenCC
+							? ImpulseIsaTables.SUBOP_INDEX_SCAN_BETWEEN_CC
+							: ImpulseIsaTables.SUBOP_INDEX_SCAN_BETWEEN_CO;
+					try {
+						if (decHi.isConst) {
+							DecimalBoundaryFolder.CmpOp hiCmp = isBetweenCC
+									? DecimalBoundaryFolder.CmpOp.LE
+									: DecimalBoundaryFolder.CmpOp.LT;
+							DecimalBoundaryFolder.FoldedComparison fcHi = DecimalBoundaryFolder.foldComparison(hiCmp,
+									colPrec, colScale, decHi.constVal, decHi.scale);
+							if (fcHi.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_FALSE) {
+								b.emitU16(ImpulseIsaTables.OP_FSEED, ImpulseIsaTables.SUBOP_FSEED_EMPTY, 0, dstF, 0, 0,
+										0, domId, 0);
+								return TypedVal.frontier(dstF, domId);
+							}
+							long hiThresh;
+							if (fcHi.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_TRUE) {
+								hiThresh = Decimal64.POW10[colPrec] - 1L;
+								subop = ImpulseIsaTables.SUBOP_INDEX_SCAN_BETWEEN_CC;
+							} else {
+								hiThresh = fcHi.thresholdUnscaled();
+								subop = (fcHi.op() == DecimalBoundaryFolder.CmpOp.LT)
+										? ImpulseIsaTables.SUBOP_INDEX_SCAN_BETWEEN_CO
+										: ImpulseIsaTables.SUBOP_INDEX_SCAN_BETWEEN_CC;
+							}
+							if (decHi.reg >= 0 && hiThresh == decHi.constVal) {
+								rHi = decHi.reg;
+							} else {
+								rHi = allocR();
+								b.emitLoadConstI64(rHi, hiThresh);
+							}
+						} else {
+							if (decHi.scale > colScale) {
+								throw new IllegalArgumentException("TYPE_MISMATCH: dynamic index-scan hi scale ("
+										+ decHi.scale + ") exceeds column scale (" + colScale + ")");
+							}
+							rHi = (decHi.scale < colScale) ? rescaleDecimalUp(decHi, colScale).reg : decHi.reg;
+						}
+					} finally {
+						pinnedRMask = savedPinLo;
+					}
+					b.emitU16(ImpulseIsaTables.OP_INDEX_SCAN, subop, 0, dstF, 0, rLo, rHi, domId, ai.attrId);
+					return TypedVal.frontier(dstF, domId);
+				}
+				int subop = isBetweenCC
+						? ImpulseIsaTables.SUBOP_INDEX_SCAN_BETWEEN_CC
+						: ImpulseIsaTables.SUBOP_INDEX_SCAN_BETWEEN_CO;
+				b.emitU16(ImpulseIsaTables.OP_INDEX_SCAN, subop, 0, dstF, 0, loVal.reg, hiVal.reg, domId, ai.attrId);
+				return TypedVal.frontier(dstF, domId);
+			}
+
+			DecimalBoundaryFolder.CmpOp cmpOp = parseCmpOp(opStr);
+			if (cmpOp == null || cmpOp == DecimalBoundaryFolder.CmpOp.NE) {
+				throw new IllegalArgumentException("PARSE_ERROR: unsupported index-scan op '" + opStr + "'");
+			}
+			TypedVal loVal = eval(e.elems.get(4));
+			if (ai.isDecimal() || loVal.bank.isDecimal()) {
+				int colPrec;
+				int colScale;
+				if (ai.isDecimal()) {
+					colPrec = ai.precision;
+					colScale = ai.scale;
+				} else {
+					ValBank colBank = attrTypeToVecBank(ai);
+					if (!colBank.isInt()) {
+						throw new IllegalArgumentException("TYPE_MISMATCH: cannot index-scan non-decimal column '"
+								+ attrName + "' (" + colBank + ") with DECIMAL; use (cast ...)");
+					}
+					colPrec = 18;
+					colScale = 0;
+				}
+				TypedVal decLo = ensureDecimal(loVal, opStr);
+				if (decLo.isConst) {
+					DecimalBoundaryFolder.FoldedComparison fc = DecimalBoundaryFolder.foldComparison(cmpOp, colPrec,
+							colScale, decLo.constVal, decLo.scale);
+					if (fc.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_FALSE) {
+						b.emitU16(ImpulseIsaTables.OP_FSEED, ImpulseIsaTables.SUBOP_FSEED_EMPTY, 0, dstF, 0, 0, 0,
+								domId, 0);
+						return TypedVal.frontier(dstF, domId);
+					}
+					if (fc.kind() == DecimalBoundaryFolder.FoldKind.ALWAYS_TRUE) {
+						int fAll = allocF();
+						b.emitU16(ImpulseIsaTables.OP_INIT_DOMAIN_SPAN,
+								ImpulseIsaTables.SUBOP_INIT_DOMAIN_SPAN_ALL_SPAN, 0, fAll, 0, 0, 0, domId, 0);
+						b.emitU16(ImpulseIsaTables.OP_NODE_FILTER, ImpulseIsaTables.SUBOP_NODE_FILTER_IS_NOT_NULL, 0,
+								dstF, fAll, 0, 0, domId, ai.attrId);
+						return TypedVal.frontier(dstF, domId);
+					}
+					int rThresh;
+					if (decLo.reg >= 0 && fc.thresholdUnscaled() == decLo.constVal) {
+						rThresh = decLo.reg;
+					} else {
+						rThresh = allocR();
+						b.emitLoadConstI64(rThresh, fc.thresholdUnscaled());
+					}
+					b.emitU16(ImpulseIsaTables.OP_INDEX_SCAN, cmpOpToIndexScanSubop(fc.op()), 0, dstF, 0, rThresh, 0,
+							domId, ai.attrId);
+					return TypedVal.frontier(dstF, domId);
+				}
+				int rCmp = decLo.reg;
+				if (decLo.scale < colScale) {
+					rCmp = rescaleDecimalUp(decLo, colScale).reg;
+				} else if (decLo.scale > colScale) {
+					throw new IllegalArgumentException("TYPE_MISMATCH: dynamic index-scan parameter scale ("
+							+ decLo.scale + ") exceeds column scale (" + colScale + "); cast parameter first");
+				}
+				b.emitU16(ImpulseIsaTables.OP_INDEX_SCAN, cmpOpToIndexScanSubop(cmpOp), 0, dstF, 0, rCmp, 0, domId,
+						ai.attrId);
+				return TypedVal.frontier(dstF, domId);
+			}
+
+			ValBank colBank = attrTypeToVecBank(ai);
+			if ((colBank.isInt() && loVal.bank.isFloat()) || (colBank.isFloat() && loVal.bank.isInt())) {
+				throw new IllegalArgumentException(
+						"TYPE_MISMATCH: implicit int/float index-scan comparison forbidden; use (cast ...)");
+			}
+			b.emitU16(ImpulseIsaTables.OP_INDEX_SCAN, cmpOpToIndexScanSubop(cmpOp), 0, dstF, 0, loVal.reg, 0, domId,
+					ai.attrId);
+			return TypedVal.frontier(dstF, domId);
 		}
 
 		private TypedVal evalEdgeStream(SExpr e) {
@@ -1738,6 +1928,9 @@ public final class ImpScmV11Compiler {
 			}
 			if ("node-filter".equals(head)) {
 				return evalNodeFilter(e);
+			}
+			if ("index-scan".equals(head)) {
+				return evalIndexScan(e);
 			}
 			if ("edge-stream".equals(head)) {
 				return evalEdgeStream(e);

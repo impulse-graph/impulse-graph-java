@@ -2253,13 +2253,10 @@ public final class ImpulsePillar4Ops {
 			return;
 		}
 		ImpulseVector col = view.getNodeAttr(domId, attrId);
-		if (col == null) {
-			ImpulseSnapshotView.OffHeapAttrColumn off = view.getOffHeapNodeAttr(domId, attrId);
-			if (off == null) {
-				ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
-				return;
-			}
-			col = materializeOffHeapColumn(ws, off);
+		ImpulseSnapshotView.OffHeapAttrColumn off = (col == null) ? view.getOffHeapNodeAttr(domId, attrId) : null;
+		if (col == null && off == null) {
+			ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+			return;
 		}
 		int domCard = (int) view.domainCards[domId];
 		boolean accum = (flags & FLAG_ACCUM) != 0;
@@ -2283,30 +2280,288 @@ public final class ImpulsePillar4Ops {
 		boolean hiValid = ws.isRValid(s3);
 		long loBits = ws.rRegs[s2];
 		long hiBits = ws.rRegs[s3];
+
+		if (loValid) {
+			if (off != null && off.elemTag() != ImpulseVector.TAG_STR) {
+				execIndexScanOffHeap(view, domId, attrId, off, subop, loBits, hiValid, hiBits, out);
+			} else {
+				if (col == null) {
+					col = materializeOffHeapColumn(ws, off);
+				}
+				execIndexScanVector(ws, col, subop, loBits, hiValid, hiBits, out);
+			}
+		}
+		if (out.tier == ImpulseFrontier.TIER0_INLINE && out.inlineCount > 1) {
+			Arrays.sort(out.inlineIds, 0, out.inlineCount);
+		}
+		ws.fRegs[dst].copyFrom(out);
+		ws.setFInitialized(dst, true);
+		ws.zf = ws.fRegs[dst].isEmpty();
+		ws.pc++;
+	}
+
+	private static boolean matchI64Subop(int subop, long x, long lo, boolean hiValid, long hi) {
+		return switch (subop) {
+			case SUBOP_INDEX_SCAN_EQ -> x == lo;
+			case SUBOP_INDEX_SCAN_BETWEEN_CC -> hiValid && x >= lo && x <= hi;
+			case SUBOP_INDEX_SCAN_BETWEEN_CO -> hiValid && x >= lo && x < hi;
+			case SUBOP_INDEX_SCAN_LT -> x < lo;
+			case SUBOP_INDEX_SCAN_LE -> x <= lo;
+			case SUBOP_INDEX_SCAN_GT -> x > lo;
+			case SUBOP_INDEX_SCAN_GE -> x >= lo;
+			default -> false;
+		};
+	}
+
+	private static int lowerBoundPermI64(ImpulseSnapshotView.OffHeapSecondaryIndex perm,
+			ImpulseSnapshotView.OffHeapAttrColumn off, int count, long key) {
+		int lo = 0;
+		int hi = count;
+		while (lo < hi) {
+			int mid = (lo + hi) >>> 1;
+			int u = perm.permNodeId(mid);
+			if (u >= 0 && u < off.count() && off.isValidAt(u) && off.readI64(u) < key) {
+				lo = mid + 1;
+			} else {
+				hi = mid;
+			}
+		}
+		return lo;
+	}
+
+	private static int upperBoundPermI64(ImpulseSnapshotView.OffHeapSecondaryIndex perm,
+			ImpulseSnapshotView.OffHeapAttrColumn off, int count, long key) {
+		int lo = 0;
+		int hi = count;
+		while (lo < hi) {
+			int mid = (lo + hi) >>> 1;
+			int u = perm.permNodeId(mid);
+			if (u >= 0 && u < off.count() && off.isValidAt(u) && off.readI64(u) <= key) {
+				lo = mid + 1;
+			} else {
+				hi = mid;
+			}
+		}
+		return lo;
+	}
+
+	private static int validEndPerm(ImpulseSnapshotView.OffHeapSecondaryIndex perm,
+			ImpulseSnapshotView.OffHeapAttrColumn off, int count) {
+		if (!off.nullable()) {
+			return count;
+		}
+		int lo = 0;
+		int hi = count;
+		while (lo < hi) {
+			int mid = (lo + hi) >>> 1;
+			int u = perm.permNodeId(mid);
+			if (u >= 0 && u < off.count() && off.isValidAt(u)) {
+				lo = mid + 1;
+			} else {
+				hi = mid;
+			}
+		}
+		return lo;
+	}
+
+	private static void execIndexScanOffHeap(ImpulseSnapshotView view, int domId, int attrId,
+			ImpulseSnapshotView.OffHeapAttrColumn off, int subop, long loBits, boolean hiValid, long hiBits,
+			ImpulseFrontier out) {
+		int n = off.count();
+		int tag = off.elemTag();
+
+		if (tag == ImpulseVector.TAG_I64) {
+			if ((subop == SUBOP_INDEX_SCAN_BETWEEN_CC && (!hiValid || loBits > hiBits))
+					|| (subop == SUBOP_INDEX_SCAN_BETWEEN_CO && (!hiValid || loBits >= hiBits))) {
+				return;
+			}
+
+			// Path 1: Physical Permutation Index (0x01) — O(log N + K) exact i64 binary
+			// search
+			ImpulseSnapshotView.OffHeapSecondaryIndex perm = view.getPermutationIndex(domId, attrId);
+			if (perm != null) {
+				int pCount = Math.min(perm.permCount(), n);
+				int startPos;
+				int endPos;
+				switch (subop) {
+					case SUBOP_INDEX_SCAN_EQ -> {
+						startPos = lowerBoundPermI64(perm, off, pCount, loBits);
+						endPos = upperBoundPermI64(perm, off, pCount, loBits);
+					}
+					case SUBOP_INDEX_SCAN_BETWEEN_CC -> {
+						startPos = lowerBoundPermI64(perm, off, pCount, loBits);
+						endPos = upperBoundPermI64(perm, off, pCount, hiBits);
+					}
+					case SUBOP_INDEX_SCAN_BETWEEN_CO -> {
+						startPos = lowerBoundPermI64(perm, off, pCount, loBits);
+						endPos = lowerBoundPermI64(perm, off, pCount, hiBits);
+					}
+					case SUBOP_INDEX_SCAN_LT -> {
+						startPos = 0;
+						endPos = lowerBoundPermI64(perm, off, pCount, loBits);
+					}
+					case SUBOP_INDEX_SCAN_LE -> {
+						startPos = 0;
+						endPos = upperBoundPermI64(perm, off, pCount, loBits);
+					}
+					case SUBOP_INDEX_SCAN_GT -> {
+						startPos = upperBoundPermI64(perm, off, pCount, loBits);
+						endPos = validEndPerm(perm, off, pCount);
+					}
+					case SUBOP_INDEX_SCAN_GE -> {
+						startPos = lowerBoundPermI64(perm, off, pCount, loBits);
+						endPos = validEndPerm(perm, off, pCount);
+					}
+					default -> {
+						return;
+					}
+				}
+				for (int pos = startPos; pos < endPos; pos++) {
+					int u = perm.permNodeId(pos);
+					if (u >= 0 && u < n && off.isValidAt(u)) {
+						out.add(u);
+					}
+				}
+				return;
+			}
+
+			// Path 2: Physical ZoneMap Index (0x02) — O(pages) block pruning + exact i64
+			// row scan
+			ImpulseSnapshotView.OffHeapSecondaryIndex zm = view.getZoneMapIndex(domId, attrId);
+			if (zm != null) {
+				int pageSize = zm.zmPageSize();
+				int pageCount = zm.zmPageCount();
+				boolean exactI64 = zm.zmIsExactI64();
+				for (int p = 0; p < pageCount; p++) {
+					boolean eligible;
+					if (exactI64) {
+						long pMin = zm.zmMinI64(p);
+						long pMax = zm.zmMaxI64(p);
+						if (pMin > pMax) {
+							continue; // all-NULL page
+						}
+						eligible = switch (subop) {
+							case SUBOP_INDEX_SCAN_EQ -> loBits >= pMin && loBits <= pMax;
+							case SUBOP_INDEX_SCAN_BETWEEN_CC -> pMax >= loBits && pMin <= hiBits;
+							case SUBOP_INDEX_SCAN_BETWEEN_CO -> pMax >= loBits && pMin < hiBits;
+							case SUBOP_INDEX_SCAN_LT -> pMin < loBits;
+							case SUBOP_INDEX_SCAN_LE -> pMin <= loBits;
+							case SUBOP_INDEX_SCAN_GT -> pMax > loBits;
+							case SUBOP_INDEX_SCAN_GE -> pMax >= loBits;
+							default -> false;
+						};
+					} else {
+						double pMin = zm.zmMinF64(p);
+						double pMax = zm.zmMaxF64(p);
+						if (pMin > pMax) {
+							continue;
+						}
+						double dLo = (double) loBits;
+						double dHi = (double) hiBits;
+						eligible = switch (subop) {
+							case SUBOP_INDEX_SCAN_EQ -> dLo >= pMin && dLo <= pMax;
+							case SUBOP_INDEX_SCAN_BETWEEN_CC, SUBOP_INDEX_SCAN_BETWEEN_CO -> pMax >= dLo && pMin <= dHi;
+							case SUBOP_INDEX_SCAN_LT, SUBOP_INDEX_SCAN_LE -> pMin <= dLo;
+							case SUBOP_INDEX_SCAN_GT, SUBOP_INDEX_SCAN_GE -> pMax >= dLo;
+							default -> false;
+						};
+					}
+					if (!eligible) {
+						continue;
+					}
+					int start = p * pageSize;
+					int end = Math.min(start + pageSize, n);
+					for (int u = start; u < end; u++) {
+						if (!off.isValidAt(u)) {
+							continue;
+						}
+						if (matchI64Subop(subop, off.readI64(u), loBits, hiValid, hiBits)) {
+							out.add(u);
+						}
+					}
+				}
+				return;
+			}
+
+			// Path 3: Direct off-heap fallback scan (zero-alloc)
+			for (int u = 0; u < n; u++) {
+				if (!off.isValidAt(u)) {
+					continue;
+				}
+				if (matchI64Subop(subop, off.readI64(u), loBits, hiValid, hiBits)) {
+					out.add(u);
+				}
+			}
+			return;
+		}
+
+		if (tag == ImpulseVector.TAG_U64) {
+			for (int u = 0; u < n; u++) {
+				if (!off.isValidAt(u)) {
+					continue;
+				}
+				long x = off.readI64(u);
+				boolean keep = switch (subop) {
+					case SUBOP_INDEX_SCAN_EQ -> x == loBits;
+					case SUBOP_INDEX_SCAN_BETWEEN_CC ->
+						hiValid && Long.compareUnsigned(x, loBits) >= 0 && Long.compareUnsigned(x, hiBits) <= 0;
+					case SUBOP_INDEX_SCAN_BETWEEN_CO ->
+						hiValid && Long.compareUnsigned(x, loBits) >= 0 && Long.compareUnsigned(x, hiBits) < 0;
+					case SUBOP_INDEX_SCAN_LT -> Long.compareUnsigned(x, loBits) < 0;
+					case SUBOP_INDEX_SCAN_LE -> Long.compareUnsigned(x, loBits) <= 0;
+					case SUBOP_INDEX_SCAN_GT -> Long.compareUnsigned(x, loBits) > 0;
+					case SUBOP_INDEX_SCAN_GE -> Long.compareUnsigned(x, loBits) >= 0;
+					default -> false;
+				};
+				if (keep) {
+					out.add(u);
+				}
+			}
+			return;
+		}
+
+		if (tag == ImpulseVector.TAG_F64) {
+			double loF = Double.longBitsToDouble(loBits);
+			double hiF = Double.longBitsToDouble(hiBits);
+			if (Double.isNaN(loF)) {
+				return;
+			}
+			for (int u = 0; u < n; u++) {
+				if (!off.isValidAt(u)) {
+					continue;
+				}
+				double x = off.readF64(u);
+				boolean keep = switch (subop) {
+					case SUBOP_INDEX_SCAN_EQ -> x == loF;
+					case SUBOP_INDEX_SCAN_BETWEEN_CC -> hiValid && !Double.isNaN(hiF) && x >= loF && x <= hiF;
+					case SUBOP_INDEX_SCAN_BETWEEN_CO -> hiValid && !Double.isNaN(hiF) && x >= loF && x < hiF;
+					case SUBOP_INDEX_SCAN_LT -> x < loF;
+					case SUBOP_INDEX_SCAN_LE -> x <= loF;
+					case SUBOP_INDEX_SCAN_GT -> x > loF;
+					case SUBOP_INDEX_SCAN_GE -> x >= loF;
+					default -> false;
+				};
+				if (keep) {
+					out.add(u);
+				}
+			}
+		}
+	}
+
+	private static void execIndexScanVector(ImpulseWorkspace ws, ImpulseVector col, int subop, long loBits,
+			boolean hiValid, long hiBits, ImpulseFrontier out) {
 		double loF = Double.longBitsToDouble(loBits);
 		double hiF = Double.longBitsToDouble(hiBits);
-		String loStr = loValid ? ws.resolveScalarStr(loBits) : null;
-		String hiStr = hiValid ? ws.resolveScalarStr(hiBits) : null;
+		String loStr = (col.elemTag == ImpulseVector.TAG_STR) ? ws.resolveScalarStr(loBits) : null;
+		String hiStr = (col.elemTag == ImpulseVector.TAG_STR && hiValid) ? ws.resolveScalarStr(hiBits) : null;
 
 		int n = col.length;
 		for (int u = 0; u < n; u++) {
-			if (!col.isValidAt(u) || !loValid)
+			if (!col.isValidAt(u))
 				continue;
 			boolean keep = false;
 			switch (col.elemTag) {
-				case ImpulseVector.TAG_I64 -> {
-					long x = col.i64Data[u];
-					keep = switch (subop) {
-						case SUBOP_INDEX_SCAN_EQ -> x == loBits;
-						case SUBOP_INDEX_SCAN_BETWEEN_CC -> hiValid && x >= loBits && x <= hiBits;
-						case SUBOP_INDEX_SCAN_BETWEEN_CO -> hiValid && x >= loBits && x < hiBits;
-						case SUBOP_INDEX_SCAN_LT -> x < loBits;
-						case SUBOP_INDEX_SCAN_LE -> x <= loBits;
-						case SUBOP_INDEX_SCAN_GT -> x > loBits;
-						case SUBOP_INDEX_SCAN_GE -> x >= loBits;
-						default -> false;
-					};
-				}
+				case ImpulseVector.TAG_I64 -> keep = matchI64Subop(subop, col.i64Data[u], loBits, hiValid, hiBits);
 				case ImpulseVector.TAG_U64 -> {
 					long x = col.i64Data[u];
 					keep = switch (subop) {
@@ -2360,10 +2615,6 @@ public final class ImpulsePillar4Ops {
 			if (keep)
 				out.add(u);
 		}
-		ws.fRegs[dst].copyFrom(out);
-		ws.setFInitialized(dst, true);
-		ws.zf = ws.fRegs[dst].isEmpty();
-		ws.pc++;
 	}
 
 	// --- 0x55 OP_MAP_KEYS_TO_DENSE ---

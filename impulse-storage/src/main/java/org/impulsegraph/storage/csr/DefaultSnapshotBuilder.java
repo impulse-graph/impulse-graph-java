@@ -134,8 +134,18 @@ public final class DefaultSnapshotBuilder {
 		}
 	}
 
+	public static final byte INDEX_TYPE_PERMUTATION = 0x01;
+	public static final byte INDEX_TYPE_ZONE_MAP = 0x02;
+	public static final int DEFAULT_ZONE_MAP_PAGE_SIZE = 1024;
+	public static final long ZONE_MAP_FEAT_EXACT_I64 = 1L;
+
+	public record SecondaryIndexEntry(int domainId, int relationId, int attributeIndex, byte indexType, String name,
+			byte[] payload, long featureMask) {
+	}
+
 	private final List<DomainEntry> customDomains = new ArrayList<>();
 	private final Map<String, int[]> customRelationDomains = new HashMap<>();
+	private final List<SecondaryIndexEntry> customIndices = new ArrayList<>();
 
 	public DefaultSnapshotBuilder withVersion(short version) {
 		this.targetVersion = version;
@@ -197,6 +207,194 @@ public final class DefaultSnapshotBuilder {
 		dom.attributes()
 				.add(new DomainAttributeEntry(name, typeCode, dimension, precision, scale, data, offsets, validity));
 		return this;
+	}
+
+	public DefaultSnapshotBuilder withDomainSecondaryIndex(int domainId, int attributeIndex, byte indexType,
+			String name, byte[] payload, long featureMask) {
+		customIndices.add(new SecondaryIndexEntry(domainId, 0xFFFF, attributeIndex, indexType,
+				name != null ? name : ("idx_" + domainId + "_" + attributeIndex),
+				payload != null ? payload : new byte[0], featureMask));
+		return this;
+	}
+
+	public DefaultSnapshotBuilder withDomainZoneMapIndex(int domainId, String attrName) {
+		return withDomainZoneMapIndex(domainId, attrName, DEFAULT_ZONE_MAP_PAGE_SIZE);
+	}
+
+	public DefaultSnapshotBuilder withDomainZoneMapIndex(int domainId, String attrName, int pageSize) {
+		if (pageSize <= 0) {
+			throw new IllegalArgumentException("ZoneMap pageSize must be > 0, got " + pageSize);
+		}
+		DomainEntry dom = findDomain(domainId);
+		if (dom == null) {
+			throw new IllegalArgumentException("Domain ID not found: " + domainId);
+		}
+		int attrIdx = -1;
+		DomainAttributeEntry attr = null;
+		for (int i = 0; i < dom.attributes().size(); i++) {
+			if (dom.attributes().get(i).name().equals(attrName)) {
+				attrIdx = i;
+				attr = dom.attributes().get(i);
+				break;
+			}
+		}
+		if (attr == null) {
+			throw new IllegalArgumentException(
+					"Attribute '" + attrName + "' not found on domain " + dom.name() + " (" + domainId + ")");
+		}
+		int n = Math.toIntExact(dom.nodeCount());
+		byte[] payload = buildZoneMapPayload(attr.typeCode(), n, attr.data(), attr.validity(), pageSize);
+		int baseType = attr.typeCode() & 0x7F;
+		long featMask = (baseType == 0x15 || baseType == 0x04 || baseType == 0x03) ? ZONE_MAP_FEAT_EXACT_I64 : 0L;
+		return withDomainSecondaryIndex(domainId, attrIdx, INDEX_TYPE_ZONE_MAP, "idx_zm_" + dom.name() + "_" + attrName,
+				payload, featMask);
+	}
+
+	public DefaultSnapshotBuilder withDomainPermutationIndex(int domainId, String attrName) {
+		DomainEntry dom = findDomain(domainId);
+		if (dom == null) {
+			throw new IllegalArgumentException("Domain ID not found: " + domainId);
+		}
+		int attrIdx = -1;
+		DomainAttributeEntry attr = null;
+		for (int i = 0; i < dom.attributes().size(); i++) {
+			if (dom.attributes().get(i).name().equals(attrName)) {
+				attrIdx = i;
+				attr = dom.attributes().get(i);
+				break;
+			}
+		}
+		if (attr == null) {
+			throw new IllegalArgumentException(
+					"Attribute '" + attrName + "' not found on domain " + dom.name() + " (" + domainId + ")");
+		}
+		int n = Math.toIntExact(dom.nodeCount());
+		byte[] payload = buildPermutationPayload(attr.typeCode(), n, attr.data(), attr.validity());
+		return withDomainSecondaryIndex(domainId, attrIdx, INDEX_TYPE_PERMUTATION,
+				"idx_perm_" + dom.name() + "_" + attrName, payload, 0L);
+	}
+
+	private static boolean isBitValid(byte[] validity, boolean nullable, int idx) {
+		if (!nullable) {
+			return true;
+		}
+		if (validity == null || (idx >>> 3) >= validity.length) {
+			return false;
+		}
+		return (validity[idx >>> 3] & (1 << (idx & 7))) != 0;
+	}
+
+	private static byte[] buildZoneMapPayload(byte typeCode, int n, byte[] data, byte[] validity, int pageSize) {
+		int baseType = typeCode & 0x7F;
+		boolean nullable = (typeCode & 0x80) != 0;
+		if (baseType != 0x03 && baseType != 0x04 && baseType != 0x06 && baseType != 0x07 && baseType != 0x15) {
+			throw new IllegalArgumentException(
+					"ZoneMap unsupported for attribute base type 0x" + Integer.toHexString(baseType));
+		}
+		int pageCount = (n == 0) ? 0 : (int) (((long) n + pageSize - 1L) / pageSize);
+		ByteBuffer out = ByteBuffer.allocate(24 + pageCount * 16).order(ByteOrder.LITTLE_ENDIAN);
+		out.putLong(n);
+		out.putInt(pageSize);
+		out.putInt(pageCount);
+		out.put(typeCode);
+		out.put(new byte[7]);
+
+		ByteBuffer src = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
+		boolean exactI64 = (baseType == 0x03 || baseType == 0x04 || baseType == 0x15);
+		for (int p = 0; p < pageCount; p++) {
+			int start = p * pageSize;
+			int end = Math.min(start + pageSize, n);
+			if (exactI64) {
+				long minV = Long.MAX_VALUE;
+				long maxV = Long.MIN_VALUE;
+				for (int i = start; i < end; i++) {
+					if (!isBitValid(validity, nullable, i)) {
+						continue;
+					}
+					long v = (baseType == 0x03) ? src.getInt(i * 4) : src.getLong(i * 8);
+					if (v < minV)
+						minV = v;
+					if (v > maxV)
+						maxV = v;
+				}
+				out.putLong(minV);
+				out.putLong(maxV);
+			} else {
+				double minV = Double.MAX_VALUE;
+				double maxV = -Double.MAX_VALUE;
+				for (int i = start; i < end; i++) {
+					if (!isBitValid(validity, nullable, i)) {
+						continue;
+					}
+					double v = (baseType == 0x06) ? src.getFloat(i * 4) : src.getDouble(i * 8);
+					if (Double.isNaN(v)) {
+						continue;
+					}
+					if (v < minV)
+						minV = v;
+					if (v > maxV)
+						maxV = v;
+				}
+				out.putDouble(minV);
+				out.putDouble(maxV);
+			}
+		}
+		return out.array();
+	}
+
+	private static byte[] buildPermutationPayload(byte typeCode, int n, byte[] data, byte[] validity) {
+		int baseType = typeCode & 0x7F;
+		boolean nullable = (typeCode & 0x80) != 0;
+		if (baseType != 0x03 && baseType != 0x04 && baseType != 0x06 && baseType != 0x07 && baseType != 0x15) {
+			throw new IllegalArgumentException(
+					"Permutation unsupported for attribute base type 0x" + Integer.toHexString(baseType));
+		}
+		Integer[] perm = new Integer[n];
+		for (int i = 0; i < n; i++) {
+			perm[i] = i;
+		}
+		ByteBuffer src = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
+		if (baseType == 0x03 || baseType == 0x04 || baseType == 0x15) {
+			Arrays.sort(perm, (a, b) -> {
+				boolean va = isBitValid(validity, nullable, a);
+				boolean vb = isBitValid(validity, nullable, b);
+				if (va != vb) {
+					return va ? -1 : 1; // NULLs sort deterministically last
+				}
+				if (!va) {
+					return Integer.compare(a, b);
+				}
+				long xa = (baseType == 0x03) ? src.getInt(a * 4) : src.getLong(a * 8);
+				long xb = (baseType == 0x03) ? src.getInt(b * 4) : src.getLong(b * 8);
+				int cmp = Long.compare(xa, xb);
+				return cmp != 0 ? cmp : Integer.compare(a, b);
+			});
+		} else {
+			Arrays.sort(perm, (a, b) -> {
+				boolean va = isBitValid(validity, nullable, a);
+				boolean vb = isBitValid(validity, nullable, b);
+				double xa = va ? ((baseType == 0x06) ? src.getFloat(a * 4) : src.getDouble(a * 8)) : Double.NaN;
+				double xb = vb ? ((baseType == 0x06) ? src.getFloat(b * 4) : src.getDouble(b * 8)) : Double.NaN;
+				boolean na = !va || Double.isNaN(xa);
+				boolean nb = !vb || Double.isNaN(xb);
+				if (na != nb) {
+					return na ? 1 : -1;
+				}
+				if (na) {
+					return Integer.compare(a, b);
+				}
+				int cmp = Double.compare(xa, xb);
+				return cmp != 0 ? cmp : Integer.compare(a, b);
+			});
+		}
+		ByteBuffer out = ByteBuffer.allocate(16 + n * 4).order(ByteOrder.LITTLE_ENDIAN);
+		out.putLong(n);
+		out.put(typeCode);
+		out.put(new byte[7]);
+		for (int i = 0; i < n; i++) {
+			out.putInt(perm[i]);
+		}
+		return out.array();
 	}
 
 	public DefaultSnapshotBuilder withDomainStringAttribute(int domainId, String name, List<String> values) {
@@ -441,6 +639,12 @@ public final class DefaultSnapshotBuilder {
 			}
 		}
 
+		List<Integer> idxNameOffsets = new ArrayList<>();
+		int indexCount = (targetVersion >= 10) ? customIndices.size() : 0;
+		for (int i = 0; i < indexCount; i++) {
+			idxNameOffsets.add(getOrAddString.apply(customIndices.get(i).name()));
+		}
+
 		// Calculate Section 2 Directory Table layout length
 		int poolBytes = stringPoolOut.size();
 		int alignedStrTableBytes = (4 + poolBytes + 127) & ~127;
@@ -464,7 +668,9 @@ public final class DefaultSnapshotBuilder {
 		int rawRelTableBytes = relationCount * relEntryBytes + totalRelAttrDescBytes;
 		int alignedRelTableBytes = (rawRelTableBytes + 127) & ~127;
 
-		int totalDirLen = alignedStrTableBytes + alignedDomTableBytes + alignedRelTableBytes;
+		int alignedIndexTableBytes = (indexCount > 0) ? ((indexCount * 64 + 127) & ~127) : 0;
+
+		int totalDirLen = alignedStrTableBytes + alignedDomTableBytes + alignedRelTableBytes + alignedIndexTableBytes;
 		int alignedDirLen = (totalDirLen + 4095) & ~4095;
 		long payloadBaseOffset = dataOffset + alignedDirLen;
 
@@ -814,6 +1020,37 @@ public final class DefaultSnapshotBuilder {
 			}
 		}
 
+		// Layout Secondary Index Payloads & Build 64B Descriptors
+		List<byte[]> indexEntries = new ArrayList<>();
+		for (int i = 0; i < indexCount; i++) {
+			SecondaryIndexEntry idx = customIndices.get(i);
+			try {
+				align128Out(payloadOut);
+				long idxDataOff = payloadBaseOffset + payloadOut.size();
+				byte[] payload = idx.payload();
+				long idxDataBytes = payload.length;
+				if (idxDataBytes > 0) {
+					payloadOut.write(payload);
+					align128Out(payloadOut);
+				}
+				ByteBuffer idxBuf = ByteBuffer.allocate(64).order(ByteOrder.LITTLE_ENDIAN);
+				idxBuf.putInt(i); // index_id
+				idxBuf.putShort((short) idx.domainId()); // domain_id
+				idxBuf.putShort((short) idx.relationId()); // relation_id (0xFFFF for node domain)
+				idxBuf.putShort((short) idx.attributeIndex()); // attribute_index
+				idxBuf.put(idx.indexType()); // index_type
+				idxBuf.put((byte) 0); // reserved1
+				idxBuf.putInt(idxNameOffsets.get(i)); // name_offset
+				idxBuf.putLong(idxDataOff); // data_offset
+				idxBuf.putLong(idxDataBytes); // data_bytes
+				idxBuf.putLong(idx.featureMask()); // payload_feature_mask
+				idxBuf.put(new byte[24]); // reserved_padding
+				indexEntries.add(idxBuf.array());
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
+
 		// 2. Build Section 2 Directory Table
 		ByteArrayOutputStream dirTableOut = new ByteArrayOutputStream();
 		try {
@@ -861,6 +1098,13 @@ public final class DefaultSnapshotBuilder {
 			}
 
 			align128Out(dirTableOut);
+
+			for (byte[] idxEntryBytes : indexEntries) {
+				dirTableOut.write(idxEntryBytes, 0, idxEntryBytes.length);
+			}
+			if (!indexEntries.isEmpty()) {
+				align128Out(dirTableOut);
+			}
 			align4kOut(dirTableOut);
 
 		} catch (IOException e) {
@@ -888,7 +1132,7 @@ public final class DefaultSnapshotBuilder {
 		hdrBuf.putShort(0x3E, crc);
 
 		if (targetVersion >= 10) {
-			hdrBuf.putShort(0x40, (short) 0); // index_count = 0
+			hdrBuf.putShort(0x40, (short) indexCount);
 		}
 
 		try {

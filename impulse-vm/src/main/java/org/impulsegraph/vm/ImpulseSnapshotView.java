@@ -2,6 +2,7 @@ package org.impulsegraph.vm;
 
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
@@ -87,6 +88,72 @@ public final class ImpulseSnapshotView {
 			if (base == 11)
 				return ImpulseVector.TAG_STR;
 			return ImpulseVector.TAG_I64;
+		}
+	}
+
+	public static final byte INDEX_TYPE_PERMUTATION = 0x01;
+	public static final byte INDEX_TYPE_ZONE_MAP = 0x02;
+	public static final long ZONE_MAP_FEAT_EXACT_I64 = 1L;
+
+	private static final ValueLayout.OfInt LE_INT = ValueLayout.JAVA_INT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
+	private static final ValueLayout.OfLong LE_LONG = ValueLayout.JAVA_LONG_UNALIGNED
+			.withOrder(ByteOrder.LITTLE_ENDIAN);
+	private static final ValueLayout.OfDouble LE_DOUBLE = ValueLayout.JAVA_DOUBLE_UNALIGNED
+			.withOrder(ByteOrder.LITTLE_ENDIAN);
+
+	/**
+	 * Immutable zero-copy off-heap secondary index view ({@code 0x01} Permutation
+	 * or {@code 0x02} ZoneMap).
+	 */
+	public record OffHeapSecondaryIndex(int indexId, int domainId, int attributeIndex, byte indexType, String name,
+			MemorySegment dataSeg, long featureMask) {
+
+		public int permCount() {
+			return Math.toIntExact(dataSeg.get(LE_LONG, 0L));
+		}
+
+		public byte permTypeCode() {
+			return dataSeg.get(ValueLayout.JAVA_BYTE, 8L);
+		}
+
+		public int permNodeId(int pos) {
+			return dataSeg.get(LE_INT, 16L + ((long) pos << 2));
+		}
+
+		public long zmElementCount() {
+			return dataSeg.get(LE_LONG, 0L);
+		}
+
+		public int zmPageSize() {
+			return dataSeg.get(LE_INT, 8L);
+		}
+
+		public int zmPageCount() {
+			return dataSeg.get(LE_INT, 12L);
+		}
+
+		public byte zmTypeCode() {
+			return dataSeg.get(ValueLayout.JAVA_BYTE, 16L);
+		}
+
+		public boolean zmIsExactI64() {
+			return (zmTypeCode() & 0x7F) == 0x15 || (featureMask & ZONE_MAP_FEAT_EXACT_I64) != 0L;
+		}
+
+		public long zmMinI64(int page) {
+			return dataSeg.get(LE_LONG, 24L + ((long) page << 4));
+		}
+
+		public long zmMaxI64(int page) {
+			return dataSeg.get(LE_LONG, 32L + ((long) page << 4));
+		}
+
+		public double zmMinF64(int page) {
+			return dataSeg.get(LE_DOUBLE, 24L + ((long) page << 4));
+		}
+
+		public double zmMaxF64(int page) {
+			return dataSeg.get(LE_DOUBLE, 32L + ((long) page << 4));
 		}
 	}
 
@@ -329,15 +396,25 @@ public final class ImpulseSnapshotView {
 	public final Map<Integer, String[]> keyCatalogs;
 	public final Map<Integer, KeyResolver> offHeapKeyResolvers;
 	public final Map<Long, String> indexes;
+	public final Map<Long, OffHeapSecondaryIndex> zoneMapIndexes;
+	public final Map<Long, OffHeapSecondaryIndex> permutationIndexes;
 
 	public ImpulseSnapshotView(long[] domainCards, RelView[] relations, Map<Long, ImpulseVector> nodeAttrs,
 			Map<Integer, String[]> keyCatalogs, Map<Long, String> indexes) {
-		this(domainCards, relations, nodeAttrs, Map.of(), keyCatalogs, Map.of(), indexes);
+		this(domainCards, relations, nodeAttrs, Map.of(), keyCatalogs, Map.of(), indexes, Map.of(), Map.of());
 	}
 
 	public ImpulseSnapshotView(long[] domainCards, RelView[] relations, Map<Long, ImpulseVector> nodeAttrs,
 			Map<Long, OffHeapAttrColumn> offHeapNodeAttrs, Map<Integer, String[]> keyCatalogs,
 			Map<Integer, KeyResolver> offHeapKeyResolvers, Map<Long, String> indexes) {
+		this(domainCards, relations, nodeAttrs, offHeapNodeAttrs, keyCatalogs, offHeapKeyResolvers, indexes, Map.of(),
+				Map.of());
+	}
+
+	public ImpulseSnapshotView(long[] domainCards, RelView[] relations, Map<Long, ImpulseVector> nodeAttrs,
+			Map<Long, OffHeapAttrColumn> offHeapNodeAttrs, Map<Integer, String[]> keyCatalogs,
+			Map<Integer, KeyResolver> offHeapKeyResolvers, Map<Long, String> indexes,
+			Map<Long, OffHeapSecondaryIndex> zoneMapIndexes, Map<Long, OffHeapSecondaryIndex> permutationIndexes) {
 		this.domainCards = domainCards != null ? domainCards : new long[0];
 		this.relations = relations != null ? relations : new RelView[0];
 		this.nodeAttrs = nodeAttrs != null ? Collections.unmodifiableMap(nodeAttrs) : Map.of();
@@ -347,6 +424,10 @@ public final class ImpulseSnapshotView {
 				? Collections.unmodifiableMap(offHeapKeyResolvers)
 				: Map.of();
 		this.indexes = indexes != null ? Collections.unmodifiableMap(indexes) : Map.of();
+		this.zoneMapIndexes = zoneMapIndexes != null ? Collections.unmodifiableMap(zoneMapIndexes) : Map.of();
+		this.permutationIndexes = permutationIndexes != null
+				? Collections.unmodifiableMap(permutationIndexes)
+				: Map.of();
 	}
 
 	public static long domAttrKey(int dom, int attr) {
@@ -378,7 +459,16 @@ public final class ImpulseSnapshotView {
 		return keyCatalogs.containsKey(dom) || offHeapKeyResolvers.containsKey(dom);
 	}
 
+	public OffHeapSecondaryIndex getZoneMapIndex(int dom, int attr) {
+		return zoneMapIndexes.get(domAttrKey(dom, attr));
+	}
+
+	public OffHeapSecondaryIndex getPermutationIndex(int dom, int attr) {
+		return permutationIndexes.get(domAttrKey(dom, attr));
+	}
+
 	public boolean hasIndex(int dom, int attr) {
-		return indexes.containsKey(domAttrKey(dom, attr));
+		long key = domAttrKey(dom, attr);
+		return indexes.containsKey(key) || zoneMapIndexes.containsKey(key) || permutationIndexes.containsKey(key);
 	}
 }
