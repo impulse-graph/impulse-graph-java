@@ -227,7 +227,8 @@ class CypherDecimalTest {
 			assertEquals(0, expTx.compareTo(new Decimal64(wsEdgeSum.outputs.get(0).i64Data[0], 18, 2).toBigDecimal()));
 
 			// 3. $param auto-inferred as (decimal 10 2) against a.balance
-			var crParam = CypherCompiler.compileToBytecode("MATCH (a:Account) WHERE a.balance >= $minBal RETURN a", snap);
+			var crParam = CypherCompiler.compileToBytecode("MATCH (a:Account) WHERE a.balance >= $minBal RETURN a",
+					snap);
 			// $minBal = 20.00 (unscaled = 2000) -> nodes 2 and 3
 			ImpulseWorkspace wsParam = executeBothAndVerifyParity(crParam, bind,
 					Map.of(0, new ImpulseWorkspace.ParamScalar(SCALAR_I64, true, 2_000L)));
@@ -304,7 +305,8 @@ class CypherDecimalTest {
 			assertEquals(3L, wsCastWhere.outputs.get(0).i64Data[0]);
 
 			// (c) Flipped literal comparison: WHERE 100.00d < a.balance -> node 3 (250.50)
-			var crFlipped = CypherCompiler.compileToBytecode("MATCH (a:Account) WHERE 100.00d < a.balance RETURN a", snap);
+			var crFlipped = CypherCompiler.compileToBytecode("MATCH (a:Account) WHERE 100.00d < a.balance RETURN a",
+					snap);
 			ImpulseWorkspace wsFlipped = executeBothAndVerifyParity(crFlipped, bind, null);
 			assertEquals(1, wsFlipped.outputs.get(0).length);
 			assertEquals(3L, wsFlipped.outputs.get(0).i64Data[0]);
@@ -348,7 +350,8 @@ class CypherDecimalTest {
 			String scmScalarWith = CypherCompiler
 					.lowerToImpScheme("MATCH (a:Account) WITH 19.99d + 0.01d AS c RETURN c", snap);
 			assertTrue(scmScalarWith.contains("(collect :scalar \"c\" c)"), scmScalarWith);
-			var crScalarWith = CypherCompiler.compileToBytecode("MATCH (a:Account) WITH 19.99d + 0.01d AS c RETURN c", snap);
+			var crScalarWith = CypherCompiler.compileToBytecode("MATCH (a:Account) WITH 19.99d + 0.01d AS c RETURN c",
+					snap);
 			ImpulseWorkspace wsSw = executeBothAndVerifyParity(crScalarWith, bind, null);
 			assertEquals(2000L, wsSw.outputs.get(0).i64Data[0]);
 

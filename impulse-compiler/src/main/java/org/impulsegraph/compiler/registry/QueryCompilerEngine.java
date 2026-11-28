@@ -123,8 +123,8 @@ public final class QueryCompilerEngine {
 	 * Executes Stage 2 (Snapshot-Bound) compilation targeting ImpulseVM v0.11.0
 	 * ({@code .impb} v11).
 	 */
-	public ImpOpsBytecodeEmitter.CompiledProgram compileStage2(QueryObject queryObject,
-			ImpulseGraphSnapshot snapshot, CompilerOptions options) {
+	public ImpOpsBytecodeEmitter.CompiledProgram compileStage2(QueryObject queryObject, ImpulseGraphSnapshot snapshot,
+			CompilerOptions options) {
 		Objects.requireNonNull(queryObject, "queryObject must not be null");
 		Objects.requireNonNull(snapshot, "snapshot must not be null");
 

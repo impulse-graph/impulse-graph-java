@@ -197,8 +197,8 @@ class ImpScmDecimalCompilerTest {
 		}
 
 		// Transcendental math on DECIMAL without explicit CAST to f64 must fail
-		IllegalArgumentException logEx = assertThrows(IllegalArgumentException.class, () -> ImpScmCompiler
-				.compile("(query (collect :scalar \"r\" (log (dec \"10.00\" 10 2))))", null, true));
+		IllegalArgumentException logEx = assertThrows(IllegalArgumentException.class,
+				() -> ImpScmCompiler.compile("(query (collect :scalar \"r\" (log (dec \"10.00\" 10 2))))", null, true));
 		assertTrue(logEx.getMessage().startsWith("TYPE_MISMATCH"), logEx.getMessage());
 	}
 
