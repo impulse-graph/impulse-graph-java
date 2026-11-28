@@ -1,7 +1,9 @@
 package org.impulsegraph.api;
 
 import java.lang.foreign.MemorySegment;
+import java.util.List;
 import org.impulsegraph.api.bitset.ImpulseBitSet;
+import org.impulsegraph.api.meta.AttributeMeta;
 import java.util.Map;
 
 /**
@@ -67,6 +69,24 @@ public interface RelationSnapshot {
 		return 0;
 	}
 	default boolean isVirtual() {
+		return false;
+	}
+	default byte getEncodingId() {
+		return 0;
+	}
+	default long getSectionFeatures() {
+		return 0L;
+	}
+	default int[] getComponentIds() {
+		return new int[0];
+	}
+	default List<AttributeMeta> getAttributeMetas() {
+		return List.of();
+	}
+	default boolean isFlatForward() {
+		return false;
+	}
+	default boolean isFlatReverse() {
 		return false;
 	}
 	void copyTargetsSimd(int nodeId, ImpulseBitSet frontier);

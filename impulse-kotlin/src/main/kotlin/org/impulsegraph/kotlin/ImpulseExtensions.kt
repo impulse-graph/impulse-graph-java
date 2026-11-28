@@ -5,7 +5,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.impulsegraph.api.ImpulseGraphQuery
 import org.impulsegraph.api.ImpulseGraphSnapshot
+import org.impulsegraph.api.RelationSnapshot
 import org.impulsegraph.api.bitset.ImpulseBitSet
+import org.impulsegraph.api.meta.AttributeMeta
+import org.impulsegraph.api.meta.DomainMeta
+import org.impulsegraph.api.meta.IndexMeta
+import org.impulsegraph.api.meta.SnapshotHeader
 import org.impulsegraph.api.spi.ImpulseEngineRegistry
 import org.impulsegraph.api.statement.ImpulseStatement
 import org.impulsegraph.api.traversal.DomainView
@@ -86,6 +91,47 @@ operator fun ImpulseGraphSnapshot.contains(relationName: String): Boolean = rela
  */
 val ImpulseGraphSnapshot.size: Int
     get() = relationCount
+
+val ImpulseGraphSnapshot.snapshotHeader: SnapshotHeader?
+    get() = header
+
+val ImpulseGraphSnapshot.domainMetas: List<DomainMeta>
+    get() = domains ?: emptyList()
+
+val ImpulseGraphSnapshot.indexMetas: List<IndexMeta>
+    get() = secondaryIndexMetas ?: emptyList()
+
+val ImpulseGraphSnapshot.metadata: Map<String, String>
+    get() = metadataMap ?: emptyMap()
+
+val ImpulseGraphSnapshot.sha256: String
+    get() = sha256Checksum ?: ""
+
+val ImpulseGraphSnapshot.relations: Map<String, RelationSnapshot>
+    get() = allRelationSnapshots ?: emptyMap()
+
+fun ImpulseGraphSnapshot.relation(name: String): RelationSnapshot? = getRelationSnapshot(name)
+
+fun ImpulseGraphSnapshot.relation(relationId: Int): RelationSnapshot? = getRelationSnapshot(relationId)
+
+fun ImpulseGraphSnapshot.domainMeta(name: String): DomainMeta? = getDomainMeta(name)
+
+fun ImpulseGraphSnapshot.domainMeta(domainId: Int): DomainMeta? = getDomainMeta(domainId)
+
+fun ImpulseGraphSnapshot.domainName(domainId: Int): String? = getDomainName(domainId)
+
+fun ImpulseGraphSnapshot.relationSourceDomainName(relationName: String): String? = getRelationSourceDomainName(relationName)
+
+fun ImpulseGraphSnapshot.relationTargetDomainName(relationName: String): String? = getRelationTargetDomainName(relationName)
+
+fun ImpulseGraphSnapshot.metadata(key: String): String? = getMetadata(key)
+
+val RelationSnapshot.attributeMetaList: List<AttributeMeta>
+    get() = attributeMetas ?: emptyList()
+
+fun RelationSnapshot.attributeMeta(name: String): AttributeMeta? = attributeMetaList.firstOrNull { it.name() == name }
+
+fun DomainMeta.attributeMeta(name: String): AttributeMeta? = attributes().firstOrNull { it.name() == name }
 
 fun ImpulseGraphSnapshot.domainView(domainName: String): DomainView = domain(domainName)
 

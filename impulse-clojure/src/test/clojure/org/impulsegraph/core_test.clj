@@ -371,3 +371,107 @@
                           imp/to-set))))
         (finally
           (Files/deleteIfExists tmp))))))
+
+(deftest test-metadata-introspection
+  (testing "Clojure metadata introspection wrappers (header, domains, attributes, relations, indices, metadata, sha256)"
+    (let [tmp (Files/createTempFile "clojure-metadata-test" ".imps"
+                                    (make-array java.nio.file.attribute.FileAttribute 0))
+          tier-buf (.order (ByteBuffer/allocate (* 4 8)) ByteOrder/LITTLE_ENDIAN)
+          not-buf (.order (ByteBuffer/allocate (* 4 8)) ByteOrder/LITTLE_ENDIAN)
+          not-val (byte-array 128)]
+      (doseq [t [10 20 30 40]]
+        (.putLong tier-buf (long t))
+        (.putLong not-buf (long (* t 100))))
+      (aset-byte not-val 0 (unchecked-byte 0x0D))
+      (try
+        (let [bytes (with-open [arena (Arena/ofConfined)]
+                      (let [rel (RelationSnapshot. arena 4 2 (int-array [0 1 2 2 2]) (int-array [1 2]))
+                            graph (GraphSnapshot. arena {"transfer" rel})
+                            builder (-> (DefaultSnapshotBuilder.)
+                                        (.withVersion (short 11))
+                                        (.withDomain 0 "Account" (byte 0x03) 4)
+                                        (.withDomainAttribute 0 "tier" (byte 0x04) 1 0 0 (.array tier-buf) nil nil)
+                                        (.withDomainAttribute 0 "notional" (unchecked-byte (bit-or 0x15 0x80))
+                                                              1 18 2 (.array not-buf) nil not-val)
+                                        (.withDomainZoneMapIndex 0 "tier")
+                                        (.withRelationDomain "transfer" 0 0)
+                                        (.withMetadata "owner" "clojure-suite"))
+                            loaded-input (BinarySnapshotLoader$DefaultLoadedSnapshot.
+                                           0x494D5053 (short 11) graph {} {} {} {})]
+                        (.build builder loaded-input)))
+              expected-sha (.formatHex (java.util.HexFormat/of)
+                                       (.digest (java.security.MessageDigest/getInstance "SHA-256") bytes))]
+          (Files/write tmp bytes (make-array OpenOption 0))
+          (imp/with-snapshot [snap tmp]
+            (let [hdr (imp/header snap)]
+              (is (some? hdr))
+              (is (= hdr (imp/header snap)))
+              (is (= hdr (imp/header @snap)))
+              (is (= 0x494D5053 (:magic hdr)))
+              (is (= 11 (:version hdr)))
+              (is (= 16 (count (:snapshot-uuid hdr))))
+              (is (every? #(<= 0 % 255) (:snapshot-uuid hdr)))
+              (is (= (:snapshot-uuid-hex hdr)
+                     (apply str (map #(format "%02x" %) (:snapshot-uuid hdr)))))
+              (is (= (count bytes) (:file-size-bytes hdr)))
+              (is (= (count bytes) (imp/file-size-bytes snap))))
+            (is (= 1 (count (imp/domains snap))))
+            (let [dom (imp/domain-meta snap :Account)
+                  notional (second (:attributes dom))]
+              (is (= dom (imp/domain-meta snap 0)))
+              (is (nil? (imp/domain-meta snap :Missing)))
+              (is (nil? (imp/domain-meta snap nil)))
+              (is (nil? (imp/domain-meta snap 3000000000)))
+              (is (= "Account" (:name dom)))
+              (is (= 2 (:attr-count dom)))
+              (is (= 2 (count (:attributes dom))))
+              (is (= "tier" (:name (first (:attributes dom)))))
+              (is (= 0x95 (:type-code notional)))
+              (is (= 0x15 (:base-type-code notional)))
+              (is (true? (:nullable? notional)))
+              (is (pos? (:validity-bytes notional))))
+            (let [rel (imp/relation-meta snap :transfer)
+                  rels (imp/relations snap)]
+              (is (some? rel))
+              (is (= rel (get rels "transfer")))
+              (is (= rel (imp/relation-meta snap (:relation-id rel))))
+              (is (= 2 (:edge-count rel)))
+              (is (= 4 (:src-node-id-width rel)))
+              (is (= 4 (:node-id-width rel)))
+              (is (= 4 (:edge-index-width rel)))
+              (is (false? (:virtual? rel)))
+              (is (vector? (:component-ids rel)))
+              (is (vector? (:attributes rel)))
+              (is (true? (:has-csr? rel)))
+              (is (nil? (imp/relation-meta snap :missing)))
+              (is (nil? (imp/relation-meta snap nil)))
+              (is (nil? (imp/relation-meta snap 999)))
+              (is (nil? (imp/relation-meta snap 3000000000))))
+            (let [idxs (imp/secondary-indices snap)
+                  idx (first idxs)]
+              (is (= 1 (count idxs)))
+              (is (= 0 (:domain-id idx)))
+              (is (pos? (:data-bytes idx))))
+            (is (= "clojure-suite" (imp/metadata-entry snap :owner)))
+            (is (nil? (imp/metadata-entry snap :missing)))
+            (is (nil? (imp/metadata-entry snap nil)))
+            (is (= "clojure-suite" (get (imp/metadata snap) "owner")))
+            (is (= expected-sha (imp/sha256-checksum snap)))
+            ;; Nil snapshot safety
+            (is (nil? (imp/header nil)))
+            (is (= 0 (imp/file-size-bytes nil)))
+            (is (= "" (imp/sha256-checksum nil)))
+            (is (nil? (imp/metadata-entry nil :owner)))
+            (is (nil? (imp/domain-meta nil :Account)))
+            (is (nil? (imp/relation-meta nil :transfer)))
+            (is (= [] (imp/domains nil)))
+            (is (= {} (imp/relations nil)))
+            (is (= [] (imp/secondary-indices nil))))
+          ;; Synthetic in-memory GraphSnapshot defaults
+          (with-open [mem-arena (Arena/ofConfined)]
+            (let [mem-snap (create-synthetic-graph mem-arena)]
+              (is (nil? (imp/header mem-snap)))
+              (is (= 0 (imp/file-size-bytes mem-snap)))
+              (is (= "" (imp/sha256-checksum mem-snap))))))
+        (finally
+          (Files/deleteIfExists tmp))))))

@@ -28,6 +28,14 @@ public class GraphSnapshot
 	private final Map<String, BinarySnapshotLoader.LoadedDomain> domainMap;
 	private final Map<Integer, BinarySnapshotLoader.LoadedDomain> domainIdMap;
 	private final List<BinarySnapshotLoader.LoadedIndex> secondaryIndices;
+	private final org.impulsegraph.api.meta.SnapshotHeader header;
+	private final java.lang.foreign.MemorySegment rootSegment;
+	private final List<org.impulsegraph.api.meta.DomainMeta> domainMetas;
+	private final Map<String, org.impulsegraph.api.meta.DomainMeta> domainMetaByName;
+	private final Map<Integer, org.impulsegraph.api.meta.DomainMeta> domainMetaById;
+	private final List<org.impulsegraph.api.meta.IndexMeta> indexMetas;
+	private final Object sha256Lock = new Object();
+	private volatile String cachedSha256;
 
 	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots) {
 		this(arena, snapshots, Map.of(), Map.of());
@@ -50,27 +58,67 @@ public class GraphSnapshot
 	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots, Map<String, String> metadata,
 			Map<String, RelationSnapshot> aliases, Map<String, BinarySnapshotLoader.LoadedDomain> domains,
 			List<BinarySnapshotLoader.LoadedIndex> secondaryIndices) {
+		this(arena, snapshots, metadata, aliases, domains, secondaryIndices, null, null);
+	}
+
+	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots, Map<String, String> metadata,
+			Map<String, RelationSnapshot> aliases, Map<String, BinarySnapshotLoader.LoadedDomain> domains,
+			List<BinarySnapshotLoader.LoadedIndex> secondaryIndices, org.impulsegraph.api.meta.SnapshotHeader header,
+			java.lang.foreign.MemorySegment rootSegment) {
+		this(arena, snapshots, metadata, aliases, domains, domains != null ? domains.values() : List.of(),
+				secondaryIndices, header, rootSegment);
+	}
+
+	public GraphSnapshot(Arena arena, Map<String, RelationSnapshot> snapshots, Map<String, String> metadata,
+			Map<String, RelationSnapshot> aliases, Map<String, BinarySnapshotLoader.LoadedDomain> domains,
+			java.util.Collection<BinarySnapshotLoader.LoadedDomain> orderedDomains,
+			List<BinarySnapshotLoader.LoadedIndex> secondaryIndices, org.impulsegraph.api.meta.SnapshotHeader header,
+			java.lang.foreign.MemorySegment rootSegment) {
 		this.arena = Objects.requireNonNull(arena, "Arena must not be null");
+		this.header = header;
+		this.rootSegment = rootSegment;
 		this.secondaryIndices = (secondaryIndices != null && !secondaryIndices.isEmpty())
 				? List.copyOf(secondaryIndices)
 				: List.of();
+		if (this.secondaryIndices.isEmpty()) {
+			this.indexMetas = List.of();
+		} else {
+			java.util.List<org.impulsegraph.api.meta.IndexMeta> im = new java.util.ArrayList<>(
+					this.secondaryIndices.size());
+			for (BinarySnapshotLoader.LoadedIndex idx : this.secondaryIndices) {
+				im.add(idx.toIndexMeta());
+			}
+			this.indexMetas = Collections.unmodifiableList(im);
+		}
 		this.aliasMap = (aliases != null && !aliases.isEmpty())
 				? Collections.unmodifiableMap(new java.util.LinkedHashMap<>(aliases))
 				: Map.of();
 		this.domainMap = (domains != null && !domains.isEmpty())
 				? Collections.unmodifiableMap(new java.util.LinkedHashMap<>(domains))
 				: Map.of();
+		java.util.Collection<BinarySnapshotLoader.LoadedDomain> domainSource = (orderedDomains != null
+				&& !orderedDomains.isEmpty()) ? orderedDomains : this.domainMap.values();
 		Map<Integer, BinarySnapshotLoader.LoadedDomain> idMap = new java.util.LinkedHashMap<>();
+		java.util.List<org.impulsegraph.api.meta.DomainMeta> dm = new java.util.ArrayList<>(domainSource.size());
+		Map<String, org.impulsegraph.api.meta.DomainMeta> dmByName = new java.util.LinkedHashMap<>();
+		Map<Integer, org.impulsegraph.api.meta.DomainMeta> dmById = new java.util.LinkedHashMap<>();
 		int maxDomNodes = 0;
-		for (BinarySnapshotLoader.LoadedDomain d : this.domainMap.values()) {
+		for (BinarySnapshotLoader.LoadedDomain d : domainSource) {
 			if (d != null) {
 				idMap.put(d.domainId(), d);
+				org.impulsegraph.api.meta.DomainMeta meta = d.toDomainMeta();
+				dm.add(meta);
+				dmByName.put(meta.name(), meta);
+				dmById.put(meta.domainId(), meta);
 				if (d.nodeCount() > 0 && d.nodeCount() <= Integer.MAX_VALUE) {
 					maxDomNodes = Math.max(maxDomNodes, (int) d.nodeCount());
 				}
 			}
 		}
 		this.domainIdMap = Collections.unmodifiableMap(idMap);
+		this.domainMetas = Collections.unmodifiableList(dm);
+		this.domainMetaByName = Collections.unmodifiableMap(dmByName);
+		this.domainMetaById = Collections.unmodifiableMap(dmById);
 		if (snapshots == null || snapshots.isEmpty()) {
 			this.relationMap = Map.of();
 			this.unmodifiableRelationMap = Map.of();
@@ -439,13 +487,91 @@ public class GraphSnapshot
 	}
 
 	@Override
+	public org.impulsegraph.api.meta.SnapshotHeader getHeader() {
+		return header;
+	}
+
+	@Override
+	public long getFileSizeBytes() {
+		if (header != null) {
+			return header.fileSizeBytes();
+		}
+		return (rootSegment != null && !rootSegment.equals(java.lang.foreign.MemorySegment.NULL))
+				? rootSegment.byteSize()
+				: 0L;
+	}
+
+	@Override
+	public List<org.impulsegraph.api.meta.DomainMeta> getDomains() {
+		return domainMetas;
+	}
+
+	@Override
+	public org.impulsegraph.api.meta.DomainMeta getDomainMeta(String domainName) {
+		if (domainName == null) {
+			return null;
+		}
+		org.impulsegraph.api.meta.DomainMeta exact = domainMetaByName.get(domainName);
+		if (exact != null) {
+			return exact;
+		}
+		BinarySnapshotLoader.LoadedDomain dom = getDomain(domainName);
+		return dom != null ? domainMetaById.get(dom.domainId()) : null;
+	}
+
+	@Override
+	public org.impulsegraph.api.meta.DomainMeta getDomainMeta(int domainId) {
+		return domainMetaById.get(domainId);
+	}
+
+	@Override
+	public List<org.impulsegraph.api.meta.IndexMeta> getSecondaryIndexMetas() {
+		return indexMetas;
+	}
+
+	@Override
 	public String getSha256Checksum() {
-		return "";
+		String cached = this.cachedSha256;
+		if (cached != null) {
+			return cached;
+		}
+		if (rootSegment == null || rootSegment.equals(java.lang.foreign.MemorySegment.NULL)
+				|| rootSegment.byteSize() <= 0L) {
+			return "";
+		}
+		synchronized (sha256Lock) {
+			cached = this.cachedSha256;
+			if (cached != null) {
+				return cached;
+			}
+			enterQuery();
+			try {
+				if (!rootSegment.scope().isAlive()) {
+					throw new IllegalStateException("Snapshot is closed");
+				}
+				java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+				long total = rootSegment.byteSize();
+				byte[] chunk = new byte[65536];
+				for (long off = 0L; off < total; off += chunk.length) {
+					int len = (int) Math.min(chunk.length, total - off);
+					java.lang.foreign.MemorySegment.copy(rootSegment, java.lang.foreign.ValueLayout.JAVA_BYTE, off,
+							chunk, 0, len);
+					md.update(chunk, 0, len);
+				}
+				String hex = java.util.HexFormat.of().formatHex(md.digest());
+				this.cachedSha256 = hex;
+				return hex;
+			} catch (java.security.NoSuchAlgorithmException e) {
+				throw new IllegalStateException("SHA-256 unavailable", e);
+			} finally {
+				exitQuery();
+			}
+		}
 	}
 
 	@Override
 	public String getMetadata(String key) {
-		return metadata.get(key);
+		return key != null ? metadata.get(key) : null;
 	}
 
 	@Override

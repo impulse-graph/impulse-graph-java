@@ -2,6 +2,8 @@ package org.impulsegraph.vm;
 
 import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.RelationSnapshot;
+import org.impulsegraph.api.meta.AttributeMeta;
+import org.impulsegraph.api.meta.DomainMeta;
 import org.impulsegraph.compiler.emitter.V11ProgramBuilder;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 
@@ -97,13 +99,20 @@ public final class StorageCoverageBenchRunner {
 		return b.toWordArray();
 	}
 
-	private static long[] buildNodeAttrEq40(int domId, int attrIdx, boolean isFloat) {
+	private static long pow10(int s) {
+		long r = 1L;
+		for (int i = 0; i < s; i++)
+			r *= 10L;
+		return r;
+	}
+
+	private static long[] buildNodeAttrEq40(int domId, int attrIdx, boolean isFloat, long targetI64) {
 		V11ProgramBuilder b = new V11ProgramBuilder();
 		b.emitU16(OP_LOAD_COLUMN, 0, 0, 0, 0, 0, 0, domId, attrIdx);
 		if (isFloat) {
 			b.emit(OP_LOAD_CONST, SUBOP_LOAD_CONST_F32, 0, 1, 0, 0, 0, Float.floatToRawIntBits(40.0f));
 		} else {
-			b.emit(OP_LOAD_CONST, SUBOP_LOAD_CONST_I32, 0, 1, 0, 0, 0, 40);
+			b.emitLoadConstI64(1, targetI64);
 		}
 		b.emit(OP_VEC_CMP, SUBOP_VEC_CMP_EQ, FLAG_SCALAR_RHS, 1, 0, 1, 0, 0);
 		b.emitU16(OP_SET_CONVERT, 2, 0, 0, 1, 0, 0, domId, 0);
@@ -113,14 +122,14 @@ public final class StorageCoverageBenchRunner {
 		return b.toWordArray();
 	}
 
-	private static long[] buildEdgeAttrMorselEq40(int relId, int inDom, int attrIdx, boolean isFloat) {
+	private static long[] buildEdgeAttrMorselEq40(int relId, int inDom, int attrIdx, boolean isFloat, long targetI64) {
 		V11ProgramBuilder b = new V11ProgramBuilder();
 		b.emitU16(OP_LOAD_PARAM, SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, inDom);
 		b.emitU16(OP_WALK, SUBOP_WALK_FWD, 0, 1, 0, 0, 0, relId, 0);
 		if (isFloat) {
 			b.emit(OP_LOAD_CONST, SUBOP_LOAD_CONST_F32, 0, 1, 0, 0, 0, Float.floatToRawIntBits(40.0f));
 		} else {
-			b.emit(OP_LOAD_CONST, SUBOP_LOAD_CONST_I32, 0, 1, 0, 0, 0, 40);
+			b.emitLoadConstI64(1, targetI64);
 		}
 		b.emit(OP_LOAD_CONST, SUBOP_LOAD_CONST_I32, 0, 0, 0, 0, 0, 0);
 		b.emitU16(OP_WALK_MORSEL, SUBOP_WALK_MORSEL_FWD, 0, 0, 1, 0, 0, relId, 5);
@@ -293,12 +302,19 @@ public final class StorageCoverageBenchRunner {
 			sb.append("],\"attrs\":[");
 			boolean firstAttr = true;
 			List<String> domAttrNames = snap.getDomainAttributeNames(canonDomName);
+			DomainMeta canonDomMeta = snap.getDomainMeta(canonDomName);
+			List<AttributeMeta> domAttrMetas = canonDomMeta != null ? canonDomMeta.attributes() : List.of();
 			for (int a = 0; a < domAttrNames.size(); a++) {
 				String aname = domAttrNames.get(a);
 				if (!aname.startsWith("EQ_NUM_"))
 					continue;
 				boolean isFlt = aname.contains("_F32") || aname.contains("_F64");
-				RunRes rr = runTimed(buildNodeAttrEq40(canonDomId, a, isFlt), binding, ws, null, warmup, iters);
+				long targetI64 = 40L;
+				if (a < domAttrMetas.size() && (domAttrMetas.get(a).baseTypeCode() & 0xFF) == 0x15) {
+					targetI64 = 40L * pow10(domAttrMetas.get(a).scale());
+				}
+				RunRes rr = runTimed(buildNodeAttrEq40(canonDomId, a, isFlt, targetI64), binding, ws, null, warmup,
+						iters);
 				if (!firstAttr)
 					sb.append(',');
 				firstAttr = false;
@@ -311,6 +327,7 @@ public final class StorageCoverageBenchRunner {
 			ImpulseSnapshotView.RelView canonRv = view.relations[canonRelId];
 			if (canonRs instanceof org.impulsegraph.storage.csr.RelationSnapshot crs) {
 				int edgeAttrCount = crs.getAttributeSegments().size();
+				List<AttributeMeta> edgeAttrMetas = crs.getAttributeMetas();
 				ImpulseWorkspace.ParamFrontier pfSrc = new ImpulseWorkspace.ParamFrontier(canonRv.srcDom,
 						new long[]{mainSeed});
 				for (int a = 0; a < edgeAttrCount; a++) {
@@ -318,8 +335,12 @@ public final class StorageCoverageBenchRunner {
 					if (aname == null || !aname.startsWith("EQ_NUM_"))
 						continue;
 					boolean isFlt = aname.contains("_F32") || aname.contains("_F64");
-					RunRes rr = runTimed(buildEdgeAttrMorselEq40(canonRelId, canonRv.srcDom, a, isFlt), binding, ws,
-							pfSrc, warmup, iters);
+					long targetI64 = 40L;
+					if (a < edgeAttrMetas.size() && (edgeAttrMetas.get(a).baseTypeCode() & 0xFF) == 0x15) {
+						targetI64 = 40L * pow10(edgeAttrMetas.get(a).scale());
+					}
+					RunRes rr = runTimed(buildEdgeAttrMorselEq40(canonRelId, canonRv.srcDom, a, isFlt, targetI64),
+							binding, ws, pfSrc, warmup, iters);
 					if (!firstAttr)
 						sb.append(',');
 					firstAttr = false;

@@ -1,8 +1,12 @@
 package org.impulsegraph.api;
 
 import java.lang.foreign.MemorySegment;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.impulsegraph.api.meta.DomainMeta;
+import org.impulsegraph.api.meta.IndexMeta;
+import org.impulsegraph.api.meta.SnapshotHeader;
 
 /**
  * Read-only binary snapshot interface for querying immutable graph snapshots.
@@ -25,6 +29,67 @@ public interface ImpulseGraphSnapshot extends AutoCloseable {
 	 * Minor spec version.
 	 */
 	short SPEC_VERSION_MINOR = 9;
+
+	/**
+	 * Returns the parsed Page 0 binary snapshot header metadata, or null for
+	 * synthetic/programmatic snapshots.
+	 */
+	default SnapshotHeader getHeader() {
+		return null;
+	}
+
+	/**
+	 * Returns the total mapped byte size of the backing {@code .imps} snapshot
+	 * file, or 0 if unavailable.
+	 */
+	default long getFileSizeBytes() {
+		SnapshotHeader hdr = getHeader();
+		return hdr != null ? hdr.fileSizeBytes() : 0L;
+	}
+
+	/**
+	 * Returns immutable metadata descriptors for all node domains in this snapshot.
+	 */
+	default List<DomainMeta> getDomains() {
+		return List.of();
+	}
+
+	/**
+	 * Returns the immutable metadata descriptor for the named domain, or null if
+	 * not found.
+	 */
+	default DomainMeta getDomainMeta(String domainName) {
+		if (domainName == null) {
+			return null;
+		}
+		for (DomainMeta d : getDomains()) {
+			if (domainName.equals(d.name())) {
+				return d;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Returns the immutable metadata descriptor for the given numeric domain ID, or
+	 * null if not found.
+	 */
+	default DomainMeta getDomainMeta(int domainId) {
+		for (DomainMeta d : getDomains()) {
+			if (d.domainId() == domainId) {
+				return d;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Returns immutable metadata descriptors for all Section 2.6 secondary indices
+	 * in this snapshot.
+	 */
+	default List<IndexMeta> getSecondaryIndexMetas() {
+		return List.of();
+	}
 
 	/**
 	 * Returns the total count of relations stored in this snapshot.
