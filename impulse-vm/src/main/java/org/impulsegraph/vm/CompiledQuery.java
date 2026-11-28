@@ -13,37 +13,37 @@ import java.util.Objects;
  */
 public final class CompiledQuery {
 
-	private final ImpulseCompiledQuery v11Delegate;
+	private final ImpulseCompiledQuery vmDelegate;
 
-	public static CompiledQuery fromV11(ImpScmNode ast, ImpulseGraphSnapshot initialSnapshot) {
+	public static CompiledQuery fromBytecode(ImpScmNode ast, ImpulseGraphSnapshot initialSnapshot) {
 		return new CompiledQuery(new ImpulseCompiledQuery(ast, initialSnapshot));
 	}
 
-	private CompiledQuery(ImpulseCompiledQuery v11Delegate) {
-		this.v11Delegate = Objects.requireNonNull(v11Delegate, "v11Delegate must not be null");
+	private CompiledQuery(ImpulseCompiledQuery vmDelegate) {
+		this.vmDelegate = Objects.requireNonNull(vmDelegate, "vmDelegate must not be null");
 	}
 
 	public ImpulseCompiledQuery v11() {
-		return v11Delegate;
+		return vmDelegate;
 	}
 
 	public long instructionCount() {
-		return v11Delegate.instructionCount();
+		return vmDelegate.instructionCount();
 	}
 
 	public ImpulseGraphSnapshot currentSnapshot() {
-		return v11Delegate.currentSnapshot();
+		return vmDelegate.currentSnapshot();
 	}
 
 	public void rebind(ImpulseGraphSnapshot newSnapshot) {
-		v11Delegate.rebind(newSnapshot);
+		vmDelegate.rebind(newSnapshot);
 	}
 
 	public Object execute(ImpulseGraphSnapshot snapshot, Object input, Arena executionArena) {
-		return v11Delegate.execute(snapshot, input, executionArena);
+		return vmDelegate.execute(snapshot, input, executionArena);
 	}
 
 	public String disassemble() {
-		return v11Delegate.disassemble();
+		return vmDelegate.disassemble();
 	}
 }

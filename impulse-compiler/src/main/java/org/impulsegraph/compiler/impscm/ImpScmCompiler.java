@@ -1,10 +1,10 @@
-package org.impulsegraph.compiler.impscm.v11;
+package org.impulsegraph.compiler.impscm;
 
 import org.impulsegraph.api.Decimal64;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.OutputColumnMeta;
 import org.impulsegraph.api.RelationSnapshot;
-import org.impulsegraph.compiler.emitter.V11ProgramBuilder;
+import org.impulsegraph.compiler.emitter.ProgramBuilder;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 import org.impulsegraph.storage.csr.GraphSnapshot;
 import org.impulsegraph.vm.ImpulseImpbContainer;
@@ -18,14 +18,14 @@ import java.util.*;
  * Validator ({@code IMPSCM_SPECIFICATION_v0_11.md} §7.1), and {@code .impb}
  * v0.11 Compiler with full {@code DECIMAL(P, S)} static typing, strict coercion
  * matrix, compile-time literal comparison boundary folding, and output schema
- * metadata. Mirrors C++ {@code impulse::compiler::v11::ImpScmV11Compiler}.
+ * metadata. Mirrors C++ {@code impulse::compiler::v11::ImpScmCompiler}.
  */
-public final class ImpScmV11Compiler {
+public final class ImpScmCompiler {
 
 	private static final byte TYPE_CODE_DECIMAL64 = 0x15;
 	private static final byte TYPE_CODE_DECIMAL64_NULLABLE = (byte) 0x95;
 
-	private ImpScmV11Compiler() {
+	private ImpScmCompiler() {
 	}
 
 	public record CompileResult(ImpulseImpbContainer container, Map<String, Integer> paramNameToId,
@@ -298,7 +298,7 @@ public final class ImpScmV11Compiler {
 
 	private static final class Ctx {
 		final ImpulseGraphSnapshot snap;
-		final V11ProgramBuilder b = new V11ProgramBuilder();
+		final ProgramBuilder b = new ProgramBuilder();
 		int nextR = 0, nextF = 0, nextV = 0, nextParamId = 0, outputSlot = 0;
 		int pinnedRMask = 0;
 		int pinnedVMask = 0;

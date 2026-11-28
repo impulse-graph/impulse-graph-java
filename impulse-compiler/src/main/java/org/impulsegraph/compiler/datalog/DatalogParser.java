@@ -2,7 +2,7 @@ package org.impulsegraph.compiler.datalog;
 
 import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.compiler.ast.ScmProgram;
-import org.impulsegraph.compiler.impscm.v11.ImpScmV11Compiler;
+import org.impulsegraph.compiler.impscm.ImpScmCompiler;
 
 import java.util.List;
 import java.util.Map;
@@ -23,11 +23,11 @@ public final class DatalogParser {
 		return ImpLogCompiler.parseRules(source);
 	}
 
-	public static String lowerToImpSchemeV11(String source, ImpulseGraphSnapshot snapshot) {
-		return ImpLogCompiler.lowerToImpSchemeV11(source, snapshot, Map.of());
+	public static String lowerToImpScheme(String source, ImpulseGraphSnapshot snapshot) {
+		return ImpLogCompiler.lowerToImpScheme(source, snapshot, Map.of());
 	}
 
-	public static ImpScmV11Compiler.CompileResult compileToV11(String source, ImpulseGraphSnapshot snapshot) {
-		return ImpLogCompiler.compileToV11(source, snapshot, Map.of());
+	public static ImpScmCompiler.CompileResult compileToBytecode(String source, ImpulseGraphSnapshot snapshot) {
+		return ImpLogCompiler.compileToBytecode(source, snapshot, Map.of());
 	}
 }

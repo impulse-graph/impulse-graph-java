@@ -1,7 +1,7 @@
 package org.impulsegraph.vm;
 
 import org.impulsegraph.api.ImpulseGraphSnapshot;
-import org.impulsegraph.compiler.emitter.V11ProgramBuilder;
+import org.impulsegraph.compiler.emitter.ProgramBuilder;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 
 import java.lang.foreign.Arena;
@@ -69,7 +69,7 @@ public final class VmBenchRunner {
 			ImpulseWorkspace ws = new ImpulseWorkspace(maxCard);
 
 			// 1. 2-Hop Walk + Cardinality
-			V11ProgramBuilder b2 = new V11ProgramBuilder();
+			ProgramBuilder b2 = new ProgramBuilder();
 			b2.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
 			b2.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 0, 0);
 			b2.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_FWD, 0, 0, 1, 0, 0, 0, 0);
@@ -80,7 +80,7 @@ public final class VmBenchRunner {
 			long[] w2 = b2.toWordArray();
 
 			// 2. Fixpoint Kleene* Reachability + Cardinality
-			V11ProgramBuilder bf = new V11ProgramBuilder();
+			ProgramBuilder bf = new ProgramBuilder();
 			bf.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
 			bf.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_FWD_FIXPOINT_STAR, 0, 1, 0, 0, 0, 0, 0);
 			bf.emit(ImpulseIsaTables.OP_SET_CARDINALITY, ImpulseIsaTables.SUBOP_SET_CARDINALITY_CARD_1BIT, 0, 0, 1, 0,
@@ -91,7 +91,7 @@ public final class VmBenchRunner {
 
 			// 3. Morsel 2-Hop (WALK 1-hop + WALK_MORSEL.fwd + MORSEL_COMMIT.yield_frontier
 			// + CARD)
-			V11ProgramBuilder bm = new V11ProgramBuilder();
+			ProgramBuilder bm = new ProgramBuilder();
 			bm.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
 			bm.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 0, 0);
 			bm.emitU16(ImpulseIsaTables.OP_WALK_MORSEL, ImpulseIsaTables.SUBOP_WALK_MORSEL_FWD, 0, 0, 1, 0, 0, 0, 2);
@@ -106,7 +106,7 @@ public final class VmBenchRunner {
 
 			// 4. Morsel Edge Count (WALK 1-hop + WALK_MORSEL.fwd +
 			// MORSEL_COMMIT.count_add_r)
-			V11ProgramBuilder bmc = new V11ProgramBuilder();
+			ProgramBuilder bmc = new ProgramBuilder();
 			bmc.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0,
 					0);
 			bmc.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 0, 0);

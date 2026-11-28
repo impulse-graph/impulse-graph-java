@@ -2,7 +2,7 @@ package org.impulsegraph.compiler.impk;
 
 import org.impulsegraph.api.Decimal64;
 import org.impulsegraph.api.OutputColumnMeta;
-import org.impulsegraph.compiler.impscm.v11.ImpScmV11Compiler;
+import org.impulsegraph.compiler.impscm.ImpScmCompiler;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 import org.impulsegraph.storage.csr.DefaultSnapshotBuilder;
 import org.impulsegraph.storage.csr.GraphSnapshot;
@@ -103,7 +103,7 @@ class ImpKDecimalTest {
 		return BinarySnapshotLoader.loadSnapshot(impsPath, arena).graph();
 	}
 
-	private static ImpulseWorkspace executeBothAndVerifyParity(ImpScmV11Compiler.CompileResult cr,
+	private static ImpulseWorkspace executeBothAndVerifyParity(ImpScmCompiler.CompileResult cr,
 			ImpulseInterpreter.SnapshotBinding bind) {
 		ImpulseWorkspace wsInterp = new ImpulseWorkspace(16);
 		assertEquals(IMPULSE_VM_OK, ImpulseInterpreter.executeValidated(cr.codeWords(), bind, wsInterp, 100_000L));
@@ -128,7 +128,7 @@ class ImpKDecimalTest {
 					bad = bal + 1.5;
 					""";
 			IllegalArgumentException ex1 = assertThrows(IllegalArgumentException.class,
-					() -> ImpKCompiler.compileToV11(badAdd, snap));
+					() -> ImpKCompiler.compileToBytecode(badAdd, snap));
 			assertTrue(ex1.getMessage().startsWith("TYPE_MISMATCH"), ex1.getMessage());
 
 			String badLog = """
@@ -136,7 +136,7 @@ class ImpKDecimalTest {
 					bad = log(bal);
 					""";
 			IllegalArgumentException ex2 = assertThrows(IllegalArgumentException.class,
-					() -> ImpKCompiler.compileToV11(badLog, snap));
+					() -> ImpKCompiler.compileToBytecode(badLog, snap));
 			assertTrue(ex2.getMessage().startsWith("TYPE_MISMATCH"), ex2.getMessage());
 		}
 	}
@@ -155,7 +155,7 @@ class ImpKDecimalTest {
 					adjusted = scaled - 5.00d;
 					total = sum(adjusted);
 					""";
-			var crSum = ImpKCompiler.compileToV11(sumScript, snap);
+			var crSum = ImpKCompiler.compileToBytecode(sumScript, snap);
 			assertEquals(OutputColumnMeta.decimal("total", 18, 2), crSum.outputSchema().get(0));
 			ImpulseWorkspace wsSum = executeBothAndVerifyParity(crSum, bind);
 
@@ -169,12 +169,12 @@ class ImpKDecimalTest {
 			assertEquals(0, expTotal.compareTo(new Decimal64(wsSum.outputs.get(0).i64Data[0], 18, 2).toBigDecimal()));
 
 			// 2. min / max reductions
-			var crMin = ImpKCompiler.compileToV11("bal = load(\"Account\", \"balance\"); mn = min(bal);", snap);
+			var crMin = ImpKCompiler.compileToBytecode("bal = load(\"Account\", \"balance\"); mn = min(bal);", snap);
 			ImpulseWorkspace wsMin = executeBothAndVerifyParity(crMin, bind);
 			assertEquals(0, new BigDecimal("10.00")
 					.compareTo(new Decimal64(wsMin.outputs.get(0).i64Data[0], 10, 2).toBigDecimal()));
 
-			var crMax = ImpKCompiler.compileToV11("bal = load(\"Account\", \"balance\"); mx = max(bal);", snap);
+			var crMax = ImpKCompiler.compileToBytecode("bal = load(\"Account\", \"balance\"); mx = max(bal);", snap);
 			ImpulseWorkspace wsMax = executeBothAndVerifyParity(crMax, bind);
 			assertEquals(0, new BigDecimal("250.50")
 					.compareTo(new Decimal64(wsMax.outputs.get(0).i64Data[0], 10, 2).toBigDecimal()));
@@ -185,7 +185,7 @@ class ImpKDecimalTest {
 					f = cast(bal, f64);
 					lg = log(f);
 					""";
-			var crLog = ImpKCompiler.compileToV11(logScript, snap);
+			var crLog = ImpKCompiler.compileToBytecode(logScript, snap);
 			assertEquals(OutputColumnMeta.of("lg", "F64"), crLog.outputSchema().get(0));
 			ImpulseWorkspace wsLog = executeBothAndVerifyParity(crLog, bind);
 			assertEquals(Math.log(100.00), wsLog.outputs.get(0).f64Data[0], 1e-12);
@@ -196,7 +196,7 @@ class ImpKDecimalTest {
 					bal = load("Account", "balance");
 					q = bal / 4;
 					""";
-			var crDiv = ImpKCompiler.compileToV11(divScript, snap);
+			var crDiv = ImpKCompiler.compileToBytecode(divScript, snap);
 			ImpulseWorkspace wsDiv = executeBothAndVerifyParity(crDiv, bind);
 			OutputColumnMeta divMeta = crDiv.outputSchema().get(0);
 			assertTrue(divMeta.isDecimal());
@@ -225,7 +225,7 @@ class ImpKDecimalTest {
 					bal = load("Account", "balance");
 					q = bal / k;
 					""";
-			var crScalarBind = ImpKCompiler.compileToV11(scalarBindScript, snap);
+			var crScalarBind = ImpKCompiler.compileToBytecode(scalarBindScript, snap);
 			ImpulseWorkspace wsSb = executeBothAndVerifyParity(crScalarBind, bind);
 			OutputColumnMeta sbMeta = crScalarBind.outputSchema().get(0);
 			BigDecimal expSb0 = new BigDecimal("100.00").divide(new BigDecimal("4"), sbMeta.scale(),
@@ -239,7 +239,7 @@ class ImpKDecimalTest {
 					bal_s4 : DECIMAL(14, 4) = load("Account", "balance");
 					total = sum(bal_s4);
 					""";
-			var crCastLoad = ImpKCompiler.compileToV11(castLoadScript, snap);
+			var crCastLoad = ImpKCompiler.compileToBytecode(castLoadScript, snap);
 			assertEquals(OutputColumnMeta.decimal("total", 18, 4), crCastLoad.outputSchema().get(0));
 			ImpulseWorkspace wsCl = executeBothAndVerifyParity(crCastLoad, bind);
 			BigDecimal expSum = new BigDecimal("100.00").add(new BigDecimal("250.50")).add(new BigDecimal("75.25"))
@@ -252,7 +252,7 @@ class ImpKDecimalTest {
 					bal = load("Account", "balance");
 					x : DECIMAL(18, 2) = cast(bal, decimal(18, 4));
 					""";
-			var crNested = ImpKCompiler.compileToV11(nestedCastScript, snap);
+			var crNested = ImpKCompiler.compileToBytecode(nestedCastScript, snap);
 			assertEquals(OutputColumnMeta.decimal("x", 18, 2), crNested.outputSchema().get(0));
 		}
 	}

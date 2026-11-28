@@ -1,4 +1,4 @@
-package org.impulsegraph.compiler.impscm.v11;
+package org.impulsegraph.compiler.impscm;
 
 import org.impulsegraph.api.Decimal64;
 

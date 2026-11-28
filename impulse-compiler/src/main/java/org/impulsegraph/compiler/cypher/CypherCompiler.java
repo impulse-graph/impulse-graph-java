@@ -5,8 +5,8 @@ import org.impulsegraph.api.RelationSnapshot;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.cel.CelAstNode;
 import org.impulsegraph.compiler.cel.CelParser;
-import org.impulsegraph.compiler.impscm.v11.ImpScmV11Compiler;
-import org.impulsegraph.compiler.impscm.v11.V11ExprLowerer;
+import org.impulsegraph.compiler.impscm.ImpScmCompiler;
+import org.impulsegraph.compiler.impscm.ExprLowerer;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 import org.impulsegraph.storage.csr.GraphSnapshot;
 import org.impulsegraph.vm.CompiledQuery;
@@ -51,7 +51,7 @@ public final class CypherCompiler {
 	 */
 	public static CompiledQuery compileToExecutable(String cypherQuery, ImpulseGraphSnapshot snapshot, Arena arena) {
 		CompilationResult res = compile(cypherQuery);
-		return CompiledQuery.fromV11(res.ast(), snapshot);
+		return CompiledQuery.fromBytecode(res.ast(), snapshot);
 	}
 
 	/**
@@ -59,8 +59,8 @@ public final class CypherCompiler {
 	 * with full {@code DECIMAL(P, S)} support, strict coercion semantics, and
 	 * schema-guided parameter type inference.
 	 */
-	public static String lowerToImpSchemeV11(String cypherQuery, ImpulseGraphSnapshot snapshot) {
-		return lowerToImpSchemeV11(cypherQuery, snapshot, Map.of());
+	public static String lowerToImpScheme(String cypherQuery, ImpulseGraphSnapshot snapshot) {
+		return lowerToImpScheme(cypherQuery, snapshot, Map.of());
 	}
 
 	/**
@@ -68,32 +68,32 @@ public final class CypherCompiler {
 	 * using optional explicit parameter type declarations (e.g.
 	 * {@code "$rate" -> "DECIMAL(10, 4)"} or {@code "(decimal 10 4)"}).
 	 */
-	public static String lowerToImpSchemeV11(String cypherQuery, ImpulseGraphSnapshot snapshot,
+	public static String lowerToImpScheme(String cypherQuery, ImpulseGraphSnapshot snapshot,
 			Map<String, String> paramTypes) {
 		Objects.requireNonNull(cypherQuery, "cypherQuery must not be null");
 		CypherParser.CypherQuery parsed = CypherParser.parse(cypherQuery);
-		return lowerToImpSchemeV11(parsed, snapshot, paramTypes != null ? paramTypes : Map.of());
+		return lowerToImpScheme(parsed, snapshot, paramTypes != null ? paramTypes : Map.of());
 	}
 
 	/**
 	 * Compiles an openCypher query directly to validated v0.11 bytecode via
-	 * {@link ImpScmV11Compiler}.
+	 * {@link ImpScmCompiler}.
 	 */
-	public static ImpScmV11Compiler.CompileResult compileToV11(String cypherQuery, ImpulseGraphSnapshot snapshot) {
-		return compileToV11(cypherQuery, snapshot, Map.of());
+	public static ImpScmCompiler.CompileResult compileToBytecode(String cypherQuery, ImpulseGraphSnapshot snapshot) {
+		return compileToBytecode(cypherQuery, snapshot, Map.of());
 	}
 
 	/**
 	 * Compiles an openCypher query with explicit parameter types directly to
-	 * validated v0.11 bytecode via {@link ImpScmV11Compiler}.
+	 * validated v0.11 bytecode via {@link ImpScmCompiler}.
 	 */
-	public static ImpScmV11Compiler.CompileResult compileToV11(String cypherQuery, ImpulseGraphSnapshot snapshot,
+	public static ImpScmCompiler.CompileResult compileToBytecode(String cypherQuery, ImpulseGraphSnapshot snapshot,
 			Map<String, String> paramTypes) {
-		String scm = lowerToImpSchemeV11(cypherQuery, snapshot, paramTypes);
-		return ImpScmV11Compiler.compile(scm, snapshot, true);
+		String scm = lowerToImpScheme(cypherQuery, snapshot, paramTypes);
+		return ImpScmCompiler.compile(scm, snapshot, true);
 	}
 
-	public static String lowerToImpSchemeV11(CypherParser.CypherQuery query, ImpulseGraphSnapshot snapshot,
+	public static String lowerToImpScheme(CypherParser.CypherQuery query, ImpulseGraphSnapshot snapshot,
 			Map<String, String> explicitParamTypes) {
 		Objects.requireNonNull(query, "query must not be null");
 		String startVar = query.path().startNode().variable() != null ? query.path().startNode().variable() : "n";
@@ -110,7 +110,7 @@ public final class CypherCompiler {
 		Map<String, String> paramDecls = new LinkedHashMap<>();
 		for (Map.Entry<String, String> e : explicitParamTypes.entrySet()) {
 			String pname = e.getKey().startsWith("$") ? e.getKey() : "$" + e.getKey();
-			paramDecls.put(pname, V11ExprLowerer.normalizeParamType(e.getValue()));
+			paramDecls.put(pname, ExprLowerer.normalizeParamType(e.getValue()));
 		}
 
 		// Partition WHERE predicates into: seed ID, start-node filters, edge filters
@@ -157,7 +157,7 @@ public final class CypherCompiler {
 		} else if (!startPreds.isEmpty() && canUseIndexScan(startPreds.get(0), startVar, startDom, snapshot)) {
 			CypherParser.WherePredicate first = startPreds.get(0);
 			String normOp = "==".equals(first.op()) ? "=" : first.op();
-			String loweredRhs = V11ExprLowerer.lowerExpr(formatWhereRhs(first), id -> id,
+			String loweredRhs = ExprLowerer.lowerExpr(formatWhereRhs(first), id -> id,
 					(v, m) -> "(attr " + v + " \"" + m + "\")");
 			letBindings.add("[f0 (index-scan \"" + startDom + "\" \"" + first.field() + "\" " + normOp + " "
 					+ loweredRhs + ")]");
@@ -174,7 +174,7 @@ public final class CypherCompiler {
 			String nextF = "f" + (++filterIdx);
 			String lhsRaw = pred.lhsExpr() != null ? pred.lhsExpr() : (pred.targetVar() + "." + pred.field());
 			String fullCmp = lhsRaw + " " + pred.op() + " " + formatWhereRhs(pred);
-			String loweredCmp = V11ExprLowerer.lowerExpr(fullCmp, id -> id, (v, m) -> "(attr " + v + " \"" + m + "\")");
+			String loweredCmp = ExprLowerer.lowerExpr(fullCmp, id -> id, (v, m) -> "(attr " + v + " \"" + m + "\")");
 			letBindings.add(
 					"[" + nextF + " (node-filter " + curFrontier + " (lambda (" + startVar + ") " + loweredCmp + "))]");
 			curFrontier = nextF;
@@ -196,7 +196,7 @@ public final class CypherCompiler {
 		Set<String> vecWithAliases = new LinkedHashSet<>();
 		for (CypherParser.WithItem wi : query.withItems()) {
 			int beforeAttrs = loadedNodeAttrs.size();
-			String lowered = V11ExprLowerer.lowerExpr(wi.expr(), id -> id, topLevelMemberResolver);
+			String lowered = ExprLowerer.lowerExpr(wi.expr(), id -> id, topLevelMemberResolver);
 			boolean aliasIsVec = loadedNodeAttrs.size() > beforeAttrs
 					|| referencesAny(wi.expr(), loadedNodeAttrs.keySet()) || referencesAny(wi.expr(), vecWithAliases);
 			if (aliasIsVec) {
@@ -213,7 +213,7 @@ public final class CypherCompiler {
 					? pred.lhsExpr()
 					: (pred.field().isEmpty() ? pred.targetVar() : pred.targetVar() + "." + pred.field());
 			String fullCmp = lhsRaw + " " + pred.op() + " " + formatWhereRhs(pred);
-			String loweredCmp = V11ExprLowerer.lowerExpr(fullCmp, id -> id, (v, m) -> "(attr " + v + " \"" + m + "\")");
+			String loweredCmp = ExprLowerer.lowerExpr(fullCmp, id -> id, (v, m) -> "(attr " + v + " \"" + m + "\")");
 			letBindings.add(
 					"[" + nextF + " (node-filter " + curFrontier + " (lambda (" + startVar + ") " + loweredCmp + "))]");
 			curFrontier = nextF;
@@ -256,7 +256,7 @@ public final class CypherCompiler {
 					String whereExpr = lowerEdgePredicates(edgePreds, edgeVar, relName, snapshot, letBindings);
 					lam.append("(where ").append(whereExpr).append(") ");
 				}
-				String loweredEdgeVal = V11ExprLowerer.lowerExpr(item.expr(), id -> id,
+				String loweredEdgeVal = ExprLowerer.lowerExpr(item.expr(), id -> id,
 						(v, m) -> v.equals(edgeVar)
 								? "(edge-attr " + v + " \"" + m + "\")"
 								: "(attr " + v + " \"" + m + "\")");
@@ -302,7 +302,7 @@ public final class CypherCompiler {
 				} else {
 					maskPart = filtered ? " :mask " + curFrontier : "";
 				}
-				String loweredExpr = V11ExprLowerer.lowerExpr(item.expr(), id -> id, topLevelMemberResolver);
+				String loweredExpr = ExprLowerer.lowerExpr(item.expr(), id -> id, topLevelMemberResolver);
 				collects.add("(collect :scalar \"" + outName + "\" (reduce " + reduceOp + " " + loweredExpr + maskPart
 						+ "))");
 				continue;
@@ -324,7 +324,7 @@ public final class CypherCompiler {
 
 			// Vector or scalar expression return
 			int beforeAttrs = loadedNodeAttrs.size();
-			String loweredExpr = V11ExprLowerer.lowerExpr(item.expr(), id -> id, topLevelMemberResolver);
+			String loweredExpr = ExprLowerer.lowerExpr(item.expr(), id -> id, topLevelMemberResolver);
 			boolean isVec = loadedNodeAttrs.size() > beforeAttrs || referencesAny(item.expr(), loadedNodeAttrs.keySet())
 					|| referencesAny(item.expr(), vecWithAliases);
 			if (isVec) {
@@ -392,9 +392,9 @@ public final class CypherCompiler {
 		int hoistIdx = 0;
 		for (CypherParser.WherePredicate pred : edgePreds) {
 			String lhsRaw = pred.lhsExpr() != null ? pred.lhsExpr() : (pred.targetVar() + "." + pred.field());
-			String lhsScm = V11ExprLowerer.lowerExpr(lhsRaw, id -> id, (v,
+			String lhsScm = ExprLowerer.lowerExpr(lhsRaw, id -> id, (v,
 					m) -> v.equals(edgeVar) ? "(edge-attr " + v + " \"" + m + "\")" : "(attr " + v + " \"" + m + "\")");
-			String rhsScm = V11ExprLowerer.lowerExpr(formatWhereRhs(pred), id -> id, (v,
+			String rhsScm = ExprLowerer.lowerExpr(formatWhereRhs(pred), id -> id, (v,
 					m) -> v.equals(edgeVar) ? "(edge-attr " + v + " \"" + m + "\")" : "(attr " + v + " \"" + m + "\")");
 			if (!rhsScm.contains("(edge-attr ") && !rhsScm.contains("(attr ") && !rhsScm.startsWith("$")) {
 				String hoistVar = "__ek" + (++hoistIdx);

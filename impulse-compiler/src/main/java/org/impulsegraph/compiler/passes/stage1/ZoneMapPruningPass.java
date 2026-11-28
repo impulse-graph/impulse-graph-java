@@ -7,7 +7,7 @@ import org.impulsegraph.api.stats.GraphStatistics;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.ast.algebra.AlgebraicSignature;
 import org.impulsegraph.compiler.cel.CelAstNode;
-import org.impulsegraph.compiler.impscm.v11.DecimalBoundaryFolder;
+import org.impulsegraph.compiler.impscm.DecimalBoundaryFolder;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.passes.CompilerPass;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;

@@ -1,4 +1,4 @@
-package org.impulsegraph.compiler.impscm.v11;
+package org.impulsegraph.compiler.impscm;
 
 import org.impulsegraph.compiler.ast.ImpScmNode;
 import org.impulsegraph.compiler.ast.ScmCelExpr;
@@ -77,7 +77,7 @@ class Decimal64IndexScanCompilerTest {
 		return false;
 	}
 
-	private static ImpulseWorkspace executeBothAndVerifyParity(ImpScmV11Compiler.CompileResult cr,
+	private static ImpulseWorkspace executeBothAndVerifyParity(ImpScmCompiler.CompileResult cr,
 			ImpulseInterpreter.SnapshotBinding bind) {
 		ImpulseWorkspace wsInterp = new ImpulseWorkspace(32);
 		assertEquals(IMPULSE_VM_OK, ImpulseInterpreter.executeValidated(cr.codeWords(), bind, wsInterp, 100_000L));
@@ -116,7 +116,7 @@ class Decimal64IndexScanCompilerTest {
 			// 1. openCypher: WHERE a.balance > 19.995d -> index-scan +
 			// DecimalBoundaryFolder (>= 2000)
 			String cypher = "MATCH (a:Account) WHERE a.balance > 19.995d RETURN COUNT(a) AS cnt";
-			ImpScmV11Compiler.CompileResult crCypher = CypherCompiler.compileToV11(cypher, snap);
+			ImpScmCompiler.CompileResult crCypher = CypherCompiler.compileToBytecode(cypher, snap);
 			assertTrue(containsOpcode(crCypher.codeWords(), OP_INDEX_SCAN, SUBOP_INDEX_SCAN_GE),
 					"Expected DecimalBoundaryFolder to fold > 19.995d into OP_INDEX_SCAN SUBOP_INDEX_SCAN_GE");
 			ImpulseWorkspace wsCypher = executeBothAndVerifyParity(crCypher, bind);
@@ -129,7 +129,7 @@ class Decimal64IndexScanCompilerTest {
 					  (let ([f0 (index-scan "Account" "balance" > (dec "19.995" 5 3))])
 					    (collect :scalar "cnt" (cardinality f0))))
 					""";
-			ImpScmV11Compiler.CompileResult crScm = ImpScmV11Compiler.compile(scm, snap, true);
+			ImpScmCompiler.CompileResult crScm = ImpScmCompiler.compile(scm, snap, true);
 			assertTrue(containsOpcode(crScm.codeWords(), OP_INDEX_SCAN, SUBOP_INDEX_SCAN_GE));
 			ImpulseWorkspace wsScm = executeBothAndVerifyParity(crScm, bind);
 			assertEquals(2L, wsScm.outputs.get(0).i64Data[0]);
@@ -141,7 +141,7 @@ class Decimal64IndexScanCompilerTest {
 					  (let ([f0 (index-scan "Account" "balance" between (dec "19.995" 5 3) (dec "250.505" 6 3))])
 					    (collect :scalar "cnt" (cardinality f0))))
 					""";
-			ImpScmV11Compiler.CompileResult crBetween = ImpScmV11Compiler.compile(scmBetween, snap, true);
+			ImpScmCompiler.CompileResult crBetween = ImpScmCompiler.compile(scmBetween, snap, true);
 			assertTrue(containsOpcode(crBetween.codeWords(), OP_INDEX_SCAN, SUBOP_INDEX_SCAN_BETWEEN_CC));
 			ImpulseWorkspace wsBetween = executeBothAndVerifyParity(crBetween, bind);
 			assertEquals(2L, wsBetween.outputs.get(0).i64Data[0]);
@@ -263,8 +263,8 @@ class Decimal64IndexScanCompilerTest {
 
 			// 1. HIGH #3: Cypher with non-scalar RHS (a.balance > a.cap) must fall back
 			// to node-filter, NOT OP_INDEX_SCAN
-			ImpScmV11Compiler.CompileResult crAttrRhs = CypherCompiler
-					.compileToV11("MATCH (a:Account) WHERE a.balance > a.cap RETURN COUNT(a) AS cnt", snap);
+			ImpScmCompiler.CompileResult crAttrRhs = CypherCompiler
+					.compileToBytecode("MATCH (a:Account) WHERE a.balance > a.cap RETURN COUNT(a) AS cnt", snap);
 			assertFalse(containsOpcode(crAttrRhs.codeWords(), OP_INDEX_SCAN, SUBOP_INDEX_SCAN_GT),
 					"Attribute-to-attribute WHERE must fall back to node-filter, not OP_INDEX_SCAN");
 			ImpulseWorkspace wsAttrRhs = executeBothAndVerifyParity(crAttrRhs, bind);
@@ -293,7 +293,7 @@ class Decimal64IndexScanCompilerTest {
 			Path pRel = tempDir.resolve("audit_rel.imps");
 			Files.write(pRel, bytesWithRel);
 			GraphSnapshot snapRel = BinarySnapshotLoader.loadSnapshot(pRel, arena).graph();
-			assertThrows(IllegalArgumentException.class, () -> CypherCompiler.compileToV11(
+			assertThrows(IllegalArgumentException.class, () -> CypherCompiler.compileToBytecode(
 					"MATCH (a:Account)-[r:TRANSFER]->(b:Account) WHERE b.balance > 100.00d RETURN COUNT(b) AS cnt",
 					snapRel), "Predicate on target alias 'b' must not silently compile to OP_INDEX_SCAN on 'a'");
 
@@ -305,7 +305,7 @@ class Decimal64IndexScanCompilerTest {
 			assertFalse(ZoneMapPruningPass.INSTANCE.isConstantFalse(ambigRes),
 					"Multi-domain ambiguous attribute 'balance' must not be pruned without domain context");
 
-			// 4. HIGH #4: ImpScmV11Compiler rejecting `between` with DECIMAL bounds on
+			// 4. HIGH #4: ImpScmCompiler rejecting `between` with DECIMAL bounds on
 			// FLOAT64 column
 			String badBetween = """
 					(query
@@ -313,7 +313,7 @@ class Decimal64IndexScanCompilerTest {
 					    (collect :scalar "cnt" (cardinality f0))))
 					""";
 			IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-					() -> ImpScmV11Compiler.compile(badBetween, snap, true));
+					() -> ImpScmCompiler.compile(badBetween, snap, true));
 			assertTrue(ex.getMessage().startsWith("TYPE_MISMATCH"), ex.getMessage());
 		}
 	}

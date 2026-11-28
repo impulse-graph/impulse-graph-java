@@ -1,4 +1,4 @@
-package org.impulsegraph.compiler.impscm.v11;
+package org.impulsegraph.compiler.impscm;
 
 import com.sun.management.ThreadMXBean;
 import org.impulsegraph.api.Decimal64;
@@ -33,13 +33,13 @@ import static org.junit.jupiter.api.Assertions.*;
  * Frontend Lowering, and E2E Financial Ledger Test Suite for
  * {@code DECIMAL(P, S)}.
  */
-class ImpScmV11DecimalCompilerTest {
+class ImpScmDecimalCompilerTest {
 
 	private static final byte TYPE_DECIMAL64 = (byte) 0x15;
 	private static final byte TYPE_DECIMAL64_NULLABLE = (byte) (0x15 | 0x80);
 
 	private static ImpulseWorkspace runScalarQuery(String src, Map<Integer, ImpulseWorkspace.ParamScalar> params) {
-		var cr = ImpScmV11Compiler.compile(src, null, true);
+		var cr = ImpScmCompiler.compile(src, null, true);
 		ImpulseWorkspace ws = new ImpulseWorkspace(16);
 		if (params != null) {
 			ws.params.putAll(params);
@@ -65,7 +65,7 @@ class ImpScmV11DecimalCompilerTest {
 			for (String op : List.of("+", "-")) {
 				String src = "(query (collect :scalar \"res\" (" + op + " (dec \"" + tc.a + "\" " + tc.p1 + " " + tc.s1
 						+ ") (dec \"" + tc.b + "\" " + tc.p2 + " " + tc.s2 + "))))";
-				var cr = ImpScmV11Compiler.compile(src, null, true);
+				var cr = ImpScmCompiler.compile(src, null, true);
 				OutputColumnMeta meta = cr.outputSchema().get(0);
 				assertTrue(meta.isDecimal());
 				assertEquals(expP, meta.precision(), src);
@@ -94,7 +94,7 @@ class ImpScmV11DecimalCompilerTest {
 			int expP = Math.min(18, tc.p1 + tc.p2);
 			String src = "(query (collect :scalar \"res\" (* (dec \"" + tc.a + "\" " + tc.p1 + " " + tc.s1 + ") (dec \""
 					+ tc.b + "\" " + tc.p2 + " " + tc.s2 + "))))";
-			var cr = ImpScmV11Compiler.compile(src, null, true);
+			var cr = ImpScmCompiler.compile(src, null, true);
 			OutputColumnMeta meta = cr.outputSchema().get(0);
 			assertEquals(expP, meta.precision(), src);
 			assertEquals(expS, meta.scale(), src);
@@ -112,7 +112,7 @@ class ImpScmV11DecimalCompilerTest {
 		// 3. DECIMAL / DECIMAL and safe-div (including div-by-zero trap 17 vs Kleene
 		// NULL)
 		String divSrc = "(query (collect :scalar \"q\" (/ (dec \"100.00\" 10 2) (dec \"3.00\" 10 2))))";
-		var divCr = ImpScmV11Compiler.compile(divSrc, null, true);
+		var divCr = ImpScmCompiler.compile(divSrc, null, true);
 		assertEquals(18, divCr.outputSchema().get(0).precision());
 		assertEquals(6, divCr.outputSchema().get(0).scale());
 		ImpulseWorkspace wsDiv = new ImpulseWorkspace(16);
@@ -186,18 +186,18 @@ class ImpScmV11DecimalCompilerTest {
 			for (String rhs : forbiddenRhs) {
 				String srcLR = "(query (collect :scalar \"r\" (" + op + " (dec \"10.00\" 10 2) " + rhs + ")))";
 				IllegalArgumentException ex1 = assertThrows(IllegalArgumentException.class,
-						() -> ImpScmV11Compiler.compile(srcLR, null, true), "Expected TYPE_MISMATCH for: " + srcLR);
+						() -> ImpScmCompiler.compile(srcLR, null, true), "Expected TYPE_MISMATCH for: " + srcLR);
 				assertTrue(ex1.getMessage().startsWith("TYPE_MISMATCH"), ex1.getMessage());
 
 				String srcRL = "(query (collect :scalar \"r\" (" + op + " " + rhs + " (dec \"10.00\" 10 2))))";
 				IllegalArgumentException ex2 = assertThrows(IllegalArgumentException.class,
-						() -> ImpScmV11Compiler.compile(srcRL, null, true), "Expected TYPE_MISMATCH for: " + srcRL);
+						() -> ImpScmCompiler.compile(srcRL, null, true), "Expected TYPE_MISMATCH for: " + srcRL);
 				assertTrue(ex2.getMessage().startsWith("TYPE_MISMATCH"), ex2.getMessage());
 			}
 		}
 
 		// Transcendental math on DECIMAL without explicit CAST to f64 must fail
-		IllegalArgumentException logEx = assertThrows(IllegalArgumentException.class, () -> ImpScmV11Compiler
+		IllegalArgumentException logEx = assertThrows(IllegalArgumentException.class, () -> ImpScmCompiler
 				.compile("(query (collect :scalar \"r\" (log (dec \"10.00\" 10 2))))", null, true));
 		assertTrue(logEx.getMessage().startsWith("TYPE_MISMATCH"), logEx.getMessage());
 	}
@@ -257,7 +257,7 @@ class ImpScmV11DecimalCompilerTest {
 			String qGt = "(query (let ([all (domain-all \"Item\")] "
 					+ "[f (node-filter all (lambda (u) (> (attr u \"price\") (dec \"19.995\" 10 3))))]) "
 					+ "(collect :frontier-ids \"hits\" f)))";
-			var crGt = ImpScmV11Compiler.compile(qGt, snap, true);
+			var crGt = ImpScmCompiler.compile(qGt, snap, true);
 			assertZeroDecimalAluOpcodes(crGt.codeWords());
 			ImpulseWorkspace wsGt = new ImpulseWorkspace(16);
 			ImpulseInterpreter.execute(crGt.codeWords(), bind, wsGt);
@@ -270,7 +270,7 @@ class ImpScmV11DecimalCompilerTest {
 			String qNegLe = "(query (let ([all (domain-all \"Item\")] "
 					+ "[f (node-filter all \"price\" <= (dec \"-19.995\" 10 3))]) "
 					+ "(collect :frontier-ids \"hits\" f)))";
-			var crNegLe = ImpScmV11Compiler.compile(qNegLe, snap, true);
+			var crNegLe = ImpScmCompiler.compile(qNegLe, snap, true);
 			assertZeroDecimalAluOpcodes(crNegLe.codeWords());
 			ImpulseWorkspace wsNegLe = new ImpulseWorkspace(16);
 			ImpulseInterpreter.execute(crNegLe.codeWords(), bind, wsNegLe);
@@ -282,7 +282,7 @@ class ImpScmV11DecimalCompilerTest {
 			String qEq = "(query (let ([all (domain-all \"Item\")] "
 					+ "[f (node-filter all \"price\" = (dec \"19.995\" 10 3))]) "
 					+ "(collect :frontier-ids \"hits\" f)))";
-			var crEq = ImpScmV11Compiler.compile(qEq, snap, true);
+			var crEq = ImpScmCompiler.compile(qEq, snap, true);
 			assertZeroDecimalAluOpcodes(crEq.codeWords());
 			ImpulseWorkspace wsEq = new ImpulseWorkspace(16);
 			ImpulseInterpreter.execute(crEq.codeWords(), bind, wsEq);
@@ -300,7 +300,7 @@ class ImpScmV11DecimalCompilerTest {
 	}
 
 	@Test
-	void frontendCelLoweringProducesValidV11DecimalImpScheme() {
+	void frontendCelLoweringProducesValidDecimalImpScheme() {
 		// 1. SQL CAST forms
 		assertEquals("(cast $rate (decimal 10 4))", CelCompiler.compileToImpScheme("CAST($rate AS DECIMAL(10, 4))"));
 		assertEquals("(log (cast amount f64))", CelCompiler.compileToImpScheme("log(CAST(amount AS FLOAT64))"));
@@ -331,7 +331,7 @@ class ImpScmV11DecimalCompilerTest {
 		assertEquals("(dec \"42\" 2 0)", CelCompiler.compileToImpScheme("42d"));
 		assertEquals("19.99", CelCompiler.compileToImpScheme("19.99"));
 
-		// Compile lowered expressions through ImpScmV11Compiler and execute
+		// Compile lowered expressions through ImpScmCompiler and execute
 		String loweredCast = CelCompiler.compileToImpScheme("CAST(19.95 AS DECIMAL(10, 2))");
 		ImpulseWorkspace ws1 = runScalarQuery("(query (collect :scalar \"v\" " + loweredCast + "))", null);
 		assertEquals(IMPULSE_VM_OK, ws1.status);
@@ -454,7 +454,7 @@ class ImpScmV11DecimalCompilerTest {
 					    (collect :vec "log_bal" log_bal)))
 					""";
 
-			var cr = ImpScmV11Compiler.compile(query, snap, true);
+			var cr = ImpScmCompiler.compile(query, snap, true);
 
 			// Verify output schema metadata carries exact (precision, scale)
 			assertEquals(6, cr.outputSchema().size());
@@ -616,7 +616,7 @@ class ImpScmV11DecimalCompilerTest {
 					    (collect :scalar "mn" (reduce :min v))
 					    (collect :scalar "mx" (reduce :max v))))
 					""";
-			var crMinMax = ImpScmV11Compiler.compile(qMinMax, snap, true);
+			var crMinMax = ImpScmCompiler.compile(qMinMax, snap, true);
 			ImpulseWorkspace wsMinMax = new ImpulseWorkspace(16);
 			assertEquals(IMPULSE_VM_OK,
 					ImpulseInterpreter.executeValidated(crMinMax.codeWords(), bind, wsMinMax, 10000L));
@@ -632,7 +632,7 @@ class ImpScmV11DecimalCompilerTest {
 					        [b (load-node-attr "Node" "divs")])
 					    (collect :vec "q" (safe-div a b))))
 					""";
-			var crSafeVec = ImpScmV11Compiler.compile(qSafeVec, snap, true);
+			var crSafeVec = ImpScmCompiler.compile(qSafeVec, snap, true);
 			ImpulseWorkspace wsSafeVec = new ImpulseWorkspace(16);
 			assertEquals(IMPULSE_VM_OK,
 					ImpulseInterpreter.executeValidated(crSafeVec.codeWords(), bind, wsSafeVec, 10000L));
@@ -650,7 +650,7 @@ class ImpScmV11DecimalCompilerTest {
 					                (* (+ x (dec "1.00" 10 2)) (+ x (dec "2.00" 10 2))))])
 					    (collect :vec "r" res)))
 					""";
-			var crNested = ImpScmV11Compiler.compile(qNested, snap, true);
+			var crNested = ImpScmCompiler.compile(qNested, snap, true);
 			ImpulseWorkspace wsNested = new ImpulseWorkspace(16);
 			assertEquals(IMPULSE_VM_OK,
 					ImpulseInterpreter.executeValidated(crNested.codeWords(), bind, wsNested, 10000L));
@@ -671,7 +671,7 @@ class ImpScmV11DecimalCompilerTest {
 					        [v5 (vec-fill "Node" (decimal 10 2) (dec "1.00" 10 2))])
 					    (collect :vec "p" (* (+ v0 (dec "1.00" 10 2)) (+ v0 (dec "2.00" 10 2))))))
 					""";
-			var crSix = ImpScmV11Compiler.compile(qSixBound, snap, true);
+			var crSix = ImpScmCompiler.compile(qSixBound, snap, true);
 			ImpulseWorkspace wsSix = new ImpulseWorkspace(16);
 			assertEquals(IMPULSE_VM_OK, ImpulseInterpreter.executeValidated(crSix.codeWords(), bind, wsSix, 10000L));
 			assertEquals(60_000L, wsSix.outputs.get(0).i64Data[0]); // 2.00 * 3.00 = 6.0000
@@ -688,7 +688,7 @@ class ImpScmV11DecimalCompilerTest {
 					    (collect :vec "p" (* (+ v0 (dec "1.00" 10 2)) (+ v0 (dec "2.00" 10 2))))))
 					""";
 			IllegalStateException exh = assertThrows(IllegalStateException.class,
-					() -> ImpScmV11Compiler.compile(qSevenBound, snap, true));
+					() -> ImpScmCompiler.compile(qSevenBound, snap, true));
 			assertTrue(exh.getMessage().startsWith("REGISTER_EXHAUSTION"), exh.getMessage());
 
 			// 6. [HIGH] vec-fill scale narrowing (1.2345 -> DECIMAL(10, 2) = 1.23)
@@ -696,7 +696,7 @@ class ImpScmV11DecimalCompilerTest {
 					(query
 					  (collect :vec "v" (vec-fill "Node" (decimal 10 2) (dec "1.2345" 5 4))))
 					""";
-			var crFill = ImpScmV11Compiler.compile(qFill, snap, true);
+			var crFill = ImpScmCompiler.compile(qFill, snap, true);
 			ImpulseWorkspace wsFill = new ImpulseWorkspace(16);
 			assertEquals(IMPULSE_VM_OK, ImpulseInterpreter.executeValidated(crFill.codeWords(), bind, wsFill, 10000L));
 			assertEquals(123L, wsFill.outputs.get(0).i64Data[0]);
@@ -710,7 +710,7 @@ class ImpScmV11DecimalCompilerTest {
 					        [f (node-filter all "intCol" > (dec "10.5" 5 1))])
 					    (collect :frontier-ids "hits" f)))
 					""";
-			var crIntDec = ImpScmV11Compiler.compile(qIntDecFilter, snap, true);
+			var crIntDec = ImpScmCompiler.compile(qIntDecFilter, snap, true);
 			assertZeroDecimalAluOpcodes(crIntDec.codeWords());
 			ImpulseWorkspace wsIntDec = new ImpulseWorkspace(16);
 			assertEquals(IMPULSE_VM_OK,
@@ -726,7 +726,7 @@ class ImpScmV11DecimalCompilerTest {
 					    (collect :frontier-ids "hits" f)))
 					""";
 			IllegalArgumentException fltEx = assertThrows(IllegalArgumentException.class,
-					() -> ImpScmV11Compiler.compile(qFltDecFilter, snap, true));
+					() -> ImpScmCompiler.compile(qFltDecFilter, snap, true));
 			assertTrue(fltEx.getMessage().startsWith("TYPE_MISMATCH"), fltEx.getMessage());
 
 			// 8. [MEDIUM] Symmetric boundary folding: (< (dec "19.995" 10 3) v) folds with
@@ -736,7 +736,7 @@ class ImpScmV11DecimalCompilerTest {
 					  (let ([v (vec-fill "Node" (decimal 10 2) (dec "20.00" 10 2))])
 					    (collect :vec "m" (< (dec "19.995" 10 3) v))))
 					""";
-			var crSym = ImpScmV11Compiler.compile(qSymFold, snap, true);
+			var crSym = ImpScmCompiler.compile(qSymFold, snap, true);
 			assertZeroDecimalAluOpcodes(crSym.codeWords());
 			ImpulseWorkspace wsSym = new ImpulseWorkspace(16);
 			assertEquals(IMPULSE_VM_OK, ImpulseInterpreter.executeValidated(crSym.codeWords(), bind, wsSym, 10000L));

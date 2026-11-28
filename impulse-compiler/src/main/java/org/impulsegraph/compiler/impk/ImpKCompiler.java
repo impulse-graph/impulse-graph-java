@@ -17,8 +17,8 @@ import org.impulsegraph.compiler.ast.ScmReduce;
 import org.impulsegraph.compiler.ast.ScmVectorAnnSearch;
 import org.impulsegraph.compiler.ast.ScmVectorRerankDot;
 import org.impulsegraph.compiler.ast.ScmWalk;
-import org.impulsegraph.compiler.impscm.v11.ImpScmV11Compiler;
-import org.impulsegraph.compiler.impscm.v11.V11ExprLowerer;
+import org.impulsegraph.compiler.impscm.ImpScmCompiler;
+import org.impulsegraph.compiler.impscm.ExprLowerer;
 import org.impulsegraph.vm.CompiledQuery;
 
 import java.lang.foreign.Arena;
@@ -298,9 +298,9 @@ public final class ImpKCompiler {
 		// Decimal/v11 built-in function calls: load/attr, sum, min, max, cast, decimal,
 		// safe_div, log/exp/sqrt/abs
 		if (first.type() == TokenType.IDENT && pos[0] + 1 < tokens.size()
-				&& tokens.get(pos[0] + 1).type() == TokenType.LPAREN && isDecimalV11Fn(first.text())
+				&& tokens.get(pos[0] + 1).type() == TokenType.LPAREN && isDecimalFn(first.text())
 				&& !hasBinaryOpAfterMatchingParen(tokens, pos[0] + 1)) {
-			parseDecimalV11Call(target, typeAnnotation, tokens, pos, statements);
+			parseDecimalCall(target, typeAnnotation, tokens, pos, statements);
 			return;
 		}
 		// Simple legacy binary forms: y = A * x, z = v + w (check no further binary
@@ -332,7 +332,7 @@ public final class ImpKCompiler {
 		// Legacy unknown function call `u = unknown_fn(1, "abc", 'def');`
 		if (first.type() == TokenType.IDENT && pos[0] + 1 < tokens.size()
 				&& tokens.get(pos[0] + 1).type() == TokenType.LPAREN && typeAnnotation.isEmpty()
-				&& !isDecimalV11Fn(first.text()) && !hasBinaryOpAfterMatchingParen(tokens, pos[0] + 1)) {
+				&& !isDecimalFn(first.text()) && !hasBinaryOpAfterMatchingParen(tokens, pos[0] + 1)) {
 			pos[0] += 2;
 			int depth = 1;
 			while (pos[0] < tokens.size() && depth > 0 && tokens.get(pos[0]).type() != TokenType.END) {
@@ -366,7 +366,7 @@ public final class ImpKCompiler {
 		};
 	}
 
-	private static boolean isDecimalV11Fn(String fn) {
+	private static boolean isDecimalFn(String fn) {
 		return switch (fn.toLowerCase()) {
 			case "load", "attr", "sum", "min", "max", "cast", "decimal", "dec", "safe_div", "log", "exp", "sqrt",
 					"abs" ->
@@ -413,7 +413,7 @@ public final class ImpKCompiler {
 		return false;
 	}
 
-	private static void parseDecimalV11Call(String target, String typeAnnotation, List<Token> tokens, int[] pos,
+	private static void parseDecimalCall(String target, String typeAnnotation, List<Token> tokens, int[] pos,
 			List<ImpKStatement> out) {
 		String fn = tokens.get(pos[0]).text();
 		String fnLower = fn.toLowerCase();
@@ -747,7 +747,7 @@ public final class ImpKCompiler {
 
 	public static CompiledQuery compileToExecutable(String script, ImpulseGraphSnapshot snapshot, Arena arena) {
 		ScmProgram prog = compile(script);
-		return CompiledQuery.fromV11(prog, snapshot);
+		return CompiledQuery.fromBytecode(prog, snapshot);
 	}
 
 	/**
@@ -755,15 +755,15 @@ public final class ImpKCompiler {
 	 * casts, arithmetic, and reductions ({@code sum}, {@code min}, {@code max})
 	 * into canonical ImpScheme v0.11 S-expression IR.
 	 */
-	public static String lowerToImpSchemeV11(String script, ImpulseGraphSnapshot snapshot) {
-		return lowerToImpSchemeV11(script, snapshot, Map.of());
+	public static String lowerToImpScheme(String script, ImpulseGraphSnapshot snapshot) {
+		return lowerToImpScheme(script, snapshot, Map.of());
 	}
 
 	/**
 	 * Lowers an ImpK script with optional explicit parameter types into canonical
 	 * ImpScheme v0.11 S-expression IR.
 	 */
-	public static String lowerToImpSchemeV11(String script, ImpulseGraphSnapshot snapshot,
+	public static String lowerToImpScheme(String script, ImpulseGraphSnapshot snapshot,
 			Map<String, String> explicitParamTypes) {
 		Objects.requireNonNull(script, "script must not be null");
 		List<ImpKStatement> stmts = parseInternal(script, true);
@@ -774,7 +774,7 @@ public final class ImpKCompiler {
 		if (explicitParamTypes != null) {
 			for (Map.Entry<String, String> e : explicitParamTypes.entrySet()) {
 				String pname = e.getKey().startsWith("$") ? e.getKey() : "$" + e.getKey();
-				paramDecls.put(pname, V11ExprLowerer.normalizeParamType(e.getValue()));
+				paramDecls.put(pname, ExprLowerer.normalizeParamType(e.getValue()));
 			}
 		}
 
@@ -799,20 +799,20 @@ public final class ImpKCompiler {
 						case REDUCE_MIN -> ":min";
 						default -> ":max";
 					};
-					String inner = V11ExprLowerer.lowerExpr(s.exprText(), id -> id,
+					String inner = ExprLowerer.lowerExpr(s.exprText(), id -> id,
 							(v, m) -> "(attr " + v + " \"" + m + "\")");
 					loweredRhs = "(reduce " + reduceKw + " " + inner + ")";
 					isVec = false;
 				}
 				case MATRIX_VECTOR_MUL -> {
 					String expr = !s.exprText().isEmpty() ? s.exprText() : (s.matrixVar() + " * " + s.vectorVar1());
-					loweredRhs = V11ExprLowerer.lowerExpr(expr, id -> id, (v, m) -> "(attr " + v + " \"" + m + "\")");
+					loweredRhs = ExprLowerer.lowerExpr(expr, id -> id, (v, m) -> "(attr " + v + " \"" + m + "\")");
 					isVec = vectorVars.contains(s.matrixVar()) || vectorVars.contains(s.vectorVar1());
 				}
 				case VECTOR_ADD, VECTOR_SUB, VECTOR_MUL, VECTOR_DIV, VECTOR_SAFE_DIV, DECIMAL_EXPR, CAST,
 						UNARY_MATH -> {
 					String expr = !s.exprText().isEmpty() ? s.exprText() : (s.vectorVar1() + " + " + s.vectorVar2());
-					loweredRhs = V11ExprLowerer.lowerExpr(expr, id -> id, (v, m) -> "(attr " + v + " \"" + m + "\")");
+					loweredRhs = ExprLowerer.lowerExpr(expr, id -> id, (v, m) -> "(attr " + v + " \"" + m + "\")");
 					isVec = referencesAnyIdent(expr, vectorVars);
 				}
 				default -> throw new IllegalArgumentException(
@@ -822,7 +822,7 @@ public final class ImpKCompiler {
 			// Apply explicit type annotation (e.g. `x : DECIMAL(18, 2) = ...`) via cast
 			// unless the expression already has the exact target type
 			if (!s.typeAnnotation().isEmpty()) {
-				String canonType = V11ExprLowerer.normalizeParamType(s.typeAnnotation());
+				String canonType = ExprLowerer.normalizeParamType(s.typeAnnotation());
 				boolean alreadyExactType = false;
 				if (s.opType() == ImpKOpType.LOAD_ATTR
 						&& snapshot instanceof org.impulsegraph.storage.csr.GraphSnapshot gs) {
@@ -871,20 +871,20 @@ public final class ImpKCompiler {
 
 	/**
 	 * Compiles an ImpK script directly to validated v0.11 bytecode via
-	 * {@link ImpScmV11Compiler}.
+	 * {@link ImpScmCompiler}.
 	 */
-	public static ImpScmV11Compiler.CompileResult compileToV11(String script, ImpulseGraphSnapshot snapshot) {
-		return compileToV11(script, snapshot, Map.of());
+	public static ImpScmCompiler.CompileResult compileToBytecode(String script, ImpulseGraphSnapshot snapshot) {
+		return compileToBytecode(script, snapshot, Map.of());
 	}
 
 	/**
 	 * Compiles an ImpK script with explicit parameter types directly to validated
-	 * v0.11 bytecode via {@link ImpScmV11Compiler}.
+	 * v0.11 bytecode via {@link ImpScmCompiler}.
 	 */
-	public static ImpScmV11Compiler.CompileResult compileToV11(String script, ImpulseGraphSnapshot snapshot,
+	public static ImpScmCompiler.CompileResult compileToBytecode(String script, ImpulseGraphSnapshot snapshot,
 			Map<String, String> paramTypes) {
-		String scm = lowerToImpSchemeV11(script, snapshot, paramTypes);
-		return ImpScmV11Compiler.compile(scm, snapshot, true);
+		String scm = lowerToImpScheme(script, snapshot, paramTypes);
+		return ImpScmCompiler.compile(scm, snapshot, true);
 	}
 
 	private static boolean referencesAnyIdent(String expr, Set<String> idents) {

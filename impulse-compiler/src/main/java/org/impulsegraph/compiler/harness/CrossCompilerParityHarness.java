@@ -1,7 +1,7 @@
 package org.impulsegraph.compiler.harness;
 
 import org.impulsegraph.api.ImpulseGraphSnapshot;
-import org.impulsegraph.compiler.impscm.v11.ImpScmV11Compiler;
+import org.impulsegraph.compiler.impscm.ImpScmCompiler;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 import org.impulsegraph.storage.csr.GraphSnapshot;
 import org.impulsegraph.storage.csr.RelationSnapshot;
@@ -50,7 +50,7 @@ public class CrossCompilerParityHarness {
 		return new GraphSnapshot(arena, Map.of("NEXT", rel), Map.of(), Map.of(), doms);
 	}
 
-	private static void runV11Impscm(String[] args) {
+	private static void runImpscm(String[] args) {
 		// args: --v11-impscm <path> <opt:0|1> <snap:rebac|chain> [param0_u64
 		// [param1_u64]]
 		String path = args[1];
@@ -59,9 +59,9 @@ public class CrossCompilerParityHarness {
 		try (Arena arena = Arena.ofConfined()) {
 			String src = Files.readString(Path.of(path));
 			GraphSnapshot snap = "rebac".equals(snapKind) ? buildRebacSnapshot(arena) : buildChainSnapshot(arena);
-			ImpScmV11Compiler.CompileResult cr;
+			ImpScmCompiler.CompileResult cr;
 			try {
-				cr = ImpScmV11Compiler.compile(src, snap, opt);
+				cr = ImpScmCompiler.compile(src, snap, opt);
 			} catch (IllegalArgumentException ex) {
 				String msg = ex.getMessage() != null ? ex.getMessage().replace("\"", "'") : "error";
 				System.out.println("{\"status\": \"compile_error\", \"error\": \"" + msg + "\"}");
@@ -106,7 +106,7 @@ public class CrossCompilerParityHarness {
 
 	public static void main(String[] args) {
 		if (args.length >= 4 && "--v11-impscm".equals(args[0])) {
-			runV11Impscm(args);
+			runImpscm(args);
 			return;
 		}
 		if (args.length < 2) {

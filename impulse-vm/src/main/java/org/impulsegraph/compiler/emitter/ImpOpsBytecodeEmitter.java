@@ -69,7 +69,7 @@ public final class ImpOpsBytecodeEmitter {
 			throw new IllegalArgumentException("ImpOpsBytecodeEmitter expects a ScmProgram root");
 		}
 
-		V11ProgramBuilder b = new V11ProgramBuilder();
+		ProgramBuilder b = new ProgramBuilder();
 		Map<String, Integer> relIdMap = new HashMap<>();
 		Map<String, Integer> paramMap = new HashMap<>();
 
@@ -880,7 +880,7 @@ public final class ImpOpsBytecodeEmitter {
 				activeIsMultiLane);
 	}
 
-	private static int emitMorselExpr(ImpScmNode expr, V11ProgramBuilder b, int[] regs, ImpulseGraphSnapshot snap,
+	private static int emitMorselExpr(ImpScmNode expr, ProgramBuilder b, int[] regs, ImpulseGraphSnapshot snap,
 			int tgtDom, int relId, boolean isNodeMorsel) {
 		if (expr instanceof ScmList list && !list.elements().isEmpty()
 				&& list.elements().get(0) instanceof ScmSymbol sym) {
@@ -952,7 +952,7 @@ public final class ImpOpsBytecodeEmitter {
 		return isNodeMorsel ? 8 : 9;
 	}
 
-	private static int emitBranch(ImpScmNode branch, int inF, int outF, V11ProgramBuilder b, ImpulseGraphSnapshot snap,
+	private static int emitBranch(ImpScmNode branch, int inF, int outF, ProgramBuilder b, ImpulseGraphSnapshot snap,
 			Map<String, Integer> relIdMap, int curDom) {
 		if (branch instanceof ScmWalk w) {
 			int rid = resolveRelId(snap, w.relationName(), w.relationId());
@@ -1119,7 +1119,7 @@ public final class ImpOpsBytecodeEmitter {
 		return r;
 	}
 
-	private static int emitCelMorselExpr(MiniCelExpr node, V11ProgramBuilder b, int[] regs, ImpulseGraphSnapshot snap,
+	private static int emitCelMorselExpr(MiniCelExpr node, ProgramBuilder b, int[] regs, ImpulseGraphSnapshot snap,
 			int domId, int relId, boolean isEdgeMorsel) {
 		if (node == null) {
 			return 8;
