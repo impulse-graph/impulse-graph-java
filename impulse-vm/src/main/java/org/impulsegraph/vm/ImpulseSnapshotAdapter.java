@@ -262,10 +262,12 @@ public final class ImpulseSnapshotAdapter {
 							: ((nEdges > 0 && seg.byteSize() == (long) nEdges * 8L) ? (byte) 7 : (byte) 6);
 					MemorySegment edgeValidSeg = (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot crs
 							&& a < crs.getValiditySegments().size()) ? crs.getValiditySegments().get(a) : null;
+					MemorySegment edgeOffsetsSeg = (rel instanceof org.impulsegraph.storage.csr.RelationSnapshot crs
+							&& a < crs.getOffsetsSegments().size()) ? crs.getOffsetsSegments().get(a) : null;
 					boolean edgeNullable = (inferredType & 0x80) != 0
 							|| (edgeValidSeg != null && !edgeValidSeg.equals(MemorySegment.NULL));
 					offHeapEdgeAttrs.put(a, new ImpulseSnapshotView.OffHeapAttrColumn(inferredType, nEdges,
-							edgeNullable, seg, edgeValidSeg, null));
+							edgeNullable, seg, edgeValidSeg, edgeOffsetsSeg));
 				}
 			}
 

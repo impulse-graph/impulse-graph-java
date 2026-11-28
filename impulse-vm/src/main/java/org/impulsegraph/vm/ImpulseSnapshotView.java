@@ -66,10 +66,13 @@ public final class ImpulseSnapshotView {
 		}
 
 		public String readString(int idx) {
-			if (!isValidAt(idx))
+			if (!isValidAt(idx) || offsetsSeg == null || offsetsSeg.equals(MemorySegment.NULL))
+				return null;
+			long offBytePos = (long) (idx + 1) << 2;
+			if (offBytePos + 4L > offsetsSeg.byteSize())
 				return null;
 			long start = Integer.toUnsignedLong(offsetsSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) idx << 2));
-			long end = Integer.toUnsignedLong(offsetsSeg.get(ValueLayout.JAVA_INT_UNALIGNED, (long) (idx + 1) << 2));
+			long end = Integer.toUnsignedLong(offsetsSeg.get(ValueLayout.JAVA_INT_UNALIGNED, offBytePos));
 			if (end < start || end > dataSeg.byteSize()) {
 				throw new IllegalStateException("Out-of-bounds UTF-8 string offset [" + start + ", " + end + ")");
 			}

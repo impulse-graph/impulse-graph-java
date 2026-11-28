@@ -3236,6 +3236,24 @@ public final class ImpulsePillar3Ops {
 				}
 			}
 			vGather.elemTag = tag;
+		} else if (tag == ImpulseVector.TAG_STR) {
+			String[] outStr = ws.arena.allocStringZeroed(len);
+			for (int i = 0; i < len; i++) {
+				if (!idxV.isValidAt(i))
+					continue;
+				long e64 = idxData[i];
+				if (e64 < 0L || e64 >= colLen) {
+					ws.status = IMPULSE_VM_ERR_OUT_OF_BOUNDS;
+					return;
+				}
+				int e = (int) e64;
+				boolean ok = (col != null) ? col.isValidAt(e) : offCol.isValidAt(e);
+				if (ok) {
+					outStr[i] = (col != null) ? col.strData[e] : offCol.readString(e);
+				}
+			}
+			ws.vVectors[dst] = ws.arena.allocStr(outStr, len);
+			return;
 		} else {
 			ws.status = IMPULSE_VM_ERR_TYPE_MISMATCH;
 			return;
