@@ -99,8 +99,8 @@ class ImpLogDecimalTest {
 	}
 
 	private static ImpulseWorkspace executeBothAndVerifyParity(
-			org.impulsegraph.compiler.impscm.ImpScmCompiler.CompileResult cr,
-			ImpulseInterpreter.SnapshotBinding bind, Map<Integer, ImpulseWorkspace.ParamScalar> params) {
+			org.impulsegraph.compiler.impscm.ImpScmCompiler.CompileResult cr, ImpulseInterpreter.SnapshotBinding bind,
+			Map<Integer, ImpulseWorkspace.ParamScalar> params) {
 		ImpulseWorkspace wsInterp = new ImpulseWorkspace(16);
 		if (params != null) {
 			wsInterp.params.putAll(params);
@@ -148,7 +148,8 @@ class ImpLogDecimalTest {
 
 			// 1. Edge predicate: high_value(X, Y) :- transfer(X, Y, Amt), Amt > 19.99d.
 			// Matches e1 (0->2, 20.00) and e2 (1->3, 300.00) -> targets {2, 3}
-			var crEdge = DatalogParser.compileToBytecode("high_value(X, Y) :- transfer(X, Y, Amt), Amt > 19.99d.", snap);
+			var crEdge = DatalogParser.compileToBytecode("high_value(X, Y) :- transfer(X, Y, Amt), Amt > 19.99d.",
+					snap);
 			ImpulseWorkspace wsEdge = executeBothAndVerifyParity(crEdge, bind, null);
 			assertEquals(2, wsEdge.outputs.get(0).length);
 			assertEquals(2L, wsEdge.outputs.get(0).i64Data[0]);
@@ -198,15 +199,15 @@ class ImpLogDecimalTest {
 
 			// [HIGH #2] Complex node predicate in Datalog: CAST(Bal AS FLOAT64) > 20.0 ->
 			// node 3 (500.00)
-			var crNodeCast = DatalogParser.compileToBytecode("big_f(X) :- account(X, Bal), CAST(Bal AS FLOAT64) > 20.0.",
-					snap);
+			var crNodeCast = DatalogParser
+					.compileToBytecode("big_f(X) :- account(X, Bal), CAST(Bal AS FLOAT64) > 20.0.", snap);
 			ImpulseWorkspace wsNc = executeBothAndVerifyParity(crNodeCast, bind, null);
 			assertEquals(1, wsNc.outputs.get(0).length);
 			assertEquals(3L, wsNc.outputs.get(0).i64Data[0]);
 
 			// [HIGH #3] Compound $param in Datalog extracts only valid $ident
-			String scmParam = DatalogParser
-					.lowerToImpScheme("hi(X, Y) :- transfer(X, Y, Amt), Amt > $minAmt + 5.00d.", snap);
+			String scmParam = DatalogParser.lowerToImpScheme("hi(X, Y) :- transfer(X, Y, Amt), Amt > $minAmt + 5.00d.",
+					snap);
 			assertTrue(scmParam.contains("(param $minAmt (decimal 10 2))"), scmParam);
 
 			// [MEDIUM #9] Quote-aware stripInlineComment and parseAtom argument splitting

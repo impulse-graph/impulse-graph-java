@@ -163,16 +163,16 @@ public final class ExprLowerer {
 					Decimal64.parseUnscaledExact(arg0.strVal(), ps[0], ps[1]);
 					return "(dec \"" + arg0.strVal() + "\" " + ps[0] + " " + ps[1] + ")";
 				}
-				return "(cast " + toImpScheme(arg0, identResolver, memberResolver) + " (decimal " + ps[0] + " "
-						+ ps[1] + "))";
+				return "(cast " + toImpScheme(arg0, identResolver, memberResolver) + " (decimal " + ps[0] + " " + ps[1]
+						+ "))";
 			}
 			throw new IllegalArgumentException(
 					"PARSE_ERROR: decimal() expects 1 or 3 arguments, got " + node.children().size());
 		}
 		if (("cast_decimal".equals(fnLower) || "to_decimal".equals(fnLower)) && node.children().size() == 3) {
 			int[] ps = extractPS(node.children().get(1), node.children().get(2), "cast_decimal(expr, P, S)");
-			return "(cast " + toImpScheme(node.children().get(0), identResolver, memberResolver) + " (decimal "
-					+ ps[0] + " " + ps[1] + "))";
+			return "(cast " + toImpScheme(node.children().get(0), identResolver, memberResolver) + " (decimal " + ps[0]
+					+ " " + ps[1] + "))";
 		}
 		if (("cast_f64".equals(fnLower) || "to_f64".equals(fnLower)) && node.children().size() == 1) {
 			return "(cast " + toImpScheme(node.children().get(0), identResolver, memberResolver) + " f64)";

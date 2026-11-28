@@ -287,18 +287,16 @@ public final class ImpLogCompiler {
 		return ImpScmCompiler.compile(scm, snapshot, true);
 	}
 
-	private static String lowerEdgeComparisons(List<ParsedComparison> comparisons, String attrVar,
-			String edgeAttrName, int[] edgeDecPS, List<String> hoistBindings) {
+	private static String lowerEdgeComparisons(List<ParsedComparison> comparisons, String attrVar, String edgeAttrName,
+			int[] edgeDecPS, List<String> hoistBindings) {
 		java.util.function.Function<String, String> identResolver = id -> id.equals(attrVar)
 				? "(edge-attr __e \"" + edgeAttrName + "\")"
 				: id;
 		List<String> parts = new ArrayList<>();
 		int hoistIdx = 0;
 		for (ParsedComparison cmp : comparisons) {
-			String lhsScm = ExprLowerer.lowerExpr(cmp.lhs(), identResolver,
-					(v, m) -> "(attr " + v + " \"" + m + "\")");
-			String rhsScm = ExprLowerer.lowerExpr(cmp.rhs(), identResolver,
-					(v, m) -> "(attr " + v + " \"" + m + "\")");
+			String lhsScm = ExprLowerer.lowerExpr(cmp.lhs(), identResolver, (v, m) -> "(attr " + v + " \"" + m + "\")");
+			String rhsScm = ExprLowerer.lowerExpr(cmp.rhs(), identResolver, (v, m) -> "(attr " + v + " \"" + m + "\")");
 			if (!rhsScm.contains("(edge-attr ") && !rhsScm.contains("(attr ") && !rhsScm.startsWith("$")) {
 				String hoistVar = "__ek" + (++hoistIdx);
 				if (edgeDecPS != null && cmp.lhs().trim().equals(attrVar) && rhsScm.matches("-?\\d+")) {
