@@ -1,8 +1,9 @@
 (ns org.impulsegraph.core
   (:refer-clojure :exclude [in])
   (:require [clojure.string :as str])
-  (:import [org.impulsegraph.api Decimal64 ImpulseGraphSnapshot ImpulseGraphQuery ImpulseQueryBuilder ReturnType ArgType]
+  (:import [org.impulsegraph.api Decimal64 ImpulseGraphSnapshot ImpulseGraphQuery ImpulseQueryBuilder RelationSnapshot ReturnType ArgType]
            [org.impulsegraph.api.bitset ImpulseBitSet]
+           [org.impulsegraph.api.meta AttributeMeta DomainMeta IndexMeta SnapshotHeader]
            [org.impulsegraph.api.spi ImpulseEngineRegistry]
            [org.impulsegraph.api.statement ImpulseStatement]
            [org.impulsegraph.api.traversal DomainView]
@@ -30,7 +31,7 @@
   (off-heap-bytes [this] "Returns off-heap memory usage in bytes.")
   (drain-and-close [this] "Drains in-flight queries and closes the snapshot."))
 
-(defn- key->str
+(defn- ^String key->str
   [k]
   (cond
     (nil? k) nil
@@ -537,6 +538,183 @@
                                  (exact-long node-id)
                                  (int precision)
                                  (int scale))))
+
+;; ----------------------------------------------------------------------------
+;; Metadata Introspection
+;; ----------------------------------------------------------------------------
+
+(defn- u8
+  ^long [b]
+  (bit-and 0xFF (int b)))
+
+(defn- attr-meta->map
+  [^AttributeMeta a]
+  {:name (.name a)
+   :type-code (u8 (.typeCode a))
+   :base-type-code (u8 (.baseTypeCode a))
+   :nullable? (.nullable a)
+   :dimension (.dimension a)
+   :precision (.precision a)
+   :scale (.scale a)
+   :validity-offset (.validityOffset a)
+   :validity-bytes (.validityBytes a)
+   :data-offset (.dataOffset a)
+   :data-bytes (.dataBytes a)
+   :offsets-offset (.offsetsOffset a)
+   :offsets-bytes (.offsetsBytes a)})
+
+(defn- domain-meta->map
+  [^DomainMeta d]
+  {:domain-id (.domainId d)
+   :name (.name d)
+   :key-type (u8 (.keyType d))
+   :dense-id-width (u8 (.denseIdWidth d))
+   :node-count (.nodeCount d)
+   :key-attr-index (.keyAttrIndex d)
+   :attr-count (.attrCount d)
+   :attributes (mapv attr-meta->map (.attributes d))})
+
+(defn- index-meta->map
+  [^IndexMeta idx]
+  {:index-id (.indexId idx)
+   :domain-id (.domainId idx)
+   :relation-id (.relationId idx)
+   :attribute-index (.attributeIndex idx)
+   :index-type (u8 (.indexType idx))
+   :name (.name idx)
+   :data-offset (.dataOffset idx)
+   :data-bytes (.dataBytes idx)
+   :payload-feature-mask (.payloadFeatureMask idx)})
+
+(defn- relation-meta->map
+  [rel-name ^RelationSnapshot r]
+  {:name rel-name
+   :relation-id (.getRelationId r)
+   :src-domain-id (.getSrcDomainId r)
+   :tgt-domain-id (.getTgtDomainId r)
+   :node-count (.getNodeCount r)
+   :edge-count (.getEdgeCount r)
+   :src-node-id-width (u8 (.getSrcNodeIdWidth r))
+   :node-id-width (u8 (.getNodeIdWidth r))
+   :edge-index-width (u8 (.getEdgeIndexWidth r))
+   :encoding-id (u8 (.getEncodingId r))
+   :section-features (.getSectionFeatures r)
+   :virtual? (.isVirtual r)
+   :flat-forward? (.isFlatForward r)
+   :flat-reverse? (.isFlatReverse r)
+   :has-csr? (.hasCsr r)
+   :has-csc? (.hasCsc r)
+   :has-coo? (.hasCoo r)
+   :coo-order (u8 (.getCooOrder r))
+   :component-ids (vec (.getComponentIds r))
+   :attributes (mapv attr-meta->map (.getAttributeMetas r))})
+
+(defn header
+  "Returns the parsed Page 0 binary header as a Clojure map, or nil if unavailable."
+  [snapshot]
+  (when-let [^ImpulseGraphSnapshot raw (when snapshot (unwrap-snapshot snapshot))]
+    (when-let [^SnapshotHeader h (.getHeader raw)]
+      {:magic (.magic h)
+       :version (.version h)
+       :data-offset (.dataOffset h)
+       :domain-count (.domainCount h)
+       :relation-count (.relationCount h)
+       :index-count (.indexCount h)
+       :timestamp-ms (.timestampMs h)
+       :required-features (.requiredFeatures h)
+       :footer-directory-offset (.footerDirectoryOffset h)
+       :footer-directory-bytes (.footerDirectoryBytes h)
+       :file-size-bytes (.fileSizeBytes h)
+       :header-checksum (.headerChecksum h)
+       :snapshot-uuid (mapv u8 (.snapshotUuid h))
+       :snapshot-uuid-hex (.snapshotUuidHex h)})))
+
+(defn file-size-bytes
+  "Returns the physical byte size of the backing .imps snapshot file."
+  ^long [snapshot]
+  (if-let [^ImpulseGraphSnapshot raw (when snapshot (unwrap-snapshot snapshot))]
+    (.getFileSizeBytes raw)
+    0))
+
+(defn sha256-checksum
+  "Computes (and caches) the lowercase hex SHA-256 digest of the backing .imps snapshot."
+  ^String [snapshot]
+  (if-let [^ImpulseGraphSnapshot raw (when snapshot (unwrap-snapshot snapshot))]
+    (.getSha256Checksum raw)
+    ""))
+
+(defn metadata-entry
+  "Returns the Section 6 metadata value for `key`, or nil if absent."
+  ^String [snapshot key]
+  (when-let [^ImpulseGraphSnapshot raw (when snapshot (unwrap-snapshot snapshot))]
+    (when-let [^String k (key->str key)]
+      (.getMetadata raw k))))
+
+(defn domains
+  "Returns a vector of domain metadata maps for all domains in the snapshot."
+  [snapshot]
+  (if-let [^ImpulseGraphSnapshot raw (when snapshot (unwrap-snapshot snapshot))]
+    (mapv domain-meta->map (.getDomains raw))
+    []))
+
+(defn- int32?
+  [n]
+  (and (integer? n)
+       (<= Integer/MIN_VALUE n Integer/MAX_VALUE)))
+
+(defn domain-meta
+  "Returns the domain metadata map for `name-or-id` (string, keyword, or integer domain ID), or nil."
+  [snapshot name-or-id]
+  (when-let [^ImpulseGraphSnapshot raw (when snapshot (unwrap-snapshot snapshot))]
+    (let [^DomainMeta d (cond
+                          (integer? name-or-id)
+                          (when (int32? name-or-id)
+                            (.getDomainMeta raw (int name-or-id)))
+                          :else
+                          (when-let [^String dname (key->str name-or-id)]
+                            (.getDomainMeta raw dname)))]
+      (when d (domain-meta->map d)))))
+
+(defn- canonical-relation-name
+  [^ImpulseGraphSnapshot raw ^RelationSnapshot target fallback]
+  (or (when-let [all (.getAllRelationSnapshots raw)]
+        (some (fn [^java.util.Map$Entry e]
+                (when (identical? (.getValue e) target)
+                  (str (.getKey e))))
+              (.entrySet all)))
+      fallback))
+
+(defn relation-meta
+  "Returns the relation metadata map for `name-or-id` (string, keyword, or integer relation ID), or nil."
+  [snapshot name-or-id]
+  (when-let [^ImpulseGraphSnapshot raw (when snapshot (unwrap-snapshot snapshot))]
+    (if (integer? name-or-id)
+      (when (int32? name-or-id)
+        (when-let [^RelationSnapshot r (.getRelationSnapshot raw (int name-or-id))]
+          (relation-meta->map (canonical-relation-name raw r (str name-or-id)) r)))
+      (when-let [^String rname (key->str name-or-id)]
+        (when-let [^RelationSnapshot r (.getRelationSnapshot raw rname)]
+          (relation-meta->map (canonical-relation-name raw r rname) r))))))
+
+(defn relations
+  "Returns a map of relation name to relation metadata map for all relations in the snapshot."
+  [snapshot]
+  (if-let [^ImpulseGraphSnapshot raw (when snapshot (unwrap-snapshot snapshot))]
+    (if-let [all (.getAllRelationSnapshots raw)]
+      (into {}
+            (keep (fn [^java.util.Map$Entry e]
+                    (when-let [^RelationSnapshot r (.getValue e)]
+                      [(str (.getKey e)) (relation-meta->map (str (.getKey e)) r)])))
+            (.entrySet all))
+      {})
+    {}))
+
+(defn secondary-indices
+  "Returns a vector of Section 2.6 secondary index metadata maps."
+  [snapshot]
+  (if-let [^ImpulseGraphSnapshot raw (when snapshot (unwrap-snapshot snapshot))]
+    (mapv index-meta->map (.getSecondaryIndexMetas raw))
+    []))
 
 (defmacro with-statement
   "Executes body with a prepared ImpulseStatement bound to `binding-form`, closing it on exit."

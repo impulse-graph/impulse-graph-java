@@ -1,7 +1,8 @@
 package org.impulsegraph.scala
 
-import org.impulsegraph.api.{ImpulseGraphQuery, ImpulseGraphSnapshot}
+import org.impulsegraph.api.{ImpulseGraphQuery, ImpulseGraphSnapshot, RelationSnapshot}
 import org.impulsegraph.api.bitset.ImpulseBitSet
+import org.impulsegraph.api.meta.{AttributeMeta, DomainMeta, IndexMeta, SnapshotHeader}
 import org.impulsegraph.api.spi.ImpulseEngineRegistry
 import org.impulsegraph.api.statement.ImpulseStatement
 import org.impulsegraph.api.traversal.DomainView
@@ -41,6 +42,48 @@ extension (snapshot: ImpulseGraphSnapshot)
   def metadataOption(key: String): Option[String] =
     Option(snapshot.getMetadata(key))
 
+  def metadataMap: Map[String, String] =
+    Option(snapshot.getMetadataMap).map(_.asScala.toMap).getOrElse(Map.empty)
+
+  def headerOption: Option[SnapshotHeader] =
+    Option(snapshot.getHeader)
+
+  def fileSizeBytes: Long =
+    snapshot.getFileSizeBytes
+
+  def domains: Seq[DomainMeta] =
+    Option(snapshot.getDomains).map(_.asScala.toSeq).getOrElse(Seq.empty)
+
+  def domainMetaOption(name: String): Option[DomainMeta] =
+    Option(snapshot.getDomainMeta(name))
+
+  def domainMetaOption(domainId: Int): Option[DomainMeta] =
+    Option(snapshot.getDomainMeta(domainId))
+
+  def domainNameOption(domainId: Int): Option[String] =
+    Option(snapshot.getDomainName(domainId))
+
+  def relationSourceDomainNameOption(relationName: String): Option[String] =
+    Option(snapshot.getRelationSourceDomainName(relationName))
+
+  def relationTargetDomainNameOption(relationName: String): Option[String] =
+    Option(snapshot.getRelationTargetDomainName(relationName))
+
+  def secondaryIndices: Seq[IndexMeta] =
+    Option(snapshot.getSecondaryIndexMetas).map(_.asScala.toSeq).getOrElse(Seq.empty)
+
+  def sha256Checksum: String =
+    Option(snapshot.getSha256Checksum).getOrElse("")
+
+  def relationOption(name: String): Option[RelationSnapshot] =
+    Option(snapshot.getRelationSnapshot(name))
+
+  def relationOption(relationId: Int): Option[RelationSnapshot] =
+    Option(snapshot.getRelationSnapshot(relationId))
+
+  def relations: Map[String, RelationSnapshot] =
+    Option(snapshot.getAllRelationSnapshots).map(_.asScala.toMap).getOrElse(Map.empty)
+
   def domainNames: Set[String] =
     snapshot.getDomainNames.asScala.toSet
 
@@ -66,6 +109,23 @@ extension (snapshot: ImpulseGraphSnapshot)
   def executeAsync[R](query: ImpulseGraphQuery[R], input: Any = null)(using ec: ExecutionContext): Future[R] =
     val boxed = boxValue(input)
     Future(blocking(query.execute(snapshot, boxed)))
+
+extension (rel: RelationSnapshot)
+  def attributeMetas: Seq[AttributeMeta] =
+    Option(rel.getAttributeMetas).map(_.asScala.toSeq).getOrElse(Seq.empty)
+
+  def attributeMetaOption(name: String): Option[AttributeMeta] =
+    attributeMetas.find(_.name() == name)
+
+  def componentIds: Seq[Int] =
+    Option(rel.getComponentIds).map(_.toSeq).getOrElse(Seq.empty)
+
+extension (domain: DomainMeta)
+  def attributeMetas: Seq[AttributeMeta] =
+    Option(domain.attributes()).map(_.asScala.toSeq).getOrElse(Seq.empty)
+
+  def attributeMetaOption(name: String): Option[AttributeMeta] =
+    attributeMetas.find(_.name() == name)
 
 extension [R](query: ImpulseGraphQuery[R])
   def apply(snapshot: ImpulseGraphSnapshot): R = query.execute(snapshot, null)

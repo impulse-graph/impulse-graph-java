@@ -68,6 +68,7 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 	private MemorySegment cooEdgeIdsSegment = MemorySegment.NULL;
 	private byte cooOrder = 0;
 	private boolean hasCooFlag = false;
+	private java.util.List<org.impulsegraph.api.meta.AttributeMeta> cachedAttributeMetas = java.util.List.of();
 
 	public RelationSnapshot(Arena arena, int nodeCount, int edgeCount, MemorySegment rowOffsetsSegment,
 			MemorySegment columnTargetsSegment, java.util.List<MemorySegment> attributeSegments) {
@@ -160,8 +161,15 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 	public void setLoadedAttributes(java.util.List<BinarySnapshotLoader.LoadedAttribute> attrs,
 			java.util.List<MemorySegment> attrOffsets) {
 		this.loadedAttributes.clear();
-		if (attrs != null) {
+		if (attrs != null && !attrs.isEmpty()) {
 			this.loadedAttributes.addAll(attrs);
+			java.util.List<org.impulsegraph.api.meta.AttributeMeta> metas = new java.util.ArrayList<>(attrs.size());
+			for (BinarySnapshotLoader.LoadedAttribute attr : attrs) {
+				metas.add(attr.toAttributeMeta());
+			}
+			this.cachedAttributeMetas = java.util.Collections.unmodifiableList(metas);
+		} else {
+			this.cachedAttributeMetas = java.util.List.of();
 		}
 		this.offsetsSegments.clear();
 		if (attrOffsets != null) {
@@ -173,10 +181,16 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 		return java.util.Collections.unmodifiableList(loadedAttributes);
 	}
 
+	@Override
+	public java.util.List<org.impulsegraph.api.meta.AttributeMeta> getAttributeMetas() {
+		return cachedAttributeMetas;
+	}
+
 	public java.util.List<MemorySegment> getOffsetsSegments() {
 		return java.util.Collections.unmodifiableList(offsetsSegments);
 	}
 
+	@Override
 	public int[] getComponentIds() {
 		return componentIds.clone();
 	}
@@ -204,19 +218,22 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 		return tgtDomainId;
 	}
 
+	@Override
 	public byte getEncodingId() {
 		return encodingId;
 	}
 
+	@Override
 	public long getSectionFeatures() {
 		return sectionFeatures;
 	}
 
 	@Override
 	public boolean isVirtual() {
-		return (sectionFeatures & 0x04L) != 0L && componentRelations.length > 0;
+		return (sectionFeatures & 0x04L) != 0L && (componentRelations.length > 0 || componentIds.length > 0);
 	}
 
+	@Override
 	public boolean isFlatForward() {
 		return !isVirtual() && rowOffsetsData == null
 				&& (rowOffsetsSegment == null || rowOffsetsSegment.equals(MemorySegment.NULL)
@@ -225,6 +242,7 @@ public class RelationSnapshot implements org.impulsegraph.api.RelationSnapshot, 
 				&& columnTargetsSegment.byteSize() > 0;
 	}
 
+	@Override
 	public boolean isFlatReverse() {
 		return !isVirtual()
 				&& (cscRowOffsetsSegment == null || cscRowOffsetsSegment.equals(MemorySegment.NULL)

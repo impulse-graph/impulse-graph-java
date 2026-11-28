@@ -172,6 +172,15 @@ public final class BinarySnapshotLoader {
 			return (keyAttrIndex >= 0 && keyAttrIndex < attributes.size()) ? attributes.get(keyAttrIndex) : null;
 		}
 
+		public org.impulsegraph.api.meta.DomainMeta toDomainMeta() {
+			List<org.impulsegraph.api.meta.AttributeMeta> attrMetas = new ArrayList<>(attributes.size());
+			for (LoadedAttribute a : attributes) {
+				attrMetas.add(a.toAttributeMeta());
+			}
+			return new org.impulsegraph.api.meta.DomainMeta(domainId, name, keyType, denseIdWidth, nodeCount,
+					keyAttrIndex, attrMetas);
+		}
+
 		/**
 		 * Resolves external business key string for the given dense ID via §5.1 O(1)
 		 * array lookup.
@@ -438,6 +447,13 @@ public final class BinarySnapshotLoader {
 		public long offsetsBytes() {
 			return offsetsBytes;
 		}
+
+		public org.impulsegraph.api.meta.AttributeMeta toAttributeMeta() {
+			byte fullTypeCode = (byte) (typeCode | (isNullable ? 0x80 : 0));
+			return new org.impulsegraph.api.meta.AttributeMeta(name, fullTypeCode, typeCode, isNullable, dimension,
+					precision, scale, validityOffset, validityBytes, dataOffset, dataBytes, offsetsOffset,
+					offsetsBytes);
+		}
 	}
 
 	public static class LoadedIndex {
@@ -483,6 +499,11 @@ public final class BinarySnapshotLoader {
 		}
 		public int attributeIndex() {
 			return attributeIndex;
+		}
+
+		public org.impulsegraph.api.meta.IndexMeta toIndexMeta() {
+			return new org.impulsegraph.api.meta.IndexMeta(indexId, domainId, relationId, attributeIndex, indexType,
+					name, dataOffset, dataBytes, payloadFeatureMask);
 		}
 		public byte indexType() {
 			return indexType;
@@ -562,14 +583,20 @@ public final class BinarySnapshotLoader {
 			this.version = version;
 			this.domainCount = domainsById != null ? domainsById.size() : 0;
 			this.relationCount = relationsById != null ? relationsById.size() : 0;
-			this.timestampMs = System.currentTimeMillis();
-			this.globalFeatures = 0L;
+			org.impulsegraph.api.meta.SnapshotHeader hdr = graph != null ? graph.getHeader() : null;
+			this.timestampMs = hdr != null ? hdr.timestampMs() : System.currentTimeMillis();
+			this.globalFeatures = hdr != null ? hdr.requiredFeatures() : 0L;
 			this.graph = graph;
 			this.domainsById = domainsById != null ? Map.copyOf(domainsById) : Map.of();
 			this.domainsByName = domainsByName != null ? Map.copyOf(domainsByName) : Map.of();
 			this.relationsById = relationsById != null ? Map.copyOf(relationsById) : Map.of();
 			this.metadata = metadata != null ? Map.copyOf(metadata) : Map.of();
 			this.indices = indices != null ? List.copyOf(indices) : List.of();
+		}
+
+		@Override
+		public String getSha256Checksum() {
+			return graph != null ? graph.getSha256Checksum() : "";
 		}
 
 		@Override
@@ -631,7 +658,7 @@ public final class BinarySnapshotLoader {
 		}
 		@Override
 		public String getMetadata(String key) {
-			return metadata.get(key);
+			return key != null ? metadata.get(key) : null;
 		}
 		@Override
 		public Map<String, String> getMetadataMap() {
@@ -883,8 +910,8 @@ public final class BinarySnapshotLoader {
 		long dirWindowLen = Math.min(maxDirBytes, 64 * 1024 * 1024L);
 		ByteBuffer dirBuf = segment.asSlice(dirOffset, dirWindowLen).asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
 
-		Map<Integer, LoadedDomain> domainsById = new HashMap<>();
-		Map<String, LoadedDomain> domainsByName = new HashMap<>();
+		Map<Integer, LoadedDomain> domainsById = new LinkedHashMap<>();
+		Map<String, LoadedDomain> domainsByName = new LinkedHashMap<>();
 
 		if (isModern) {
 			// Read Shared String Table Header & Pool
@@ -1617,8 +1644,15 @@ public final class BinarySnapshotLoader {
 				metadata.put("domain." + dom.name() + ".id", String.valueOf(dom.domainId()));
 				metadata.put("domain." + dom.domainId() + ".name", dom.name());
 			}
+			byte[] uuidBytes = new byte[16];
+			for (int u = 0; u < 16; u++) {
+				uuidBytes[u] = buf.get(0x2E + u);
+			}
+			org.impulsegraph.api.meta.SnapshotHeader headerMeta = new org.impulsegraph.api.meta.SnapshotHeader(magic,
+					ver, dataOffset, domainCount, relationCount, loadedIndices.size(), buf.getLong(14), buf.getLong(22),
+					buf.getLong(30), buf.getLong(38), segSize, Short.toUnsignedInt(buf.getShort(0x3E)), uuidBytes);
 			GraphSnapshot graph = new GraphSnapshot(arena, relationSnapshots, metadata, relationAliases, domainsByName,
-					loadedIndices);
+					domainsById.values(), loadedIndices, headerMeta, segment);
 
 			for (Map.Entry<Integer, RelationSnapshot> entry : relIdToSnapshot.entrySet()) {
 				String json = metadata.get("impulse.stats.relation." + entry.getKey() + ".out_degree");
