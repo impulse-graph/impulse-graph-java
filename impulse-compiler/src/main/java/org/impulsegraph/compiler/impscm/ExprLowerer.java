@@ -1,4 +1,4 @@
-package org.impulsegraph.compiler.impscm.v11;
+package org.impulsegraph.compiler.impscm;
 
 import org.impulsegraph.api.Decimal64;
 import org.impulsegraph.compiler.cel.CelAstNode;
@@ -23,18 +23,18 @@ import java.util.regex.Pattern;
  * {@code (dec "digits" P S)}</li>
  * <li>{@code 0x10d} stays an integer literal</li>
  * <li>Bare {@code 19.99} stays a float literal (causing {@code TYPE_MISMATCH}
- * when mixed with DECIMAL in {@link ImpScmV11Compiler})</li>
+ * when mixed with DECIMAL in {@link ImpScmCompiler})</li>
  * <li>Malformed scientific notation on decimal ({@code 1e5d}) is rejected</li>
  * </ul>
  */
-public final class V11ExprLowerer {
+public final class ExprLowerer {
 
 	private static final Pattern DECIMAL_TYPE_SPEC = Pattern
 			.compile("(?is)^DECIMAL\\s*\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*\\)$");
 	private static final Pattern CAST_FN_DECIMAL = Pattern
 			.compile("(?is)^decimal\\s*\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*\\)$");
 
-	private V11ExprLowerer() {
+	private ExprLowerer() {
 	}
 
 	/**
@@ -59,13 +59,13 @@ public final class V11ExprLowerer {
 	public static String lowerExpr(String rawExpr, Function<String, String> identResolver,
 			BiFunction<String, String, String> memberResolver) {
 		CelAstNode ast = parseExpr(rawExpr);
-		return toV11ImpScheme(ast, identResolver, memberResolver);
+		return toImpScheme(ast, identResolver, memberResolver);
 	}
 
 	/**
 	 * Lowers a parsed {@link CelAstNode} to an ImpScheme v0.11 S-expression string.
 	 */
-	public static String toV11ImpScheme(CelAstNode node, Function<String, String> identResolver,
+	public static String toImpScheme(CelAstNode node, Function<String, String> identResolver,
 			BiFunction<String, String, String> memberResolver) {
 		if (node == null) {
 			throw new IllegalArgumentException("PARSE_ERROR: null expression node");
@@ -93,7 +93,7 @@ public final class V11ExprLowerer {
 				if (obj.kind() == CelAstNode.Kind.IDENTIFIER && memberResolver != null) {
 					yield memberResolver.apply(obj.text(), member);
 				}
-				yield "(attr " + toV11ImpScheme(obj, identResolver, memberResolver) + " \"" + member + "\")";
+				yield "(attr " + toImpScheme(obj, identResolver, memberResolver) + " \"" + member + "\")";
 			}
 			case UNARY_OP -> {
 				String op = node.text();
@@ -114,20 +114,20 @@ public final class V11ExprLowerer {
 						}
 						yield s;
 					}
-					yield "(neg " + toV11ImpScheme(child, identResolver, memberResolver) + ")";
+					yield "(neg " + toImpScheme(child, identResolver, memberResolver) + ")";
 				}
 				if ("!".equals(op)) {
-					yield "(not " + toV11ImpScheme(child, identResolver, memberResolver) + ")";
+					yield "(not " + toImpScheme(child, identResolver, memberResolver) + ")";
 				}
 				if ("+".equals(op)) {
-					yield toV11ImpScheme(child, identResolver, memberResolver);
+					yield toImpScheme(child, identResolver, memberResolver);
 				}
-				yield "(" + op + " " + toV11ImpScheme(child, identResolver, memberResolver) + ")";
+				yield "(" + op + " " + toImpScheme(child, identResolver, memberResolver) + ")";
 			}
 			case BINARY_OP -> {
 				String op = node.text();
-				String lhs = toV11ImpScheme(node.children().get(0), identResolver, memberResolver);
-				String rhs = toV11ImpScheme(node.children().get(1), identResolver, memberResolver);
+				String lhs = toImpScheme(node.children().get(0), identResolver, memberResolver);
+				String rhs = toImpScheme(node.children().get(1), identResolver, memberResolver);
 				String scmOp = switch (op) {
 					case "==" -> "=";
 					case "&&" -> "and";
@@ -163,7 +163,7 @@ public final class V11ExprLowerer {
 					Decimal64.parseUnscaledExact(arg0.strVal(), ps[0], ps[1]);
 					return "(dec \"" + arg0.strVal() + "\" " + ps[0] + " " + ps[1] + ")";
 				}
-				return "(cast " + toV11ImpScheme(arg0, identResolver, memberResolver) + " (decimal " + ps[0] + " "
+				return "(cast " + toImpScheme(arg0, identResolver, memberResolver) + " (decimal " + ps[0] + " "
 						+ ps[1] + "))";
 			}
 			throw new IllegalArgumentException(
@@ -171,14 +171,14 @@ public final class V11ExprLowerer {
 		}
 		if (("cast_decimal".equals(fnLower) || "to_decimal".equals(fnLower)) && node.children().size() == 3) {
 			int[] ps = extractPS(node.children().get(1), node.children().get(2), "cast_decimal(expr, P, S)");
-			return "(cast " + toV11ImpScheme(node.children().get(0), identResolver, memberResolver) + " (decimal "
+			return "(cast " + toImpScheme(node.children().get(0), identResolver, memberResolver) + " (decimal "
 					+ ps[0] + " " + ps[1] + "))";
 		}
 		if (("cast_f64".equals(fnLower) || "to_f64".equals(fnLower)) && node.children().size() == 1) {
-			return "(cast " + toV11ImpScheme(node.children().get(0), identResolver, memberResolver) + " f64)";
+			return "(cast " + toImpScheme(node.children().get(0), identResolver, memberResolver) + " f64)";
 		}
 		if (("cast_i64".equals(fnLower) || "to_i64".equals(fnLower)) && node.children().size() == 1) {
-			return "(cast " + toV11ImpScheme(node.children().get(0), identResolver, memberResolver) + " i64)";
+			return "(cast " + toImpScheme(node.children().get(0), identResolver, memberResolver) + " i64)";
 		}
 		String scmFn = switch (fnLower) {
 			case "safe_div", "safe-div" -> "safe-div";
@@ -190,7 +190,7 @@ public final class V11ExprLowerer {
 		};
 		StringBuilder sb = new StringBuilder("(").append(scmFn);
 		for (CelAstNode arg : node.children()) {
-			sb.append(' ').append(toV11ImpScheme(arg, identResolver, memberResolver));
+			sb.append(' ').append(toImpScheme(arg, identResolver, memberResolver));
 		}
 		sb.append(')');
 		return sb.toString();

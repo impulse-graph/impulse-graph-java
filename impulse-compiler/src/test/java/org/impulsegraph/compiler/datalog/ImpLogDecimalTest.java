@@ -99,7 +99,7 @@ class ImpLogDecimalTest {
 	}
 
 	private static ImpulseWorkspace executeBothAndVerifyParity(
-			org.impulsegraph.compiler.impscm.v11.ImpScmV11Compiler.CompileResult cr,
+			org.impulsegraph.compiler.impscm.ImpScmCompiler.CompileResult cr,
 			ImpulseInterpreter.SnapshotBinding bind, Map<Integer, ImpulseWorkspace.ParamScalar> params) {
 		ImpulseWorkspace wsInterp = new ImpulseWorkspace(16);
 		if (params != null) {
@@ -128,13 +128,13 @@ class ImpLogDecimalTest {
 			// Bare float 19.99 compared against DECIMAL(10, 2) edge attribute ->
 			// TYPE_MISMATCH
 			IllegalArgumentException exEdge = assertThrows(IllegalArgumentException.class,
-					() -> DatalogParser.compileToV11("bad(X, Y) :- transfer(X, Y, Amt), Amt > 19.99.", snap));
+					() -> DatalogParser.compileToBytecode("bad(X, Y) :- transfer(X, Y, Amt), Amt > 19.99.", snap));
 			assertTrue(exEdge.getMessage().startsWith("TYPE_MISMATCH"), exEdge.getMessage());
 
 			// Bare float 19.99 compared against DECIMAL(10, 2) node attribute ->
 			// TYPE_MISMATCH
 			IllegalArgumentException exNode = assertThrows(IllegalArgumentException.class,
-					() -> DatalogParser.compileToV11("bad(X) :- account(X, Bal), Bal > 19.99.", snap));
+					() -> DatalogParser.compileToBytecode("bad(X) :- account(X, Bal), Bal > 19.99.", snap));
 			assertTrue(exNode.getMessage().startsWith("TYPE_MISMATCH"), exNode.getMessage());
 		}
 	}
@@ -148,7 +148,7 @@ class ImpLogDecimalTest {
 
 			// 1. Edge predicate: high_value(X, Y) :- transfer(X, Y, Amt), Amt > 19.99d.
 			// Matches e1 (0->2, 20.00) and e2 (1->3, 300.00) -> targets {2, 3}
-			var crEdge = DatalogParser.compileToV11("high_value(X, Y) :- transfer(X, Y, Amt), Amt > 19.99d.", snap);
+			var crEdge = DatalogParser.compileToBytecode("high_value(X, Y) :- transfer(X, Y, Amt), Amt > 19.99d.", snap);
 			ImpulseWorkspace wsEdge = executeBothAndVerifyParity(crEdge, bind, null);
 			assertEquals(2, wsEdge.outputs.get(0).length);
 			assertEquals(2L, wsEdge.outputs.get(0).i64Data[0]);
@@ -157,14 +157,14 @@ class ImpLogDecimalTest {
 			// 2. Edge predicate with decimal("100.00", 10, 2) -> matches e2 (1->3, 300.00)
 			// -> target {3}
 			var crDecFn = DatalogParser
-					.compileToV11("whale(X, Y) :- transfer(X, Y, Amt), Amt >= decimal(\"100.00\", 10, 2).", snap);
+					.compileToBytecode("whale(X, Y) :- transfer(X, Y, Amt), Amt >= decimal(\"100.00\", 10, 2).", snap);
 			ImpulseWorkspace wsDecFn = executeBothAndVerifyParity(crDecFn, bind, null);
 			assertEquals(1, wsDecFn.outputs.get(0).length);
 			assertEquals(3L, wsDecFn.outputs.get(0).i64Data[0]);
 
 			// 3. Node predicate with boundary folding (19.995d on DECIMAL(10, 2) -> zero
 			// rescale!)
-			var crNode = DatalogParser.compileToV11("rich(X) :- account(X, Bal), Bal > 19.995d.", snap);
+			var crNode = DatalogParser.compileToBytecode("rich(X) :- account(X, Bal), Bal > 19.995d.", snap);
 			for (long w : crNode.codeWords()) {
 				int op = (int) (w & 0xFFL);
 				assertNotEquals(OP_SCALAR_DECIMAL_ALU, op);
@@ -177,28 +177,28 @@ class ImpLogDecimalTest {
 
 			// 4. Negative decimal literal on node predicate: Bal <= -19.995d -> node 0
 			// (-20.00)
-			var crNeg = DatalogParser.compileToV11("overdrawn(X) :- account(X, Bal), Bal <= -19.995d.", snap);
+			var crNeg = DatalogParser.compileToBytecode("overdrawn(X) :- account(X, Bal), Bal <= -19.995d.", snap);
 			ImpulseWorkspace wsNeg = executeBothAndVerifyParity(crNeg, bind, null);
 			assertEquals(1, wsNeg.outputs.get(0).length);
 			assertEquals(0L, wsNeg.outputs.get(0).i64Data[0]);
 
 			// 5. Explicit CAST(Amt AS FLOAT64) > 250.0 -> matches e2 (300.00) -> target {3}
 			var crCast = DatalogParser
-					.compileToV11("large_f(X, Y) :- transfer(X, Y, Amt), CAST(Amt AS FLOAT64) > 250.0.", snap);
+					.compileToBytecode("large_f(X, Y) :- transfer(X, Y, Amt), CAST(Amt AS FLOAT64) > 250.0.", snap);
 			ImpulseWorkspace wsCast = executeBothAndVerifyParity(crCast, bind, null);
 			assertEquals(1, wsCast.outputs.get(0).length);
 			assertEquals(3L, wsCast.outputs.get(0).i64Data[0]);
 
 			// 6. Hex integer 0x10d (= 269) exact INT promotion against DECIMAL(10, 2) ->
 			// matches e2 (300.00 > 269)
-			var crHex = DatalogParser.compileToV11("over_hex(X, Y) :- transfer(X, Y, Amt), Amt > 0x10d.", snap);
+			var crHex = DatalogParser.compileToBytecode("over_hex(X, Y) :- transfer(X, Y, Amt), Amt > 0x10d.", snap);
 			ImpulseWorkspace wsHex = executeBothAndVerifyParity(crHex, bind, null);
 			assertEquals(1, wsHex.outputs.get(0).length);
 			assertEquals(3L, wsHex.outputs.get(0).i64Data[0]);
 
 			// [HIGH #2] Complex node predicate in Datalog: CAST(Bal AS FLOAT64) > 20.0 ->
 			// node 3 (500.00)
-			var crNodeCast = DatalogParser.compileToV11("big_f(X) :- account(X, Bal), CAST(Bal AS FLOAT64) > 20.0.",
+			var crNodeCast = DatalogParser.compileToBytecode("big_f(X) :- account(X, Bal), CAST(Bal AS FLOAT64) > 20.0.",
 					snap);
 			ImpulseWorkspace wsNc = executeBothAndVerifyParity(crNodeCast, bind, null);
 			assertEquals(1, wsNc.outputs.get(0).length);
@@ -206,7 +206,7 @@ class ImpLogDecimalTest {
 
 			// [HIGH #3] Compound $param in Datalog extracts only valid $ident
 			String scmParam = DatalogParser
-					.lowerToImpSchemeV11("hi(X, Y) :- transfer(X, Y, Amt), Amt > $minAmt + 5.00d.", snap);
+					.lowerToImpScheme("hi(X, Y) :- transfer(X, Y, Amt), Amt > $minAmt + 5.00d.", snap);
 			assertTrue(scmParam.contains("(param $minAmt (decimal 10 2))"), scmParam);
 
 			// [MEDIUM #9] Quote-aware stripInlineComment and parseAtom argument splitting
@@ -229,7 +229,7 @@ class ImpLogDecimalTest {
 					                 (yield-frontier out y)))])
 					    (collect :frontier-ids "mid" res)))
 					""";
-			var crMultiWhere = org.impulsegraph.compiler.impscm.v11.ImpScmV11Compiler.compile(multiWhere, snap, true);
+			var crMultiWhere = org.impulsegraph.compiler.impscm.ImpScmCompiler.compile(multiWhere, snap, true);
 			// Only e1 (0->2, 20.00) satisfies 19.99 < amount < 100.00 -> target {2}
 			ImpulseWorkspace wsMw = executeBothAndVerifyParity(crMultiWhere, bind, null);
 			assertEquals(1, wsMw.outputs.get(0).length);

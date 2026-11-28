@@ -100,7 +100,7 @@ public final class QueryCompilerEngine {
 			ast = ctx.executePass(RegisterAllocationPass.INSTANCE, ast);
 
 			long jitStart = System.nanoTime();
-			CompiledQuery compiled = CompiledQuery.fromV11(ast, snapshot);
+			CompiledQuery compiled = CompiledQuery.fromBytecode(ast, snapshot);
 			long jitDur = System.nanoTime() - jitStart;
 			compilerMetrics.recordJit(jitDur);
 
@@ -123,7 +123,7 @@ public final class QueryCompilerEngine {
 	 * Executes Stage 2 (Snapshot-Bound) compilation targeting ImpulseVM v0.11.0
 	 * ({@code .impb} v11).
 	 */
-	public ImpOpsBytecodeEmitter.CompiledProgram compileStage2V11(QueryObject queryObject,
+	public ImpOpsBytecodeEmitter.CompiledProgram compileStage2(QueryObject queryObject,
 			ImpulseGraphSnapshot snapshot, CompilerOptions options) {
 		Objects.requireNonNull(queryObject, "queryObject must not be null");
 		Objects.requireNonNull(snapshot, "snapshot must not be null");

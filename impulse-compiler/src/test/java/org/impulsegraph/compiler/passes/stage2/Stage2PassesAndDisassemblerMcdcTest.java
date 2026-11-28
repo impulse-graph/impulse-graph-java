@@ -4,7 +4,7 @@ import org.impulsegraph.api.stats.RelationStatistics;
 import org.impulsegraph.api.stats.RelationStatistics.Multiplicity;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.emitter.ImpAsmDisassembler;
-import org.impulsegraph.compiler.emitter.V11ProgramBuilder;
+import org.impulsegraph.compiler.emitter.ProgramBuilder;
 import org.impulsegraph.compiler.passes.CompilerContext;
 import org.impulsegraph.compiler.trace.CompilerOptions;
 import org.impulsegraph.compiler.trace.PassTracer;
@@ -124,7 +124,7 @@ class Stage2PassesAndDisassemblerMcdcTest {
 
 	@Test
 	void testImpAsmDisassemblerAllInstructionComments() {
-		V11ProgramBuilder b = new V11ProgramBuilder();
+		ProgramBuilder b = new ProgramBuilder();
 		b.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
 		b.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 2, 0);
 		b.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_REV, 0, 2, 1, 0, 0, 3, 0);

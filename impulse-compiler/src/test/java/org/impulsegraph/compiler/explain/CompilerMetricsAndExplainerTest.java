@@ -3,7 +3,7 @@ package org.impulsegraph.compiler.explain;
 import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.compiler.ast.*;
 import org.impulsegraph.compiler.emitter.ImpAsmDisassembler;
-import org.impulsegraph.compiler.emitter.V11ProgramBuilder;
+import org.impulsegraph.compiler.emitter.ProgramBuilder;
 import org.impulsegraph.compiler.harness.CrossCompilerParityHarness;
 import org.impulsegraph.compiler.metrics.CompilerMetricsRecorder;
 import org.impulsegraph.compiler.metrics.PlanCacheMetricsRecorder;
@@ -162,7 +162,7 @@ public class CompilerMetricsAndExplainerTest {
 		@Test
 		@DisplayName("Disassembly: Produces valid .impas text with header and v0.11 opcode names")
 		void testDisassemblyFormatting() {
-			V11ProgramBuilder b = new V11ProgramBuilder();
+			ProgramBuilder b = new ProgramBuilder();
 			b.emitU16(ImpulseIsaTables.OP_LOAD_PARAM, ImpulseIsaTables.SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, 0);
 			b.emitU16(ImpulseIsaTables.OP_WALK, ImpulseIsaTables.SUBOP_WALK_FWD, 0, 1, 0, 0, 0, 0, 0);
 			b.emitU16(ImpulseIsaTables.OP_COLLECT, ImpulseIsaTables.SUBOP_COLLECT_FRONTIER_BITSET, 0, 0, 1, 0, 0, 0, 0);
@@ -182,7 +182,7 @@ public class CompilerMetricsAndExplainerTest {
 		@Test
 		@DisplayName("Fallback: Unrecognized opcode falls back to OP_0x hex string")
 		void testUnknownOpcodeFallback() {
-			long unknownWord = V11ProgramBuilder.encodeWord(0xFE, 0, 0, 0, 0, 0, 0, 0);
+			long unknownWord = ProgramBuilder.encodeWord(0xFE, 0, 0, 0, 0, 0, 0, 0);
 			String asm = ImpAsmDisassembler.disassemble(new long[]{unknownWord});
 			assertThat(asm).contains("OP_0xFE");
 		}

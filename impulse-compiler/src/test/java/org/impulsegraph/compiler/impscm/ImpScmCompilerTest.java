@@ -1,4 +1,4 @@
-package org.impulsegraph.compiler.impscm.v11;
+package org.impulsegraph.compiler.impscm;
 
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 import org.impulsegraph.storage.csr.GraphSnapshot;
@@ -17,11 +17,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Verifies {@link ImpScmV11Compiler} against the normative
+ * Verifies {@link ImpScmCompiler} against the normative
  * {@code impulse-graph-spec/test-fixtures/impscm-v11} positive E2E and negative
  * static validation fixtures.
  */
-class ImpScmV11CompilerTest {
+class ImpScmCompilerTest {
 
 	private static Path specFixtureDir() {
 		Path p = Path.of("../spec/test-fixtures/impscm-v11");
@@ -82,8 +82,8 @@ class ImpScmV11CompilerTest {
 			GraphSnapshot snap = buildRebacSnapshot(arena);
 			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
 
-			var resOn = ImpScmV11Compiler.compile(src, snap, true);
-			var resOff = ImpScmV11Compiler.compile(src, snap, false);
+			var resOn = ImpScmCompiler.compile(src, snap, true);
+			var resOff = ImpScmCompiler.compile(src, snap, false);
 
 			int[] domCards = {2, 3, 2};
 			ImpulseInterpreter.SnapshotBinding binding = new ImpulseInterpreter.SnapshotBinding(domCards, view);
@@ -114,7 +114,7 @@ class ImpScmV11CompilerTest {
 			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
 			ImpulseInterpreter.SnapshotBinding binding = new ImpulseInterpreter.SnapshotBinding(new int[]{5}, view);
 
-			var r2 = ImpScmV11Compiler.compile(src2, snap, true);
+			var r2 = ImpScmCompiler.compile(src2, snap, true);
 			ImpulseWorkspace ws2 = new ImpulseWorkspace(16);
 			ws2.params.put(0, new ImpulseWorkspace.ParamScalar(ImpulseIsaTables.SCALAR_U64, true, 0L));
 			ImpulseInterpreter.execute(r2.codeWords(), binding, ws2);
@@ -123,7 +123,7 @@ class ImpScmV11CompilerTest {
 			assertEquals(2L, ws2.outputs.get(0).i64Data[0]);
 			assertEquals(1L, ws2.outputs.get(1).i64Data[0]);
 
-			var r3 = ImpScmV11Compiler.compile(src3, snap, true);
+			var r3 = ImpScmCompiler.compile(src3, snap, true);
 			ImpulseWorkspace ws3 = new ImpulseWorkspace(16);
 			ws3.params.put(0, new ImpulseWorkspace.ParamScalar(ImpulseIsaTables.SCALAR_U64, true, 1L));
 			ImpulseInterpreter.execute(r3.codeWords(), binding, ws3);
@@ -139,13 +139,13 @@ class ImpScmV11CompilerTest {
 		String negEndo = Files.readString(specFixtureDir().resolve("06_negative_non_endo_transitive.impscm"));
 		try (Arena arena = Arena.ofConfined()) {
 			GraphSnapshot snap = buildRebacSnapshot(arena);
-			var e1 = assertThrows(IllegalArgumentException.class, () -> ImpScmV11Compiler.compile(negDom, snap, true));
+			var e1 = assertThrows(IllegalArgumentException.class, () -> ImpScmCompiler.compile(negDom, snap, true));
 			assertTrue(e1.getMessage().startsWith("DOMAIN_MISMATCH"), e1.getMessage());
 
-			var e2 = assertThrows(IllegalArgumentException.class, () -> ImpScmV11Compiler.compile(negMix, snap, true));
+			var e2 = assertThrows(IllegalArgumentException.class, () -> ImpScmCompiler.compile(negMix, snap, true));
 			assertTrue(e2.getMessage().startsWith("TYPE_MISMATCH"), e2.getMessage());
 
-			var e3 = assertThrows(IllegalArgumentException.class, () -> ImpScmV11Compiler.compile(negEndo, snap, true));
+			var e3 = assertThrows(IllegalArgumentException.class, () -> ImpScmCompiler.compile(negEndo, snap, true));
 			assertTrue(e3.getMessage().startsWith("DOMAIN_MISMATCH"), e3.getMessage());
 		}
 	}

@@ -10,9 +10,9 @@ import java.util.List;
 /**
  * Type-safe 64-bit nibble instruction builder and {@code .impb} v0.11.0
  * container serializer. Mirrors C++
- * {@code impulse::compiler::v11::V11ProgramBuilder} bit-for-bit.
+ * {@code impulse::compiler::v11::ProgramBuilder} bit-for-bit.
  */
-public final class V11ProgramBuilder {
+public final class ProgramBuilder {
 
 	private final List<Long> words = new ArrayList<>();
 	private final List<ImpulseImpbContainer.ConstPoolEntry> constPool = new ArrayList<>();

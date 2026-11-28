@@ -53,8 +53,8 @@ public final class ImpulseSpecVectorsTest {
 				spec = pathlib.Path(sys.argv[1])
 				sys.path.insert(0, str(spec / 'tools'))
 				import run_vm_asm_suite as suite
-				from impas_assembler import ImpAsmV11
-				asm = ImpAsmV11()
+				from impas_assembler import ImpAsm
+				asm = ImpAsm()
 				vec_root = spec / 'test-vectors' / 'vm-impas'
 				for p in sorted(vec_root.rglob('*.impas')):
 				    rel = str(p.relative_to(vec_root))

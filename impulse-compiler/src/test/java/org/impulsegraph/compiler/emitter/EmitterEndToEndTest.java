@@ -21,9 +21,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * End-to-end tests for M4.1 + M4.2: {@link ImpulseSnapshotAdapter},
  * {@link ImpulseImpbContainer}, and {@link ImpOpsBytecodeEmitter} via
- * {@link QueryCompilerEngine#compileStage2V11}.
+ * {@link QueryCompilerEngine#compileStage2}.
  */
-class V11EmitterEndToEndTest {
+class EmitterEndToEndTest {
 
 	/**
 	 * Builds a 5-node directed chain 0->1->2->3->4 in a real off-heap
@@ -47,7 +47,7 @@ class V11EmitterEndToEndTest {
 	}
 
 	@Test
-	void testTwoHopAndFixpointAndReduceEndToEndOnV11() {
+	void testTwoHopAndFixpointAndReduceEndToEnd() {
 		try (Arena arena = Arena.ofConfined()) {
 			ImpulseGraphSnapshot snap = buildChainSnapshot(arena);
 			ImpulseSnapshotView view = ImpulseSnapshotAdapter.from(snap);
@@ -59,8 +59,8 @@ class V11EmitterEndToEndTest {
 			// 1. 2-hop walk from seed {0} -> {2}
 			ScmProgram twoHop = ScmProgram.of(ScmWalk.forward("NEXT"), ScmWalk.forward("NEXT"), ScmCollect.list());
 			QueryObject qOn = engine.compileStage1("twoHop", "", twoHop, CompilerOptions.DEFAULT);
-			var progOn = engine.compileStage2V11(qOn, snap, CompilerOptions.DEFAULT);
-			var progOff = engine.compileStage2V11(qOn, snap,
+			var progOn = engine.compileStage2(qOn, snap, CompilerOptions.DEFAULT);
+			var progOff = engine.compileStage2(qOn, snap,
 					CompilerOptions.builder().withDisabledPassesMask(CompilerOptions.OPT_ALL_DISABLED).build());
 
 			// Verify .impb roundtrip
@@ -100,7 +100,7 @@ class V11EmitterEndToEndTest {
 	}
 
 	@Test
-	void testMultiLaneQuorumEndToEndOnV11() {
+	void testMultiLaneQuorumEndToEnd() {
 		try (Arena arena = Arena.ofConfined()) {
 			// 4-node graph: 0->2, 1->2, 1->3
 			MemorySegment off = arena.allocate(5L * Integer.BYTES);

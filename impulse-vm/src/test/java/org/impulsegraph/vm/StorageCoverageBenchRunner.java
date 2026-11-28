@@ -4,7 +4,7 @@ import org.impulsegraph.api.ImpulseGraphSnapshot;
 import org.impulsegraph.api.RelationSnapshot;
 import org.impulsegraph.api.meta.AttributeMeta;
 import org.impulsegraph.api.meta.DomainMeta;
-import org.impulsegraph.compiler.emitter.V11ProgramBuilder;
+import org.impulsegraph.compiler.emitter.ProgramBuilder;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 
 import java.lang.foreign.Arena;
@@ -67,7 +67,7 @@ public final class StorageCoverageBenchRunner {
 	}
 
 	private static long[] buildWalk1Hop(int relId, int inDom, int subop) {
-		V11ProgramBuilder b = new V11ProgramBuilder();
+		ProgramBuilder b = new ProgramBuilder();
 		b.emitU16(OP_LOAD_PARAM, SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, inDom);
 		b.emitU16(OP_WALK, subop, 0, 1, 0, 0, 0, relId, 0);
 		b.emit(OP_SET_CARDINALITY, SUBOP_SET_CARDINALITY_CARD_1BIT, 0, 0, 1, 0, 0, 0);
@@ -77,7 +77,7 @@ public final class StorageCoverageBenchRunner {
 	}
 
 	private static long[] buildWalk2Hop(int relId, int inDom, int subop) {
-		V11ProgramBuilder b = new V11ProgramBuilder();
+		ProgramBuilder b = new ProgramBuilder();
 		b.emitU16(OP_LOAD_PARAM, SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, inDom);
 		b.emitU16(OP_WALK, subop, 0, 1, 0, 0, 0, relId, 0);
 		b.emitU16(OP_WALK, subop, 0, 0, 1, 0, 0, relId, 0);
@@ -88,7 +88,7 @@ public final class StorageCoverageBenchRunner {
 	}
 
 	private static long[] buildMorsel1Hop(int relId, int inDom, int tgtDom, int subop) {
-		V11ProgramBuilder b = new V11ProgramBuilder();
+		ProgramBuilder b = new ProgramBuilder();
 		b.emitU16(OP_LOAD_PARAM, SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, inDom);
 		b.emitU16(OP_WALK_MORSEL, subop, 0, 0, 0, 0, 0, relId, 2);
 		b.emitU16(OP_MORSEL_COMMIT, SUBOP_MORSEL_COMMIT_YIELD_FRONTIER, 0, 1, 9, 0, 0, tgtDom, 0);
@@ -107,7 +107,7 @@ public final class StorageCoverageBenchRunner {
 	}
 
 	private static long[] buildNodeAttrEq40(int domId, int attrIdx, boolean isFloat, long targetI64) {
-		V11ProgramBuilder b = new V11ProgramBuilder();
+		ProgramBuilder b = new ProgramBuilder();
 		b.emitU16(OP_LOAD_COLUMN, 0, 0, 0, 0, 0, 0, domId, attrIdx);
 		if (isFloat) {
 			b.emit(OP_LOAD_CONST, SUBOP_LOAD_CONST_F32, 0, 1, 0, 0, 0, Float.floatToRawIntBits(40.0f));
@@ -123,7 +123,7 @@ public final class StorageCoverageBenchRunner {
 	}
 
 	private static long[] buildEdgeAttrMorselEq40(int relId, int inDom, int attrIdx, boolean isFloat, long targetI64) {
-		V11ProgramBuilder b = new V11ProgramBuilder();
+		ProgramBuilder b = new ProgramBuilder();
 		b.emitU16(OP_LOAD_PARAM, SUBOP_LOAD_PARAM_FRONTIER, 0, 0, 0, 0, 0, 0, inDom);
 		b.emitU16(OP_WALK, SUBOP_WALK_FWD, 0, 1, 0, 0, 0, relId, 0);
 		if (isFloat) {
@@ -144,7 +144,7 @@ public final class StorageCoverageBenchRunner {
 	}
 
 	private static long[] buildNodeAttrReduce(int domId, int attrIdx, int redSubop) {
-		V11ProgramBuilder b = new V11ProgramBuilder();
+		ProgramBuilder b = new ProgramBuilder();
 		b.emitU16(OP_LOAD_COLUMN, 0, 0, 0, 0, 0, 0, domId, attrIdx);
 		b.emit(OP_VEC_REDUCE, redSubop, 0, 0, 0, 0, 0, 0);
 		b.emitU16(OP_COLLECT, SUBOP_COLLECT_SCALAR, 0, 0, 0, 0, 0, 0, 0);
@@ -153,7 +153,7 @@ public final class StorageCoverageBenchRunner {
 	}
 
 	private static long[] buildMl2Hop(int relId, int domId, boolean forceW64) {
-		V11ProgramBuilder b = new V11ProgramBuilder();
+		ProgramBuilder b = new ProgramBuilder();
 		b.emitU16(OP_LOAD_PARAM, SUBOP_LOAD_PARAM_VEC, 0, 0, 0, 0, 0, 0, 2);
 		b.emitU16(OP_LANE_INIT_SEEDS, forceW64 ? SUBOP_LANE_INIT_SEEDS_FORCE_W64 : SUBOP_LANE_INIT_SEEDS_AUTO_WIDTH, 0,
 				0, 0, 0, 0, domId, 0);
@@ -166,7 +166,7 @@ public final class StorageCoverageBenchRunner {
 	}
 
 	private static long[] buildMlMorsel2Hop(int relId, int domId, boolean forceW64) {
-		V11ProgramBuilder b = new V11ProgramBuilder();
+		ProgramBuilder b = new ProgramBuilder();
 		b.emitU16(OP_LOAD_PARAM, SUBOP_LOAD_PARAM_VEC, 0, 0, 0, 0, 0, 0, 2);
 		b.emitU16(OP_LANE_INIT_SEEDS, forceW64 ? SUBOP_LANE_INIT_SEEDS_FORCE_W64 : SUBOP_LANE_INIT_SEEDS_AUTO_WIDTH, 0,
 				0, 0, 0, 0, domId, 0);

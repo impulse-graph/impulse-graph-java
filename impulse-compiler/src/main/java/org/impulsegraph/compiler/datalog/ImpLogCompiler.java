@@ -13,8 +13,8 @@ import org.impulsegraph.compiler.ast.ScmProgram;
 import org.impulsegraph.compiler.ast.ScmSetOp;
 import org.impulsegraph.compiler.ast.ScmWalk;
 import org.impulsegraph.compiler.datalog.StratificationValidator.DependencyEdge;
-import org.impulsegraph.compiler.impscm.v11.ImpScmV11Compiler;
-import org.impulsegraph.compiler.impscm.v11.V11ExprLowerer;
+import org.impulsegraph.compiler.impscm.ImpScmCompiler;
+import org.impulsegraph.compiler.impscm.ExprLowerer;
 import org.impulsegraph.storage.csr.BinarySnapshotLoader;
 import org.impulsegraph.storage.csr.GraphSnapshot;
 import org.impulsegraph.vm.CompiledQuery;
@@ -96,13 +96,13 @@ public final class ImpLogCompiler {
 
 	public static CompiledQuery compileToExecutable(String source, ImpulseGraphSnapshot snapshot, Arena arena) {
 		ScmProgram prog = compile(source);
-		return CompiledQuery.fromV11(prog, snapshot);
+		return CompiledQuery.fromBytecode(prog, snapshot);
 	}
 
 	public static CompiledQuery compileMultiSeedToExecutable(String source, List<Long> seeds,
 			ImpulseGraphSnapshot snapshot, Arena arena) {
 		ScmProgram prog = compileMultiSeed(source, seeds);
-		return CompiledQuery.fromV11(prog, snapshot);
+		return CompiledQuery.fromBytecode(prog, snapshot);
 	}
 
 	/**
@@ -140,7 +140,7 @@ public final class ImpLogCompiler {
 				ParsedComparison cmp = tryParseComparison(rawTerm);
 				if (cmp != null) {
 					// Validate expression syntax eagerly (rejects malformed literals like 1e5d)
-					V11ExprLowerer.parseExpr(cmp.lhs() + " " + cmp.op() + " " + cmp.rhs());
+					ExprLowerer.parseExpr(cmp.lhs() + " " + cmp.op() + " " + cmp.rhs());
 					comparisons.add(cmp);
 				} else {
 					ParsedAtom atom = parseAtom(rawTerm);
@@ -158,15 +158,15 @@ public final class ImpLogCompiler {
 	 * Lowers an ImpLog Datalog program (including decimal comparison predicates in
 	 * rule bodies) into canonical ImpScheme v0.11 S-expression IR.
 	 */
-	public static String lowerToImpSchemeV11(String source, ImpulseGraphSnapshot snapshot) {
-		return lowerToImpSchemeV11(source, snapshot, Map.of());
+	public static String lowerToImpScheme(String source, ImpulseGraphSnapshot snapshot) {
+		return lowerToImpScheme(source, snapshot, Map.of());
 	}
 
 	/**
 	 * Lowers an ImpLog Datalog program with optional explicit parameter types into
 	 * canonical ImpScheme v0.11 S-expression IR.
 	 */
-	public static String lowerToImpSchemeV11(String source, ImpulseGraphSnapshot snapshot,
+	public static String lowerToImpScheme(String source, ImpulseGraphSnapshot snapshot,
 			Map<String, String> explicitParamTypes) {
 		List<ParsedRule> rules = parseRules(source);
 		if (rules.isEmpty()) {
@@ -181,7 +181,7 @@ public final class ImpLogCompiler {
 		if (explicitParamTypes != null) {
 			for (Map.Entry<String, String> e : explicitParamTypes.entrySet()) {
 				String pname = e.getKey().startsWith("$") ? e.getKey() : "$" + e.getKey();
-				paramDecls.put(pname, V11ExprLowerer.normalizeParamType(e.getValue()));
+				paramDecls.put(pname, ExprLowerer.normalizeParamType(e.getValue()));
 			}
 		}
 
@@ -219,7 +219,7 @@ public final class ImpLogCompiler {
 						.append("\" __src)])\n");
 			} else {
 				List<String> hoistBindings = new ArrayList<>();
-				String whereExpr = lowerEdgeComparisonsToV11(rule.comparisons(), attrVar, edgeAttrName, edgeDecPS,
+				String whereExpr = lowerEdgeComparisons(rule.comparisons(), attrVar, edgeAttrName, edgeDecPS,
 						hoistBindings);
 				for (String hb : hoistBindings) {
 					scm.append("        ").append(hb).append('\n');
@@ -257,7 +257,7 @@ public final class ImpLogCompiler {
 		int fIdx = 0;
 		for (ParsedComparison cmp : rule.comparisons()) {
 			String nextF = "__f" + (++fIdx);
-			String lowered = V11ExprLowerer.lowerExpr(cmp.lhs() + " " + cmp.op() + " " + cmp.rhs(),
+			String lowered = ExprLowerer.lowerExpr(cmp.lhs() + " " + cmp.op() + " " + cmp.rhs(),
 					id -> id.equals(attrVar) ? "(attr " + nodeVar + " \"" + nodeAttrName + "\")" : id,
 					(v, m) -> "(attr " + v + " \"" + m + "\")");
 			scm.append("\n        [").append(nextF).append(" (node-filter ").append(curF).append(" (lambda (")
@@ -271,23 +271,23 @@ public final class ImpLogCompiler {
 
 	/**
 	 * Compiles an ImpLog Datalog program directly to validated v0.11 bytecode via
-	 * {@link ImpScmV11Compiler}.
+	 * {@link ImpScmCompiler}.
 	 */
-	public static ImpScmV11Compiler.CompileResult compileToV11(String source, ImpulseGraphSnapshot snapshot) {
-		return compileToV11(source, snapshot, Map.of());
+	public static ImpScmCompiler.CompileResult compileToBytecode(String source, ImpulseGraphSnapshot snapshot) {
+		return compileToBytecode(source, snapshot, Map.of());
 	}
 
 	/**
 	 * Compiles an ImpLog Datalog program with explicit parameter types directly to
-	 * validated v0.11 bytecode via {@link ImpScmV11Compiler}.
+	 * validated v0.11 bytecode via {@link ImpScmCompiler}.
 	 */
-	public static ImpScmV11Compiler.CompileResult compileToV11(String source, ImpulseGraphSnapshot snapshot,
+	public static ImpScmCompiler.CompileResult compileToBytecode(String source, ImpulseGraphSnapshot snapshot,
 			Map<String, String> paramTypes) {
-		String scm = lowerToImpSchemeV11(source, snapshot, paramTypes);
-		return ImpScmV11Compiler.compile(scm, snapshot, true);
+		String scm = lowerToImpScheme(source, snapshot, paramTypes);
+		return ImpScmCompiler.compile(scm, snapshot, true);
 	}
 
-	private static String lowerEdgeComparisonsToV11(List<ParsedComparison> comparisons, String attrVar,
+	private static String lowerEdgeComparisons(List<ParsedComparison> comparisons, String attrVar,
 			String edgeAttrName, int[] edgeDecPS, List<String> hoistBindings) {
 		java.util.function.Function<String, String> identResolver = id -> id.equals(attrVar)
 				? "(edge-attr __e \"" + edgeAttrName + "\")"
@@ -295,9 +295,9 @@ public final class ImpLogCompiler {
 		List<String> parts = new ArrayList<>();
 		int hoistIdx = 0;
 		for (ParsedComparison cmp : comparisons) {
-			String lhsScm = V11ExprLowerer.lowerExpr(cmp.lhs(), identResolver,
+			String lhsScm = ExprLowerer.lowerExpr(cmp.lhs(), identResolver,
 					(v, m) -> "(attr " + v + " \"" + m + "\")");
-			String rhsScm = V11ExprLowerer.lowerExpr(cmp.rhs(), identResolver,
+			String rhsScm = ExprLowerer.lowerExpr(cmp.rhs(), identResolver,
 					(v, m) -> "(attr " + v + " \"" + m + "\")");
 			if (!rhsScm.contains("(edge-attr ") && !rhsScm.contains("(attr ") && !rhsScm.startsWith("$")) {
 				String hoistVar = "__ek" + (++hoistIdx);
@@ -583,7 +583,7 @@ public final class ImpLogCompiler {
 			for (String rawTerm : rawBodyTerms) {
 				ParsedComparison cmp = tryParseComparison(rawTerm);
 				if (cmp != null) {
-					V11ExprLowerer.parseExpr(cmp.lhs() + " " + cmp.op() + " " + cmp.rhs());
+					ExprLowerer.parseExpr(cmp.lhs() + " " + cmp.op() + " " + cmp.rhs());
 					comparisons.add(cmp);
 				} else {
 					ParsedAtom atom = parseAtom(rawTerm);

@@ -110,7 +110,7 @@ public class DefaultImpulseQueryEvaluator implements ImpulseGraphQueryEvaluator 
 	}
 
 	public static CompiledQuery compileAst(ImpScmNode ast, ImpulseGraphSnapshot snapshot, Arena arena) {
-		return CompiledQuery.fromV11(ast, snapshot);
+		return CompiledQuery.fromBytecode(ast, snapshot);
 	}
 
 	public static String disassembleQuery(ImpulseGraphQuery<?> query, ImpulseGraphSnapshot snapshot) {
